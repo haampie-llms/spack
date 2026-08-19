@@ -5415,3 +5415,14 @@ def test_solve_in_rounds_with_no_specs(mock_packages, config):
     """Tests that solving no specs at all yields no result, instead of being unsatisfiable."""
     solver = spack.solver.asp.Solver()
     assert list(solver.solve_in_rounds([])) == []
+
+
+@pytest.mark.regression("51829")
+def test_asp_facts_with_config_values():
+    """Config values are syaml_str / syaml_int subclasses of str / int, and have to be emitted
+    as ASP strings and numbers. Booleans are strings."""
+    fn = spack.solver.core.fn
+    assert str(fn.max_dupes("cmake", syaml.syaml_int(2))) == 'max_dupes("cmake",2)'
+    assert str(fn.max_dupes("cmake", 2)) == 'max_dupes("cmake",2)'
+    assert str(fn.os_compatible(syaml.syaml_str('a"b\\c'), "d")) == r'os_compatible("a\"b\\c","d")'
+    assert str(fn.variant_value("x", True)) == 'variant_value("x","True")'
