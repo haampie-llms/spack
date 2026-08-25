@@ -90,7 +90,7 @@ def complete_architecture(node: spack.spec.Spec) -> None:
 
     node.namespace = spack.repo.PATH.repo_for_pkg(node.name).namespace
     for flag_type in spack.spec.FlagMap.valid_compiler_flags():
-        node.compiler_flags.setdefault(flag_type, [])
+        node.compiler_flags.setdefault(flag_type, ())
 
 
 def complete_variants_and_architecture(node: spack.spec.Spec) -> None:
