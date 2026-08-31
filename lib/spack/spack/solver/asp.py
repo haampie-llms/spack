@@ -75,7 +75,17 @@ from spack.util.lang import elide_list
 
 from .clauses import SpecClauseGenerator
 from .compat import default_clingo_control, make_error_control
-from .core import AspFunction, AspVar, NodeId, SourceContext, asp_argument, extract_args, fn, quote
+from .core import (
+    AspFunction,
+    AspVar,
+    NodeId,
+    SourceContext,
+    asp_argument,
+    extract_args,
+    fn,
+    quote,
+    quote_once,
+)
 from .input_analysis import create_counter, create_graph_analyzer
 from .requirements import RequirementKind, RequirementOrigin, RequirementParser, RequirementRule
 from .reuse import ReusableSpecsSelector, SpecFiltersFactory
@@ -1538,7 +1548,7 @@ class SpackSolverSetup:
             quoted_name = quote(name)
             for (spec_str, _), (trigger_id, requirements) in cache.items():
                 problem.append(f"pkg_fact({quoted_name},trigger_id({trigger_id})).")
-                problem.append(f"pkg_fact({quoted_name},trigger_msg({quote(spec_str)})).")
+                problem.append(f"pkg_fact({quoted_name},trigger_msg({quote_once(spec_str)})).")
                 # the requirements are written out as they are, with the trigger id prepended,
                 # so there is no point in building a function object for each of them
                 for predicate in requirements:
@@ -1558,7 +1568,7 @@ class SpackSolverSetup:
             quoted_name = quote(name)
             for (spec_str, _), (effect_id, requirements) in cache.items():
                 problem.append(f"pkg_fact({quoted_name},effect_id({effect_id})).")
-                problem.append(f"pkg_fact({quoted_name},effect_msg({quote(spec_str)})).")
+                problem.append(f"pkg_fact({quoted_name},effect_msg({quote_once(spec_str)})).")
                 # see the note in trigger_rules()
                 for predicate in requirements:
                     problem.append(f"imposed_constraint({effect_id},{predicate.args_str()}).")
@@ -1755,9 +1765,10 @@ class SpackSolverSetup:
             context=requirement_context,
         )
         quoted_name = quote(required_name)
+        quoted_msg = quote_once(msg) if type(msg) is str else asp_argument(msg)
         clauses = [
             f"pkg_fact({quoted_name},condition({condition_id})).",
-            f"condition_reason({condition_id},{asp_argument(msg)}).",
+            f"condition_reason({condition_id},{quoted_msg}).",
             f"pkg_fact({quoted_name},condition_trigger({condition_id},{trigger_id})).",
         ]
         if not imposed_spec:
@@ -2401,10 +2412,13 @@ class SpackSolverSetup:
             if possible_versions is None:
                 continue
             for versions in sorted(set_of_versions):
+                # `StandardVersion.satisfies(VersionList)` is this call, and every possible
+                # version is tested against every constraint, so it is made directly
+                accepts = versions.intersects
                 # Look for contiguous ranges of versions that satisfy the constraint
                 start_idx = None
                 for current_idx, v in enumerate(possible_versions):
-                    if v.satisfies(versions):
+                    if accepts(v) if type(v) is vn.StandardVersion else v.satisfies(versions):
                         if start_idx is None:
                             start_idx = current_idx
                     elif start_idx is not None:

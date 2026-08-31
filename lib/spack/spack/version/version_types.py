@@ -856,7 +856,7 @@ class ClosedOpenRange(VersionType):
 
     def __eq__(self, other):
         if isinstance(other, ClosedOpenRange):
-            return (self.lo, self.hi) == (other.lo, other.hi)
+            return self.lo == other.lo and self.hi == other.hi
         if isinstance(other, StandardVersion):
             return False
         return NotImplemented
@@ -903,7 +903,9 @@ class ClosedOpenRange(VersionType):
 
     def intersects(self, other: VersionType) -> bool:
         if isinstance(other, StandardVersion):
-            return self.lo <= other < self.hi
+            # `self.lo <= other < self.hi` with the comparisons of StandardVersion written out:
+            # this is the innermost test of the version constraint facts of a solve
+            return self.lo.version <= other.version < self.hi.version
         if isinstance(other, ClosedOpenRange):
             return (self.lo < other.hi) and (other.lo < self.hi)
         if isinstance(other, GitVersion):
@@ -1095,7 +1097,12 @@ class VersionList(VersionType, _VersionListBase):
 
     def intersects(self, other: VersionType) -> bool:
         if isinstance(other, (ClosedOpenRange, StandardVersion)):
-            return any(v.intersects(other) for v in self)
+            # a plain loop: this is the innermost test of the version constraint facts, and a
+            # list holds one or two entries, so the generator of any() costs more than it saves
+            for v in self:
+                if v.intersects(other):
+                    return True
+            return False
 
         if isinstance(other, VersionList):
             s = o = 0
@@ -1457,3 +1464,8 @@ def intern_version_list(version_list: VersionList) -> VersionList:
 
 def _unpickle_version_list(versions: Tuple[VersionType, ...]) -> VersionList:
     return intern_version_list(VersionList._from_sorted(versions))
+
+
+#: The unconstrained list is on every abstract spec and is by far the most rendered one, so it is
+#: interned like the rest, which is what puts its rendering in _VERSION_LIST_STR.
+intern_version_list(_ANY_VERSION_LIST)

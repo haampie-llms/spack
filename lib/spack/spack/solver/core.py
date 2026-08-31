@@ -71,7 +71,14 @@ class AspFunction:
 
     def args_str(self) -> str:
         """The arguments as they appear between the parentheses of this function."""
-        return ",".join([asp_argument(arg) for arg in self.args])
+        # Most arguments are strings that were written out before, and those skip the call.
+        quoted = _QUOTED
+        return ",".join(
+            [
+                quoted[arg] if type(arg) is str and arg in quoted else asp_argument(arg)
+                for arg in self.args
+            ]
+        )
 
     def __repr__(self) -> str:
         return str(self)
@@ -85,14 +92,22 @@ _QUOTED: Dict[str, str] = {}
 
 
 def quote(arg: str) -> str:
-    """The ASP literal for the string ``arg``: escaped and in double quotes."""
+    """The ASP literal for the string ``arg``: escaped and in double quotes, and kept for reuse.
+
+    Use :func:`quote_once` for the strings that are written out once, such as the messages that
+    explain a condition, so that they do not fill the cache.
+    """
     return _QUOTED.get(arg) or _quote(arg)
+
+
+def quote_once(arg: str) -> str:
+    """The ASP literal for a string that is not expected to come up again."""
+    return '"' + arg.replace("\\", r"\\").replace("\n", r"\n").replace('"', r"\"") + '"'
 
 
 def _quote(arg: str) -> str:
     """Compute and cache the ASP literal for ``arg``; see :func:`quote`."""
-    result = '"' + arg.replace("\\", r"\\").replace("\n", r"\n").replace('"', r"\"") + '"'
-    _QUOTED[arg] = result
+    result = _QUOTED[arg] = quote_once(arg)
     return result
 
 
