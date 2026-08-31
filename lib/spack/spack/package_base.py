@@ -751,7 +751,17 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
     @classmethod
     def variant_definitions(cls, name: str) -> List[Tuple[spack.spec.Spec, spack.variant.Variant]]:
         """Iterator over (when_spec, Variant) for all variant definitions for a particular name."""
-        return _definitions(cls.variants, name)
+        # `cls.variants` does not change once the directives of the class have run, and a solve
+        # asks for the same definitions tens of thousands of times, so the list is kept on the
+        # class that computed it. Callers do not modify what they get back.
+        cache = cls.__dict__.get("_variant_definitions_cache")
+        if cache is None:
+            cache = {}
+            setattr(cls, "_variant_definitions_cache", cache)
+        result = cache.get(name)
+        if result is None:
+            result = cache[name] = _definitions(cls.variants, name)
+        return result
 
     @classmethod
     def variant_items(cls) -> Iterable[Tuple[spack.spec.Spec, Dict[str, spack.variant.Variant]]]:

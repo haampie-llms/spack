@@ -211,17 +211,21 @@ def identity_for_facts(
 def dependency_holds(
     *, dependency_flags: dt.DepFlag, pkg_cls: Type[spack.package_base.PackageBase]
 ) -> TransformFunction:
+    # The transform runs once per dependency of the package, so what only depends on the package
+    # and the flags is computed here: `name` is a class property, not a plain attribute.
+    pkg_name = pkg_cls.name
+    deptypes = [dt.flag_to_string(t) for t in dt.ALL_FLAGS if t & dependency_flags]
+    remove_nodes = remove_facts("node", "virtual_node")
+
     def _transform_fn(
         name: str, input_spec: spack.spec.Spec, requirements: List[AspFunction]
     ) -> List[AspFunction]:
-        result = remove_facts("node", "virtual_node")(name, input_spec, requirements) + [
-            fn.attr("dependency_holds", pkg_cls.name, name, dt.flag_to_string(t))
-            for t in dt.ALL_FLAGS
-            if t & dependency_flags
+        result = remove_nodes(name, input_spec, requirements) + [
+            fn.attr("dependency_holds", pkg_name, name, deptype) for deptype in deptypes
         ]
         if name not in pkg_cls.extendees:
             return result
-        return result + [fn.attr("extends", pkg_cls.name, name)]
+        return result + [fn.attr("extends", pkg_name, name)]
 
     return _transform_fn
 
@@ -1423,63 +1427,62 @@ class SpackSolverSetup:
 
     def pkg_version_rules(self, pkg: Type[spack.package_base.PackageBase]) -> None:
         """Declares known versions, their origins, and their weights."""
-        version_provenance = self.possible_versions[pkg.name]
-        ordered_versions = spack.package_base.sort_by_pkg_preference(
-            self.possible_versions[pkg.name], pkg=pkg
-        )
+        pkg_name = pkg.name
+        version_provenance = self.possible_versions[pkg_name]
+        ordered_versions = spack.package_base.sort_by_pkg_preference(version_provenance, pkg=pkg)
         # Account for preferences in packages.yaml, if any
-        if pkg.name in self.versions_from_yaml:
+        if pkg_name in self.versions_from_yaml:
             ordered_versions = list(
-                spack.util.lang.dedupe(self.versions_from_yaml[pkg.name] + ordered_versions)
+                spack.util.lang.dedupe(self.versions_from_yaml[pkg_name] + ordered_versions)
             )
 
         # Set the deprecation penalty, according to the package. This should be enough to move the
         # first version last if deprecated.
         if ordered_versions:
-            self.gen.pkg_fact(pkg.name, fn.version_deprecation_penalty(len(ordered_versions)))
+            self.gen.pkg_fact(pkg_name, fn.version_deprecation_penalty(len(ordered_versions)))
 
         for weight, declared_version in enumerate(ordered_versions):
-            self.gen.pkg_fact(pkg.name, fn.version_declared(declared_version, weight))
+            self.gen.pkg_fact(pkg_name, fn.version_declared(declared_version, weight))
             for origin in version_provenance[declared_version]:
-                self.gen.pkg_fact(pkg.name, fn.version_origin(declared_version, str(origin)))
+                self.gen.pkg_fact(pkg_name, fn.version_origin(declared_version, str(origin)))
 
-        for v in self.possible_versions[pkg.name]:
+        for v in version_provenance:
             if pkg.needs_commit(v):
                 commit = pkg.version_or_package_attr("commit", v, "")
-                self.git_commit_versions[pkg.name][v] = commit
+                self.git_commit_versions[pkg_name][v] = commit
 
         # Declare deprecated versions for this package, if any
-        deprecated = self.deprecated_versions[pkg.name]
-        for v in sorted(deprecated):
-            self.gen.pkg_fact(pkg.name, fn.deprecated_version(v))
+        for v in sorted(self.deprecated_versions[pkg_name]):
+            self.gen.pkg_fact(pkg_name, fn.deprecated_version(v))
 
     def conflict_rules(self, pkg):
+        pkg_name = pkg.name
         for when_spec, conflict_specs in pkg.conflicts.items():
             when_spec_msg = f"conflict constraint {when_spec}"
-            when_spec_id = self.condition(when_spec, required_name=pkg.name, msg=when_spec_msg)
+            when_spec_id = self.condition(when_spec, required_name=pkg_name, msg=when_spec_msg)
             when_spec_str = str(when_spec)
 
             for conflict_spec, conflict_msg in conflict_specs:
                 conflict_spec_str = str(conflict_spec)
                 if conflict_msg is None:
-                    conflict_msg = f"{pkg.name}: "
+                    conflict_msg = f"{pkg_name}: "
                     if not when_spec_str:
                         conflict_msg += f"conflicts with '{conflict_spec_str}'"
                     else:
                         conflict_msg += f"'{conflict_spec_str}' conflicts with '{when_spec_str}'"
 
                 if not conflict_spec_str:
-                    conflict_spec_msg = f"conflict is triggered when {pkg.name}"
+                    conflict_spec_msg = f"conflict is triggered when {pkg_name}"
                 else:
                     conflict_spec_msg = f"conflict is triggered when {conflict_spec_str}"
 
                 conflict_spec_id = self.condition(
                     conflict_spec,
-                    required_name=conflict_spec.name or pkg.name,
+                    required_name=conflict_spec.name or pkg_name,
                     msg=conflict_spec_msg,
                 )
                 self.gen.pkg_fact(
-                    pkg.name, fn.conflict(conflict_spec_id, when_spec_id, conflict_msg)
+                    pkg_name, fn.conflict(conflict_spec_id, when_spec_id, conflict_msg)
                 )
                 self.gen.newline()
 
@@ -1838,6 +1841,7 @@ class SpackSolverSetup:
 
     def package_dependencies_rules(self, pkg):
         """Translate ``depends_on`` directives into ASP logic."""
+        pkg_name = pkg.name
         for cond, deps_by_name in pkg.dependencies.items():
             cond_str = str(cond)
             cond_str_suffix = f" when {cond_str}" if cond_str else ""
@@ -1856,13 +1860,13 @@ class SpackSolverSetup:
                 if not depflag:
                     continue
 
-                msg = f"{pkg.name} depends on {dep.spec}{cond_str_suffix}"
+                msg = f"{pkg_name} depends on {dep.spec}{cond_str_suffix}"
                 context = ConditionContext()
                 context.source = ConstraintOrigin.append_type_suffix(
-                    pkg.name, ConstraintOrigin.DEPENDS_ON
+                    pkg_name, ConstraintOrigin.DEPENDS_ON
                 )
                 context.transform_imposed = dependency_holds(dependency_flags=depflag, pkg_cls=pkg)
-                self.condition(cond, dep.spec, required_name=pkg.name, msg=msg, context=context)
+                self.condition(cond, dep.spec, required_name=pkg_name, msg=msg, context=context)
                 self.gen.newline()
 
     def _gen_match_variant_splice_constraints(
