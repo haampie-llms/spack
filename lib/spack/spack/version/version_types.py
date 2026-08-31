@@ -1200,7 +1200,11 @@ class VersionList(VersionType, _VersionListBase):
         if not self:
             return ""
 
-        return ",".join(f"={v}" if type(v) is StandardVersion else str(v) for v in self)
+        cached = _VERSION_LIST_STR.get(id(self))
+        if cached is not None:
+            return cached
+
+        return ",".join([f"={v}" if type(v) is StandardVersion else str(v) for v in self])
 
     def __repr__(self) -> str:
         return repr(list(self))
@@ -1402,6 +1406,11 @@ _ANY_VERSION_LIST = VersionList._from_sorted((_UNBOUNDED_RANGE,))
 #: Version constraints repeat across package recipes and across the nodes of a solve.
 _VERSION_LIST_CACHE: Dict[str, VersionList] = {}
 
+#: The rendering of the interned version lists, by object id. `spack solve --show asp py-torch`
+#: writes 84 444 version lists out taking 3 092 distinct values, and every one of them is a key
+#: of _VERSION_LIST_CACHE, which keeps it alive, so its id keeps identifying it.
+_VERSION_LIST_STR: Dict[int, str] = {}
+
 #: Version literals repeat too: `spack solve --show asp py-torch` parses 21 271 of them taking
 #: 3 065 distinct values, so the parsed constraint is kept instead of the string.
 _FROM_STRING_CACHE: Dict[str, VersionType] = {}
@@ -1442,6 +1451,7 @@ def intern_version_list(version_list: VersionList) -> VersionList:
     if cached is not None:
         return cached
     _VERSION_LIST_CACHE[key] = version_list
+    _VERSION_LIST_STR[id(version_list)] = key
     return version_list
 
 
