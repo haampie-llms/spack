@@ -269,6 +269,11 @@ class SpecClauseGenerator:
         self, spec: spack.spec.Spec, *, name: str, body: bool
     ) -> List[AspFunction]:
         """Return clauses for the virtuals a spec provides on its incoming edges."""
+        # Almost every spec a condition is generated from is a lone node, and without incoming
+        # edges there are no virtuals to report either way.
+        if not spec._dependents:
+            return []
+
         # TODO: a loop over `edges_to_dependencies` is preferred over `edges_from_dependents`
         # since dependents can point to specs out of scope for the solver.
         edges = spec.edges_from_dependents()

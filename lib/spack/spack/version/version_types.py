@@ -1322,6 +1322,27 @@ def VersionRange(lo: Union[str, StandardVersion], hi: Union[str, StandardVersion
 
 def from_string(string: str) -> VersionType:
     """Converts a string to a version object. This is private. Client code should use ver()."""
+    cached = _FROM_STRING_CACHE.get(string)
+    if cached is not None:
+        return cached
+
+    result = _parse_version_string(string)
+
+    # A GitVersion resolves its ref against the package it belongs to and caches what that
+    # resolves to, so two packages naming the same ref need a version each; see
+    # intern_version_list(). Everything else is immutable and can be shared.
+    if isinstance(result, VersionList):
+        shareable = all(type(v) is StandardVersion or type(v) is ClosedOpenRange for v in result)
+    else:
+        shareable = type(result) is StandardVersion or type(result) is ClosedOpenRange
+    if shareable:
+        _FROM_STRING_CACHE[string] = result
+
+    return result
+
+
+def _parse_version_string(string: str) -> VersionType:
+    """Parse a version literal; see :func:`from_string`, which caches the result."""
     string = string.replace(" ", "")
 
     # VersionList
@@ -1380,6 +1401,29 @@ _ANY_VERSION_LIST = VersionList._from_sorted((_UNBOUNDED_RANGE,))
 
 #: Version constraints repeat across package recipes and across the nodes of a solve.
 _VERSION_LIST_CACHE: Dict[str, VersionList] = {}
+
+#: Version literals repeat too: `spack solve --show asp py-torch` parses 21 271 of them taking
+#: 3 065 distinct values, so the parsed constraint is kept instead of the string.
+_FROM_STRING_CACHE: Dict[str, VersionType] = {}
+
+#: The same, for the version list a spec literal like `@1.2:` denotes.
+_VERSION_LIST_FROM_STRING_CACHE: Dict[str, VersionList] = {}
+
+
+def version_list_from_string(string: str) -> VersionList:
+    """The interned VersionList a spec's version literal denotes, e.g. `1.2:` or `1.0,2.0`."""
+    cached = _VERSION_LIST_FROM_STRING_CACHE.get(string)
+    if cached is not None:
+        return cached
+
+    parsed = from_string(string)
+    result = intern_version_list(
+        parsed if isinstance(parsed, VersionList) else VersionList([parsed])
+    )
+    if all(type(v) is StandardVersion or type(v) is ClosedOpenRange for v in result):
+        _VERSION_LIST_FROM_STRING_CACHE[string] = result
+
+    return result
 
 
 def intern_version_list(version_list: VersionList) -> VersionList:
