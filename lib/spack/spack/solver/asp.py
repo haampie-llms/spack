@@ -80,6 +80,7 @@ from .core import (
     AspVar,
     NodeId,
     SourceContext,
+    args_str,
     asp_argument,
     extract_args,
     fn,
@@ -226,6 +227,9 @@ def dependency_holds(
     pkg_name = pkg_cls.name
     deptypes = [dt.flag_to_string(t) for t in dt.ALL_FLAGS if t & dependency_flags]
     remove_nodes = remove_facts("node", "virtual_node")
+    # the directives of the class have run by the time a transform is asked for, so the dict
+    # below is the one they filled and it does not change any more
+    extendees = pkg_cls.extendees
 
     def _transform_fn(
         name: str, input_spec: spack.spec.Spec, requirements: List[AspFunction]
@@ -233,7 +237,7 @@ def dependency_holds(
         result = remove_nodes(name, input_spec, requirements) + [
             fn.attr("dependency_holds", pkg_name, name, deptype) for deptype in deptypes
         ]
-        if name not in pkg_cls.extendees:
+        if name not in extendees:
             return result
         return result + [fn.attr("extends", pkg_name, name)]
 
@@ -1552,7 +1556,7 @@ class SpackSolverSetup:
                 # the requirements are written out as they are, with the trigger id prepended,
                 # so there is no point in building a function object for each of them
                 for predicate in requirements:
-                    problem.append(f"condition_requirement({trigger_id},{predicate.args_str()}).")
+                    problem.append(f"condition_requirement({trigger_id},{args_str(predicate)}).")
                 problem.append("")
         self._trigger_cache.clear()
 
@@ -1571,7 +1575,7 @@ class SpackSolverSetup:
                 problem.append(f"pkg_fact({quoted_name},effect_msg({quote_once(spec_str)})).")
                 # see the note in trigger_rules()
                 for predicate in requirements:
-                    problem.append(f"imposed_constraint({effect_id},{predicate.args_str()}).")
+                    problem.append(f"imposed_constraint({effect_id},{args_str(predicate)}).")
                 problem.append("")
         self._effect_cache.clear()
 
