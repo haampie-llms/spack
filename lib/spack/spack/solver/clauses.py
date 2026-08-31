@@ -93,6 +93,8 @@ class SpecClauseGenerator:
         self._condition_clause_cache: Dict[Tuple, List[AspFunction]] = {}
         #: Package classes by name, see pkg_class()
         self._pkg_classes: Dict[str, Type[spack.package_base.PackageBase]] = {}
+        #: Whether a name is virtual, see is_virtual()
+        self._virtual_names: Dict[str, bool] = {}
 
     def record_version_constraint(self, name: str, versions) -> None:
         """Record that `versions` was requested for package `name`."""
@@ -482,7 +484,7 @@ class SpecClauseGenerator:
 
         f: Union[Type[_Head], Type[_Body]] = _Body if body else _Head
 
-        virtual = spack.repo.PATH.is_virtual(name) if name else False
+        virtual = self.is_virtual(name) if name else False
         if name:
             clauses.append(AspFunction("attr", (f.virtual_node if virtual else f.node, name)))
         if spec.namespace:
@@ -567,6 +569,17 @@ class SpecClauseGenerator:
 
         clauses.extend(edge_clauses)
         return clauses
+
+    def is_virtual(self, name: str) -> bool:
+        """Whether ``name`` is the name of a virtual package.
+
+        Every spec a clause is generated for asks this, and `spack.repo.PATH` is a singleton,
+        so reaching through it is three calls; this generator lives for one setup.
+        """
+        result = self._virtual_names.get(name)
+        if result is None:
+            result = self._virtual_names[name] = spack.repo.PATH.is_virtual(name)
+        return result
 
     def pkg_class(self, pkg_name: str) -> Type[spack.package_base.PackageBase]:
         # The classes are asked for by name over and over while generating clauses. This

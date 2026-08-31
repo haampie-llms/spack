@@ -839,8 +839,12 @@ def prevalidate_variant_value(
         )
 
     # a value is interned by a key that identifies it exactly, so a definition it validated
-    # against once validates again; see _VALIDATED_VALUES
-    value_key = getattr(variant, "_key", None)
+    # against once validates again; see _VALIDATED_VALUES. Values that were not interned have
+    # no key, and are validated every time.
+    try:
+        value_key: Optional[Tuple] = variant._key
+    except AttributeError:
+        value_key = None
 
     # do as much prevalidation as we can -- check only those
     # variants whose when constraint intersects this spec
