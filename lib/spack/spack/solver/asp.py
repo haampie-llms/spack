@@ -1344,9 +1344,18 @@ class ConditionIdContext(SourceContext):
     lower-level context with less information.
     """
 
-    def __init__(self):
-        super().__init__()
-        self.transform: Optional[TransformFunction] = None
+    def __init__(
+        self,
+        *,
+        source: str = "none",
+        transform: Optional[TransformFunction] = None,
+        wrap_node_requirement: Optional[bool] = None,
+    ):
+        # The fields are written here rather than through the base class: two of these are
+        # built for every condition of a solve.
+        self.source = source
+        self.wrap_node_requirement = wrap_node_requirement
+        self.transform = transform
 
 
 class ConditionContext(SourceContext):
@@ -1372,18 +1381,18 @@ class ConditionContext(SourceContext):
         self.wrap_node_requirement: Optional[bool] = None
 
     def requirement_context(self) -> ConditionIdContext:
-        ctxt = ConditionIdContext()
-        ctxt.source = self.source
-        ctxt.transform = self.transform_required
-        ctxt.wrap_node_requirement = self.wrap_node_requirement
-        return ctxt
+        return ConditionIdContext(
+            source=self.source,
+            transform=self.transform_required,
+            wrap_node_requirement=self.wrap_node_requirement,
+        )
 
     def impose_context(self) -> ConditionIdContext:
-        ctxt = ConditionIdContext()
-        ctxt.source = self.source
-        ctxt.transform = self.transform_imposed
-        ctxt.wrap_node_requirement = self.wrap_node_requirement
-        return ctxt
+        return ConditionIdContext(
+            source=self.source,
+            transform=self.transform_imposed,
+            wrap_node_requirement=self.wrap_node_requirement,
+        )
 
 
 class SpackSolverSetup:

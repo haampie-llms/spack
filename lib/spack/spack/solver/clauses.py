@@ -138,6 +138,7 @@ class SpecClauseGenerator:
 
         # Check if the target is a concrete target
         if str(target) in spack.vendor.archspec.cpu.TARGETS:
+            assert single_target_attr, f"no attribute to state the target of '{name}' with"
             return [AspFunction("attr", (single_target_attr, name, target))]
 
         self.target_constraints.add(target)

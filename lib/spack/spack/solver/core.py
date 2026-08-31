@@ -67,20 +67,16 @@ class AspFunction:
             return f"{self.name}({asp_argument(args[0])})"
         if len(args) == 2:
             return f"{self.name}({asp_argument(args[0])},{asp_argument(args[1])})"
-        return f"{self.name}({self.args_str()})"
-
-    def args_str(self) -> str:
-        """The arguments as they appear between the parentheses of this function."""
-        return args_str(self)
+        return f"{self.name}({args_str(self)})"
 
     def __repr__(self) -> str:
         return str(self)
 
 
 #: ASP string arguments are package, variant, version, ... names, so a solve writes the same
-#: handful of strings out over and over: `spack solve --show asp py-torch` renders 1.2 million
-#: string arguments taking 27 000 distinct values. Escaping one means scanning it three times,
-#: so the literals are kept here instead.
+#: handful of strings out over and over: `spack solve --show asp py-torch` renders 614 086 of
+#: them taking 4 659 distinct values. Escaping one means scanning it three times, so the
+#: literals are kept here instead.
 _QUOTED: Dict[str, str] = {}
 
 
@@ -107,8 +103,8 @@ def _quote(arg: str) -> str:
 def args_str(function: AspFunction) -> str:
     """The arguments of ``function`` as they appear between its parentheses.
 
-    This is a function rather than only a method because the requirements of the trigger and
-    effect rules are written out with a different head, which is the hottest loop that needs it.
+    The trigger and effect rules write the arguments of the clauses out under a head of their
+    own, which is what needs this separately from :meth:`AspFunction.__str__`.
     """
     # Most arguments are strings that were written out before, and those skip the call below.
     quoted = _QUOTED
