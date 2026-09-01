@@ -1715,7 +1715,9 @@ class SpackSolverSetup:
             return result[0]
 
         cond_id = next(self._id_counter)
-        requirements = self.clauses.spec_clauses(cond, name=name, body=body, context=context)
+        requirements = self.clauses.condition_clauses(
+            cond, spec_str=cond_str, name=name, body=body, context=context
+        )
         if context.transform:
             requirements = context.transform(name, cond, requirements)
         pkg_cache[named_cond_key] = (cond_id, requirements)

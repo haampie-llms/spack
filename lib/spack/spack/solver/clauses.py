@@ -84,6 +84,9 @@ class SpecClauseGenerator:
         self.version_constraints: Dict[str, Set] = collections.defaultdict(set)
         self.target_constraints: Set = set()
         self.variant_values_from_specs: Set = set()
+        #: Clauses returned by condition_clauses(); they live exactly as long as the constraints
+        #: recorded above.
+        self._condition_clause_cache: Dict[Tuple, List[AspFunction]] = {}
 
     def record_version_constraint(self, name: str, versions) -> None:
         """Record that `versions` was requested for package `name`."""
@@ -127,6 +130,38 @@ class SpecClauseGenerator:
 
         self.target_constraints.add(target)
         return [fn.attr("node_target_satisfies", name, target)]
+
+    def condition_clauses(
+        self,
+        spec: spack.spec.Spec,
+        *,
+        spec_str: str,
+        name: str,
+        body: bool,
+        context: "SourceContext",
+    ) -> List[AspFunction]:
+        """The clauses of one half of a condition, before the transform of its context.
+
+        The transform is what ties a condition to the package that declared it; the clauses of
+        the spec are not tied to it, so the conditions that agree on the spec share them even
+        though their ids differ. The source of the context only reaches compiler flag clauses,
+        so it is part of the key only for the specs that can carry flags.
+
+        Generating clauses also records the versions, targets and variant values the spec
+        mentions, and recording the same ones twice is a no-op, so a repeated call returns the
+        clauses of the first one.
+
+        Callers must not modify the result: ``remove_facts()`` and ``dependency_holds()`` return
+        a new list, and the clauses are only read from there on.
+        """
+        source = context.source if spec.compiler_flags or spec._dependencies else None
+        key = (name, spec_str, body, getattr(context, "wrap_node_requirement", None), source)
+        clauses = self._condition_clause_cache.get(key)
+        if clauses is None:
+            clauses = self._condition_clause_cache[key] = self.spec_clauses(
+                spec, name=name, body=body, context=context
+            )
+        return clauses
 
     def spec_clauses(
         self,
@@ -184,7 +219,7 @@ class SpecClauseGenerator:
         return clauses
 
     def _variant_clauses(
-        self, spec: spack.spec.Spec, f, *, name: str, body: bool
+        self, spec: spack.spec.Spec, f, *, name: str, body: bool, virtual: bool
     ) -> List[AspFunction]:
         """Return clauses for the variants of a spec."""
         variants = spec.variants
@@ -194,11 +229,7 @@ class SpecClauseGenerator:
         # Neither the package class nor whether the values have to be prevalidated depend on the
         # variant, let alone on its values, so both are settled once for the whole spec.
         concrete = spec.concrete
-        pkg_cls = (
-            self.pkg_class(name)
-            if name and not concrete and not spack.repo.PATH.is_virtual(name)
-            else None
-        )
+        pkg_cls = self.pkg_class(name) if name and not concrete and not virtual else None
 
         clauses = []
         for vname, variant in sorted(variants.items()):
@@ -431,16 +462,15 @@ class SpecClauseGenerator:
 
         f: Union[Type[_Head], Type[_Body]] = _Body if body else _Head
 
+        virtual = spack.repo.PATH.is_virtual(name) if name else False
         if name:
-            clauses.append(
-                f.node(name) if not spack.repo.PATH.is_virtual(name) else f.virtual_node(name)
-            )
+            clauses.append(f.virtual_node(name) if virtual else f.node(name))
         if spec.namespace:
             clauses.append(f.namespace(name, spec.namespace))
 
         clauses.extend(self.spec_versions(spec, name=name))
         clauses.extend(self._arch_clauses(spec, f, name=name))
-        clauses.extend(self._variant_clauses(spec, f, name=name, body=body))
+        clauses.extend(self._variant_clauses(spec, f, name=name, body=body, virtual=virtual))
         clauses.extend(self._flag_clauses(spec, f, name=name, context=context))
 
         # Hash for concrete specs
@@ -461,7 +491,7 @@ class SpecClauseGenerator:
             for libc in self.libcs:
                 clauses.append(fn.attr("compatible_libc", name, libc.name, libc.version))
 
-        if not transitive:
+        if not transitive or not spec._dependencies:
             return clauses
 
         # Dependencies
