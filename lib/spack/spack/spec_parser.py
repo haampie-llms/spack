@@ -566,7 +566,7 @@ class EdgeAttributeParser:
                 name, value = self.ctx.current_token.value.split("=", maxsplit=1)
                 if name.endswith(":"):
                     name = name[:-1]
-                value = value.strip("'\" ")
+                value = strip_quotes_and_unescape(value)
                 # A when value is one spec string, where a comma is part of the syntax, e.g.
                 # when='@1,2'; deptypes and virtuals values are comma-separated lists.
                 attributes[name] = value if name == "when" else value.split(",")

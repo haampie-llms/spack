@@ -2089,36 +2089,6 @@ class Spec:
         """
         return _select_edges(self._dependencies, child=name, depflag=depflag, virtuals=virtuals)
 
-    @property
-    def edge_attributes(self) -> str:
-        """Helper method to print edge attributes in spec strings."""
-        edges = self.edges_from_dependents()
-        if not edges:
-            return ""
-
-        union = DependencySpec(parent=Spec(), spec=self, depflag=0, virtuals=())
-        all_direct_edges = all(x.direct for x in edges)
-        dep_conditions = set()
-
-        for edge in edges:
-            union.update_deptypes(edge.depflag)
-            union.update_virtuals(edge.virtuals)
-            dep_conditions.add(edge.when)
-
-        deptypes_str = ""
-        if not all_direct_edges and union.depflag:
-            deptypes_str = f"deptypes={','.join(dt.flag_to_tuple(union.depflag))}"
-
-        virtuals_str = f"virtuals={','.join(union.virtuals)}" if union.virtuals else ""
-
-        conditions = [str(c) for c in dep_conditions if c != Spec()]
-        when_str = f"when='{','.join(conditions)}'" if conditions else ""
-
-        result = " ".join(filter(lambda x: bool(x), (when_str, deptypes_str, virtuals_str)))
-        if result:
-            result = f"[{result}]"
-        return result
-
     def dependencies(
         self,
         name: Optional[str] = None,
@@ -4697,7 +4667,11 @@ class Spec:
             if deptypes and dep.depflag
             else ""
         )
-        when_str = f"when='{(dep.when)}'" if dep.when != EMPTY_SPEC else ""
+        when_str = (
+            f"when={spack.spec_parser.quote_if_needed(str(dep.when))}"
+            if dep.when != EMPTY_SPEC
+            else ""
+        )
         virtuals_str = f"virtuals={','.join(dep.virtuals)}" if virtuals and dep.virtuals else ""
 
         attrs = " ".join(s for s in (when_str, deptypes_str, virtuals_str) if s)
