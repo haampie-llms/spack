@@ -155,7 +155,7 @@ class SpecClauseGenerator:
         a new list, and the clauses are only read from there on.
         """
         source = context.source if spec.compiler_flags or spec._dependencies else None
-        key = (name, spec_str, body, getattr(context, "wrap_node_requirement", None), source)
+        key = (name, spec_str, body, context.wrap_node_requirement, source)
         clauses = self._condition_clause_cache.get(key)
         if clauses is None:
             clauses = self._condition_clause_cache[key] = self.spec_clauses(
@@ -232,7 +232,9 @@ class SpecClauseGenerator:
         pkg_cls = self.pkg_class(name) if name and not concrete and not virtual else None
 
         clauses = []
-        for vname, variant in sorted(variants.items()):
+        # a single variant is already sorted
+        items = variants.items() if len(variants) == 1 else sorted(variants.items())
+        for vname, variant in items:
             # TODO: variant="*" means 'variant is defined to something', which used to
             # be meaningless in concretization, as all variants had to be defined. But
             # now that variants can be conditional, it should force a variant to exist.
@@ -456,9 +458,7 @@ class SpecClauseGenerator:
         for spec ``diff``).
         """
         clauses = []
-        seen = seen if seen is not None else set()
         name = spec.name or name or ""
-        seen.add(id(spec))
 
         f: Union[Type[_Head], Type[_Body]] = _Body if body else _Head
 
@@ -469,9 +469,13 @@ class SpecClauseGenerator:
             clauses.append(f.namespace(name, spec.namespace))
 
         clauses.extend(self.spec_versions(spec, name=name))
-        clauses.extend(self._arch_clauses(spec, f, name=name))
-        clauses.extend(self._variant_clauses(spec, f, name=name, body=body, virtual=virtual))
-        clauses.extend(self._flag_clauses(spec, f, name=name, context=context))
+        # an absent part contributes no clauses
+        if spec.architecture:
+            clauses.extend(self._arch_clauses(spec, f, name=name))
+        if spec.variants:
+            clauses.extend(self._variant_clauses(spec, f, name=name, body=body, virtual=virtual))
+        if spec.compiler_flags:
+            clauses.extend(self._flag_clauses(spec, f, name=name, context=context))
 
         # Hash for concrete specs
         if spec.concrete:
@@ -483,7 +487,8 @@ class SpecClauseGenerator:
             if spec.external:
                 clauses.append(fn.attr("external", name))
 
-        clauses.extend(self._virtuals_from_dependents(spec, name=name, body=body))
+        if spec._dependents:
+            clauses.extend(self._virtuals_from_dependents(spec, name=name, body=body))
 
         # If the spec is external and concrete, we allow all the libcs on the system
         if spec.external and spec.concrete and spack.platforms.using_libc_compatibility():
@@ -493,6 +498,11 @@ class SpecClauseGenerator:
 
         if not transitive or not spec._dependencies:
             return clauses
+
+        # only the specs that have dependencies need to track what has been visited
+        if seen is None:
+            seen = set()
+        seen.add(id(spec))
 
         # Dependencies
         edge_clauses = []
@@ -518,6 +528,8 @@ class SpecClauseGenerator:
             # if it's concrete, then the hashes above take care of dependency
             # constraints, but expand the hashes if asked for.
             if (not spec.concrete or expand_hashes) and id(dep) not in seen:
+                # the callee only records what it visits itself once it descends further
+                seen.add(id(dep))
                 dependency_clauses = self._spec_clauses(
                     dep,
                     body=body,
