@@ -106,7 +106,11 @@ VALUE = r"(?:[a-zA-Z_0-9\-+\*.,:=%^\~\/\\]+)"
 QUOTED_VALUE = r"(?:'(?:[^']|(?<=\\)')*'|\"(?:[^\"]|(?<=\\)\")*\")"
 
 VERSION = r"=?(?:[a-zA-Z0-9_][a-zA-Z_0-9\-\.]*\b)"
-VERSION_RANGE = rf"(?:(?:{VERSION})?:(?:{VERSION}(?!\s*=))?)"
+#: An upper bound is not a key value pair: in ``@1.2: develop=foo``, develop is a variant name.
+#: The check has to happen before the bound is matched, or the regex backtracks into a partial
+#: version to satisfy it, e.g. ``a.`` in ``@:a.a=''``.
+NOT_A_KEY = r"(?![a-zA-Z_0-9\-.]*\s*=)"
+VERSION_RANGE = rf"(?:(?:{VERSION})?:(?:{NOT_A_KEY}{VERSION})?)"
 VERSION_LIST = rf"(?:{VERSION_RANGE}|{VERSION})(?:\s*,\s*(?:{VERSION_RANGE}|{VERSION}))*"
 
 SPLIT_KVP = re.compile(rf"^({NAME})(:?==?)(.*)$")
