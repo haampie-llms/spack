@@ -70,14 +70,7 @@ class AspFunction:
 
     def args_str(self) -> str:
         """The arguments as they appear between the parentheses of this function."""
-        # Most arguments are strings that were written out before, and those skip the call.
-        quoted = _QUOTED
-        return ",".join(
-            [
-                quoted[arg] if type(arg) is str and arg in quoted else asp_argument(arg)
-                for arg in self.args
-            ]
-        )
+        return args_str(self)
 
     def __repr__(self) -> str:
         return str(self)
@@ -107,6 +100,22 @@ def _quote(arg: str) -> str:
     """Compute and cache the ASP literal for ``arg``; see :func:`quote`."""
     result = _QUOTED[arg] = quote_once(arg)
     return result
+
+
+def args_str(function: AspFunction) -> str:
+    """The arguments of ``function`` as they appear between its parentheses.
+
+    This is a function rather than only a method because the requirements of the trigger and
+    effect rules are written out with a different head, which is the hottest loop that needs it.
+    """
+    # a string that has been written out before needs no further work
+    quoted = _QUOTED
+    return ",".join(
+        [
+            quoted[arg] if type(arg) is str and arg in quoted else asp_argument(arg)
+            for arg in function.args
+        ]
+    )
 
 
 def asp_argument(arg: Any) -> str:

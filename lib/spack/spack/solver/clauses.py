@@ -30,31 +30,35 @@ def libc_is_compatible(lhs: spack.spec.Spec, rhs: spack.spec.Spec) -> bool:
 
 
 class _Head:
-    """ASP functions used to express spec clauses in the HEAD of a rule"""
+    """Names of the ``attr`` facts that express spec clauses in the HEAD of a rule.
 
-    node = fn.attr("node")
-    namespace = fn.attr("namespace_set")
-    virtual_node = fn.attr("virtual_node")
-    node_platform = fn.attr("node_platform_set")
-    node_os = fn.attr("node_os_set")
-    node_target = fn.attr("node_target_set")
-    variant_value = fn.attr("variant_set")
-    node_flag = fn.attr("node_flag_set")
-    propagate = fn.attr("propagate")
+    They are the first argument of ``attr``, and clause generation builds the functions as
+    ``AspFunction("attr", (<name>, ...))``.
+    """
+
+    node = "node"
+    namespace = "namespace_set"
+    virtual_node = "virtual_node"
+    node_platform = "node_platform_set"
+    node_os = "node_os_set"
+    node_target = "node_target_set"
+    variant_value = "variant_set"
+    node_flag = "node_flag_set"
+    propagate = "propagate"
 
 
 class _Body:
-    """ASP functions used to express spec clauses in the BODY of a rule"""
+    """The same for the BODY of a rule; see :class:`_Head`."""
 
-    node = fn.attr("node")
-    namespace = fn.attr("namespace")
-    virtual_node = fn.attr("virtual_node")
-    node_platform = fn.attr("node_platform")
-    node_os = fn.attr("node_os")
-    node_target = fn.attr("node_target")
-    variant_value = fn.attr("variant_value")
-    node_flag = fn.attr("node_flag")
-    propagate = fn.attr("propagate")
+    node = "node"
+    namespace = "namespace"
+    virtual_node = "virtual_node"
+    node_platform = "node_platform"
+    node_os = "node_os"
+    node_target = "node_target"
+    variant_value = "variant_value"
+    node_flag = "node_flag"
+    propagate = "propagate"
 
 
 class SpecClauseGenerator:
@@ -87,6 +91,8 @@ class SpecClauseGenerator:
         #: Clauses returned by condition_clauses(); they live exactly as long as the constraints
         #: recorded above.
         self._condition_clause_cache: Dict[Tuple, List[AspFunction]] = {}
+        #: Package classes by name, see pkg_class()
+        self._pkg_classes: Dict[str, Type[spack.package_base.PackageBase]] = {}
 
     def record_version_constraint(self, name: str, versions) -> None:
         """Record that `versions` was requested for package `name`."""
@@ -114,7 +120,11 @@ class SpecClauseGenerator:
         return [fn.attr("node_version_satisfies", name, spec.versions)]
 
     def target_ranges(
-        self, spec: spack.spec.Spec, single_target_fn, *, name: Optional[str] = None
+        self,
+        spec: spack.spec.Spec,
+        single_target_attr: Optional[str],
+        *,
+        name: Optional[str] = None,
     ) -> List[AspFunction]:
         name = spec.name or name
         assert name, "Internal Error: spec with no name occurred. Please file an issue."
@@ -126,7 +136,7 @@ class SpecClauseGenerator:
 
         # Check if the target is a concrete target
         if str(target) in spack.vendor.archspec.cpu.TARGETS:
-            return [single_target_fn(name, target)]
+            return [AspFunction("attr", (single_target_attr, name, target))]
 
         self.target_constraints.add(target)
         return [fn.attr("node_target_satisfies", name, target)]
@@ -211,9 +221,9 @@ class SpecClauseGenerator:
 
         clauses = []
         if arch.platform:
-            clauses.append(f.node_platform(name, arch.platform))
+            clauses.append(AspFunction("attr", (f.node_platform, name, arch.platform)))
         if arch.os:
-            clauses.append(f.node_os(name, arch.os))
+            clauses.append(AspFunction("attr", (f.node_os, name, arch.os)))
         if arch.target:
             clauses.extend(self.target_ranges(spec, f.node_target, name=name))
         return clauses
@@ -257,14 +267,16 @@ class SpecClauseGenerator:
             if variant.propagate:
                 has_variant = self.pkg_class(name).has_variant(vname)
                 for value in values:
-                    clauses.append(f.propagate(name, fn.variant_value(vname, value)))
+                    clauses.append(
+                        AspFunction("attr", (f.propagate, name, fn.variant_value(vname, value)))
+                    )
                     if has_variant:
-                        clauses.append(f.variant_value(name, vname, value))
+                        clauses.append(AspFunction("attr", (f.variant_value, name, vname, value)))
                 continue
 
             concrete_multi = variant.concrete and variant.type == vt.VariantType.MULTI
             for value in values:
-                variant_clause = f.variant_value(name, vname, value)
+                variant_clause = AspFunction("attr", (f.variant_value, name, vname, value))
                 if concrete_multi and not concrete:
                     if body is False:
                         variant_clause.args = (
@@ -286,14 +298,21 @@ class SpecClauseGenerator:
             flag_group = " ".join(flags)
             for flag in flags:
                 clauses.append(
-                    f.node_flag(name, fn.node_flag(flag_type, flag, flag_group, source))
+                    AspFunction(
+                        "attr",
+                        (f.node_flag, name, fn.node_flag(flag_type, flag, flag_group, source)),
+                    )
                 )
                 if not spec.concrete and flag.propagate is True:
                     clauses.append(
-                        f.propagate(
-                            name,
-                            fn.node_flag(flag_type, flag, flag_group, source),
-                            fn.edge_types("link", "run"),
+                        AspFunction(
+                            "attr",
+                            (
+                                f.propagate,
+                                name,
+                                fn.node_flag(flag_type, flag, flag_group, source),
+                                fn.edge_types("link", "run"),
+                            ),
                         )
                     )
         return clauses
@@ -464,9 +483,9 @@ class SpecClauseGenerator:
 
         virtual = spack.repo.PATH.is_virtual(name) if name else False
         if name:
-            clauses.append(f.virtual_node(name) if virtual else f.node(name))
+            clauses.append(AspFunction("attr", (f.virtual_node if virtual else f.node, name)))
         if spec.namespace:
-            clauses.append(f.namespace(name, spec.namespace))
+            clauses.append(AspFunction("attr", (f.namespace, name, spec.namespace)))
 
         clauses.extend(self.spec_versions(spec, name=name))
         # an absent part contributes no clauses
@@ -548,8 +567,14 @@ class SpecClauseGenerator:
         return clauses
 
     def pkg_class(self, pkg_name: str) -> Type[spack.package_base.PackageBase]:
+        # This generator lives for a single setup, so a class it hands out cannot go stale.
+        cls = self._pkg_classes.get(pkg_name)
+        if cls is not None:
+            return cls
+
         request = pkg_name
         if pkg_name in self.explicitly_required_namespaces:
             namespace = self.explicitly_required_namespaces[pkg_name]
             request = f"{namespace}.{pkg_name}"
-        return spack.repo.PATH.get_pkg_class(request)
+        cls = self._pkg_classes[pkg_name] = spack.repo.PATH.get_pkg_class(request)
+        return cls
