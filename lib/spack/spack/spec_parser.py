@@ -175,9 +175,6 @@ class SpecTokens(TokenBase):
         rf"(?P<value>{VALUE}|{QUOTED_VALUE})"  # bare or quoted value
     )
 
-    # Virtual assignment, after KEY_VALUE_PAIR: only tried first at the start of a dependency
-    VIRTUAL_ASSIGNMENT = rf"(?:{VIRTUAL_ASSIGNMENT})"
-
     # FILENAME
     FILENAME = rf"(?:{FILENAME})"
 
@@ -187,6 +184,11 @@ class SpecTokens(TokenBase):
 
     # DAG hash
     DAG_HASH = rf"/(?P<hash>{HASH})"
+
+    # Virtual assignment, e.g. c,cxx=gcc. Only valid right after a dependency sigil or edge
+    # properties, where it is matched out of band (see tokenize()); anywhere else a package name
+    # matches first, so this alternative is not tried for ordinary tokens.
+    VIRTUAL_ASSIGNMENT = rf"(?:{VIRTUAL_ASSIGNMENT})"
 
     # Unexpected character
     UNEXPECTED = r"\S"
@@ -325,6 +327,15 @@ class SpecParser:
                     # ^ (transitive) or % / %% (direct) edge, followed by a dependency node
                     edge_properties = {"virtuals": (), "depflag": 0}
             elif kind is SpecTokens.UNEXPECTED:
+                # A misplaced virtual assignment c,cxx=gcc is tokenized as a package name and an
+                # unexpected comma: point that out, rather than the comma
+                assignment = _VIRTUAL_ASSIGNMENT_AHEAD.match(self.literal_str, first_token.start())
+                if assignment:
+                    msg = (
+                        "a virtual assignment such as c,cxx=gcc must directly follow a "
+                        "dependency sigil (^ or %) or edge properties"
+                    )
+                    raise SpecParsingError(msg, assignment, self.literal_str)
                 raise SpecTokenizationError(self.literal_str)
             else:
                 # Any other token starts the next spec in the input: this spec is complete
@@ -529,14 +540,6 @@ class SpecParser:
                     break
                 spec.abstract_hash = token.group("hash")
                 self.curr = scanner.match()
-
-            elif kind is SpecTokens.VIRTUAL_ASSIGNMENT:
-                raise SpecParsingError(
-                    "a virtual assignment such as c,cxx=gcc must directly follow a dependency "
-                    "sigil (^ or %) or edge properties",
-                    token,
-                    self.literal_str,
-                )
 
             else:
                 # A dependency sigil, edge properties, package name, spec file or unexpected
