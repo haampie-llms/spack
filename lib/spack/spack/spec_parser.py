@@ -105,9 +105,9 @@ VALUE = r"(?:[a-zA-Z_0-9\-+\*.,:=%^\~\/\\]+)"
 QUOTED_VALUE = r"(?:'(?:[^']|(?<=\\)')*'|\"(?:[^\"]|(?<=\\)\")*\")"
 
 VERSION = r"=?(?:[a-zA-Z0-9_][a-zA-Z_0-9\-\.]*\b)"
-#: An upper bound is not a key value pair: in ``@1.2: develop=foo``, develop is a variant name.
-#: The check has to happen before the bound is matched, or the regex backtracks into a partial
-#: version to satisfy it, e.g. ``a.`` in ``@:a.a=''``.
+#: An upper bound is never the key of a key-value pair, so ``@1.2: develop=foo`` is a range and a
+#: variant. The check has to happen before the bound is matched, or the regex backtracks into a
+#: partial version to satisfy it, e.g. ``a.`` in ``@:a.a=''``.
 NOT_A_KEY = r"(?![a-zA-Z_0-9\-.]*\s*=)"
 VERSION_RANGE = rf"(?:(?:{VERSION})?:(?:{NOT_A_KEY}{VERSION})?)"
 VERSION_LIST = rf"(?:{VERSION_RANGE}|{VERSION})(?:\s*,\s*(?:{VERSION_RANGE}|{VERSION}))*"
