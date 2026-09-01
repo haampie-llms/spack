@@ -104,12 +104,12 @@ VALUE = r"(?:[a-zA-Z_0-9\-+\*.,:=%^\~\/\\]+)"
 #: Quoted values can be *anything* in between quotes, including escaped quotes.
 QUOTED_VALUE = r"(?:'(?:[^']|(?<=\\)')*'|\"(?:[^\"]|(?<=\\)\")*\")"
 
-VERSION = r"=?(?:[a-zA-Z0-9_][a-zA-Z_0-9\-\.]*\b)"
-#: An upper bound is never the key of a key-value pair, so ``@1.2: develop=foo`` is a range and a
-#: variant. The check has to happen before the bound is matched, or the regex backtracks into a
-#: partial version to satisfy it, e.g. ``a.`` in ``@:a.a=''``.
-NOT_A_KEY = r"(?![a-zA-Z_0-9\-.]*\s*=)"
-VERSION_RANGE = rf"(?:(?:{VERSION})?:(?:{NOT_A_KEY}{VERSION})?)"
+#: A version starts and ends with an alphanumeric character and is the whole run of version
+#: characters, so a following ``=`` cannot be satisfied by backtracking into a shorter version.
+VERSION = r"=?(?:[a-zA-Z0-9_](?:[a-zA-Z_0-9\-\.]*[a-zA-Z0-9_])?(?![a-zA-Z_0-9\-\.]))"
+#: The upper bound of a range is not the key of a key-value pair: ``@1.2:develop=foo`` is ``@1.2:``
+#: and a variant.
+VERSION_RANGE = rf"(?:(?:{VERSION})?:(?:{VERSION}(?!\s*=))?)"
 VERSION_LIST = rf"(?:{VERSION_RANGE}|{VERSION})(?:\s*,\s*(?:{VERSION_RANGE}|{VERSION}))*"
 
 #: Split ``key=value]]`` into key, delimiter, value and closing brackets of edge attributes
