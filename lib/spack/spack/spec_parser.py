@@ -202,6 +202,20 @@ SPEC_TOKENIZER = Tokenizer(SpecTokens, skip_whitespace=True)
 #: rather than a key-value pair. The tokenizer is context free, so this is matched separately.
 _VIRTUAL_ASSIGNMENT_AHEAD = re.compile(rf"\s*(?P<assignment>{VIRTUAL_ASSIGNMENT})")
 
+#: Token kinds, as compared against ``re.Match.lastgroup`` in the parser. These are the names of
+#: the :class:`SpecTokens` members; ``SpecTokens.DEPENDENCY.name`` itself is a property call, too
+#: slow to make once per token.
+_DEPENDENCY = SpecTokens.DEPENDENCY.name
+_END_EDGE_PROPERTIES = SpecTokens.END_EDGE_PROPERTIES.name
+_VERSION = SpecTokens.VERSION.name
+_BOOL_VARIANT = SpecTokens.BOOL_VARIANT.name
+_KEY_VALUE_PAIR = SpecTokens.KEY_VALUE_PAIR.name
+_FILENAME = SpecTokens.FILENAME.name
+_FULLY_QUALIFIED_PACKAGE_NAME = SpecTokens.FULLY_QUALIFIED_PACKAGE_NAME.name
+_UNQUALIFIED_PACKAGE_NAME = SpecTokens.UNQUALIFIED_PACKAGE_NAME.name
+_DAG_HASH = SpecTokens.DAG_HASH.name
+_UNEXPECTED = SpecTokens.UNEXPECTED.name
+
 #: The Spec class, imported on first use since ``spack.spec`` imports this module
 _Spec: Optional[Type["spack.spec.Spec"]] = None
 
@@ -270,8 +284,8 @@ class SpecParser:
 
     The parser drives the tokenizer regex directly, with one token of lookahead: ``self.curr``
     is the next token to consume, as a ``re.Match``, or ``None`` at the end of the input. The
-    kind of that token is ``SPEC_TOKENIZER.kinds[self.curr.lastgroup]``, and its text is
-    ``self.curr.group(self.curr.lastindex)``.
+    kind of that token is ``self.curr.lastgroup``, the name of a :class:`SpecTokens` member, and
+    its text is ``self.curr.group(self.curr.lastindex)``.
 
     A method call per token is comparatively expensive, so there are no ``accept`` and
     ``expect`` methods. Instead, the parser uses two idioms:
@@ -314,11 +328,10 @@ class SpecParser:
         first_token = self.curr
         root_spec = self._parse_node(initial_spec)
         current_spec = root_spec
-        kinds = SPEC_TOKENIZER.kinds
         while self.curr is not None:
             token = self.curr
-            kind = kinds[token.lastgroup]
-            if kind is SpecTokens.DEPENDENCY:
+            kind = token.lastgroup
+            if kind == _DEPENDENCY:
                 if token.group("open_bracket"):
                     # ^[key=value ...] or %[key=value ...] followed by a dependency node
                     self.curr = self.scanner.match()
@@ -326,7 +339,7 @@ class SpecParser:
                 else:
                     # ^ (transitive) or % / %% (direct) edge, followed by a dependency node
                     edge_properties = {"virtuals": (), "depflag": 0}
-            elif kind is SpecTokens.UNEXPECTED:
+            elif kind == _UNEXPECTED:
                 # A misplaced virtual assignment c,cxx=gcc is tokenized as a package name and an
                 # unexpected comma: point that out, rather than the comma
                 assignment = _VIRTUAL_ASSIGNMENT_AHEAD.match(self.literal_str, first_token.start())
@@ -395,10 +408,9 @@ class SpecParser:
         virtuals: Tuple[str, ...] = ()
         depflag = 0
         when = None
-        kinds = SPEC_TOKENIZER.kinds
         while self.curr is not None:
             token = self.curr
-            if kinds[token.lastgroup] is not SpecTokens.KEY_VALUE_PAIR:
+            if token.lastgroup != _KEY_VALUE_PAIR:
                 break
             self.curr = self.scanner.match()
             name = token.group("key")
@@ -421,7 +433,7 @@ class SpecParser:
                 raise SpecParsingError(msg, token, self.literal_str)
 
         # TODO: Add code to accept bool variants here as soon as use variants are implemented
-        if self.curr is None or kinds[self.curr.lastgroup] is not SpecTokens.END_EDGE_PROPERTIES:
+        if self.curr is None or self.curr.lastgroup != _END_EDGE_PROPERTIES:
             msg = "unexpected token in edge attributes"
             raise SpecParsingError(msg, self.curr, self.literal_str)
 
@@ -480,18 +492,18 @@ class SpecParser:
 
         # If we start with a package name we have a named spec, we cannot
         # accept another package name afterwards in a node
-        kind = SPEC_TOKENIZER.kinds[token.lastgroup]
-        if kind is SpecTokens.UNQUALIFIED_PACKAGE_NAME:
+        kind = token.lastgroup
+        if kind == _UNQUALIFIED_PACKAGE_NAME:
             name = token.group(token.lastindex)
             if name != "*":  # `*` is the name of an anonymous node, as in `%*+shared`
                 initial_spec.name = name
             self.curr = self.scanner.match()
 
-        elif kind is SpecTokens.FULLY_QUALIFIED_PACKAGE_NAME:
+        elif kind == _FULLY_QUALIFIED_PACKAGE_NAME:
             initial_spec.namespace, initial_spec.name = token.group(token.lastindex).rsplit(".", 1)
             self.curr = self.scanner.match()
 
-        elif kind is SpecTokens.FILENAME:
+        elif kind == _FILENAME:
             self.curr = self.scanner.match()
             return self._parse_specfile(token.group(token.lastindex), initial_spec)
 
@@ -499,13 +511,13 @@ class SpecParser:
 
     def _parse_node_options(self, spec: "spack.spec.Spec") -> "spack.spec.Spec":
         """Parse the options of a node (version, variants, hash) into ``spec``"""
-        kinds, scanner = SPEC_TOKENIZER.kinds, self.scanner
+        scanner = self.scanner
         has_version = False
         while self.curr is not None:
             token = self.curr
-            kind = kinds[token.lastgroup]
+            kind = token.lastgroup
 
-            if kind is SpecTokens.VERSION:
+            if kind == _VERSION:
                 if has_version:
                     raise SpecParsingError(
                         "Spec cannot have multiple versions", token, self.literal_str
@@ -521,20 +533,20 @@ class SpecParser:
                 has_version = True
                 self.curr = scanner.match()
 
-            elif kind is SpecTokens.BOOL_VARIANT:
+            elif kind == _BOOL_VARIANT:
                 prefix = token.group("variant_prefix")  # + / ~ / -, doubled if propagated
                 name = token.group("variant_name")
                 self._add_flag(spec, token, name, prefix[0] == "+", len(prefix) == 2, True)
                 self.curr = scanner.match()
 
-            elif kind is SpecTokens.KEY_VALUE_PAIR:
+            elif kind == _KEY_VALUE_PAIR:
                 separator = token.group("separator")  # =, == if propagated, := if concrete
                 name = token.group("key")
                 value = strip_quotes_and_unescape(token.group("value"))
                 self._add_flag(spec, token, name, value, "==" in separator, separator[0] == ":")
                 self.curr = scanner.match()
 
-            elif kind is SpecTokens.DAG_HASH:
+            elif kind == _DAG_HASH:
                 if spec.abstract_hash:
                     # A second hash belongs to the next spec, e.g. `spack find /abc /def`
                     break
