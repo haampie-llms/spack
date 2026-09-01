@@ -75,7 +75,18 @@ from spack.util.lang import elide_list
 
 from .clauses import SpecClauseGenerator
 from .compat import default_clingo_control, make_error_control
-from .core import AspFunction, AspVar, NodeId, SourceContext, extract_args, fn
+from .core import (
+    AspFunction,
+    AspVar,
+    NodeId,
+    SourceContext,
+    args_str,
+    asp_argument,
+    extract_args,
+    fn,
+    quote,
+    quote_once,
+)
 from .input_analysis import create_counter, create_graph_analyzer
 from .requirements import RequirementKind, RequirementOrigin, RequirementParser, RequirementRule
 from .reuse import ReusableSpecsSelector, SpecFiltersFactory
@@ -211,17 +222,24 @@ def identity_for_facts(
 def dependency_holds(
     *, dependency_flags: dt.DepFlag, pkg_cls: Type[spack.package_base.PackageBase]
 ) -> TransformFunction:
+    # Everything that depends only on the package and the flags is settled here; the transform
+    # itself runs once per dependency. Note that `name` is a class property, not an attribute.
+    pkg_name = pkg_cls.name
+    deptypes = [dt.flag_to_string(t) for t in dt.ALL_FLAGS if t & dependency_flags]
+    remove_nodes = remove_facts("node", "virtual_node")
+    # the directives of the class have run by the time a transform is asked for, so this is the
+    # dict they filled and it does not change any more
+    extendees = pkg_cls.extendees
+
     def _transform_fn(
         name: str, input_spec: spack.spec.Spec, requirements: List[AspFunction]
     ) -> List[AspFunction]:
-        result = remove_facts("node", "virtual_node")(name, input_spec, requirements) + [
-            fn.attr("dependency_holds", pkg_cls.name, name, dt.flag_to_string(t))
-            for t in dt.ALL_FLAGS
-            if t & dependency_flags
+        result = remove_nodes(name, input_spec, requirements) + [
+            fn.attr("dependency_holds", pkg_name, name, deptype) for deptype in deptypes
         ]
-        if name not in pkg_cls.extendees:
+        if name not in extendees:
             return result
-        return result + [fn.attr("extends", pkg_cls.name, name)]
+        return result + [fn.attr("extends", pkg_name, name)]
 
     return _transform_fn
 
@@ -1423,69 +1441,62 @@ class SpackSolverSetup:
 
     def pkg_version_rules(self, pkg: Type[spack.package_base.PackageBase]) -> None:
         """Declares known versions, their origins, and their weights."""
-        version_provenance = self.possible_versions[pkg.name]
-        ordered_versions = spack.package_base.sort_by_pkg_preference(
-            self.possible_versions[pkg.name], pkg=pkg
-        )
+        pkg_name = pkg.name
+        version_provenance = self.possible_versions[pkg_name]
+        ordered_versions = spack.package_base.sort_by_pkg_preference(version_provenance, pkg=pkg)
         # Account for preferences in packages.yaml, if any
-        if pkg.name in self.versions_from_yaml:
+        if pkg_name in self.versions_from_yaml:
             ordered_versions = list(
-                spack.util.lang.dedupe(self.versions_from_yaml[pkg.name] + ordered_versions)
+                spack.util.lang.dedupe(self.versions_from_yaml[pkg_name] + ordered_versions)
             )
 
         # Set the deprecation penalty, according to the package. This should be enough to move the
         # first version last if deprecated.
         if ordered_versions:
-            self.gen.fact(
-                fn.pkg_fact(pkg.name, fn.version_deprecation_penalty(len(ordered_versions)))
-            )
+            self.gen.pkg_fact(pkg_name, fn.version_deprecation_penalty(len(ordered_versions)))
 
         for weight, declared_version in enumerate(ordered_versions):
-            self.gen.fact(fn.pkg_fact(pkg.name, fn.version_declared(declared_version, weight)))
+            self.gen.pkg_fact(pkg_name, fn.version_declared(declared_version, weight))
             for origin in version_provenance[declared_version]:
-                self.gen.fact(
-                    fn.pkg_fact(pkg.name, fn.version_origin(declared_version, str(origin)))
-                )
+                self.gen.pkg_fact(pkg_name, fn.version_origin(declared_version, str(origin)))
 
-        for v in self.possible_versions[pkg.name]:
+        for v in version_provenance:
             if pkg.needs_commit(v):
                 commit = pkg.version_or_package_attr("commit", v, "")
-                self.git_commit_versions[pkg.name][v] = commit
+                self.git_commit_versions[pkg_name][v] = commit
 
         # Declare deprecated versions for this package, if any
-        deprecated = self.deprecated_versions[pkg.name]
-        for v in sorted(deprecated):
-            self.gen.fact(fn.pkg_fact(pkg.name, fn.deprecated_version(v)))
+        for v in sorted(self.deprecated_versions[pkg_name]):
+            self.gen.pkg_fact(pkg_name, fn.deprecated_version(v))
 
     def conflict_rules(self, pkg):
+        pkg_name = pkg.name
         for when_spec, conflict_specs in pkg.conflicts.items():
             when_spec_msg = f"conflict constraint {when_spec}"
-            when_spec_id = self.condition(when_spec, required_name=pkg.name, msg=when_spec_msg)
+            when_spec_id = self.condition(when_spec, required_name=pkg_name, msg=when_spec_msg)
             when_spec_str = str(when_spec)
 
             for conflict_spec, conflict_msg in conflict_specs:
                 conflict_spec_str = str(conflict_spec)
                 if conflict_msg is None:
-                    conflict_msg = f"{pkg.name}: "
+                    conflict_msg = f"{pkg_name}: "
                     if not when_spec_str:
                         conflict_msg += f"conflicts with '{conflict_spec_str}'"
                     else:
                         conflict_msg += f"'{conflict_spec_str}' conflicts with '{when_spec_str}'"
 
                 if not conflict_spec_str:
-                    conflict_spec_msg = f"conflict is triggered when {pkg.name}"
+                    conflict_spec_msg = f"conflict is triggered when {pkg_name}"
                 else:
                     conflict_spec_msg = f"conflict is triggered when {conflict_spec_str}"
 
                 conflict_spec_id = self.condition(
                     conflict_spec,
-                    required_name=conflict_spec.name or pkg.name,
+                    required_name=conflict_spec.name or pkg_name,
                     msg=conflict_spec_msg,
                 )
-                self.gen.fact(
-                    fn.pkg_fact(
-                        pkg.name, fn.conflict(conflict_spec_id, when_spec_id, conflict_msg)
-                    )
+                self.gen.pkg_fact(
+                    pkg_name, fn.conflict(conflict_spec_id, when_spec_id, conflict_msg)
                 )
                 self.gen.newline()
 
@@ -1505,7 +1516,7 @@ class SpackSolverSetup:
         pkg = self.clauses.pkg_class(pkg)
 
         # Namespace of the package
-        self.gen.fact(fn.pkg_fact(pkg.name, fn.namespace(pkg.namespace)))
+        self.gen.pkg_fact(pkg.name, fn.namespace(pkg.namespace))
 
         # versions
         self.pkg_version_rules(pkg)
@@ -1535,14 +1546,17 @@ class SpackSolverSetup:
             return
 
         self.gen.h2("Trigger conditions")
+        problem = self.gen.asp_problem
         for name in self._trigger_cache:
             cache = self._trigger_cache[name]
+            quoted_name = quote(name)
             for (spec_str, _), (trigger_id, requirements) in cache.items():
-                self.gen.fact(fn.pkg_fact(name, fn.trigger_id(trigger_id)))
-                self.gen.fact(fn.pkg_fact(name, fn.trigger_msg(spec_str)))
+                problem.append(f"pkg_fact({quoted_name},trigger_id({trigger_id})).")
+                problem.append(f"pkg_fact({quoted_name},trigger_msg({quote_once(spec_str)})).")
+                # the requirements are written out as they are, with the trigger id prepended
                 for predicate in requirements:
-                    self.gen.fact(fn.condition_requirement(trigger_id, *predicate.args))
-                self.gen.newline()
+                    problem.append(f"condition_requirement({trigger_id},{args_str(predicate)}).")
+                problem.append("")
         self._trigger_cache.clear()
 
     def effect_rules(self):
@@ -1551,14 +1565,17 @@ class SpackSolverSetup:
             return
 
         self.gen.h2("Imposed requirements")
+        problem = self.gen.asp_problem
         for name in sorted(self._effect_cache):
             cache = self._effect_cache[name]
+            quoted_name = quote(name)
             for (spec_str, _), (effect_id, requirements) in cache.items():
-                self.gen.fact(fn.pkg_fact(name, fn.effect_id(effect_id)))
-                self.gen.fact(fn.pkg_fact(name, fn.effect_msg(spec_str)))
+                problem.append(f"pkg_fact({quoted_name},effect_id({effect_id})).")
+                problem.append(f"pkg_fact({quoted_name},effect_msg({quote_once(spec_str)})).")
+                # see the note in trigger_rules()
                 for predicate in requirements:
-                    self.gen.fact(fn.imposed_constraint(effect_id, *predicate.args))
-                self.gen.newline()
+                    problem.append(f"imposed_constraint({effect_id},{args_str(predicate)}).")
+                problem.append("")
         self._effect_cache.clear()
 
     def define_variant(
@@ -1568,7 +1585,7 @@ class SpackSolverSetup:
         when: spack.spec.Spec,
         variant_def: vt.Variant,
     ):
-        pkg_fact = lambda f: self.gen.fact(fn.pkg_fact(pkg.name, f))
+        pkg_fact = lambda f: self.gen.pkg_fact(pkg.name, f)
 
         # Every variant id has a unique definition (conditional or unconditional), and
         # higher variant id definitions take precedence when variants intersect.
@@ -1711,7 +1728,9 @@ class SpackSolverSetup:
             return result[0]
 
         cond_id = next(self._id_counter)
-        requirements = self.clauses.spec_clauses(cond, name=name, body=body, context=context)
+        requirements = self.clauses.condition_clauses(
+            cond, spec_str=cond_str, name=name, body=body, context=context
+        )
         if context.transform:
             requirements = context.transform(name, cond, requirements)
         pkg_cache[named_cond_key] = (cond_id, requirements)
@@ -1727,8 +1746,7 @@ class SpackSolverSetup:
         imposed_name: Optional[str] = None,
         msg: Optional[str] = None,
         context: Optional[ConditionContext] = None,
-    ) -> Tuple[List[AspFunction], int]:
-        clauses = []
+    ) -> Tuple[List[str], int]:
         required_name = required_spec.name or required_name
         if not required_name:
             raise ValueError(f"Must provide a name for anonymous condition: '{required_spec}'")
@@ -1749,9 +1767,13 @@ class SpackSolverSetup:
             body=True,
             context=requirement_context,
         )
-        clauses.append(fn.pkg_fact(required_name, fn.condition(condition_id)))
-        clauses.append(fn.condition_reason(condition_id, msg))
-        clauses.append(fn.pkg_fact(required_name, fn.condition_trigger(condition_id, trigger_id)))
+        quoted_name = quote(required_name)
+        quoted_msg = quote_once(msg) if type(msg) is str else asp_argument(msg)
+        clauses = [
+            f"pkg_fact({quoted_name},condition({condition_id})).",
+            f"condition_reason({condition_id},{quoted_msg}).",
+            f"pkg_fact({quoted_name},condition_trigger({condition_id},{trigger_id})).",
+        ]
         if not imposed_spec:
             return clauses, condition_id
 
@@ -1767,7 +1789,7 @@ class SpackSolverSetup:
             body=False,
             context=impose_context,
         )
-        clauses.append(fn.pkg_fact(required_name, fn.condition_effect(condition_id, effect_id)))
+        clauses.append(f"pkg_fact({quoted_name},condition_effect({condition_id},{effect_id})).")
 
         return clauses, condition_id
 
@@ -1804,8 +1826,7 @@ class SpackSolverSetup:
             msg=msg,
             context=context,
         )
-        for clause in clauses:
-            self.gen.fact(clause)
+        self.gen.asp_problem.extend(clauses)
 
         return condition_id
 
@@ -1813,7 +1834,7 @@ class SpackSolverSetup:
         for vpkg_name in pkg.provided_virtual_names():
             if vpkg_name not in self.possible_virtuals:
                 continue
-            self.gen.fact(fn.pkg_fact(pkg.name, fn.possible_provider(vpkg_name)))
+            self.gen.pkg_fact(pkg.name, fn.possible_provider(vpkg_name))
 
         for when, provided in pkg.provided.items():
             for vpkg in sorted(provided):
@@ -1822,9 +1843,7 @@ class SpackSolverSetup:
 
                 msg = f"{pkg.name} provides {vpkg}{'' if when == EMPTY_SPEC else f' when {when}'}"
                 condition_id = self.condition(when, vpkg, required_name=pkg.name, msg=msg)
-                self.gen.fact(
-                    fn.pkg_fact(pkg.name, fn.provider_condition(condition_id, vpkg.name))
-                )
+                self.gen.pkg_fact(pkg.name, fn.provider_condition(condition_id, vpkg.name))
             self.gen.newline()
 
         for when, sets_of_virtuals in pkg.provided_together.items():
@@ -1833,13 +1852,12 @@ class SpackSolverSetup:
             )
             for set_id, virtuals_together in enumerate(sorted(sets_of_virtuals)):
                 for name in sorted(virtuals_together):
-                    self.gen.fact(
-                        fn.pkg_fact(pkg.name, fn.provided_together(condition_id, set_id, name))
-                    )
+                    self.gen.pkg_fact(pkg.name, fn.provided_together(condition_id, set_id, name))
             self.gen.newline()
 
     def package_dependencies_rules(self, pkg):
         """Translate ``depends_on`` directives into ASP logic."""
+        pkg_name = pkg.name
         for cond, deps_by_name in pkg.dependencies.items():
             cond_str = str(cond)
             cond_str_suffix = f" when {cond_str}" if cond_str else ""
@@ -1858,13 +1876,13 @@ class SpackSolverSetup:
                 if not depflag:
                     continue
 
-                msg = f"{pkg.name} depends on {dep.spec}{cond_str_suffix}"
+                msg = f"{pkg_name} depends on {dep.spec}{cond_str_suffix}"
                 context = ConditionContext()
                 context.source = ConstraintOrigin.append_type_suffix(
-                    pkg.name, ConstraintOrigin.DEPENDS_ON
+                    pkg_name, ConstraintOrigin.DEPENDS_ON
                 )
                 context.transform_imposed = dependency_holds(dependency_flags=depflag, pkg_cls=pkg)
-                self.condition(cond, dep.spec, required_name=pkg.name, msg=msg, context=context)
+                self.condition(cond, dep.spec, required_name=pkg_name, msg=msg, context=context)
                 self.gen.newline()
 
     def _gen_match_variant_splice_constraints(
@@ -2382,13 +2400,13 @@ class SpackSolverSetup:
             possible_versions.sort()
             sorted_versions[pkg_name] = possible_versions
             for idx, v in enumerate(possible_versions):
-                self.gen.fact(fn.pkg_fact(pkg_name, fn.version_order(v, idx)))
+                self.gen.pkg_fact(pkg_name, fn.version_order(v, idx))
                 if v in self.git_commit_versions[pkg_name]:
                     sha = self.git_commit_versions[pkg_name].get(v)
                     if sha:
-                        self.gen.fact(fn.pkg_fact(pkg_name, fn.version_has_commit(v, sha)))
+                        self.gen.pkg_fact(pkg_name, fn.version_has_commit(v, sha))
                     else:
-                        self.gen.fact(fn.pkg_fact(pkg_name, fn.version_needs_commit(v)))
+                        self.gen.pkg_fact(pkg_name, fn.version_needs_commit(v))
             self.gen.newline()
         self.gen.newline()
 
@@ -2397,22 +2415,24 @@ class SpackSolverSetup:
             if possible_versions is None:
                 continue
             for versions in sorted(set_of_versions):
+                # `StandardVersion.satisfies(VersionList)` is exactly this call
+                accepts = versions.intersects
                 # Look for contiguous ranges of versions that satisfy the constraint
                 start_idx = None
                 for current_idx, v in enumerate(possible_versions):
-                    if v.satisfies(versions):
+                    if accepts(v) if type(v) is vn.StandardVersion else v.satisfies(versions):
                         if start_idx is None:
                             start_idx = current_idx
                     elif start_idx is not None:
                         # End of a contiguous satisfying range found
                         version_range = fn.version_range(versions, start_idx, current_idx - 1)
-                        self.gen.fact(fn.pkg_fact(pkg_name, version_range))
+                        self.gen.pkg_fact(pkg_name, version_range)
                         start_idx = None
                 if start_idx is not None:
                     version_range = fn.version_range(
                         versions, start_idx, len(possible_versions) - 1
                     )
-                    self.gen.fact(fn.pkg_fact(pkg_name, version_range))
+                    self.gen.pkg_fact(pkg_name, version_range)
             self.gen.newline()
 
     def collect_virtual_constraints(self):
@@ -2500,7 +2520,7 @@ class SpackSolverSetup:
 
         # Tell the concretizer about possible values from specs seen in spec_clauses().
         for pkg_name, vid, value in sorted(def_info):
-            self.gen.fact(fn.pkg_fact(pkg_name, fn.variant_possible_value(vid, value)))
+            self.gen.pkg_fact(pkg_name, fn.variant_possible_value(vid, value))
 
     def register_concrete_spec(self, spec, possible: set, *, selectable: bool = True):
         # tell the solver about any installed packages that could
@@ -2928,7 +2948,7 @@ class SpackSolverSetup:
 
             # Special condition triggered by "literal_solved"
             self.gen.fact(fn.literal(trigger_id))
-            self.gen.fact(fn.pkg_fact(spec.name, fn.condition_trigger(condition_id, trigger_id)))
+            self.gen.pkg_fact(spec.name, fn.condition_trigger(condition_id, trigger_id))
             self.gen.fact(fn.condition_reason(condition_id, f"{spec} requested explicitly"))
 
             imposed_spec_key = str(spec), None
@@ -2959,7 +2979,7 @@ class SpackSolverSetup:
             )
             requirements = [x for x in requirements if x.args[0] != "depends_on"]
             cache[imposed_spec_key] = (effect_id, requirements)
-            self.gen.fact(fn.pkg_fact(spec.name, fn.condition_effect(condition_id, effect_id)))
+            self.gen.pkg_fact(spec.name, fn.condition_effect(condition_id, effect_id))
 
             # Create subcondition with any conditional dependencies
             # spec_clauses() does not do anything with conditional dependencies
@@ -3102,6 +3122,13 @@ class ProblemInstanceBuilder:
 
     def fact(self, atom: AspFunction) -> None:
         self.asp_problem.append(f"{atom}.")
+
+    def pkg_fact(self, pkg_name: str, atom: AspFunction) -> None:
+        """Add ``pkg_fact(<pkg_name>, <atom>)``, the most common fact of the problem by far.
+
+        It is written out here, so that the wrapping ``AspFunction`` is never built.
+        """
+        self.asp_problem.append(f"pkg_fact({quote(pkg_name)},{atom}).")
 
     def append(self, rule: str) -> None:
         self.asp_problem.append(rule)

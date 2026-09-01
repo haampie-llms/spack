@@ -30,31 +30,35 @@ def libc_is_compatible(lhs: spack.spec.Spec, rhs: spack.spec.Spec) -> bool:
 
 
 class _Head:
-    """ASP functions used to express spec clauses in the HEAD of a rule"""
+    """Names of the ``attr`` facts that express spec clauses in the HEAD of a rule.
 
-    node = fn.attr("node")
-    namespace = fn.attr("namespace_set")
-    virtual_node = fn.attr("virtual_node")
-    node_platform = fn.attr("node_platform_set")
-    node_os = fn.attr("node_os_set")
-    node_target = fn.attr("node_target_set")
-    variant_value = fn.attr("variant_set")
-    node_flag = fn.attr("node_flag_set")
-    propagate = fn.attr("propagate")
+    They are the first argument of ``attr``, and clause generation builds the functions as
+    ``AspFunction("attr", (<name>, ...))``.
+    """
+
+    node = "node"
+    namespace = "namespace_set"
+    virtual_node = "virtual_node"
+    node_platform = "node_platform_set"
+    node_os = "node_os_set"
+    node_target = "node_target_set"
+    variant_value = "variant_set"
+    node_flag = "node_flag_set"
+    propagate = "propagate"
 
 
 class _Body:
-    """ASP functions used to express spec clauses in the BODY of a rule"""
+    """The same for the BODY of a rule; see :class:`_Head`."""
 
-    node = fn.attr("node")
-    namespace = fn.attr("namespace")
-    virtual_node = fn.attr("virtual_node")
-    node_platform = fn.attr("node_platform")
-    node_os = fn.attr("node_os")
-    node_target = fn.attr("node_target")
-    variant_value = fn.attr("variant_value")
-    node_flag = fn.attr("node_flag")
-    propagate = fn.attr("propagate")
+    node = "node"
+    namespace = "namespace"
+    virtual_node = "virtual_node"
+    node_platform = "node_platform"
+    node_os = "node_os"
+    node_target = "node_target"
+    variant_value = "variant_value"
+    node_flag = "node_flag"
+    propagate = "propagate"
 
 
 class SpecClauseGenerator:
@@ -84,6 +88,13 @@ class SpecClauseGenerator:
         self.version_constraints: Dict[str, Set] = collections.defaultdict(set)
         self.target_constraints: Set = set()
         self.variant_values_from_specs: Set = set()
+        #: Clauses returned by condition_clauses(); they live exactly as long as the constraints
+        #: recorded above.
+        self._condition_clause_cache: Dict[Tuple, List[AspFunction]] = {}
+        #: Package classes by name, see pkg_class()
+        self._pkg_classes: Dict[str, Type[spack.package_base.PackageBase]] = {}
+        #: Whether a name is virtual, see is_virtual()
+        self._virtual_names: Dict[str, bool] = {}
 
     def record_version_constraint(self, name: str, versions) -> None:
         """Record that `versions` was requested for package `name`."""
@@ -111,7 +122,11 @@ class SpecClauseGenerator:
         return [fn.attr("node_version_satisfies", name, spec.versions)]
 
     def target_ranges(
-        self, spec: spack.spec.Spec, single_target_fn, *, name: Optional[str] = None
+        self,
+        spec: spack.spec.Spec,
+        single_target_attr: Optional[str],
+        *,
+        name: Optional[str] = None,
     ) -> List[AspFunction]:
         name = spec.name or name
         assert name, "Internal Error: spec with no name occurred. Please file an issue."
@@ -123,10 +138,42 @@ class SpecClauseGenerator:
 
         # Check if the target is a concrete target
         if str(target) in spack.vendor.archspec.cpu.TARGETS:
-            return [single_target_fn(name, target)]
+            return [AspFunction("attr", (single_target_attr, name, target))]
 
         self.target_constraints.add(target)
         return [fn.attr("node_target_satisfies", name, target)]
+
+    def condition_clauses(
+        self,
+        spec: spack.spec.Spec,
+        *,
+        spec_str: str,
+        name: str,
+        body: bool,
+        context: "SourceContext",
+    ) -> List[AspFunction]:
+        """The clauses of one half of a condition, before the transform of its context.
+
+        The transform is what ties a condition to the package that declared it; the clauses of
+        the spec are not tied to it, so the conditions that agree on the spec share them even
+        though their ids differ. The source of the context only reaches compiler flag clauses,
+        so it is part of the key only for the specs that can carry flags.
+
+        Generating clauses also records the versions, targets and variant values the spec
+        mentions, and recording the same ones twice is a no-op, so a repeated call returns the
+        clauses of the first one.
+
+        Callers must not modify the result: ``remove_facts()`` and ``dependency_holds()`` return
+        a new list, and the clauses are only read from there on.
+        """
+        source = context.source if spec.compiler_flags or spec._dependencies else None
+        key = (name, spec_str, body, context.wrap_node_requirement, source)
+        clauses = self._condition_clause_cache.get(key)
+        if clauses is None:
+            clauses = self._condition_clause_cache[key] = self.spec_clauses(
+                spec, name=name, body=body, context=context
+            )
+        return clauses
 
     def spec_clauses(
         self,
@@ -176,45 +223,63 @@ class SpecClauseGenerator:
 
         clauses = []
         if arch.platform:
-            clauses.append(f.node_platform(name, arch.platform))
+            clauses.append(AspFunction("attr", (f.node_platform, name, arch.platform)))
         if arch.os:
-            clauses.append(f.node_os(name, arch.os))
+            clauses.append(AspFunction("attr", (f.node_os, name, arch.os)))
         if arch.target:
             clauses.extend(self.target_ranges(spec, f.node_target, name=name))
         return clauses
 
     def _variant_clauses(
-        self, spec: spack.spec.Spec, f, *, name: str, body: bool
+        self, spec: spack.spec.Spec, f, *, name: str, body: bool, virtual: bool
     ) -> List[AspFunction]:
         """Return clauses for the variants of a spec."""
+        variants = spec.variants
+        if not variants:
+            return []
+
+        # Neither the package class nor whether the values have to be prevalidated depend on the
+        # variant, let alone on its values, so both are settled once for the whole spec.
+        concrete = spec.concrete
+        pkg_cls = self.pkg_class(name) if name and not concrete and not virtual else None
+
         clauses = []
-        for vname, variant in sorted(spec.variants.items()):
+        # a single variant is already sorted
+        items = variants.items() if len(variants) == 1 else sorted(variants.items())
+        for vname, variant in items:
             # TODO: variant="*" means 'variant is defined to something', which used to
             # be meaningless in concretization, as all variants had to be defined. But
             # now that variants can be conditional, it should force a variant to exist.
-            if not variant.values:
+            values = variant.values
+            if not values:
                 continue
 
-            for value in variant.values:
-                # ensure that the value *can* be valid for the spec
-                if name and not spec.concrete and not spack.repo.PATH.is_virtual(name):
-                    variant_defs = vt.prevalidate_variant_value(
-                        self.pkg_class(name), variant, spec
+            if pkg_cls is not None:
+                # ensure that the values *can* be valid for the spec. The definitions that accept
+                # them depend on the variant, not on the individual value.
+                variant_defs = vt.prevalidate_variant_value(pkg_cls, variant, spec)
+
+                # Record that that these are valid possible values. Accounts for
+                # int/str/etc., where valid values can't be listed in the package
+                for variant_def in variant_defs:
+                    def_id = id(variant_def)
+                    for value in values:
+                        self.variant_values_from_specs.add((name, def_id, value))
+
+            if variant.propagate:
+                has_variant = self.pkg_class(name).has_variant(vname)
+                for value in values:
+                    clauses.append(
+                        AspFunction("attr", (f.propagate, name, fn.variant_value(vname, value)))
                     )
+                    if has_variant:
+                        clauses.append(AspFunction("attr", (f.variant_value, name, vname, value)))
+                continue
 
-                    # Record that that this is a valid possible value. Accounts for
-                    # int/str/etc., where valid values can't be listed in the package
-                    for variant_def in variant_defs:
-                        self.variant_values_from_specs.add((name, id(variant_def), value))
-
-                if variant.propagate:
-                    clauses.append(f.propagate(name, fn.variant_value(vname, value)))
-                    if self.pkg_class(name).has_variant(vname):
-                        clauses.append(f.variant_value(name, vname, value))
-                    continue
-
-                variant_clause = f.variant_value(name, vname, value)
-                if variant.concrete and variant.type == vt.VariantType.MULTI and not spec.concrete:
+            concrete_multi = variant.concrete and variant.type == vt.VariantType.MULTI
+            for value in values:
+                variant_clause = AspFunction("attr", (f.variant_value, name, vname, value))
+                if concrete_multi and not concrete:
                     if body is False:
                         variant_clause.args = (
                             f"concrete_{variant_clause.args[0]}",
@@ -235,14 +300,21 @@ class SpecClauseGenerator:
             flag_group = " ".join(flags)
             for flag in flags:
                 clauses.append(
-                    f.node_flag(name, fn.node_flag(flag_type, flag, flag_group, source))
+                    AspFunction(
+                        "attr",
+                        (f.node_flag, name, fn.node_flag(flag_type, flag, flag_group, source)),
+                    )
                 )
                 if not spec.concrete and flag.propagate is True:
                     clauses.append(
-                        f.propagate(
-                            name,
-                            fn.node_flag(flag_type, flag, flag_group, source),
-                            fn.edge_types("link", "run"),
+                        AspFunction(
+                            "attr",
+                            (
+                                f.propagate,
+                                name,
+                                fn.node_flag(flag_type, flag, flag_group, source),
+                                fn.edge_types("link", "run"),
+                            ),
                         )
                     )
         return clauses
@@ -251,6 +323,10 @@ class SpecClauseGenerator:
         self, spec: spack.spec.Spec, *, name: str, body: bool
     ) -> List[AspFunction]:
         """Return clauses for the virtuals a spec provides on its incoming edges."""
+        # without incoming edges there are no virtuals to report
+        if not spec._dependents:
+            return []
+
         # TODO: a loop over `edges_to_dependencies` is preferred over `edges_from_dependents`
         # since dependents can point to specs out of scope for the solver.
         edges = spec.edges_from_dependents()
@@ -403,23 +479,24 @@ class SpecClauseGenerator:
         for spec ``diff``).
         """
         clauses = []
-        seen = seen if seen is not None else set()
         name = spec.name or name or ""
-        seen.add(id(spec))
 
         f: Union[Type[_Head], Type[_Body]] = _Body if body else _Head
 
+        virtual = self.is_virtual(name) if name else False
         if name:
-            clauses.append(
-                f.node(name) if not spack.repo.PATH.is_virtual(name) else f.virtual_node(name)
-            )
+            clauses.append(AspFunction("attr", (f.virtual_node if virtual else f.node, name)))
         if spec.namespace:
-            clauses.append(f.namespace(name, spec.namespace))
+            clauses.append(AspFunction("attr", (f.namespace, name, spec.namespace)))
 
         clauses.extend(self.spec_versions(spec, name=name))
-        clauses.extend(self._arch_clauses(spec, f, name=name))
-        clauses.extend(self._variant_clauses(spec, f, name=name, body=body))
-        clauses.extend(self._flag_clauses(spec, f, name=name, context=context))
+        # an absent part contributes no clauses
+        if spec.architecture:
+            clauses.extend(self._arch_clauses(spec, f, name=name))
+        if spec.variants:
+            clauses.extend(self._variant_clauses(spec, f, name=name, body=body, virtual=virtual))
+        if spec.compiler_flags:
+            clauses.extend(self._flag_clauses(spec, f, name=name, context=context))
 
         # Hash for concrete specs
         if spec.concrete:
@@ -431,7 +508,8 @@ class SpecClauseGenerator:
             if spec.external:
                 clauses.append(fn.attr("external", name))
 
-        clauses.extend(self._virtuals_from_dependents(spec, name=name, body=body))
+        if spec._dependents:
+            clauses.extend(self._virtuals_from_dependents(spec, name=name, body=body))
 
         # If the spec is external and concrete, we allow all the libcs on the system
         if spec.external and spec.concrete and spack.platforms.using_libc_compatibility():
@@ -439,8 +517,13 @@ class SpecClauseGenerator:
             for libc in self.libcs:
                 clauses.append(fn.attr("compatible_libc", name, libc.name, libc.version))
 
-        if not transitive:
+        if not transitive or not spec._dependencies:
             return clauses
+
+        # only the specs that have dependencies need to track what has been visited
+        if seen is None:
+            seen = set()
+        seen.add(id(spec))
 
         # Dependencies
         edge_clauses = []
@@ -466,6 +549,8 @@ class SpecClauseGenerator:
             # if it's concrete, then the hashes above take care of dependency
             # constraints, but expand the hashes if asked for.
             if (not spec.concrete or expand_hashes) and id(dep) not in seen:
+                # the callee only records what it visits itself once it descends further
+                seen.add(id(dep))
                 dependency_clauses = self._spec_clauses(
                     dep,
                     body=body,
@@ -483,9 +568,26 @@ class SpecClauseGenerator:
         clauses.extend(edge_clauses)
         return clauses
 
+    def is_virtual(self, name: str) -> bool:
+        """Whether ``name`` is the name of a virtual package.
+
+        The answer is kept: this generator lives for a single setup, and the set of virtuals
+        does not change during one.
+        """
+        result = self._virtual_names.get(name)
+        if result is None:
+            result = self._virtual_names[name] = spack.repo.PATH.is_virtual(name)
+        return result
+
     def pkg_class(self, pkg_name: str) -> Type[spack.package_base.PackageBase]:
+        # This generator lives for a single setup, so a class it hands out cannot go stale.
+        cls = self._pkg_classes.get(pkg_name)
+        if cls is not None:
+            return cls
+
         request = pkg_name
         if pkg_name in self.explicitly_required_namespaces:
             namespace = self.explicitly_required_namespaces[pkg_name]
             request = f"{namespace}.{pkg_name}"
-        return spack.repo.PATH.get_pkg_class(request)
+        cls = self._pkg_classes[pkg_name] = spack.repo.PATH.get_pkg_class(request)
+        return cls

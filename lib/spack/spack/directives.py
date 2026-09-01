@@ -394,7 +394,7 @@ class _DependsOn(NamedTuple):
         deps_by_name = pkg.dependencies.setdefault(when_spec, {})
         dependency = deps_by_name.get(spec.name)
 
-        edges = spec.edges_to_dependencies()
+        edges = spec.edges_to_dependencies() if spec._dependencies else ()
         if edges and not all(x.direct for x in edges):
             raise DirectiveError(
                 f"the '^' sigil cannot be used in 'depends_on' directives. Please reformulate "
