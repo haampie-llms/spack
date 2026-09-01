@@ -92,7 +92,11 @@ STAR = r"\*"
 
 #: Substitute a package for a virtual, e.g. ``c,cxx=gcc``. Overlaps with a key-value pair, and is
 #: only tried first right after a dependency sigil or edge properties.
-VIRTUAL_ASSIGNMENT = rf"(?:{IDENTIFIER}(?:,{IDENTIFIER})*=(?:{DOTTED_IDENTIFIER}|{IDENTIFIER}))"
+VIRTUAL_ASSIGNMENT = (
+    rf"(?P<virtuals>{IDENTIFIER}(?:,{IDENTIFIER})*)"  # comma-separated virtuals
+    r"="
+    rf"(?P<substitute>{DOTTED_IDENTIFIER}|{IDENTIFIER})"  # package to substitute for them
+)
 
 NAME = r"[a-zA-Z_0-9][a-zA-Z_0-9\-.]*"
 
@@ -133,23 +137,43 @@ class SpecTokens(TokenBase):
 
     Order of declaration is extremely important, since text containing specs is parsed with a
     single regex obtained by ``"|".join(...)`` of all the regex in the order of declaration.
+
+    The parts of a token that the parser needs are named groups inside its regex, e.g. the
+    ``key`` of a ``KEY_VALUE_PAIR``. Since all tokens end up in one regex, group names must be
+    unique across tokens.
     """
 
-    # Dependency
-    START_EDGE_PROPERTIES = r"(?:(?:\^|\%\%|\%)\[)"
-    END_EDGE_PROPERTIES = r"(?:\])"
-    DEPENDENCY = r"(?:\^|\%\%|\%)"
+    # Dependency: ^ (transitive), % (direct) or %% (direct, propagated), optionally opening
+    # edge properties, e.g. ^[virtuals=mpi]
+    DEPENDENCY = (
+        r"(?P<sigil>\^|%%|%)"  # ^, % or %%
+        r"(?P<open_bracket>\[)?"  # start of edge properties
+    )
+    END_EDGE_PROPERTIES = r"\]"
 
-    # Version
-    VERSION_HASH_PAIR = rf"(?:@(?:{GIT_VERSION_PATTERN})=(?:{VERSION}))"
-    GIT_VERSION = rf"@(?:{GIT_VERSION_PATTERN})"
-    VERSION = rf"(?:@\s*(?:{VERSION_LIST}))"
+    # Version: @ followed by either a git ref or commit, optionally paired with the version it
+    # corresponds to (@git.v1.2, @<sha>=1.2), or a list of versions and ranges (@1.2:1.4,1.6)
+    VERSION = (
+        r"@"
+        r"(?:"
+        rf"(?P<git_version>{GIT_VERSION_PATTERN}(?:={VERSION})?)"  # git.<ref> or <sha>, [=version]
+        r"|"
+        rf"\s*(?P<version_list>{VERSION_LIST})"  # e.g. 1.2, 1.2:1.4,1.6, =1.2 or :
+        r")"
+    )
 
-    # Variants
-    PROPAGATED_BOOL_VARIANT = rf"(?:(?:\+\+|~~|--)\s*{NAME})"
-    BOOL_VARIANT = rf"(?:[~+-]\s*{NAME})"
-    PROPAGATED_KEY_VALUE_PAIR = rf"(?:{NAME}:?==(?:{VALUE}|{QUOTED_VALUE}))"
-    KEY_VALUE_PAIR = rf"(?:{NAME}:?=(?:{VALUE}|{QUOTED_VALUE}))"
+    # Boolean variant, e.g. +debug, ~debug, -debug, or propagated: ++debug, ~~debug, --debug
+    BOOL_VARIANT = (
+        r"(?P<variant_prefix>\+\+|~~|--|[+~-])"  # two characters if propagated
+        r"\s*"
+        rf"(?P<variant_name>{NAME})"
+    )
+    # Key-value pair, e.g. foo=bar or foo='bar baz'; propagated: foo==bar; concrete: foo:=bar
+    KEY_VALUE_PAIR = (
+        rf"(?P<key>{NAME})"
+        r"(?P<separator>:?==?)"  # =, ==, := or :==
+        rf"(?P<value>{VALUE}|{QUOTED_VALUE})"  # bare or quoted value
+    )
 
     # Virtual assignment, after KEY_VALUE_PAIR: only tried first at the start of a dependency
     VIRTUAL_ASSIGNMENT = rf"(?:{VIRTUAL_ASSIGNMENT})"
@@ -162,7 +186,7 @@ class SpecTokens(TokenBase):
     UNQUALIFIED_PACKAGE_NAME = rf"(?:{IDENTIFIER}|{STAR})"
 
     # DAG hash
-    DAG_HASH = rf"(?:/(?:{HASH}))"
+    DAG_HASH = rf"/(?P<hash>{HASH})"
 
     # Unexpected character
     UNEXPECTED = r"\S"
@@ -174,10 +198,7 @@ SPEC_TOKENIZER = Tokenizer(SpecTokens, skip_whitespace=True)
 
 #: Right after a dependency sigil or edge properties, ``c,cxx=gcc`` is a virtual assignment
 #: rather than a key-value pair. The tokenizer is context free, so this is matched separately.
-_VIRTUAL_ASSIGNMENT_AHEAD = re.compile(rf"\s*({VIRTUAL_ASSIGNMENT})")
-
-#: Tokens after which a dependency node starts
-_NODE_START = (SpecTokens.DEPENDENCY, SpecTokens.END_EDGE_PROPERTIES)
+_VIRTUAL_ASSIGNMENT_AHEAD = re.compile(rf"\s*(?P<assignment>{VIRTUAL_ASSIGNMENT})")
 
 #: The Spec class, imported on first use since ``spack.spec`` imports this module
 _Spec: Optional[Type["spack.spec.Spec"]] = None
@@ -213,10 +234,14 @@ def tokenize(text: str, *, everything: bool = False) -> Iterator[Token]:
                 raise SpecTokenizationError(text)
             i = m.lastindex
             yield Token(kind, m.group(i), m.start(i), m.end(i))
-            if kind in _NODE_START:
+            # A dependency node starts after a sigil without edge properties, or after them
+            if kind is SpecTokens.END_EDGE_PROPERTIES or (
+                kind is SpecTokens.DEPENDENCY and not m.group("open_bracket")
+            ):
                 va = _VIRTUAL_ASSIGNMENT_AHEAD.match(text, m.end())
                 if va:
-                    yield Token(SpecTokens.VIRTUAL_ASSIGNMENT, va.group(1), va.start(1), va.end())
+                    value, (start, end) = va.group("assignment"), va.span("assignment")
+                    yield Token(SpecTokens.VIRTUAL_ASSIGNMENT, value, start, end)
                     pos = va.end()
                     break
         else:
@@ -292,22 +317,23 @@ class SpecParser:
             token = self.curr
             kind = kinds[token.lastgroup]
             if kind is SpecTokens.DEPENDENCY:
-                # ^ (transitive) or % / %% (direct) edge, followed by a dependency node
-                edge_properties = {"virtuals": (), "depflag": 0}
-            elif kind is SpecTokens.START_EDGE_PROPERTIES:
-                # ^[key=value ...] or %[key=value ...] followed by a dependency node
-                self.curr = self.scanner.match()
-                edge_properties = self._parse_edge_properties()
+                if token.group("open_bracket"):
+                    # ^[key=value ...] or %[key=value ...] followed by a dependency node
+                    self.curr = self.scanner.match()
+                    edge_properties = self._parse_edge_properties()
+                else:
+                    # ^ (transitive) or % / %% (direct) edge, followed by a dependency node
+                    edge_properties = {"virtuals": (), "depflag": 0}
             elif kind is SpecTokens.UNEXPECTED:
                 raise SpecTokenizationError(self.literal_str)
             else:
                 # Any other token starts the next spec in the input: this spec is complete
                 break
 
-            sigil = token.group(token.lastindex)
+            sigil = token.group("sigil")
             edge_properties["direct"] = sigil[0] == "%"
             edge_properties["propagation"] = (
-                PropagationPolicy.PREFERENCE if sigil.startswith("%%") else PropagationPolicy.NONE
+                PropagationPolicy.PREFERENCE if sigil == "%%" else PropagationPolicy.NONE
             )
 
             dependency = self._parse_dependency(root_spec, edge_properties)
@@ -364,9 +390,11 @@ class SpecParser:
             if kinds[token.lastgroup] is not SpecTokens.KEY_VALUE_PAIR:
                 break
             self.curr = self.scanner.match()
-            name, value = token.group(token.lastindex).split("=", maxsplit=1)
-            name = name.rstrip(":")  # the := of a concrete variant has no meaning on an edge
-            value = strip_quotes_and_unescape(value)
+            name = token.group("key")
+            value = strip_quotes_and_unescape(token.group("value"))
+            if "==" in token.group("separator"):
+                msg = "propagation with == has no meaning in edge attributes"
+                raise SpecParsingError(msg, token, self.literal_str)
             if name == "virtuals":
                 virtuals += tuple(value.split(","))
             elif name == "deptypes":
@@ -412,9 +440,8 @@ class SpecParser:
             )
             self.curr = self.scanner.match()
 
-            virtuals, substitute = assignment.group(1).split("=")
-            edge_properties["virtuals"] += tuple(virtuals.split(","))
-            namespace, _, name = substitute.rpartition(".")
+            edge_properties["virtuals"] += tuple(assignment.group("virtuals").split(","))
+            namespace, _, name = assignment.group("substitute").rpartition(".")
             dependency = _new_spec()
             dependency.name = name
             dependency.namespace = namespace or None
@@ -467,55 +494,40 @@ class SpecParser:
             token = self.curr
             kind = kinds[token.lastgroup]
 
-            if (
-                kind is SpecTokens.VERSION
-                or kind is SpecTokens.GIT_VERSION
-                or kind is SpecTokens.VERSION_HASH_PAIR
-            ):
+            if kind is SpecTokens.VERSION:
                 if has_version:
                     raise SpecParsingError(
                         "Spec cannot have multiple versions", token, self.literal_str
                     )
-                spec.versions = spack.version.VersionList(
-                    [spack.version.from_string(token.group(token.lastindex)[1:])]
-                )
-                spec.attach_git_version_lookup()
+                git_version = token.group("git_version")
+                if git_version:
+                    spec.versions = spack.version.VersionList(
+                        [spack.version.GitVersion(git_version)]
+                    )
+                    spec.attach_git_version_lookup()
+                else:
+                    spec.versions = spack.version.VersionList(token.group("version_list"))
                 has_version = True
                 self.curr = scanner.match()
 
             elif kind is SpecTokens.BOOL_VARIANT:
-                value = token.group(token.lastindex)
-                self._add_flag(spec, token, value[1:].strip(), value[0] == "+", False, True)
-                self.curr = scanner.match()
-
-            elif kind is SpecTokens.PROPAGATED_BOOL_VARIANT:
-                value = token.group(token.lastindex)
-                self._add_flag(spec, token, value[2:].strip(), value[:2] == "++", True, True)
+                prefix = token.group("variant_prefix")  # + / ~ / -, doubled if propagated
+                name = token.group("variant_name")
+                self._add_flag(spec, token, name, prefix[0] == "+", len(prefix) == 2, True)
                 self.curr = scanner.match()
 
             elif kind is SpecTokens.KEY_VALUE_PAIR:
-                name, value = token.group(token.lastindex).split("=", maxsplit=1)
-                concrete = name.endswith(":")
-                if concrete:
-                    name = name[:-1]
-                value = strip_quotes_and_unescape(value)
-                self._add_flag(spec, token, name, value, False, concrete)
-                self.curr = scanner.match()
-
-            elif kind is SpecTokens.PROPAGATED_KEY_VALUE_PAIR:
-                name, value = token.group(token.lastindex).split("==", maxsplit=1)
-                concrete = name.endswith(":")
-                if concrete:
-                    name = name[:-1]
-                value = strip_quotes_and_unescape(value)
-                self._add_flag(spec, token, name, value, True, concrete)
+                separator = token.group("separator")  # =, == if propagated, := if concrete
+                name = token.group("key")
+                value = strip_quotes_and_unescape(token.group("value"))
+                self._add_flag(spec, token, name, value, "==" in separator, separator[0] == ":")
                 self.curr = scanner.match()
 
             elif kind is SpecTokens.DAG_HASH:
                 if spec.abstract_hash:
                     # A second hash belongs to the next spec, e.g. `spack find /abc /def`
                     break
-                spec.abstract_hash = token.group(token.lastindex)[1:]
+                spec.abstract_hash = token.group("hash")
                 self.curr = scanner.match()
 
             elif kind is SpecTokens.VIRTUAL_ASSIGNMENT:

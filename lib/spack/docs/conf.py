@@ -179,17 +179,13 @@ class SpecLexer(RegexLexer):
         "spec": [
             # New line terminates the spec string
             (r"\s*?$", Text, "#pop"),
-            # Dependency, with optional virtual assignment specifier
-            (SpecTokens.START_EDGE_PROPERTIES.regex, Name.Variable, "edge_properties"),
+            # Dependency, with optional edge properties
+            (r"(?:\^|%%|%)\[", Name.Variable, "edge_properties"),
             (SpecTokens.DEPENDENCY.regex, Name.Variable),
             # versions
-            (SpecTokens.VERSION_HASH_PAIR.regex, Keyword.Pseudo),
-            (SpecTokens.GIT_VERSION.regex, Keyword.Pseudo),
             (SpecTokens.VERSION.regex, Keyword.Pseudo),
             # variants
-            (SpecTokens.PROPAGATED_BOOL_VARIANT.regex, Name.Function),
             (SpecTokens.BOOL_VARIANT.regex, Name.Function),
-            (SpecTokens.PROPAGATED_KEY_VALUE_PAIR.regex, Name.Function),
             (SpecTokens.KEY_VALUE_PAIR.regex, Name.Function),
             # filename
             (SpecTokens.FILENAME.regex, Text),

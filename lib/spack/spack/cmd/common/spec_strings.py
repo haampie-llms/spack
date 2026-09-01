@@ -24,13 +24,9 @@ class _LegacySpecTokens(TokenBase):
     END_EDGE_PROPERTIES = r"(?:\])"
     DEPENDENCY = r"(?:\^)"
     # Version
-    VERSION_HASH_PAIR = SpecTokens.VERSION_HASH_PAIR.regex
-    GIT_VERSION = SpecTokens.GIT_VERSION.regex
     VERSION = SpecTokens.VERSION.regex
     # Variants
-    PROPAGATED_BOOL_VARIANT = SpecTokens.PROPAGATED_BOOL_VARIANT.regex
     BOOL_VARIANT = SpecTokens.BOOL_VARIANT.regex
-    PROPAGATED_KEY_VALUE_PAIR = SpecTokens.PROPAGATED_KEY_VALUE_PAIR.regex
     KEY_VALUE_PAIR = SpecTokens.KEY_VALUE_PAIR.regex
     # Compilers
     COMPILER_AND_VERSION = rf"(?:%\s*(?:{NAME})(?:[\s]*)@\s*(?:{VERSION_LIST}))"
@@ -114,12 +110,8 @@ def _spec_str_format(spec_str: str) -> Optional[str]:
         elif in_edge_attr:
             current_block.append(token)
         elif token.kind in (
-            _LegacySpecTokens.VERSION_HASH_PAIR,
-            _LegacySpecTokens.GIT_VERSION,
             _LegacySpecTokens.VERSION,
-            _LegacySpecTokens.PROPAGATED_BOOL_VARIANT,
             _LegacySpecTokens.BOOL_VARIANT,
-            _LegacySpecTokens.PROPAGATED_KEY_VALUE_PAIR,
             _LegacySpecTokens.KEY_VALUE_PAIR,
             _LegacySpecTokens.DAG_HASH,
         ):
