@@ -464,54 +464,51 @@ class SpecParser:
             self.curr = self.scanner.match()
 
             edge_properties["virtuals"] += tuple(assignment.group("virtuals").split(","))
-            namespace, _, name = assignment.group("substitute").rpartition(".")
-            dependency = _new_spec()
-            dependency.name = name
-            dependency.namespace = namespace or None
-            self._parse_node_options(dependency)
+            dependency = self._parse_node(initial_name=assignment.group("substitute"))
 
         if root_spec.concrete:
             raise spack.error.SpecError(str(root_spec), "^" + str(dependency))
         return dependency
 
-    def _parse_node(self, initial_spec: Optional["spack.spec.Spec"] = None) -> "spack.spec.Spec":
-        """Parse a single spec node: an optional package name or spec file, and node options.
+    def _parse_node(
+        self, initial_spec: Optional["spack.spec.Spec"] = None, initial_name: Optional[str] = None
+    ) -> "spack.spec.Spec":
+        """Parse a single spec node: a package name or spec file, followed by node options.
 
         Args:
             initial_spec: object to be constructed
+            initial_name: name of the node from a virtual assignment on its incoming edge, in
+                which case the node has no package name of its own
 
         Return:
             The object passed as argument
         """
-        if initial_spec is None:
-            initial_spec = _new_spec()
-
-        token = self.curr
-        if token is None:
-            return initial_spec
-
-        # If we start with a package name we have a named spec, we cannot
-        # accept another package name afterwards in a node
-        kind = token.lastgroup
-        if kind == _UNQUALIFIED_PACKAGE_NAME:
-            name = token.group(token.lastindex)
-            if name != "*":  # `*` is the name of an anonymous node, as in `%*+shared`
-                initial_spec.name = name
-            self.curr = self.scanner.match()
-
-        elif kind == _FULLY_QUALIFIED_PACKAGE_NAME:
-            initial_spec.namespace, initial_spec.name = token.group(token.lastindex).rsplit(".", 1)
-            self.curr = self.scanner.match()
-
-        elif kind == _FILENAME:
-            self.curr = self.scanner.match()
-            return self._parse_specfile(token.group(token.lastindex), initial_spec)
-
-        return self._parse_node_options(initial_spec)
-
-    def _parse_node_options(self, spec: "spack.spec.Spec") -> "spack.spec.Spec":
-        """Parse the options of a node (version, variants, hash) into ``spec``"""
+        spec = initial_spec if initial_spec is not None else _new_spec()
         scanner = self.scanner
+
+        # 1. Package name or spec file. A missing name is fine: anonymous specs like `@1.2 +debug`
+        # are valid.
+        token = self.curr
+        if initial_name is not None:
+            namespace, _, spec.name = initial_name.rpartition(".")
+            spec.namespace = namespace or None
+        elif token is None:
+            return spec
+        else:
+            kind = token.lastgroup
+            if kind == _UNQUALIFIED_PACKAGE_NAME:
+                name = token.group(token.lastindex)
+                if name != "*":  # `*` is the name of an anonymous node, as in `%*+shared`
+                    spec.name = name
+                self.curr = scanner.match()
+            elif kind == _FULLY_QUALIFIED_PACKAGE_NAME:
+                spec.namespace, spec.name = token.group(token.lastindex).rsplit(".", 1)
+                self.curr = scanner.match()
+            elif kind == _FILENAME:
+                self.curr = scanner.match()
+                return self._parse_specfile(token.group(token.lastindex), spec)
+
+        # 2. Node options: version, variants and hash, in any order
         has_version = False
         while self.curr is not None:
             token = self.curr
@@ -536,14 +533,24 @@ class SpecParser:
             elif kind == _BOOL_VARIANT:
                 prefix = token.group("variant_prefix")  # + / ~ / -, doubled if propagated
                 name = token.group("variant_name")
-                self._add_flag(spec, token, name, prefix[0] == "+", len(prefix) == 2, True)
+                try:
+                    spec._add_flag(
+                        name, prefix[0] == "+", propagate=len(prefix) == 2, concrete=True
+                    )
+                except Exception as e:
+                    raise SpecParsingError(str(e), token, self.literal_str) from e
                 self.curr = scanner.match()
 
             elif kind == _KEY_VALUE_PAIR:
                 separator = token.group("separator")  # =, == if propagated, := if concrete
                 name = token.group("key")
                 value = strip_quotes_and_unescape(token.group("value"))
-                self._add_flag(spec, token, name, value, "==" in separator, separator[0] == ":")
+                try:
+                    spec._add_flag(
+                        name, value, propagate="==" in separator, concrete=separator[0] == ":"
+                    )
+                except Exception as e:
+                    raise SpecParsingError(str(e), token, self.literal_str) from e
                 self.curr = scanner.match()
 
             elif kind == _DAG_HASH:
@@ -559,21 +566,6 @@ class SpecParser:
                 break
 
         return spec
-
-    def _add_flag(
-        self,
-        spec: "spack.spec.Spec",
-        token: Match,
-        name: str,
-        value: Union[str, bool],
-        propagate: bool,
-        concrete: bool,
-    ) -> None:
-        """Wrapper around ``Spec._add_flag()`` that adds parser context to errors raised."""
-        try:
-            spec._add_flag(name, value, propagate, concrete)
-        except Exception as e:
-            raise SpecParsingError(str(e), token, self.literal_str) from e
 
     def _parse_specfile(self, filename: str, initial_spec: "spack.spec.Spec") -> "spack.spec.Spec":
         """Parse a spec tree from a JSON or YAML spec file into ``initial_spec``"""
