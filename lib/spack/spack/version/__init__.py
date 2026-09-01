@@ -34,6 +34,7 @@ from .version_types import (
     from_string,
     intern_version_list,
     ver,
+    version_list_from_string,
 )
 
 #: This version contains all possible versions.
@@ -61,4 +62,5 @@ __all__ = [
     "is_git_commit_sha",
     "is_git_version",
     "ver",
+    "version_list_from_string",
 ]
