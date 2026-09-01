@@ -765,6 +765,12 @@ class ConditionalValue:
         return self.value < other.value
 
 
+#: Definition/value pairs that validated before. A solve validates the same value against the
+#: same definition thousands of times; a definition lives on a package class, which stays loaded
+#: for the life of the process, so its id keeps identifying it.
+_VALIDATED_VALUES: Set[Tuple[int, Tuple]] = set()
+
+
 def prevalidate_variant_value(
     pkg_cls: "Type[spack.package_base.PackageBase]",
     variant: VariantValue,
@@ -792,11 +798,21 @@ def prevalidate_variant_value(
     if variant.name in RESERVED_NAMES or variant.propagate:
         return []
 
-    # raise if there is no definition at all
-    if not pkg_cls.has_variant(variant.name):
+    # raise if there is no definition at all. A Variant is always truthy, so the name has a
+    # definition exactly when variant_definitions() reports one.
+    definitions = pkg_cls.variant_definitions(variant.name)
+    if not definitions:
         raise UnknownVariantError(
             f"No such variant '{variant.name}' in package {pkg_cls.name}", [variant.name]
         )
+
+    # a value is interned by a key that identifies it exactly, so a definition it validated
+    # against once validates again; see _VALIDATED_VALUES. Values that were not interned have
+    # no key, and are validated every time.
+    try:
+        value_key: Optional[Tuple] = variant._key
+    except AttributeError:
+        value_key = None
 
     # do as much prevalidation as we can -- check only those
     # variants whose when constraint intersects this spec
@@ -804,14 +820,21 @@ def prevalidate_variant_value(
     possible_definitions = []
     valid_definitions = []
 
-    for when, pkg_variant_def in pkg_cls.variant_definitions(variant.name):
+    for when, pkg_variant_def in definitions:
         if spec and not spec.intersects(when):
             continue
         possible_definitions.append(pkg_variant_def)
 
+        cache_key = None if value_key is None else (id(pkg_variant_def), value_key)
+        if cache_key is not None and cache_key in _VALIDATED_VALUES:
+            valid_definitions.append(pkg_variant_def)
+            continue
+
         try:
             pkg_variant_def.validate_or_raise(variant, pkg_cls.name)
             valid_definitions.append(pkg_variant_def)
+            if cache_key is not None:
+                _VALIDATED_VALUES.add(cache_key)
         except spack.error.SpecError as e:
             errors.append(e)
 
