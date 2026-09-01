@@ -692,8 +692,8 @@ class SpecParser:
                     )
                     spec.attach_git_version_lookup()
                 else:
-                    spec.versions = spack.version.intern_version_list(
-                        spack.version.VersionList(curr.group(_VERSION_LIST))
+                    spec.versions = spack.version.version_list_from_string(
+                        curr.group(_VERSION_LIST)
                     )
                 has_version = True
 

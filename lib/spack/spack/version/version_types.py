@@ -1200,7 +1200,11 @@ class VersionList(VersionType, _VersionListBase):
         if not self:
             return ""
 
-        return ",".join(f"={v}" if type(v) is StandardVersion else str(v) for v in self)
+        cached = _VERSION_LIST_STR.get(id(self))
+        if cached is not None:
+            return cached
+
+        return ",".join([f"={v}" if type(v) is StandardVersion else str(v) for v in self])
 
     def __repr__(self) -> str:
         return repr(list(self))
@@ -1322,6 +1326,27 @@ def VersionRange(lo: Union[str, StandardVersion], hi: Union[str, StandardVersion
 
 def from_string(string: str) -> VersionType:
     """Converts a string to a version object. This is private. Client code should use ver()."""
+    cached = _FROM_STRING_CACHE.get(string)
+    if cached is not None:
+        return cached
+
+    result = _parse_version_string(string)
+
+    # A GitVersion resolves its ref against the package it belongs to and caches what that
+    # resolves to, so two packages naming the same ref need a version each; see
+    # intern_version_list(). Everything else is immutable and can be shared.
+    if isinstance(result, VersionList):
+        shareable = all(type(v) is StandardVersion or type(v) is ClosedOpenRange for v in result)
+    else:
+        shareable = type(result) is StandardVersion or type(result) is ClosedOpenRange
+    if shareable:
+        _FROM_STRING_CACHE[string] = result
+
+    return result
+
+
+def _parse_version_string(string: str) -> VersionType:
+    """Parse a version literal; see :func:`from_string`, which caches the result."""
     string = string.replace(" ", "")
 
     # VersionList
@@ -1381,6 +1406,34 @@ _ANY_VERSION_LIST = VersionList._from_sorted((_UNBOUNDED_RANGE,))
 #: Version constraints repeat across package recipes and across the nodes of a solve.
 _VERSION_LIST_CACHE: Dict[str, VersionList] = {}
 
+#: The rendering of the interned version lists, by object id. `spack solve --show asp py-torch`
+#: writes 102 650 version lists out taking 3 094 distinct values, and every one of them is a key
+#: of _VERSION_LIST_CACHE, which keeps it alive, so its id keeps identifying it.
+_VERSION_LIST_STR: Dict[int, str] = {}
+
+#: Version literals repeat too: `spack solve --show asp py-torch` parses 21 953 of them taking
+#: 3 144 distinct values, so the parsed constraint is kept instead of the string.
+_FROM_STRING_CACHE: Dict[str, VersionType] = {}
+
+#: The same, for the version list a spec literal like `@1.2:` denotes.
+_VERSION_LIST_FROM_STRING_CACHE: Dict[str, VersionList] = {}
+
+
+def version_list_from_string(string: str) -> VersionList:
+    """The interned VersionList a spec's version literal denotes, e.g. `1.2:` or `1.0,2.0`."""
+    cached = _VERSION_LIST_FROM_STRING_CACHE.get(string)
+    if cached is not None:
+        return cached
+
+    parsed = from_string(string)
+    result = intern_version_list(
+        parsed if isinstance(parsed, VersionList) else VersionList([parsed])
+    )
+    if all(type(v) is StandardVersion or type(v) is ClosedOpenRange for v in result):
+        _VERSION_LIST_FROM_STRING_CACHE[string] = result
+
+    return result
+
 
 def intern_version_list(version_list: VersionList) -> VersionList:
     """Return the shared VersionList equal to ``version_list``.
@@ -1398,8 +1451,14 @@ def intern_version_list(version_list: VersionList) -> VersionList:
     if cached is not None:
         return cached
     _VERSION_LIST_CACHE[key] = version_list
+    _VERSION_LIST_STR[id(version_list)] = key
     return version_list
 
 
 def _unpickle_version_list(versions: Tuple[VersionType, ...]) -> VersionList:
     return intern_version_list(VersionList._from_sorted(versions))
+
+
+#: The unconstrained list is on every abstract spec and is by far the most rendered one, so it is
+#: interned like the rest, which is what puts its rendering in _VERSION_LIST_STR.
+intern_version_list(_ANY_VERSION_LIST)
