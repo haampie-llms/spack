@@ -187,34 +187,52 @@ class SpecClauseGenerator:
         self, spec: spack.spec.Spec, f, *, name: str, body: bool
     ) -> List[AspFunction]:
         """Return clauses for the variants of a spec."""
+        variants = spec.variants
+        if not variants:
+            return []
+
+        # Neither the package class nor whether the values have to be prevalidated depend on the
+        # variant, let alone on its values, so both are settled once for the whole spec.
+        concrete = spec.concrete
+        pkg_cls = (
+            self.pkg_class(name)
+            if name and not concrete and not spack.repo.PATH.is_virtual(name)
+            else None
+        )
+
         clauses = []
-        for vname, variant in sorted(spec.variants.items()):
+        for vname, variant in sorted(variants.items()):
             # TODO: variant="*" means 'variant is defined to something', which used to
             # be meaningless in concretization, as all variants had to be defined. But
             # now that variants can be conditional, it should force a variant to exist.
-            if not variant.values:
+            values = variant.values
+            if not values:
                 continue
 
-            for value in variant.values:
-                # ensure that the value *can* be valid for the spec
-                if name and not spec.concrete and not spack.repo.PATH.is_virtual(name):
-                    variant_defs = vt.prevalidate_variant_value(
-                        self.pkg_class(name), variant, spec
-                    )
+            if pkg_cls is not None:
+                # ensure that the values *can* be valid for the spec. The definitions that accept
+                # them depend on the variant, not on the individual value.
+                variant_defs = vt.prevalidate_variant_value(pkg_cls, variant, spec)
 
-                    # Record that that this is a valid possible value. Accounts for
-                    # int/str/etc., where valid values can't be listed in the package
-                    for variant_def in variant_defs:
-                        self.variant_values_from_specs.add((name, id(variant_def), value))
+                # Record that that these are valid possible values. Accounts for
+                # int/str/etc., where valid values can't be listed in the package
+                for variant_def in variant_defs:
+                    def_id = id(variant_def)
+                    for value in values:
+                        self.variant_values_from_specs.add((name, def_id, value))
 
-                if variant.propagate:
+            if variant.propagate:
+                has_variant = self.pkg_class(name).has_variant(vname)
+                for value in values:
                     clauses.append(f.propagate(name, fn.variant_value(vname, value)))
-                    if self.pkg_class(name).has_variant(vname):
+                    if has_variant:
                         clauses.append(f.variant_value(name, vname, value))
-                    continue
+                continue
 
+            concrete_multi = variant.concrete and variant.type == vt.VariantType.MULTI
+            for value in values:
                 variant_clause = f.variant_value(name, vname, value)
-                if variant.concrete and variant.type == vt.VariantType.MULTI and not spec.concrete:
+                if concrete_multi and not concrete:
                     if body is False:
                         variant_clause.args = (
                             f"concrete_{variant_clause.args[0]}",
