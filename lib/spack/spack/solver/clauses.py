@@ -93,6 +93,8 @@ class SpecClauseGenerator:
         self._condition_clause_cache: Dict[Tuple, List[AspFunction]] = {}
         #: Package classes by name, see pkg_class()
         self._pkg_classes: Dict[str, Type[spack.package_base.PackageBase]] = {}
+        #: Whether a name is virtual, see is_virtual()
+        self._virtual_names: Dict[str, bool] = {}
 
     def record_version_constraint(self, name: str, versions) -> None:
         """Record that `versions` was requested for package `name`."""
@@ -481,7 +483,7 @@ class SpecClauseGenerator:
 
         f: Union[Type[_Head], Type[_Body]] = _Body if body else _Head
 
-        virtual = spack.repo.PATH.is_virtual(name) if name else False
+        virtual = self.is_virtual(name) if name else False
         if name:
             clauses.append(AspFunction("attr", (f.virtual_node if virtual else f.node, name)))
         if spec.namespace:
@@ -565,6 +567,17 @@ class SpecClauseGenerator:
 
         clauses.extend(edge_clauses)
         return clauses
+
+    def is_virtual(self, name: str) -> bool:
+        """Whether ``name`` is the name of a virtual package.
+
+        The answer is kept: this generator lives for a single setup, and the set of virtuals
+        does not change during one.
+        """
+        result = self._virtual_names.get(name)
+        if result is None:
+            result = self._virtual_names[name] = spack.repo.PATH.is_virtual(name)
+        return result
 
     def pkg_class(self, pkg_name: str) -> Type[spack.package_base.PackageBase]:
         # This generator lives for a single setup, so a class it hands out cannot go stale.
