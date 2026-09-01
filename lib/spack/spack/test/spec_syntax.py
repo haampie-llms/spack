@@ -1175,6 +1175,8 @@ def test_parse_multiple_specs(text, tokens, expected_specs):
         (["zlib ldflags='' +pic"], "zlib+pic"),
         # Ensure that $ORIGIN is handled correctly
         (["zlib", "ldflags=-Wl,-rpath=$ORIGIN/_libs"], "zlib ldflags='-Wl,-rpath=$ORIGIN/_libs'"),
+        # A closing bracket ends the edge attribute list, it is never part of the value
+        (["mpileaks", "%[", "when=@1.0]", "gcc"], "mpileaks %[when='@1.0'] gcc"),
         # Ensure that passing escaped quotes on the CLI raises a tokenization error
         (["zlib", '"-g', '-O2"'], SpecTokenizationError),
     ],
@@ -1900,6 +1902,36 @@ def test_when_edge_attribute_keeps_commas():
     comma-separated deptypes and virtuals lists."""
     edge = spack.spec.Spec("foo ^[when='@1,2'] bar").edges_to_dependencies(name="bar")[0]
     assert edge.when == spack.spec.Spec("@1,2")
+
+
+@pytest.mark.parametrize(
+    "spec_str,expected",
+    [
+        # square brackets are not valid characters in an unquoted value
+        ("a=']'", "a=']'"),
+        ("a='['", "a='['"),
+        # virtuals of an anonymous spec stay in the edge attributes, there is no name to
+        # substitute them with
+        ("%[virtuals=c] *", "%[virtuals=c] *"),
+        ("%[deptypes=build virtuals=c] *", "%[deptypes=build virtuals=c] *"),
+        ("^[virtuals=c,cxx] *", "^[virtuals=c,cxx] *"),
+        ("%[virtuals=c] @4.0 foo=bar", "%[virtuals=c] *@4.0 foo=bar"),
+        # a star is a package name, so name=* is a variant value, not a substitute
+        ("^dev_path=*", "^*dev_path='*'"),
+        # a when= value is a spec string, so it needs quoting and escaping in turn
+        ('%[when="a=*"]', """%[when="a='*'"] *"""),
+        ("""x %[when="a=']'"] gcc""", """x %[when="a=']'"] gcc"""),
+        ("%[when='@1,2' virtuals=c] *", "%[when='@1:2' virtuals=c] *"),
+        # a version bound is never truncated at a "." to make room for a key=value pair
+        ("@:a.a=''", "a.a=''"),
+        ("@1.2:2.0=x", "@1.2: 2.0=x"),
+    ],
+)
+def test_spec_str_round_trips(spec_str, expected):
+    """The string of a spec must be parseable, and parse back to the same spec."""
+    spec = spack.spec.Spec(spec_str)
+    assert str(spec) == expected
+    assert spack.spec.Spec(str(spec)) == spec
 
 
 @pytest.mark.regression("52375")
