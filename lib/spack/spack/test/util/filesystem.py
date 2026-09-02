@@ -4,6 +4,7 @@
 
 """Tests for ``util/filesystem.py``"""
 
+import errno
 import filecmp
 import os
 import pathlib
@@ -1451,3 +1452,121 @@ def test_write_tmp_and_move_permissions(tmp_path: pathlib.Path):
         assert dst.read_text() == "updated"
     finally:
         os.umask(old_umask)
+
+
+@pytest.mark.not_on_windows("fd-relative system calls are POSIX only")
+def test_open_nofollow(tmp_path: pathlib.Path):
+    (tmp_path / "file").write_text("x")
+    (tmp_path / "dir").mkdir()
+    os.symlink("file", str(tmp_path / "link_f"))
+    os.symlink("dir", str(tmp_path / "link_d"))
+
+    for link in ("link_f", "link_d"):
+        with pytest.raises(OSError) as exc_info:
+            fs.open_nofollow(str(tmp_path / link))
+        assert fs._is_nofollow_error(exc_info.value)
+
+    with pytest.raises(OSError) as exc_info:
+        fs.open_nofollow(str(tmp_path / "file"), directory=True)
+    assert exc_info.value.errno == errno.ENOTDIR
+
+    with fs.directory_fd(str(tmp_path)) as dir_fd:
+        assert dir_fd is not None
+        fd = fs.open_nofollow("file", dir_fd=dir_fd)
+        try:
+            assert os.path.samestat(os.fstat(fd), os.lstat(str(tmp_path / "file")))
+        finally:
+            os.close(fd)
+        fd = fs.open_nofollow("dir", dir_fd=dir_fd, directory=True)
+        try:
+            assert stat.S_ISDIR(os.fstat(fd).st_mode)
+        finally:
+            os.close(fd)
+
+
+@pytest.mark.not_on_windows("fd-relative system calls are POSIX only")
+@pytest.mark.skipif(os.getuid() == 0, reason="root can read files with mode 0")
+def test_chmod_nofollow(tmp_path: pathlib.Path):
+    target = tmp_path / "target"
+    target.write_text("x")
+    target.chmod(0o600)
+    os.symlink("target", str(tmp_path / "link"))
+    assert fs.chmod_nofollow(str(tmp_path / "link"), 0o777) is False
+    assert stat.S_IMODE(os.stat(str(target)).st_mode) == 0o600
+
+    with fs.directory_fd(str(tmp_path)) as dir_fd:
+        assert fs.chmod_nofollow("link", 0o777, dir_fd=dir_fd) is False
+        assert stat.S_IMODE(os.stat(str(target)).st_mode) == 0o600
+        assert fs.chmod_nofollow("target", 0o640, dir_fd=dir_fd) is True
+        assert stat.S_IMODE(os.stat(str(target)).st_mode) == 0o640
+
+    # unreadable regular file: cannot be opened, changed through the fallback
+    unreadable = tmp_path / "unreadable"
+    unreadable.write_text("x")
+    unreadable.chmod(0)
+    assert fs.chmod_nofollow(str(unreadable), 0o644) is True
+    assert stat.S_IMODE(os.stat(str(unreadable)).st_mode) == 0o644
+
+    # special files are never opened, only changed through the fallback
+    fifo = tmp_path / "fifo"
+    os.mkfifo(str(fifo), 0o600)
+    assert fs.chmod_nofollow(str(fifo), 0o640) is True
+    assert stat.S_IMODE(os.stat(str(fifo)).st_mode) == 0o640
+
+    d = tmp_path / "dir"
+    d.mkdir()
+    assert fs.chmod_nofollow(str(d), 0o750) is True
+    assert stat.S_IMODE(os.stat(str(d)).st_mode) == 0o750
+
+
+@pytest.mark.not_on_windows("fd-relative system calls are POSIX only")
+@pytest.mark.skipif(os.getuid() == 0, reason="root can read files with mode 0")
+def test_set_install_permissions_does_not_follow_symlinks(tmp_path: pathlib.Path):
+    outside = tmp_path / "outside"
+    outside.write_text("secret")
+    outside.chmod(0o600)
+    prefix = tmp_path / "prefix"
+    prefix.mkdir(mode=0o700)
+    (prefix / "file").write_text("x")
+    (prefix / "file").chmod(0o600)
+    (prefix / "unreadable").write_text("x")
+    (prefix / "unreadable").chmod(0)
+    os.symlink(str(outside), str(prefix / "link"))
+
+    for entry in ("file", "unreadable", "link"):
+        fs.set_install_permissions(str(prefix / entry))
+    fs.set_install_permissions(str(prefix))
+
+    assert stat.S_IMODE(os.stat(str(prefix)).st_mode) == 0o755
+    assert stat.S_IMODE(os.stat(str(prefix / "file")).st_mode) == 0o644
+    assert stat.S_IMODE(os.stat(str(prefix / "unreadable")).st_mode) == 0o644
+    assert stat.S_IMODE(os.stat(str(outside)).st_mode) == 0o600
+
+
+@pytest.mark.not_on_windows("chgrp is POSIX only")
+def test_chgrp_fd_and_nofollow(tmp_path: pathlib.Path):
+    groups = os.getgroups()
+    if len(groups) < 2:
+        pytest.skip("need membership of at least two groups")
+    target = tmp_path / "target"
+    target.write_text("x")
+    link = tmp_path / "link"
+    os.symlink("target", str(link))
+    current = os.stat(str(target)).st_gid
+    other = next(g for g in groups if g != current)
+
+    # follow_symlinks=False changes the link, not the target
+    fs.chgrp(str(link), other, follow_symlinks=False)
+    assert os.lstat(str(link)).st_gid == other
+    assert os.stat(str(target)).st_gid == current
+
+    # and if the link already has the group, the target is not consulted or changed
+    fs.chgrp(str(link), other, follow_symlinks=False)
+    assert os.stat(str(target)).st_gid == current
+
+    fd = os.open(str(target), os.O_RDONLY)
+    try:
+        fs.chgrp(fd, other)
+    finally:
+        os.close(fd)
+    assert os.stat(str(target)).st_gid == other

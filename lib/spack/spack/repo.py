@@ -365,19 +365,6 @@ class SpackNamespace(types.ModuleType):
         return getattr(self, name)
 
 
-@contextlib.contextmanager
-def _directory_fd(path: str) -> Generator[Optional[int], None, None]:
-    if sys.platform == "win32":
-        yield None
-        return
-
-    fd = os.open(path, os.O_RDONLY)
-    try:
-        yield fd
-    finally:
-        os.close(fd)
-
-
 class FastPackageChecker(Mapping[str, float]):
     """Cache that maps package names to the modification times of their ``package.py`` files.
 
@@ -418,10 +405,10 @@ class FastPackageChecker(Mapping[str, float]):
         naming_scheme = nm.get_naming_scheme(self.package_api)
 
         # Use a file descriptor for the packages directory to avoid repeated path resolution.
-        with _directory_fd(self.packages_path) as fd, os.scandir(self.packages_path) as entries:
+        with fs.directory_fd(self.packages_path) as fd, os.scandir(self.packages_path) as entries:
             for entry in entries:
                 # Construct the file name from the directory
-                if sys.platform == "win32":
+                if fd is None:
                     pkg_file = f"{entry.path}{package_py_suffix}"
                 else:
                     pkg_file = f"{entry.name}{package_py_suffix}"
