@@ -4,6 +4,7 @@
 
 """Tests for ``util/filesystem.py``"""
 
+import errno
 import filecmp
 import os
 import pathlib
@@ -1451,3 +1452,230 @@ def test_write_tmp_and_move_permissions(tmp_path: pathlib.Path):
         assert dst.read_text() == "updated"
     finally:
         os.umask(old_umask)
+
+
+def _make_tree_with_escaping_links(tmp_path: pathlib.Path):
+    """A ``victim`` tree with symlinks pointing at an ``outside`` tree, a dangling symlink, a FIFO
+    and some nested real content. Returns ``(victim, outside)``."""
+    outside = tmp_path / "outside"
+    (outside / "d").mkdir(parents=True)
+    (outside / "f").write_text("keep me")
+    (outside / "d" / "g").write_text("keep me too")
+
+    victim = tmp_path / "victim"
+    (victim / "sub" / "subsub").mkdir(parents=True)
+    (victim / "sub" / "subsub" / "file").write_text("x")
+    (victim / "file").write_text("y")
+    os.symlink(str(outside / "f"), str(victim / "link_f"))
+    os.symlink(str(outside / "d"), str(victim / "link_d"))
+    os.symlink(str(outside / "d"), str(victim / "sub" / "link_d"))
+    os.symlink("nowhere", str(victim / "dangling"))
+    os.mkfifo(str(victim / "sub" / "fifo"))
+    return victim, outside
+
+
+def _assert_outside_intact(outside: pathlib.Path):
+    assert (outside / "f").read_text() == "keep me"
+    assert (outside / "d" / "g").read_text() == "keep me too"
+
+
+@pytest.mark.not_on_windows("fd-relative system calls are POSIX only")
+def test_open_nofollow(tmp_path: pathlib.Path):
+    (tmp_path / "file").write_text("x")
+    (tmp_path / "dir").mkdir()
+    os.symlink("file", str(tmp_path / "link_f"))
+    os.symlink("dir", str(tmp_path / "link_d"))
+
+    for link in ("link_f", "link_d"):
+        with pytest.raises(OSError) as exc_info:
+            fs.open_nofollow(str(tmp_path / link))
+        assert fs._is_nofollow_error(exc_info.value)
+
+    with pytest.raises(OSError) as exc_info:
+        fs.open_nofollow(str(tmp_path / "file"), directory=True)
+    assert exc_info.value.errno == errno.ENOTDIR
+
+    with fs.directory_fd(str(tmp_path)) as dir_fd:
+        assert dir_fd is not None
+        fd = fs.open_nofollow("file", dir_fd=dir_fd)
+        try:
+            assert os.path.samestat(os.fstat(fd), os.lstat(str(tmp_path / "file")))
+        finally:
+            os.close(fd)
+        fd = fs.open_nofollow("dir", dir_fd=dir_fd, directory=True)
+        try:
+            assert stat.S_ISDIR(os.fstat(fd).st_mode)
+        finally:
+            os.close(fd)
+
+
+@pytest.mark.not_on_windows("fd-relative system calls are POSIX only")
+def test_remove_directory_contents_does_not_follow_symlinks(tmp_path: pathlib.Path):
+    victim, outside = _make_tree_with_escaping_links(tmp_path)
+    fs.remove_directory_contents(str(victim))
+    assert victim.is_dir() and not os.listdir(str(victim))
+    _assert_outside_intact(outside)
+
+
+@pytest.mark.not_on_windows("fd-relative system calls are POSIX only")
+def test_remove_linked_tree_does_not_follow_symlinks_inside(tmp_path: pathlib.Path):
+    victim, outside = _make_tree_with_escaping_links(tmp_path)
+    fs.remove_linked_tree(str(victim))
+    assert not os.path.lexists(str(victim))
+    _assert_outside_intact(outside)
+
+
+@pytest.mark.not_on_windows("fd-relative system calls are POSIX only")
+def test_remove_linked_tree_follows_root_symlink_once(tmp_path: pathlib.Path):
+    victim, outside = _make_tree_with_escaping_links(tmp_path)
+    link = tmp_path / "link_to_victim"
+    os.symlink(str(victim), str(link))
+    fs.remove_linked_tree(str(link))
+    # Both the link and the directory it pointed to are gone, but nothing beyond that.
+    assert not os.path.lexists(str(link))
+    assert not os.path.lexists(str(victim))
+    _assert_outside_intact(outside)
+
+
+@pytest.mark.not_on_windows("fd-relative system calls are POSIX only")
+def test_remove_linked_tree_on_symlink_to_file_and_dangling_link(tmp_path: pathlib.Path):
+    target = tmp_path / "file"
+    target.write_text("keep me")
+    link = tmp_path / "link"
+    os.symlink(str(target), str(link))
+    fs.remove_linked_tree(str(link))
+    assert not os.path.lexists(str(link))
+    assert target.read_text() == "keep me"
+
+    dangling = tmp_path / "dangling"
+    os.symlink("nowhere", str(dangling))
+    fs.remove_linked_tree(str(dangling))
+    assert os.path.islink(str(dangling))
+
+
+@pytest.mark.not_on_windows("fd-relative system calls are POSIX only")
+@pytest.mark.skipif(os.getuid() == 0, reason="root ignores directory permissions")
+def test_remove_tree_unremovable_subdirectory(tmp_path: pathlib.Path):
+    victim = tmp_path / "victim"
+    locked = victim / "locked"
+    locked.mkdir(parents=True)
+    (locked / "file").write_text("x")
+    locked.chmod(0o500)
+    try:
+        # remove_linked_tree ignores errors, like shutil.rmtree(ignore_errors=True) did
+        fs.remove_linked_tree(str(victim))
+        assert (locked / "file").exists()
+        # remove_directory_contents raises the first error
+        with pytest.raises(PermissionError):
+            fs.remove_directory_contents(str(victim))
+    finally:
+        locked.chmod(0o700)
+
+
+@pytest.mark.not_on_windows("fd-relative system calls are POSIX only")
+@pytest.mark.skipif(os.getuid() == 0, reason="root can read files with mode 0")
+def test_chmod_nofollow(tmp_path: pathlib.Path):
+    target = tmp_path / "target"
+    target.write_text("x")
+    target.chmod(0o600)
+    os.symlink("target", str(tmp_path / "link"))
+    assert fs.chmod_nofollow(str(tmp_path / "link"), 0o777) is False
+    assert stat.S_IMODE(os.stat(str(target)).st_mode) == 0o600
+
+    with fs.directory_fd(str(tmp_path)) as dir_fd:
+        assert fs.chmod_nofollow("link", 0o777, dir_fd=dir_fd) is False
+        assert stat.S_IMODE(os.stat(str(target)).st_mode) == 0o600
+        assert fs.chmod_nofollow("target", 0o640, dir_fd=dir_fd) is True
+        assert stat.S_IMODE(os.stat(str(target)).st_mode) == 0o640
+
+    # unreadable regular file: cannot be opened, changed through the fallback
+    unreadable = tmp_path / "unreadable"
+    unreadable.write_text("x")
+    unreadable.chmod(0)
+    assert fs.chmod_nofollow(str(unreadable), 0o644) is True
+    assert stat.S_IMODE(os.stat(str(unreadable)).st_mode) == 0o644
+
+    # special files are never opened, only changed through the fallback
+    fifo = tmp_path / "fifo"
+    os.mkfifo(str(fifo), 0o600)
+    assert fs.chmod_nofollow(str(fifo), 0o640) is True
+    assert stat.S_IMODE(os.stat(str(fifo)).st_mode) == 0o640
+
+    d = tmp_path / "dir"
+    d.mkdir()
+    assert fs.chmod_nofollow(str(d), 0o750) is True
+    assert stat.S_IMODE(os.stat(str(d)).st_mode) == 0o750
+
+
+@pytest.mark.not_on_windows("fd-relative system calls are POSIX only")
+@pytest.mark.skipif(os.getuid() == 0, reason="root can read files with mode 0")
+def test_set_install_permissions_does_not_follow_symlinks(tmp_path: pathlib.Path):
+    outside = tmp_path / "outside"
+    outside.write_text("secret")
+    outside.chmod(0o600)
+    prefix = tmp_path / "prefix"
+    prefix.mkdir(mode=0o700)
+    (prefix / "file").write_text("x")
+    (prefix / "file").chmod(0o600)
+    (prefix / "unreadable").write_text("x")
+    (prefix / "unreadable").chmod(0)
+    os.symlink(str(outside), str(prefix / "link"))
+
+    for entry in ("file", "unreadable", "link"):
+        fs.set_install_permissions(str(prefix / entry))
+    fs.set_install_permissions(str(prefix))
+
+    assert stat.S_IMODE(os.stat(str(prefix)).st_mode) == 0o755
+    assert stat.S_IMODE(os.stat(str(prefix / "file")).st_mode) == 0o644
+    assert stat.S_IMODE(os.stat(str(prefix / "unreadable")).st_mode) == 0o644
+    assert stat.S_IMODE(os.stat(str(outside)).st_mode) == 0o600
+
+
+@pytest.mark.not_on_windows("fd-relative system calls are POSIX only")
+def test_remove_dead_links_does_not_follow_symlinks(noncyclical_dir_structure):
+    root = str(noncyclical_dir_structure)
+    j = os.path.join
+    # a dead link that is only reachable through the symlinked directory `b`
+    os.symlink("nowhere", j(root, "a", "d", "dead_in_a"))
+    before = sorted(os.listdir(j(root, "a")))
+
+    fs.remove_dead_links(j(root, "c"))
+    assert not os.path.lexists(j(root, "c", "dangling_link"))
+    assert os.path.exists(j(root, "c", "file_2"))
+    assert os.path.lexists(j(root, "a", "d", "dead_in_a"))
+
+    fs.remove_dead_links(root)
+    assert not os.path.lexists(j(root, "a", "d", "dead_in_a"))
+    assert os.path.islink(j(root, "b"))
+    assert os.path.islink(j(root, "a", "to_file_1"))
+    assert os.path.islink(j(root, "a", "to_c"))
+    assert sorted(os.listdir(j(root, "a"))) == before
+
+
+@pytest.mark.not_on_windows("chgrp is POSIX only")
+def test_chgrp_fd_and_nofollow(tmp_path: pathlib.Path):
+    groups = os.getgroups()
+    if len(groups) < 2:
+        pytest.skip("need membership of at least two groups")
+    target = tmp_path / "target"
+    target.write_text("x")
+    link = tmp_path / "link"
+    os.symlink("target", str(link))
+    current = os.stat(str(target)).st_gid
+    other = next(g for g in groups if g != current)
+
+    # follow_symlinks=False changes the link, not the target
+    fs.chgrp(str(link), other, follow_symlinks=False)
+    assert os.lstat(str(link)).st_gid == other
+    assert os.stat(str(target)).st_gid == current
+
+    # and if the link already has the group, the target is not consulted or changed
+    fs.chgrp(str(link), other, follow_symlinks=False)
+    assert os.stat(str(target)).st_gid == current
+
+    fd = os.open(str(target), os.O_RDONLY)
+    try:
+        fs.chgrp(fd, other)
+    finally:
+        os.close(fd)
+    assert os.stat(str(target)).st_gid == other
