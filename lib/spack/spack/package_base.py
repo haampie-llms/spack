@@ -356,7 +356,7 @@ class PackageViewMixin:
         Alternative implementations may allow some of the files to exist in
         the view (in this case they would be omitted from the results).
         """
-        return {dst for dst in merge_map.values() if os.path.lexists(dst)}
+        return {dst for dst in merge_map.values() if view.exists(dst)}
 
     def add_files_to_view(self, view, merge_map, skip_if_exists=True):
         """Given a map of package files to destination paths in the view, add
@@ -374,7 +374,7 @@ class PackageViewMixin:
         """
         if skip_if_exists:
             for src, dst in merge_map.items():
-                if not os.path.lexists(dst):
+                if not view.exists(dst):
                     view.link(src, dst, spec=self.spec)
         else:
             for src, dst in merge_map.items():

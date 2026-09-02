@@ -912,7 +912,7 @@ def test_view_projection_path_is_final_after_regenerate(
         original(self, view, merge_map, skip_if_exists=skip_if_exists)
         # Emulate packages like python that bake the projection into file contents.
         projection = view.get_projection_for_spec(self.spec)
-        with open(os.path.join(projection, f"{self.name}.projection"), "w", encoding="utf-8") as f:
+        with view.open(os.path.join(projection, f"{self.name}.projection"), encoding="utf-8") as f:
             f.write(projection)
 
     monkeypatch.setattr(spack.package_base.PackageBase, "add_files_to_view", add_files_to_view)
@@ -930,6 +930,80 @@ def test_view_projection_path_is_final_after_regenerate(
         assert marker.read_text() == str(view_dir)
 
     # No staging/backup siblings should be left behind after a successful regeneration.
+    assert not list(tmp_path.glob("view.new.*"))
+    assert not list(tmp_path.glob("view.old.*"))
+
+
+def test_view_is_published_atomically(
+    tmp_path: pathlib.Path, config, temporary_store, monkeypatch
+):
+    """While a view is generated, nothing is visible at its root: a new view appears in one
+    rename, and an existing view stays complete until it is replaced."""
+    view_dir = tmp_path / "view"
+    seen = []
+
+    original = spack.package_base.PackageBase.add_files_to_view
+
+    def add_files_to_view(self, view, merge_map, skip_if_exists=True):
+        original(self, view, merge_map, skip_if_exists=skip_if_exists)
+        # The root is either absent or a complete previous view, never a partial one.
+        if not os.path.lexists(str(view_dir)):
+            seen.append("absent")
+            # Files are written to the staging directory, not to the (absent) root.
+            for dst in merge_map.values():
+                assert view.exists(dst)
+                assert not os.path.lexists(dst)
+        else:
+            assert (view_dir / ev.environment.MARKER_FILE).is_file()
+            seen.append("previous")
+
+    monkeypatch.setattr(spack.package_base.PackageBase, "add_files_to_view", add_files_to_view)
+
+    env = ev.create_in_dir(tmp_path, with_view="view")
+    env.add("mpileaks")
+    env.concretize()
+    env.install_all(fake=True)
+    env.regenerate_views()
+    assert seen and all(s == "absent" for s in seen)
+    assert (view_dir / ev.environment.MARKER_FILE).is_file()
+    first_marker = (view_dir / ev.environment.MARKER_FILE).read_text()
+
+    # Regenerate with different content: the first view is complete until replaced.
+    seen.clear()
+    env.add("trivial-install-test-package")
+    env.concretize()
+    env.install_all(fake=True)
+    env.regenerate_views()
+    assert seen and all(s == "previous" for s in seen)
+    assert (view_dir / ev.environment.MARKER_FILE).read_text() != first_marker
+    assert not list(tmp_path.glob("view.new.*"))
+    assert not list(tmp_path.glob("view.old.*"))
+
+
+def test_view_regeneration_failure_keeps_previous_view(
+    tmp_path: pathlib.Path, config, temporary_store, monkeypatch
+):
+    view_dir = tmp_path / "view"
+    env = ev.create_in_dir(tmp_path, with_view="view")
+    env.add("mpileaks")
+    env.concretize()
+    env.install_all(fake=True)
+    env.regenerate_views()
+    before = sorted(p.relative_to(view_dir) for p in view_dir.rglob("*"))
+    marker = (view_dir / ev.environment.MARKER_FILE).read_text()
+
+    def add_files_to_view(self, view, merge_map, skip_if_exists=True):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(spack.package_base.PackageBase, "add_files_to_view", add_files_to_view)
+    env.add("trivial-install-test-package")
+    env.concretize()
+    env.install_all(fake=True)
+    with pytest.raises(RuntimeError, match="boom"):
+        env.regenerate_views()
+
+    assert sorted(p.relative_to(view_dir) for p in view_dir.rglob("*")) == before
+    assert (view_dir / ev.environment.MARKER_FILE).read_text() == marker
     assert not list(tmp_path.glob("view.new.*"))
     assert not list(tmp_path.glob("view.old.*"))
 

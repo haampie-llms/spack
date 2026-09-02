@@ -912,8 +912,10 @@ class ViewDescriptor:
             )
         return self._view(path)
 
-    def _view(self, root: str) -> fsv.SimpleFilesystemView:
-        """Returns a view object for a given root dir."""
+    def _view(
+        self, root: str, destination: Optional[str] = None, destination_fd: Optional[int] = None
+    ) -> fsv.SimpleFilesystemView:
+        """Returns a view object for a given root dir, optionally staged at ``destination``."""
         return fsv.SimpleFilesystemView(
             root,
             spack.store.STORE.layout,
@@ -921,6 +923,8 @@ class ViewDescriptor:
             projections=self.projections,
             link_type=self.link_type,
             link_dirs=self.link_dirs,
+            destination=destination,
+            destination_fd=destination_fd,
         )
 
     def __contains__(self, spec):
@@ -981,44 +985,63 @@ class ViewDescriptor:
         root_parent = os.path.dirname(self.root)
         root_basename = os.path.basename(self.root)
 
-        # The view is built *in place* at self.root: packages bake the projection path
-        # (e.g. shebangs, pyvenv.cfg) into file contents, and that path has to be the
-        # final view location, not a temporary build directory that's renamed afterwards.
-        # To stay able to roll back, move an existing view aside first.
-        old_root = self._move_old_view_aside()
+        # The view is staged in a sibling directory and moved to self.root with a single rename
+        # once it is complete, so a partially generated view is never visible at self.root.
+        # Projections and paths baked into file contents (shebangs, pyvenv.cfg) still refer to
+        # self.root: the view object separates its logical root from where it writes. On POSIX
+        # every write is relative to an open descriptor of the staging directory, so renaming
+        # the staging directory or self.root while the view is generated cannot split it.
+        fs.mkdirp(root_parent)
+        staging = f"{self.root}.new.{uuid.uuid4().hex[:8]}"
+        os.mkdir(staging)
+        old_root: Optional[str] = None
 
-        try:
-            fs.mkdirp(self.root)
-            self._view(self.root).add_specs(*specs)
+        with fs.directory_fd(staging) as staging_fd:
+            try:
+                view = self._view(self.root, destination=staging, destination_fd=staging_fd)
+                view.add_specs(*specs)
 
-            # Claim ownership of the view by dropping a marker file with the content hash.
-            with open(self.marker_path, "x", encoding="utf-8") as f:
-                f.write(content_hash)
+                # Claim ownership of the view by dropping a marker file with the content hash.
+                with view.open(self.marker_path, "x", encoding="utf-8") as f:
+                    f.write(content_hash)
 
-        except Exception as e:
-            # Roll back to the previous view (if any).
-            shutil.rmtree(self.root, ignore_errors=True)
-            if old_root is not None:
-                try:
-                    os.rename(old_root, self.root)
-                except OSError:
-                    pass
+                # Publish: move an existing view aside to stay able to roll back, then rename.
+                old_root = self._move_old_view_aside()
+                os.rename(staging, self.root)
 
-            if isinstance(e, ConflictingSpecsError):
-                spec_a = e.args[0].format(color=clr.get_color_when())
-                spec_b = e.args[1].format(color=clr.get_color_when())
-                raise SpackEnvironmentViewError(
-                    f"The environment view in {self.root} could not be created, "
-                    "because the following two specs project to the same prefix:\n"
-                    f"    {spec_a}, and\n"
-                    f"    {spec_b}.\n"
-                    "    To resolve this issue:\n"
-                    "        a. use `concretizer:unify:true` to ensure there is only one "
-                    "package per spec in the environment, or\n"
-                    "        b. disable views with `view:false`, or\n"
-                    "        c. create custom view projections."
-                ) from e
-            raise
+            except Exception as e:
+                # Remove the staging directory through its descriptor, not by path.
+                if staging_fd is not None:
+                    fs.remove_directory_contents_fd(staging_fd, staging, onerror=lambda *a: None)
+                    try:
+                        os.rmdir(staging)
+                    except OSError:
+                        pass
+                else:
+                    shutil.rmtree(staging, ignore_errors=True)
+
+                # Roll back to the previous view (if any).
+                if old_root is not None:
+                    try:
+                        os.rename(old_root, self.root)
+                    except OSError:
+                        pass
+
+                if isinstance(e, ConflictingSpecsError):
+                    spec_a = e.args[0].format(color=clr.get_color_when())
+                    spec_b = e.args[1].format(color=clr.get_color_when())
+                    raise SpackEnvironmentViewError(
+                        f"The environment view in {self.root} could not be created, "
+                        "because the following two specs project to the same prefix:\n"
+                        f"    {spec_a}, and\n"
+                        f"    {spec_b}.\n"
+                        "    To resolve this issue:\n"
+                        "        a. use `concretizer:unify:true` to ensure there is only one "
+                        "package per spec in the environment, or\n"
+                        "        b. disable views with `view:false`, or\n"
+                        "        c. create custom view projections."
+                    ) from e
+                raise
 
         if old_root is None:
             return

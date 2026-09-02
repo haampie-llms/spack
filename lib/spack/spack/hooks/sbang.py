@@ -138,7 +138,7 @@ def _filter_shebang_at(dir_fd: Optional[int], name: str, path: str) -> bool:
         tmp_name = os.path.join(dirname, f".{basename}.sbang-{secrets.token_hex(4)}")
         tmp_fd = os.open(
             tmp_name,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | fs._NOFOLLOW_FLAGS,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | fs.NOFOLLOW_FLAGS,
             0o600,
             dir_fd=dir_fd,
         )

@@ -3,13 +3,14 @@
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
 import functools as ft
+import io
 import os
 import re
 import shutil
 import stat
 import sys
 import tempfile
-from typing import Callable, Dict, List, Optional
+from typing import IO, Callable, Dict, List, Optional, Tuple
 
 from spack.vendor.typing_extensions import Literal
 
@@ -17,9 +18,11 @@ import spack.config
 import spack.directory_layout
 import spack.projections
 import spack.relocate
+import spack.relocate_text
 import spack.schema.projections
 import spack.spec
 import spack.store
+import spack.util.filesystem as fs
 import spack.util.spack_json as s_json
 import spack.util.spack_yaml as s_yaml
 from spack.error import SpackError
@@ -49,12 +52,14 @@ _projections_path = ".spack/projections.yaml"
 LinkCallbackType = Callable[[str, str, "FilesystemView", Optional[spack.spec.Spec]], None]
 
 
-def view_symlink(src: str, dst: str, *args, **kwargs) -> None:
-    symlink(src, dst)
+def view_symlink(src: str, dst: str, view: "FilesystemView", *args, **kwargs) -> None:
+    dir_fd, target = view.destination_of(dst)
+    symlink(src, target, dir_fd=dir_fd)
 
 
-def view_hardlink(src: str, dst: str, *args, **kwargs) -> None:
-    os.link(src, dst)
+def view_hardlink(src: str, dst: str, view: "FilesystemView", *args, **kwargs) -> None:
+    dir_fd, target = view.destination_of(dst)
+    os.link(src, target, dst_dir_fd=dir_fd)
 
 
 def view_copy(
@@ -63,42 +68,89 @@ def view_copy(
     """
     Copy a file from src to dst.
 
-    Use spec and view to generate relocations
+    Use spec and view to generate relocations. Relocation is done in memory and the result is
+    written to the view's destination, so the file at ``dst`` is never opened by path.
     """
-    shutil.copy2(src, dst, follow_symlinks=False)
-
-    # No need to relocate if no metadata or external.
-    if not spec or spec.external:
-        return
-
-    # Order of this dict is somewhat irrelevant
-    prefix_to_projection = {
-        str(s.prefix): view.get_projection_for_spec(s)
-        for s in spec.traverse(root=True, order="breadth")
-        if not s.external
-    }
-
+    dir_fd, target = view.destination_of(dst)
     src_stat = os.lstat(src)
 
-    # TODO: change this into a bulk operation instead of a per-file operation
+    # No need to relocate if no metadata or external. Order of this dict is somewhat irrelevant.
+    prefix_to_projection: Dict[str, str] = (
+        {
+            str(s.prefix): view.get_projection_for_spec(s)
+            for s in spec.traverse(root=True, order="breadth")
+            if not s.external
+        }
+        if spec and not spec.external
+        else {}
+    )
 
     if stat.S_ISLNK(src_stat.st_mode):
-        spack.relocate.relocate_links(links=[dst], prefix_to_prefix=prefix_to_projection)
-    elif spack.relocate.is_binary(dst):
-        spack.relocate.relocate_text_bin(binaries=[dst], prefix_to_prefix=prefix_to_projection)
-    else:
-        prefix_to_projection[spack.store.STORE.layout.root] = view._root
-        spack.relocate.relocate_text(files=[dst], prefix_to_prefix=prefix_to_projection)
-
-    try:
+        link_target = os.readlink(src)
+        if prefix_to_projection and os.path.isabs(link_target):
+            regex = re.compile("|".join(re.escape(p) for p in prefix_to_projection))
+            match = regex.match(link_target)
+            if match is not None:
+                link_target = prefix_to_projection[match.group()] + link_target[match.end() :]
+        symlink(link_target, target, dir_fd=dir_fd)
         if sys.platform != "win32":
-            os.chown(dst, src_stat.st_uid, src_stat.st_gid)
-        else:
-            from spack.util.win_acl import copy_file_permissions
+            try:
+                os.chown(
+                    target, src_stat.st_uid, src_stat.st_gid, dir_fd=dir_fd, follow_symlinks=False
+                )
+            except OSError:
+                tty.debug(f"Can't change the permissions for {dst}")
+        return
 
-            copy_file_permissions(src, dst)
-    except OSError:
-        tty.debug(f"Can't change the permissions for {dst}")
+    # TODO: change this into a bulk operation instead of a per-file operation
+    with open(src, "rb") as f:
+        data = f.read()
+
+    if prefix_to_projection:
+        buffer = io.BytesIO(data)
+        if spack.relocate.is_elf_magic(data[:8]) or spack.relocate.is_macho_magic(data[:8]):
+            replacer: spack.relocate_text.PrefixReplacer = (
+                spack.relocate_text.BinaryFilePrefixReplacer.from_strings_or_bytes(
+                    prefix_to_projection
+                )
+            )
+        else:
+            prefix_to_projection[spack.store.STORE.layout.root] = view._root
+            replacer = spack.relocate_text.TextFilePrefixReplacer.from_strings_or_bytes(
+                prefix_to_projection
+            )
+        if replacer.apply_to_file(buffer):
+            data = buffer.getvalue()
+
+    mode = stat.S_IMODE(src_stat.st_mode)
+    fd = os.open(
+        target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | fs.NOFOLLOW_FLAGS, mode, dir_fd=dir_fd
+    )
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            if sys.platform != "win32":
+                # Like shutil.copy2: copy mode and times, and try to preserve ownership.
+                os.chmod(f.fileno(), mode)
+                os.utime(f.fileno(), ns=(src_stat.st_atime_ns, src_stat.st_mtime_ns))
+                try:
+                    os.chown(f.fileno(), src_stat.st_uid, src_stat.st_gid)
+                except OSError:
+                    tty.debug(f"Can't change the permissions for {dst}")
+    except BaseException:
+        try:
+            os.unlink(target, dir_fd=dir_fd)
+        except OSError:
+            pass
+        raise
+
+    if sys.platform == "win32":
+        from spack.util.win_acl import copy_file_permissions
+
+        try:
+            copy_file_permissions(src, target)
+        except OSError:
+            tty.debug(f"Can't change the permissions for {dst}")
 
 
 #: Type alias for link types
@@ -165,14 +217,25 @@ class FilesystemView:
         verbose: bool = False,
         link_type: LinkType = "symlink",
         link_dirs: bool = False,
+        destination: Optional[str] = None,
+        destination_fd: Optional[int] = None,
     ):
         """
         Initialize a filesystem view under the given ``root`` directory with
         corresponding directory ``layout``.
 
         Files are linked by method ``link`` (spack.util.filesystem.symlink by default).
+
+        ``root`` is the *logical* location of the view: it is what projections and paths baked
+        into file contents refer to. By default files are also written there, but a view can be
+        staged elsewhere by passing ``destination`` (a directory path) and, on POSIX,
+        ``destination_fd`` (an open file descriptor of that directory). All writes then happen
+        relative to that descriptor, so they cannot be redirected by renaming the directory, and
+        the finished staging directory can be moved to ``root`` in one atomic ``rename``.
         """
         self._root = root
+        self._destination = destination if destination is not None else root
+        self._destination_fd = destination_fd
         self.layout = layout
         self.projections = {} if projections is None else projections
 
@@ -185,7 +248,77 @@ class FilesystemView:
         self.link_dirs = link_dirs and link_type == "symlink"
 
     def link(self, src: str, dst: str, spec: Optional[spack.spec.Spec] = None) -> None:
+        """Link (or copy, depending on the link type) ``src`` to the path ``dst`` in the view."""
         self._link(src, dst, self, spec)
+
+    def _relative_to_root(self, dst: str) -> str:
+        """Return ``dst`` relative to the view root, or raise if it is not inside the view."""
+        if dst == self._root:
+            return ""
+        prefix = os.path.join(self._root, "")
+        if not dst.startswith(prefix):
+            dst = os.path.normpath(dst)
+            prefix = os.path.normpath(prefix) + os.sep
+            if not dst.startswith(prefix):
+                raise ValueError(f"{dst} is not inside the view root {self._root}")
+        return dst[len(prefix) :]
+
+    def destination_of(self, dst: str) -> Tuple[Optional[int], str]:
+        """Translate the path ``dst`` in the view to where it has to be written.
+
+        Returns a ``(dir_fd, path)`` pair to be passed to the ``dir_fd`` argument and the path
+        argument of the ``os`` functions: either an open descriptor of the staging directory and
+        a path relative to it, or ``None`` and an absolute path."""
+        rel = self._relative_to_root(dst)
+        if self._destination_fd is not None:
+            return self._destination_fd, rel or "."
+        return None, os.path.join(self._destination, rel) if rel else self._destination
+
+    def exists(self, dst: str) -> bool:
+        """Whether the path ``dst`` exists in the view (without following a final symlink)."""
+        dir_fd, path = self.destination_of(dst)
+        try:
+            os.stat(path, dir_fd=dir_fd, follow_symlinks=False)
+        except OSError:
+            return False
+        return True
+
+    def mkdir(self, dst: str) -> None:
+        """Create the directory ``dst`` in the view. Its parent must exist."""
+        dir_fd, path = self.destination_of(dst)
+        os.mkdir(path, dir_fd=dir_fd)
+
+    def open(
+        self,
+        dst: str,
+        mode: str = "w",
+        *,
+        permissions: int = 0o644,
+        encoding: Optional[str] = None,
+    ) -> IO:
+        """Open the file ``dst`` in the view for writing, and return a file object.
+
+        Packages that generate files in the view (rather than linking them from their prefix)
+        must use this instead of ``open(dst, "w")``: the path ``dst`` is where the file ends up
+        once the view is published, not necessarily where it is written now.
+
+        Args:
+            dst: path of the file in the view
+            mode: ``"w"``, ``"wb"``, ``"x"`` or ``"xb"``
+            permissions: mode bits of the file if it is created
+            encoding: text encoding, for text modes
+        """
+        if mode not in ("w", "wb", "x", "xb"):
+            raise ValueError(f"unsupported mode {mode!r}, expected one of 'w', 'wb', 'x', 'xb'")
+        dir_fd, path = self.destination_of(dst)
+        flags = os.O_WRONLY | os.O_CREAT | fs.NOFOLLOW_FLAGS
+        flags |= os.O_EXCL if mode.startswith("x") else os.O_TRUNC
+        fd = os.open(path, flags, permissions, dir_fd=dir_fd)
+        try:
+            return os.fdopen(fd, mode, encoding=encoding)
+        except BaseException:
+            os.close(fd)
+            raise
 
     def add_specs(self, *specs: spack.spec.Spec, **kwargs) -> None:
         """
@@ -713,7 +846,7 @@ class SimpleFilesystemView(FilesystemView):
             return os.path.basename(file) == spack.store.STORE.layout.metadata_dir
 
         # Determine if the root is on a case-insensitive filesystem
-        normalize_paths = is_folder_on_case_insensitive_filesystem(self._root)
+        normalize_paths = is_folder_on_case_insensitive_filesystem(self._destination)
 
         sources = [
             (spec.package.view_source(), self.get_relative_projection_for_spec(spec))
@@ -727,7 +860,7 @@ class SimpleFilesystemView(FilesystemView):
         )
 
         # Check for conflicts in destination dir.
-        visit_directory_tree(self._root, DestinationMergeVisitor(visitor))
+        visit_directory_tree(self._destination, DestinationMergeVisitor(visitor))
 
         # Throw on fatal dir-file conflicts.
         if visitor.fatal_conflicts:
@@ -744,7 +877,7 @@ class SimpleFilesystemView(FilesystemView):
 
         # Make the directory structure
         for dst in visitor.directories:
-            os.mkdir(os.path.join(self._root, dst))
+            self.mkdir(os.path.join(self._root, dst))
 
         # Link the files using a "merge map": full src => full dst
         merge_map_per_prefix = self._source_merge_visitor_to_merge_map(visitor)
@@ -788,7 +921,7 @@ class SimpleFilesystemView(FilesystemView):
         metadata_visitor = MultiPrefixMerger(prefix_and_projection)
 
         # Check for conflicts in destination dir.
-        visit_directory_tree(self._root, DestinationMergeVisitor(metadata_visitor))
+        visit_directory_tree(self._destination, DestinationMergeVisitor(metadata_visitor))
 
         # Throw on dir-file conflicts -- unlikely, but who knows.
         if metadata_visitor.fatal_conflicts:
@@ -799,7 +932,7 @@ class SimpleFilesystemView(FilesystemView):
             raise MergeConflictSummary(metadata_visitor.file_conflicts)
 
         for dst in metadata_visitor.directories:
-            os.mkdir(os.path.join(self._root, dst))
+            self.mkdir(os.path.join(self._root, dst))
 
         for dst_relpath, (src_root, src_relpath) in metadata_visitor.files.items():
             self.link(os.path.join(src_root, src_relpath), os.path.join(self._root, dst_relpath))

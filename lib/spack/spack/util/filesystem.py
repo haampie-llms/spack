@@ -706,7 +706,7 @@ _HAVE_DIR_FD = (
 
 #: Flags to open a file for reading without following a final symlink, without blocking on a
 #: FIFO, and without acquiring a controlling terminal from a character device.
-_NOFOLLOW_FLAGS = (
+NOFOLLOW_FLAGS = (
     os.O_RDONLY
     | getattr(os, "O_NOFOLLOW", 0)
     | getattr(os, "O_CLOEXEC", 0)
@@ -744,7 +744,7 @@ def open_nofollow(name: str, *, dir_fd: Optional[int] = None, directory: bool = 
     Raises:
         OSError: on failure; :func:`_is_nofollow_error` tells whether ``name`` is a symlink.
     """
-    flags = _NOFOLLOW_FLAGS
+    flags = NOFOLLOW_FLAGS
     if directory:
         flags |= getattr(os, "O_DIRECTORY", 0)
     return os.open(name, flags, dir_fd=dir_fd)
@@ -769,7 +769,7 @@ def directory_fd(path: str) -> Generator[Optional[int], None, None]:
 _OnError = Callable[[Callable[..., Any], str, BaseException], None]
 
 
-def _remove_directory_contents_fd(
+def remove_directory_contents_fd(
     dir_fd: int, display_path: str, onerror: Optional[_OnError] = None
 ) -> None:
     """Remove everything below the directory open at ``dir_fd``, but not the directory itself.
@@ -812,7 +812,7 @@ def _remove_directory_contents_fd(
                         raise
                 else:
                     try:
-                        _remove_directory_contents_fd(fd, entry_path, onerror)
+                        remove_directory_contents_fd(fd, entry_path, onerror)
                     finally:
                         os.close(fd)
                     func = os.rmdir
@@ -1970,7 +1970,7 @@ def remove_linked_tree(path: str) -> None:
 
     if root_fd != -1:
         try:
-            _remove_directory_contents_fd(root_fd, path, onerror=ignore)
+            remove_directory_contents_fd(root_fd, path, onerror=ignore)
             if is_link:
                 # Only remove the directory we just emptied, not whatever the link points to now.
                 target = os.path.realpath(path)
@@ -3039,7 +3039,7 @@ def remove_directory_contents(dir):
 
     with directory_fd(dir) as fd:
         if fd is not None:
-            _remove_directory_contents_fd(fd, dir)
+            remove_directory_contents_fd(fd, dir)
             return
 
         for entry in [os.path.join(dir, entry) for entry in os.listdir(dir)]:
