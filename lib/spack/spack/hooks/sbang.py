@@ -4,13 +4,15 @@
 
 import os
 import re
+import secrets
 import shutil
 import stat
 import sys
-import tempfile
+from typing import Iterable, Optional
 
 import spack.error
 import spack.store
+import spack.util.filesystem as fs
 from spack.util import tty
 
 #: OS-imposed character limit for shebang line: 127 for Linux; 511 for Mac.
@@ -73,14 +75,28 @@ def get_interpreter(binary_string):
     return None if match is None else match.group(1)
 
 
-def filter_shebang(path):
-    """
-    Adds a second shebang line, using sbang, at the beginning of a file, if necessary.
-    Note: Spack imposes a relaxed shebang line limit, meaning that a newline or end of
-    file must occur before ``spack_shebang_limit`` bytes. If not, the file is not
-    patched.
-    """
-    with open(path, "rb") as original:
+def _filter_shebang_at(dir_fd: Optional[int], name: str, path: str) -> bool:
+    """Implementation of :func:`filter_shebang` relative to an open directory file descriptor.
+
+    Args:
+        dir_fd: open file descriptor of the directory containing the file, or ``None`` to resolve
+            ``name`` by path
+        name: name of the file relative to ``dir_fd``, or its path if ``dir_fd`` is ``None``
+        path: full path of the file, used for messages
+
+    The file is opened with ``O_NOFOLLOW`` and its patched version is written to a temporary
+    file in the same directory, which then replaces it with ``rename(2)`` relative to ``dir_fd``,
+    so a symlink that appears in the prefix while the hook runs is never followed. Replacing the
+    file requires write permission on the directory, not on the file, so read-only files are
+    handled without changing their mode; the patched file has the same mode as the original."""
+    try:
+        fd = fs.open_nofollow(name, dir_fd=dir_fd)
+    except OSError as e:
+        if fs._is_nofollow_error(e):
+            return False
+        raise
+
+    with os.fdopen(fd, "rb") as original:
         # If there is no shebang, we shouldn't replace anything.
         old_shebang_line = original.read(2)
         if old_shebang_line != b"#!":
@@ -106,7 +122,7 @@ def filter_shebang(path):
 
         # Skip files that are already using sbang.
         if old_shebang_line == new_sbang_line:
-            return
+            return False
 
         interpreter = get_interpreter(old_shebang_line)
 
@@ -115,67 +131,94 @@ def filter_shebang(path):
             return False
 
         # Store the file permissions, the patched version needs the same.
-        saved_mode = os.stat(path).st_mode
+        saved_mode = stat.S_IMODE(os.fstat(original.fileno()).st_mode)
 
-        # Change non-writable files to be writable if needed.
-        if not os.access(path, os.W_OK):
-            os.chmod(path, saved_mode | stat.S_IWUSR)
+        # Write the patched file next to the original, then atomically replace the original.
+        dirname, basename = os.path.split(name)
+        tmp_name = os.path.join(dirname, f".{basename}.sbang-{secrets.token_hex(4)}")
+        tmp_fd = os.open(
+            tmp_name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | fs._NOFOLLOW_FLAGS,
+            0o600,
+            dir_fd=dir_fd,
+        )
+        try:
+            with os.fdopen(tmp_fd, "wb") as patched:
+                patched.write(new_sbang_line)
 
-        # No need to delete since we'll move it and overwrite the original.
-        patched = tempfile.NamedTemporaryFile("wb", delete=False)
-        patched.write(new_sbang_line)
+                # Note that in Python this does not go out of bounds even if interpreter is a
+                # short byte array.
+                # Note: if the interpreter string was encoded with UTF-16, there would have
+                # been a \0 byte between all characters of lua, node, php; meaning that it would
+                # lead to truncation of the interpreter. So we don't have to worry about weird
+                # encodings here, and just looking at bytes is justified.
+                if interpreter[-4:] == b"/lua" or interpreter[-7:] == b"/luajit":
+                    # Use --! instead of #! on second line for lua.
+                    patched.write(b"--!" + old_shebang_line[2:])
+                elif interpreter[-5:] == b"/node":
+                    # Use //! instead of #! on second line for node.js.
+                    patched.write(b"//!" + old_shebang_line[2:])
+                elif interpreter[-4:] == b"/php":
+                    # Use <?php #!... ?> instead of #!... on second line for php.
+                    patched.write(b"<?php " + old_shebang_line + b" ?>")
+                else:
+                    patched.write(old_shebang_line)
 
-        # Note that in Python this does not go out of bounds even if interpreter is a
-        # short byte array.
-        # Note: if the interpreter string was encoded with UTF-16, there would have
-        # been a \0 byte between all characters of lua, node, php; meaning that it would
-        # lead to truncation of the interpreter. So we don't have to worry about weird
-        # encodings here, and just looking at bytes is justified.
-        if interpreter[-4:] == b"/lua" or interpreter[-7:] == b"/luajit":
-            # Use --! instead of #! on second line for lua.
-            patched.write(b"--!" + old_shebang_line[2:])
-        elif interpreter[-5:] == b"/node":
-            # Use //! instead of #! on second line for node.js.
-            patched.write(b"//!" + old_shebang_line[2:])
-        elif interpreter[-4:] == b"/php":
-            # Use <?php #!... ?> instead of #!... on second line for php.
-            patched.write(b"<?php " + old_shebang_line + b" ?>")
-        else:
-            patched.write(old_shebang_line)
+                # Copy the remainder of the file, and give the patched file the original's mode.
+                shutil.copyfileobj(original, patched)
+                os.fchmod(patched.fileno(), saved_mode)
 
-        # After copying the remainder of the file, we can close the original
-        shutil.copyfileobj(original, patched)
+            os.rename(tmp_name, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+        except BaseException:
+            try:
+                os.unlink(tmp_name, dir_fd=dir_fd)
+            except OSError:
+                pass
+            raise
 
-    # And close the temporary file so we can move it.
-    patched.close()
-
-    # Overwrite original file with patched file, and keep the original mode
-    shutil.move(patched.name, path)
-    os.chmod(path, saved_mode)
     return True
 
 
-def filter_shebangs_in_directory(directory, filenames=None):
-    if filenames is None:
-        filenames = os.listdir(directory)
+def filter_shebang(path: str) -> bool:
+    """
+    Adds a second shebang line, using sbang, at the beginning of a file, if necessary.
+    Note: Spack imposes a relaxed shebang line limit, meaning that a newline or end of
+    file must occur before ``spack_shebang_limit`` bytes. If not, the file is not
+    patched.
+    """
+    with fs.directory_fd(os.path.dirname(path) or ".") as dir_fd:
+        name = os.path.basename(path) if dir_fd is not None else path
+        return _filter_shebang_at(dir_fd, name, path)
 
+
+def _filter_shebangs_at(dir_fd: Optional[int], directory: str, filenames: Iterable[str]) -> None:
+    """Filter the shebangs of the executable, non-symlink regular files ``filenames`` in the
+    directory open at ``dir_fd`` (or at ``directory`` if ``dir_fd`` is ``None``)."""
     is_exe = stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
 
     for file in filenames:
         path = os.path.join(directory, file)
+        name = file if dir_fd is not None else path
 
         # Only look at executable, non-symlink files.
         try:
-            st = os.lstat(path)
+            st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
         except OSError:
             continue
 
-        if stat.S_ISLNK(st.st_mode) or stat.S_ISDIR(st.st_mode) or not st.st_mode & is_exe:
+        if not stat.S_ISREG(st.st_mode) or not st.st_mode & is_exe:
             continue
 
         # test the file for a long shebang, and filter
-        if filter_shebang(path):
+        if _filter_shebang_at(dir_fd, name, path):
             tty.debug("Patched overlong shebang in %s" % path)
+
+
+def filter_shebangs_in_directory(directory: str, filenames: Optional[Iterable[str]] = None):
+    with fs.directory_fd(directory) as dir_fd:
+        if filenames is None:
+            filenames = os.listdir(directory if dir_fd is None else dir_fd)
+        _filter_shebangs_at(dir_fd, directory, filenames)
 
 
 def post_install(spec, explicit=None):
@@ -189,8 +232,10 @@ def post_install(spec, explicit=None):
         tty.debug("SKIP: shebang filtering [external package]")
         return
 
-    for directory, _, filenames in os.walk(spec.prefix):
-        filter_shebangs_in_directory(directory, filenames)
+    # Every directory is visited through its own file descriptor; symlinked directories are
+    # never entered, and files are opened and replaced relative to that descriptor.
+    for directory, _, filenames, dir_fd in os.fwalk(spec.prefix, follow_symlinks=False):
+        _filter_shebangs_at(dir_fd, directory, filenames)
 
 
 class SbangPathError(spack.error.SpackError):

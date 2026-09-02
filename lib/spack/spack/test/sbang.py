@@ -13,6 +13,7 @@ import shutil
 import stat
 import sys
 import tempfile
+import types
 
 import pytest
 
@@ -450,3 +451,45 @@ def test_sbang_hook_handles_non_writable_files_preserving_permissions(tmp_path: 
     with open(path, "r", encoding="utf-8") as f:
         assert "sbang" in f.readline()
     assert os.stat(path).st_mode & 0o777 == 0o555
+
+
+def test_sbang_hook_does_not_follow_symlinks(tmp_path: pathlib.Path):
+    """A symlink inside the prefix pointing at a script outside of it must not be patched."""
+    outside = tmp_path / "outside.sh"
+    outside.write_text(long_line, encoding="utf-8")
+    outside.chmod(0o755)
+    before = outside.read_bytes()
+
+    prefix = tmp_path / "prefix"
+    prefix.mkdir()
+    os.symlink(str(outside), str(prefix / "link.sh"))
+    os.symlink(str(tmp_path), str(prefix / "link_dir"))
+    inside = prefix / "inside.sh"
+    inside.write_text(long_line, encoding="utf-8")
+    inside.chmod(0o755)
+
+    sbang.post_install(types.SimpleNamespace(prefix=str(prefix), external=False))
+
+    assert outside.read_bytes() == before
+    assert os.path.islink(str(prefix / "link.sh"))
+    assert not sbang.filter_shebang(str(prefix / "link.sh"))
+    assert outside.read_bytes() == before
+    assert "sbang" in inside.read_text(encoding="utf-8").splitlines()[0]
+    assert not os.path.islink(str(inside))
+    assert os.stat(str(inside)).st_mode & 0o777 == 0o755
+
+
+def test_sbang_hook_cleans_up_temporary_file_on_failure(tmp_path: pathlib.Path, monkeypatch):
+    path = tmp_path / "file.sh"
+    path.write_text(long_line, encoding="utf-8")
+    before = path.read_bytes()
+
+    def fail(*args, **kwargs):
+        raise OSError("rename failed")
+
+    monkeypatch.setattr(os, "rename", fail)
+    with pytest.raises(OSError, match="rename failed"):
+        sbang.filter_shebang(str(path))
+
+    assert path.read_bytes() == before
+    assert os.listdir(str(tmp_path)) == ["file.sh"]
