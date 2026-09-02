@@ -621,10 +621,10 @@ def set_install_permissions(path):
         sd.add_ace(everyone_ace)
         sd.apply(path)
         return
-    if os.path.isdir(path):
-        os.chmod(path, 0o755)
-    else:
-        os.chmod(path, 0o644)
+    mode = os.lstat(path).st_mode
+    if stat.S_ISLNK(mode):
+        return
+    chmod_nofollow(path, 0o755 if stat.S_ISDIR(mode) else 0o644)
 
 
 def group_ids(uid: Optional[int] = None) -> List[int]:
@@ -652,17 +652,28 @@ def group_ids(uid: Optional[int] = None) -> List[int]:
     return sorted(set(gids + [g.gr_gid for g in grp.getgrall() if user in g.gr_mem]))
 
 
+def group_gid(group: Union[str, int]) -> int:
+    """Return the gid of ``group``, given either by name or by gid."""
+    if isinstance(group, str):
+        return grp.getgrnam(group).gr_gid
+    return group
+
+
 @system_path_filter(arg_slice=slice(1))
-def chgrp(path, group, follow_symlinks=True):
-    """Implement the bash chgrp function on a single path"""
+def chgrp(path: Union[str, int], group: Union[str, int], follow_symlinks: bool = True) -> None:
+    """Implement the bash chgrp function on a single path, or on an open file descriptor.
+
+    When ``path`` is an ``int`` it is taken to be a file descriptor, and ``follow_symlinks`` is
+    ignored: the group of the open file is changed."""
     if sys.platform == "win32":
         raise OSError("Function 'chgrp' is not supported on Windows")
 
-    if isinstance(group, str):
-        gid = grp.getgrnam(group).gr_gid
-    else:
-        gid = group
-    if os.stat(path).st_gid == gid:
+    gid = group_gid(group)
+    if isinstance(path, int):
+        if os.fstat(path).st_gid != gid:
+            os.chown(path, -1, gid)
+        return
+    if os.stat(path, follow_symlinks=follow_symlinks).st_gid == gid:
         return
     if follow_symlinks:
         os.chown(path, -1, gid)
@@ -671,17 +682,127 @@ def chgrp(path, group, follow_symlinks=True):
 
 
 @system_path_filter(arg_slice=slice(1))
-def chmod_x(entry, perms):
+def chmod_x(entry: Union[str, int], perms: int) -> None:
     """Implements chmod, treating all executable bits as set using the chmod
     utility's ``+X`` option.
-    """
+
+    ``entry`` may be a path or an open file descriptor."""
     mode = os.stat(entry).st_mode
-    if os.path.isfile(entry):
+    if stat.S_ISREG(mode):
         if not mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH):
             perms &= ~stat.S_IXUSR
             perms &= ~stat.S_IXGRP
             perms &= ~stat.S_IXOTH
     os.chmod(entry, perms)
+
+
+#: Whether the fd-relative (``*at``) system calls used by the TOCTOU-safe helpers below are
+#: available. On Windows they are not, and callers fall back to path-based code, exactly like
+#: ``shutil.rmtree`` does where ``shutil.rmtree.avoids_symlink_attacks`` is false.
+_HAVE_DIR_FD = sys.platform != "win32" and {os.open, os.stat, os.chmod, os.chown} <= (
+    os.supports_dir_fd
+)
+
+#: Flags to open a file for reading without following a final symlink, without blocking on a
+#: FIFO, and without acquiring a controlling terminal from a character device.
+_NOFOLLOW_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_CLOEXEC", 0)
+    | getattr(os, "O_NONBLOCK", 0)
+    | getattr(os, "O_NOCTTY", 0)
+)
+
+#: errno values that ``open(2)`` with ``O_NOFOLLOW`` reports when the last path component is a
+#: symlink: ``ELOOP`` on Linux and macOS, ``EMLINK`` on FreeBSD, ``EFTYPE`` on NetBSD.
+_NOFOLLOW_ERRNOS = frozenset(
+    e for e in (errno.ELOOP, errno.EMLINK, getattr(errno, "EFTYPE", None)) if e is not None
+)
+
+
+def _is_nofollow_error(e: OSError) -> bool:
+    """Whether ``e`` was raised by ``open(2)`` with ``O_NOFOLLOW`` because the last path
+    component is a symlink."""
+    return e.errno in _NOFOLLOW_ERRNOS
+
+
+def open_nofollow(name: str, *, dir_fd: Optional[int] = None, directory: bool = False) -> int:
+    """Open ``name`` for reading without following a symlink in the last path component.
+
+    This is the building block of the time-of-check/time-of-use safe helpers in this module:
+    when ``dir_fd`` is an open directory, ``name`` is resolved relative to *that* directory, so
+    nothing done to the path in the meantime can redirect the open outside of it. The threat
+    model is an attacker that can write inside the tree being operated on, not one that controls
+    the parent of its root.
+
+    Args:
+        name: path, relative to ``dir_fd`` if given
+        dir_fd: open directory file descriptor to resolve ``name`` against
+        directory: require ``name`` to be a directory (``O_DIRECTORY``)
+
+    Raises:
+        OSError: on failure; :func:`_is_nofollow_error` tells whether ``name`` is a symlink.
+    """
+    flags = _NOFOLLOW_FLAGS
+    if directory:
+        flags |= getattr(os, "O_DIRECTORY", 0)
+    return os.open(name, flags, dir_fd=dir_fd)
+
+
+@contextmanager
+def directory_fd(path: str) -> Generator[Optional[int], None, None]:
+    """Context manager yielding an open file descriptor for the directory ``path`` on POSIX, and
+    ``None`` on Windows, where fd-relative operations are unavailable."""
+    if not _HAVE_DIR_FD:
+        yield None
+        return
+
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0))
+    try:
+        yield fd
+    finally:
+        os.close(fd)
+
+
+def chmod_nofollow(name: str, mode: int, *, dir_fd: Optional[int] = None) -> bool:
+    """Change the mode of ``name`` without following a symlink in the last path component.
+
+    Regular files and directories are opened with ``O_NOFOLLOW`` and changed through the file
+    descriptor, which cannot be redirected once open. Files that cannot be opened for reading
+    (e.g. mode ``0o000``) and special files (FIFOs, sockets, devices), which are never opened,
+    fall back to ``chmod(2)`` relative to ``dir_fd`` after checking they are not symlinks. That
+    fallback has a small residual window between the check and the change, which is the best
+    Linux offers without ``fchmodat2(2)``.
+
+    Args:
+        name: path, relative to ``dir_fd`` if given
+        mode: the new mode
+        dir_fd: open directory file descriptor to resolve ``name`` against
+
+    Returns:
+        ``True`` if the mode was changed, ``False`` if ``name`` is a symlink (left untouched)
+    """
+    st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+    if stat.S_ISLNK(st.st_mode):
+        return False
+
+    if stat.S_ISREG(st.st_mode) or stat.S_ISDIR(st.st_mode):
+        try:
+            fd = open_nofollow(name, dir_fd=dir_fd, directory=stat.S_ISDIR(st.st_mode))
+        except OSError as e:
+            if _is_nofollow_error(e):
+                return False
+            if e.errno not in (errno.EACCES, errno.EPERM):
+                raise
+        else:
+            try:
+                os.chmod(fd, mode)
+            finally:
+                os.close(fd)
+            return True
+
+    os.chmod(name, mode, dir_fd=dir_fd)
+    return True
 
 
 def win_copy_exe_mode(src, dest):
