@@ -92,10 +92,12 @@ Inputs and outputs are in `results/handwritten/`. The synthetic `errtest` reposi
 - `twoconds+x+y` reports only the +x path.
 - `hdf5~mpi ^mpich` says mpich is not a dependency but not that `~mpi` is why.
 - "Multiple providers are required for the same 'mpi' virtual" never names the providers
-  or that one came from `packages.yaml`. Its cause analysis always reports nothing
-  because the rule in `error_messages.lp` line 129 references `has_provider`, which is
-  defined nowhere. Clingo prints "atom does not occur in any rule head" for it in 11 of
-  the 36 runs that reached the second pass.
+  or that one came from `packages.yaml`. Its cause analysis always reports nothing:
+  `error_messages.lp` has a causation rule for a virtual with no provider, but none for
+  two providers. Clingo also prints an "atom does not occur in any rule head" info line
+  about `has_provider` in 11 of the 36 runs that reached the second pass. The atom is
+  defined in `concretize.lp`; it is simply absent from models that contain no virtuals,
+  and the causation program does not declare it with `#defined`.
 
 ### Generic, fan-out
 
@@ -230,8 +232,8 @@ an agent expecting an error will be surprised.
 5. Put the requirement spec and its config file and line into requirement messages in
    the first pass, and collapse the per-node fan-out for `all:` requirements. The blame
    data already exists in `spack config blame`.
-6. Define `has_provider` in `error_messages.lp` or drop the rule, so provider conflicts
-   get causes and the clingo warning disappears.
+6. Add a causation rule for two providers of the same virtual in `error_messages.lp`,
+   and declare `has_provider/1` there with `#defined` so the clingo info line disappears.
 7. List the externals considered and the failing constraint in `buildable: false`
    messages. Ten of ten fuzzed cases hid the cause.
 8. Print each message once, drop the chatter when stdout is not a tty, and offer the
