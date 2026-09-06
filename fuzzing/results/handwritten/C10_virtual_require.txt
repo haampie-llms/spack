@@ -1,0 +1,7 @@
+# -C <fuzzing>/cases/C10_virtual_require spec hdf5 ^mpich
+# note: virtual requirement openmpi vs root mpich
+# exit=1 time=5.7s lines=4 chars=248
+==> Error: failed to concretize `hdf5 ^mpich` for the following reasons:
+       1. Multiple providers are required for the same 'mpi' virtual
+  Analyzing the cause of the failure, this may take a moment...
+==> No additional error causes discovered

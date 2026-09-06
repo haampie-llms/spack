@@ -1,0 +1,14 @@
+# -C <fuzzing>/cases/C08_all_target spec zlib-ng
+# note: all: require foreign target
+# exit=1 time=5.9s lines=11 chars=730
+==> Error: failed to concretize `zlib-ng` for the following reasons:
+       1. cannot satisfy a requirement for package 'zlib-ng'.
+     2. cannot satisfy a requirement for package 'gnuconfig'.
+     3. cannot satisfy a requirement for package 'gmake'.
+     4. cannot satisfy a requirement for package 'compiler-wrapper'.
+     5. Cannot select a single "node_target" for package "apple-clang"
+     6. 'apple-clang target=x86_64' is not compatible with this machine
+     7. 'apple-clang target=x86_64' cannot satisfy constraint 'target=aarch64:'
+     8. 'apple-clang target=armv8.1a' cannot satisfy constraint 'target=x86_64:'
+  Analyzing the cause of the failure, this may take a moment...
+==> No additional error causes discovered

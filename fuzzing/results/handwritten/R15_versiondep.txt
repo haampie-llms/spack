@@ -1,0 +1,6 @@
+# spec versiondep ^leaf@3
+# note: versiondep@2 needs leaf@2: (ok!), @1 needs leaf@1; this should SUCCEED with @2
+# exit=0 time=4.7s lines=3 chars=163
+ -   versiondep@2.0 build_system=generic platform=darwin os=sequoia target=m4
+ -       ^leaf@3.0+shared build_system=generic platform=darwin os=sequoia target=m4
+

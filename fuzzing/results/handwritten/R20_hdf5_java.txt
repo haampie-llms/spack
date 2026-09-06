@@ -1,0 +1,8 @@
+# spec hdf5@1.8.19+java
+# note: java variant only when @1.10:
+# exit=1 time=5.5s lines=5 chars=325
+==> Error: failed to concretize `hdf5@1.8.19+java` for the following reasons:
+       1. Cannot satisfy 'hdf5@1.8.19'
+  Analyzing the cause of the failure, this may take a moment...
+==> Error:      2. Cannot satisfy 'hdf5@1.8.19' (version 1.14.6 does not match)
+        required because hdf5@1.8.19+java requested explicitly 

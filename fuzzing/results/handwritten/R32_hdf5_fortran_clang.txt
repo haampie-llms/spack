@@ -1,0 +1,5 @@
+# spec hdf5+fortran %fortran=apple-clang
+# note: apple-clang has no fortran
+# exit=1 time=4.7s lines=2 chars=216
+==> Error: Spack concretizer internal error. Please submit a bug report at https://github.com/spack/spack and include the command and environment if applicable.
+    hdf5+fortran %fortran=apple-clang is unsatisfiable

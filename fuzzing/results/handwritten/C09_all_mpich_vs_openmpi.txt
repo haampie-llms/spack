@@ -1,0 +1,28 @@
+# -C <fuzzing>/cases/C09_all_mpich_vs_openmpi spec hdf5 ^openmpi
+# note: config forces mpich, root asks openmpi
+# exit=1 time=5.5s lines=25 chars=1622
+==> Warning: <fuzzing>/cases/C09_all_mpich_vs_openmpi/packages.yaml:3: 'packages: all: require: ["^mpich"]' applies a dependency constraint to all packages. This often leads to concretization errors. This was likely intended as a requirement for a provider of a (language) virtual. Consider instead:
+# For each virtual:
+packages:
+  <virtual>:
+    require:
+    - mpich
+==> Error: failed to concretize `hdf5 ^openmpi` for the following reasons:
+       1. cannot satisfy a requirement for package 'zlib-ng'.
+     2. cannot satisfy a requirement for package 'readline'.
+     3. cannot satisfy a requirement for package 'pkgconf'.
+     4. cannot satisfy a requirement for package 'perl'.
+     5. cannot satisfy a requirement for package 'openmpi'.
+     6. cannot satisfy a requirement for package 'ncurses'.
+     7. cannot satisfy a requirement for package 'less'.
+     8. cannot satisfy a requirement for package 'hdf5'.
+     9. cannot satisfy a requirement for package 'gmake'.
+    10. cannot satisfy a requirement for package 'gdbm'.
+    11. cannot satisfy a requirement for package 'diffutils'.
+    12. cannot satisfy a requirement for package 'curl'.
+    13. cannot satisfy a requirement for package 'cmake'.
+    14. cannot satisfy a requirement for package 'bzip2'.
+    15. cannot satisfy a requirement for package 'berkeley-db'.
+    16. Cannot build musl, since it is configured `buildable:false` and no externals satisfy the request
+  Analyzing the cause of the failure, this may take a moment...
+==> No additional error causes discovered

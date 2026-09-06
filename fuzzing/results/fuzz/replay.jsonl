@@ -1,0 +1,8 @@
+{"kind": "cfg_require_version_conflict", "specs": ["py-funcy@=1.14"], "config": {"packages": {"py-funcy": {"require": "@=1.15"}}}, "expect": ["1.15", "requirement"], "package": "py-funcy"}
+{"kind": "compiler_c", "specs": ["r-rocr %c=gcc"], "config": null, "expect": ["gcc"], "package": "r-rocr"}
+{"kind": "cfg_external_too_old", "specs": ["py-awscrt"], "config": {"packages": {"cmake": {"buildable": false, "externals": [{"spec": "cmake@=2.8.10.2", "prefix": "/usr"}]}}}, "expect": ["cmake", "2.8.10.2", "3.1:"], "package": "py-awscrt"}
+{"kind": "dep_version_out_of_range", "specs": ["aocl-compression@:5.0 build_system=cmake ^cmake@=3.0.2"], "config": null, "expect": ["cmake", "3.22:", "3.0.2"], "package": "aocl-compression"}
+{"kind": "arch_os", "specs": ["brynet os=ubuntu22.04"], "config": null, "expect": ["ubuntu22.04"], "package": "brynet"}
+{"kind": "two_conditional_deps_disjoint", "specs": ["nccl-tests cuda_arch=35,90"], "config": null, "expect": ["cuda", "5.0:11.8", "12.0:"], "package": "nccl-tests"}
+{"kind": "cfg_provider_require_conflict", "specs": ["audacious@4.4: ^qt-base"], "config": {"packages": {"qmake": {"require": "qt"}}}, "expect": ["qmake", "qt-base", "qt"], "package": "audacious"}
+{"kind": "two_providers", "specs": ["mumps+mpi ^intel-oneapi-mpi ^mvapich-plus"], "config": null, "expect": ["mpi", "intel-oneapi-mpi", "mvapich-plus"], "package": "mumps"}

@@ -1,0 +1,13 @@
+# spec depvariant ^leaf+shared
+# note: depvariant requires leaf~shared
+# exit=1 time=4.9s lines=10 chars=662
+==> Error: failed to concretize `depvariant ^leaf+shared` for the following reasons:
+       1. 'leaf' requires conflicting variant values '~shared' and '+shared'
+  Analyzing the cause of the failure, this may take a moment...
+<spack>/lib/spack/spack/solver/error_messages.lp:129:10-40: info: atom does not occur in any rule head:
+  has_provider(node(X,Virtual))
+
+==> Error:      2. 'leaf' requires conflicting variant values '~shared' and '+shared'
+        required because depvariant depends on leaf~shared 
+          required because depvariant ^leaf+shared requested explicitly 
+        required because depvariant ^leaf+shared requested explicitly 

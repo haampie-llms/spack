@@ -1,0 +1,7 @@
+# -C <fuzzing>/cases/C01_nonbuildable spec zlib-ng
+# note: buildable:false, no external
+# exit=1 time=5.3s lines=4 chars=285
+==> Error: failed to concretize `zlib-ng` for the following reasons:
+       1. Cannot build zlib-ng, since it is configured `buildable:false` and no externals satisfy the request
+  Analyzing the cause of the failure, this may take a moment...
+==> No additional error causes discovered

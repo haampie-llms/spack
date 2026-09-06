@@ -1,0 +1,12 @@
+# -e <fuzzing>/cases/E01_unify_version/env concretize -f
+# note: unify:true, roots need leaf@2 and leaf@1
+# exit=1 time=5.3s lines=9 chars=504
+==> Error: failed to concretize `leaf@2`, `chain-b` for the following reasons:
+       1. Cannot satisfy 'leaf@1'
+  Analyzing the cause of the failure, this may take a moment...
+<spack>/lib/spack/spack/solver/error_messages.lp:129:10-40: info: atom does not occur in any rule head:
+  has_provider(node(X,Virtual))
+
+==> Error:      2. Cannot satisfy 'leaf@1' (version 2.0 does not match)
+        required because chain-b depends on leaf@1 
+          required because chain-b requested explicitly 

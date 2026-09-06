@@ -1,0 +1,8 @@
+# spec zlib-ng %c=gcc
+# note: external gcc only provides fortran; gcc buildable so may just build gcc (long!)
+# exit=1 time=6.5s lines=5 chars=340
+==> Error: failed to concretize `zlib-ng %c=gcc` for the following reasons:
+       1. Only external, or concrete, compilers are allowed for the cxx language
+     2. Only external, or concrete, compilers are allowed for the c language
+  Analyzing the cause of the failure, this may take a moment...
+==> No additional error causes discovered

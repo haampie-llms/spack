@@ -1,0 +1,4 @@
+# -C <fuzzing>/cases/C05_require_badversion spec hdf5
+# note: config requires nonexistent version
+# exit=1 time=0.9s lines=1 chars=111
+==> Error: Version requirement 99 on hdf5 for hdf5 cannot match any known version from package.py or externals

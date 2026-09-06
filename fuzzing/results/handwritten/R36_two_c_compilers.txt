@@ -1,0 +1,5 @@
+# spec zlib-ng %c=gcc %c=apple-clang
+# note: two providers for c
+# exit=1 time=5.9s lines=2 chars=212
+==> Error: Spack concretizer internal error. Please submit a bug report at https://github.com/spack/spack and include the command and environment if applicable.
+    zlib-ng %c=apple-clang %c=gcc is unsatisfiable

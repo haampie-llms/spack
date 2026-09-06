@@ -1,0 +1,25 @@
+# -C <fuzzing>/cases/C20_require_when_bad spec hdf5~mpi
+# note: conditional requirement +mpi vs root ~mpi
+# exit=0 time=5.5s lines=22 chars=2821
+ -   hdf5@2.2.0~cxx~fortran~hl~ipo~java~map~mpi+shared~szip~threadsafe+tools api=default build_system=cmake build_type=Release generator=make platform=darwin os=sequoia target=m4 %c=apple-clang@17.0.0
+[e]      ^apple-clang@17.0.0 build_system=bundle platform=darwin os=sequoia target=aarch64
+ -       ^cmake@3.31.12~doc+ncurses+ownlibs~qtgui build_system=generic build_type=Release platform=darwin os=sequoia target=m4 %c,cxx=apple-clang@17.0.0
+ -           ^curl@8.21.0~gssapi~ldap~libidn2~librtmp~libssh~libssh2+nghttp2 build_system=autotools libs:=shared,static tls:=openssl platform=darwin os=sequoia target=m4 %c,cxx=apple-clang@17.0.0
+ -               ^nghttp2@1.67.1 build_system=autotools platform=darwin os=sequoia target=m4 %c,cxx=apple-clang@17.0.0
+ -                   ^diffutils@3.12 build_system=autotools platform=darwin os=sequoia target=m4 %c=apple-clang@17.0.0
+ -                       ^libiconv@1.18 build_system=autotools libs:=shared,static platform=darwin os=sequoia target=m4 %c=apple-clang@17.0.0
+ -               ^openssl@3.6.1~docs+shared build_system=generic certs=mozilla platform=darwin os=sequoia target=m4 %c,cxx=apple-clang@17.0.0
+ -                   ^ca-certificates-mozilla@2026-05-14 build_system=generic platform=darwin os=sequoia target=m4
+ -                   ^perl@5.42.2+cpanm+opcode+open+shared+threads build_system=generic platform=darwin os=sequoia target=m4 %c=apple-clang@17.0.0
+ -                       ^berkeley-db@18.1.40+cxx~docs+stl build_system=autotools patches=26090f4,b231fcc platform=darwin os=sequoia target=m4 %c,cxx=apple-clang@17.0.0
+ -                       ^bzip2@1.0.8~debug~pic+shared build_system=generic platform=darwin os=sequoia target=m4 %c=apple-clang@17.0.0
+ -                       ^gdbm@1.26 build_system=autotools platform=darwin os=sequoia target=m4 %c=apple-clang@17.0.0
+ -                           ^readline@8.3 build_system=autotools patches=21f0a03,72dee13,e273643 platform=darwin os=sequoia target=m4 %c=apple-clang@17.0.0
+ -                       ^less@692 build_system=autotools platform=darwin os=sequoia target=m4 %c=apple-clang@17.0.0
+ -           ^ncurses@6.6~symlinks+termlib abi=none build_system=autotools patches=7a351bc platform=darwin os=sequoia target=m4 %c,cxx=apple-clang@17.0.0
+[+]      ^compiler-wrapper@1.1.0 build_system=generic platform=darwin os=sequoia target=m4
+[+]      ^gmake@4.4.1~guile build_system=generic platform=darwin os=sequoia target=m4 %c=apple-clang@17.0.0
+ -       ^pkgconf@2.5.1 build_system=autotools platform=darwin os=sequoia target=m4 %c=apple-clang@17.0.0
+[+]          ^gnuconfig@2025-07-10 build_system=generic platform=darwin os=sequoia target=m4
+ -       ^zlib-ng@2.3.3+compat+new_strategies+opt+pic+shared build_system=autotools platform=darwin os=sequoia target=m4 %c,cxx=apple-clang@17.0.0
+

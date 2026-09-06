@@ -1,0 +1,12 @@
+# spec versiondep@1 ^leaf@2
+# note: versiondep@1 needs leaf@1
+# exit=1 time=5.1s lines=9 chars=531
+==> Error: failed to concretize `versiondep@1 ^leaf@2` for the following reasons:
+       1. Cannot satisfy 'leaf@1'
+  Analyzing the cause of the failure, this may take a moment...
+<spack>/lib/spack/spack/solver/error_messages.lp:129:10-40: info: atom does not occur in any rule head:
+  has_provider(node(X,Virtual))
+
+==> Error:      2. Cannot satisfy 'leaf@1' (version 2.0 does not match)
+        required because versiondep depends on leaf@1 when @1 
+          required because versiondep@1 ^leaf@2 requested explicitly 

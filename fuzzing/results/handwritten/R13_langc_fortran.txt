@@ -1,0 +1,4 @@
+# spec langc %fortran=gcc
+# note: edge attribute for virtual fortran, langc never depends on fortran
+# exit=1 time=0.3s lines=1 chars=57
+==> Error: 'langc %fortran=gcc' cannot depend on fortran

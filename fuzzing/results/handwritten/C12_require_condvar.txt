@@ -1,0 +1,8 @@
+# -C <fuzzing>/cases/C12_require_condvar spec hdf5@1.8.19
+# note: config requires conditional variant on old version
+# exit=1 time=5.8s lines=5 chars=315
+==> Error: failed to concretize `hdf5@1.8.19` for the following reasons:
+       1. Cannot satisfy 'hdf5@1.8.19'
+  Analyzing the cause of the failure, this may take a moment...
+==> Error:      2. Cannot satisfy 'hdf5@1.8.19' (version 1.14.6 does not match)
+        required because hdf5@1.8.19 requested explicitly 

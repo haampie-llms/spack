@@ -1,0 +1,7 @@
+# spec zlib-ng platform=linux
+# note: host platform is darwin
+# exit=1 time=5.4s lines=4 chars=261
+==> Error: failed to concretize `zlib-ng platform=linux` for the following reasons:
+       1. Cannot select a single "node_platform" for package "zlib-ng"
+  Analyzing the cause of the failure, this may take a moment...
+==> No additional error causes discovered

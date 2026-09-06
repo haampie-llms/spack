@@ -1,0 +1,5 @@
+# spec platdep ^leaf
+# note: leaf is a dep only on platform=linux
+# exit=1 time=4.1s lines=2 chars=196
+==> Error: Spack concretizer internal error. Please submit a bug report at https://github.com/spack/spack and include the command and environment if applicable.
+    platdep ^leaf is unsatisfiable

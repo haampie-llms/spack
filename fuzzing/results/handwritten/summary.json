@@ -1,0 +1,10 @@
+[
+ {
+  "name": "R01_condvar",
+  "exit": 1,
+  "time": 3.7,
+  "lines": 8,
+  "chars": 545,
+  "note": "variant 'feat' only exists when @2:"
+ }
+]
