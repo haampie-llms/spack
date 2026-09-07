@@ -12,6 +12,9 @@
 
 #program error_messages.
 
+% Atoms from the main solve that may be absent from the model (e.g. no virtuals in the DAG)
+#defined has_provider/1.
+
 % The following "condition_cause" rules create a causal tree between trigger
 % conditions by locating the effect conditions that are triggers for another
 % condition. In all these rules, Condition2 is caused by Condition1
