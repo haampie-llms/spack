@@ -1555,16 +1555,30 @@ attr("variant_selected", PackageNode, Variant, Value, VariantType, VariantID) :-
   node_has_variant(PackageNode, Variant, VariantID),
   variant_type(VariantID, VariantType).
 
-% a variant cannot be set if it is not a variant on the package
+% a variant cannot be set if it is not a variant on the package. If the variant is
+% conditional, report every definition condition that the node does not satisfy, e.g.
+% "Cannot set variant 'java' for 'hdf5@1.8.19': Package hdf5 has variant 'java' when @1.10:"
+error(100, "Cannot set variant '{0}' for '{1}@{2}': {3}", Variant, Package, Version, Reason)
+  :- attr("variant_set", node(ID, Package), Variant),
+     not pkg_has_variant(node(ID, Package), Variant),
+     attr("version", node(ID, Package), Version),
+     pkg_fact(Package, variant_condition(Variant, _, ConditionID)),
+     condition_reason(ConditionID, Reason),
+     build(node(ID, Package)).
+
+variant_has_condition(Package, Variant) :- pkg_fact(Package, variant_condition(Variant, _, _)).
+
 error(100, "Cannot set variant '{0}' for package '{1}' because the variant condition cannot be satisfied for the given spec", Variant, Package)
   :- attr("variant_set", node(ID, Package), Variant),
      not pkg_has_variant(node(ID, Package), Variant),
+     not variant_has_condition(Package, Variant),
      build(node(ID, Package)).
 
 % a variant cannot take on a value if it is not a variant of the package
 error(100, "Cannot set variant '{0}' for package '{1}' because the variant condition cannot be satisfied for the given spec", Variant, Package)
   :- attr("variant_value", node(ID, Package), Variant, _),
      not pkg_has_variant(node(ID, Package), Variant),
+     not attr("variant_set", node(ID, Package), Variant),
      build(node(ID, Package)).
 
 % at most one variant value for single-valued variants.
@@ -1627,8 +1641,17 @@ error(100, "{0} variant '{1}' cannot have values '{2}' and '{3}' as they come fr
      Set1 < Set2, % see[1]
      build(node(ID, Package)).
 
+% A variant that is set must take that value. When a node we need to build does not have
+% the variant at all (e.g. it is conditional on a version the user pinned) this is reported
+% by the error rules above instead, so that the solver does not silently change the version
+% to make the variant exist and then blame the version.
 :- attr("variant_set", node(ID, Package), Variant, Value),
-   not attr("variant_value", node(ID, Package), Variant, Value).
+   not attr("variant_value", node(ID, Package), Variant, Value),
+   pkg_has_variant(node(ID, Package), Variant).
+
+:- attr("variant_set", node(ID, Package), Variant, Value),
+   not attr("variant_value", node(ID, Package), Variant, Value),
+   not build(node(ID, Package)).
 
 % In a case with `variant("foo", when="+bar")` and a user request for +foo or ~foo,
 % force +bar to be set too. This gives no penalty if `+bar` is not the default value, and
