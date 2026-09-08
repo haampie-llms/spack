@@ -183,20 +183,43 @@ them changes how many error atoms a model carries, and so which model the optimi
 it needs its own before/after on the corpus rather than a local test. *Cost: moderate, and the
 risk is in the optimization, not in the rule.*
 
-**2. The remaining 11 internal errors.** Instrumenting every integrity constraint — rewriting
-each bare `:-` head into a tagged `error(...)` — identifies the blocker directly. That found
-`concretize.lp:1034` for the compiler case. Two caveats learned the hard way: the pure
-well-formedness constraints (`concretize.lp:81-97`) must stay hard, or the solver dodges
-everything else by dropping a node; and relaxing all of them at once makes solving slow enough
-that most cases hit the timeout before yielding an answer. Of 17 internal-error cases swept,
-5 were explained (`1034` ×3, `847`, `1194`); the rest need the sibling `.lp` files
-(`direct_dependency.lp`, `libc_compatibility.lp`, `os_compatibility.lp` hold 5 more
-constraints) and the hard `1 {...} 1` cardinality rules instrumented too.
+**2. The remaining 11 internal errors.** Instrumenting integrity constraints — rewriting each
+bare `:-` head into a tagged `error(...)` — identifies the blocker directly, and found
+`concretize.lp:1034` for the compiler case. Two caveats: the pure well-formedness constraints
+(`concretize.lp:81-97`) must stay hard, or the solver dodges everything else by dropping a
+node; and every relaxation makes the program harder to solve, which bounds how much can be
+relaxed at once.
 
-Dependency cycles are the exception and cannot be done this way at all:
-`concretize.lp:2170-2171` uses clingo's `#edge` acyclicity extension, not a rule, so a cycle is
-infeasible with no atom to attach a message to. It needs Python-side detection.
-*Cost: low per constraint, but the diagnosis loop is slow.*
+The largest remaining class is `X ^dep` where the root has no compiler dependencies
+(`maven ^zlib-ng`, `apktool ^libpng`; 5 of the 11). It resisted the technique entirely, and
+the negative results are worth recording:
+
+- **Not an integrity constraint.** All 62 in `concretize.lp` plus the 5 in
+  `direct_dependency.lp`, `libc_compatibility.lp` and `os_compatibility.lp` were relaxed at
+  once. Still no model.
+- **Not the acyclicity extension.** Disabling `#edge` at `concretize.lp:2221` changes nothing.
+- **Not reachable by a pre-solve check.** `zlib-ng` is in maven's optimistic possible-dependency
+  closure — 607 packages, via openjdk — so no closure-based check can reject `maven ^zlib-ng`
+  without also rejecting legitimate transitive `^` specs.
+- The rule that *should* cover it, `error(10, "'{0}' is not a valid dependency for any package
+  in the DAG")` at `concretize.lp:1030`, is present and unguarded by anything that was relaxed.
+
+What remains is that the fully relaxed program does not finish: an unbounded solve ran past ten
+minutes without producing a model. Every one of these cases is also in the slow-unsat class
+below — `maven ^zlib-ng` takes 48 s unrelaxed. The likeliest reading is that the solver *can*
+express the error and cannot find it in the time available, which makes this the same problem
+as item 3 rather than a missing rule. A diagnosis needs either a faster encoding or clingo
+unsat cores via assumptions, not more instrumentation.
+
+One structural bug found along the way, unrelated to these cases but real:
+`impossible_dependencies_check` (`asp.py:2564`) tests membership in `self.pkgs`, which is the
+closure of the *input specs* and so already contains everything the user wrote after `^`. The
+check cannot reject `foo ^bar` on those grounds. Recomputing the closure from the root names
+alone makes it well-formed, but does not help here, for the reason above.
+
+Dependency cycles are a separate exception: `concretize.lp:2220-2221` uses clingo's `#edge`
+acyclicity extension, not a rule, so a cycle is infeasible with no atom to attach a message to.
+That one needs Python-side detection.
 
 **3. Slow unsatisfiable inputs (14 timeouts).** Two shapes: `all: require: %gcc@99`, and
 `X ^libpng` where libpng is not a dependency. `alglib ^libpng` runs past 45 s while `shc ^gmp`
