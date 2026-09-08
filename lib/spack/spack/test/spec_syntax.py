@@ -19,6 +19,7 @@ import spack.repo
 import spack.solver.asp
 import spack.spec
 import spack.util.filesystem as fs
+import spack.version
 from spack.externals import (
     ExternalSpecsParser,
     complete_variants_and_architecture,
@@ -1930,6 +1931,18 @@ def test_parse_multiple_edge_attributes(input_args, expected):
     s, *_ = spack.cmd.parse_specs(input_args)
     for c in expected:
         assert s.satisfies(c)
+
+
+def test_uppercase_hash_is_not_a_git_version():
+    """A git hash is lowercase, as in is_git_commit_sha: with uppercase digits it is a plain
+    version, both alone and once printed, and a constraint on it does not tokenize."""
+    upper = "894CaF3Ce2AE06Abe360C0FB39EF0dEB5BDD8510"
+    spec = spack.spec.Spec(f"x@{upper}")
+    assert not isinstance(spec.versions[0], spack.version.GitVersion)
+    assert spack.spec.Spec(str(spec)) == spec
+    with pytest.raises(SpecTokenizationError):
+        spack.spec.Spec(f"x@{upper}=1.2")
+    assert isinstance(spack.spec.Spec(f"x@{upper.lower()}").versions[0], spack.version.GitVersion)
 
 
 def test_when_edge_attribute_keeps_commas():
