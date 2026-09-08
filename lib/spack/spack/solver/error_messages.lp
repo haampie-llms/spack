@@ -147,16 +147,29 @@ error(0, "'{0}' requires conflicting variant values 'Spec({1}={2})' and 'Spec({1
      condition_holds(Cause2, node(X, TriggerPkg2)),
      Value1 < Value2. % see[1] in concretize.lp
 
-% A package configured `buildable: false` whose externals do not match. The first-pass message
+% What is actually on offer, whatever the mismatch turns out to be. Versions are the common
+% case but anything can enter a constraint -- a variant, a target, a compiler -- and this line
+% is true regardless, where a version-specific one would blame the wrong thing.
+error(0, "Cannot build {0}, since it is configured `buildable:false`; the external declared for it is {1}", Package, ExternalSpec)
+  :- buildable_false(Package),
+     attr("node", node(ID, Package)),
+     build(node(ID, Package)),
+     pkg_fact(Package, external_spec_declared(ExternalSpec)).
+
+% A package configured `buildable: false` whose external is too old. The first-pass message
 % names neither the external on offer nor the constraint it failed, which is everything the user
-% needs to fix it. No satisfaction check is needed: the error means no external matched, so
-% every declared one failed.
+% needs to fix it.
+%
+% The version check is required, not redundant: an external can fail to match on a variant while
+% its version is perfectly fine, and without this guard the message blames the version for a
+% mismatch that has nothing to do with it.
 error(0, "Cannot build {0}, since it is configured `buildable:false` and the external {0}@{1} does not satisfy '{0}@{2}'", Package, ExternalVersion, Constraint, startcauses, Cause, CauseID)
   :- buildable_false(Package),
      attr("node", node(ID, Package)),
      build(node(ID, Package)),
      pkg_fact(Package, external_version_declared(ExternalVersion)),
      attr("node_version_satisfies", node(ID, Package), Constraint),
+     not pkg_fact(Package, version_satisfies(Constraint, ExternalVersion)),
      pkg_fact(TriggerPkg, condition_effect(Cause, EffectID)),
      imposed_constraint(EffectID, "node_version_satisfies", Package, Constraint),
      condition_holds(Cause, node(CauseID, TriggerPkg)).
@@ -229,3 +242,4 @@ pkg_fact(Package, version_satisfies(Constraint, Version)) :-
 #defined has_provider/1.
 #defined buildable_false/1.
 #defined external_version_declared/1.
+#defined external_spec_declared/1.

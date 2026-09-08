@@ -263,6 +263,24 @@ def test_buildable_false_names_the_external_and_the_constraint(
     assert_actionable_error(exc_info, "libelf@0.8.10", "0.8.13:")
 
 
+def test_buildable_false_names_the_external_on_a_variant_mismatch(
+    mock_packages, mutable_config: Configuration
+):
+    """When the external fails on something other than its version, the message must still name
+    it, and must not claim the version is at fault."""
+    mutable_config.set(
+        "packages:quantum-espresso",
+        {
+            "buildable": False,
+            "externals": [{"spec": "quantum-espresso@1.0~veritas", "prefix": "/u"}],
+        },
+    )
+    with pytest.raises(spack.error.SpackError) as exc_info:
+        spack.concretize.concretize_one("quantum-espresso+veritas")
+    assert_actionable_error(exc_info, "quantum-espresso@1.0~veritas")
+    assert "does not satisfy" not in str(exc_info.value)
+
+
 def test_requirement_error_names_config_location(
     mock_packages, mutable_config: Configuration, tmp_path: pathlib.Path
 ):

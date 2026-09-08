@@ -2090,11 +2090,25 @@ class SpackSolverSetup:
                 # written rather than requiring a concrete version.
                 for entry in data.get("externals", []):
                     try:
-                        versions = spack.spec.Spec(entry["spec"]).versions
+                        external_spec = spack.spec.Spec(entry["spec"])
                     except Exception:  # noqa: BLE001
                         continue
-                    if versions != vn.any_version:
-                        self.gen.pkg_fact(pkg_name, fn.external_version_declared(str(versions)))
+                    # The spec as written, for a message that names what is on offer whatever
+                    # the mismatch turns out to be -- a variant or a target just as easily as a
+                    # version.
+                    # packages_with_externals is deepcopy_as_builtin(..., line_info=True), so the
+                    # YAML mark survives as the entry's line_info rather than as a syaml mark
+                    location = getattr(entry, "line_info", "")
+                    self.gen.pkg_fact(
+                        pkg_name,
+                        fn.external_spec_declared(
+                            f"'{entry['spec']}'" + (f" from {location}" if location else "")
+                        ),
+                    )
+                    if external_spec.versions != vn.any_version:
+                        self.gen.pkg_fact(
+                            pkg_name, fn.external_version_declared(str(external_spec.versions))
+                        )
 
     def preferred_variants(self, pkg_name):
         """Facts on concretization preferences, as read from packages.yaml"""
