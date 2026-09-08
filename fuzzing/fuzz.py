@@ -609,6 +609,54 @@ def m_two_cond_deps(cls):
     return None
 
 
+def m_unrelated_dep_no_compiler(cls):
+    """`^dep` on a root that depends on no compiler at all.
+
+    The same mutation on a package with compiler dependencies gets the proper "is not a direct
+    build or test dependency" message; without them it is an internal error (maven ^zlib-ng).
+    m_not_a_dependency hits this only by accident, since most packages do need a compiler.
+    """
+    names = set(cls.dependencies_by_name(when=False))
+    if names & {"c", "cxx", "fortran"}:
+        return None
+    choices = [d for d in ("zlib-ng", "libpng", "libiconv", "readline", "gmp") if d not in names]
+    if not choices or cls.name in choices:
+        return None
+    dep = random.choice(choices)
+    return dict(
+        kind="unrelated_dep_no_compiler", specs=[f"{cls.name} ^{dep}"], config=None, expect=[dep]
+    )
+
+
+def m_propagated_variant_conflict(cls):
+    """Propagate a boolean variant while pinning a dependency to the opposite value.
+
+    Propagation has its own error rules in concretize.lp and none of them has a causation rule,
+    so nothing else in the corpus reaches them.
+    """
+    mine = [n for _, n, _ in bool_variants(cls)]
+    if not mine:
+        return None
+    random.shuffle(mine)
+    for dname in cls.dependencies_by_name(when=False):
+        if is_virtual(dname) or dname == cls.name:
+            continue
+        try:
+            dcls = PATH.get_pkg_class(dname)
+        except Exception:  # noqa: BLE001
+            continue
+        theirs = {n for _, n, _ in bool_variants(dcls)}
+        for n in mine:
+            if n in theirs:
+                return dict(
+                    kind="propagated_variant_conflict",
+                    specs=[f"{cls.name} ++{n} ^{dname}~{n}"],
+                    config=None,
+                    expect=[n, dname],
+                )
+    return None
+
+
 MUTATORS = [
     m_cond_variant,
     m_cond_value,
@@ -633,6 +681,8 @@ MUTATORS = [
     m_cfg_provider_require,
     m_env_unify,
     m_two_cond_deps,
+    m_unrelated_dep_no_compiler,
+    m_propagated_variant_conflict,
 ]
 
 
