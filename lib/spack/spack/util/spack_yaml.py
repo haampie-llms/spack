@@ -282,9 +282,11 @@ def _line_info(obj):
     m = get_mark_from_yaml_data(obj)
     if m is None:
         return ""
-    if m.line:
-        return f"{m.name}:{m.line:d}"
-    return m.name
+    if m.line is None:
+        return m.name
+    # marks are 0-indexed; report the line as an editor numbers it, matching `spack config
+    # blame` and _mark_str in spack.solver.requirements
+    return f"{m.name}:{m.line + 1:d}"
 
 
 #: Global for interactions between LineAnnotationDumper and dump_annotated().
