@@ -9,6 +9,7 @@ where it makes sense.
 
 import os
 import pathlib
+import re
 
 import pytest
 
@@ -814,11 +815,32 @@ def test_git_branch_with_slash(monkeypatch):
         ("git.foo", True),
         ("git.abcdabcdabcdabcdabcdabcdabcdabcdabcdabcd", True),
         ("abcdabcdabcdabcdabcdabcdabcdabcdabcdabcd", True),
+        ("abcdabcdabcdabcdabcdabcdabcdabcdabcdabcd=1.2", True),
     ],
 )
 def test_version_git_vs_base(string, git):
     assert is_git_version(string) == git
     assert isinstance(Version(string), GitVersion) == git
+
+
+@pytest.mark.parametrize(
+    "string,error",
+    [
+        # the constraint on a ref is a version or a range, and nothing else
+        ("git.foo==1.2", "Bad characters in version string: =1.2"),
+        ("git.foo=1:=2", "Bad characters in version string: =2"),
+        ("git.foo=1:2:3", "Bad characters in version string: 2:3"),
+        ("git.foo=1=2", "Bad characters in version string: 1=2"),
+        ("1:2:3", "Bad characters in version string: 2:3"),
+        # a ref cannot contain a `:`, so this is a range with an exact version as upper bound,
+        # not the ref `1:` assigned version 2
+        ("1:=2", "Bad characters in version string: =2"),
+    ],
+)
+def test_invalid_version_strings(string, error):
+    """A malformed version is a ValueError naming what is wrong, not an internal error."""
+    with pytest.raises(ValueError, match=re.escape(error)):
+        ver(string)
 
 
 def test_version_range_nonempty():
