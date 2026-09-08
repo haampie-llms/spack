@@ -20,17 +20,23 @@ for f in files:
                 recs.append(json.loads(line))
 
 # --- templates from concretize.lp + known python-side messages
-lp_templates = []
+# Read the solver program from the checkout this script lives in, so that evaluating a fix in a
+# worktree buckets its new messages instead of silently dropping them into OTHER:.
+SPACK_ROOT = os.environ.get(
+    "SPACK_ROOT", os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+lp = os.path.join(SPACK_ROOT, "lib", "spack", "spack", "solver", "concretize.lp")
 try:
-    import os
+    with open(lp, encoding="utf-8") as fh:
+        lp_source = fh.read()
+except OSError as e:
+    sys.exit(f"cannot read {lp}: {e}\nset SPACK_ROOT to the checkout under test")
 
-    lp = os.path.expanduser("~/spack/lib/spack/spack/solver/concretize.lp")
-    for m in re.finditer(r'error\(\d+, *"([^"]*)"', open(lp).read()):
-        t = m.group(1)
-        if t not in lp_templates:
-            lp_templates.append(t)
-except OSError:
-    pass
+lp_templates = []
+for m in re.finditer(r'error\(\d+, *"([^"]*)"', lp_source):
+    t = m.group(1)
+    if t not in lp_templates:
+        lp_templates.append(t)
 
 
 def template_regex(t):
@@ -73,6 +79,23 @@ generic = [
     (
         r"Cannot select a single \".+\" for package \".+\"",
         'Cannot select a single "{attr}" for package "{pkg}"',
+    ),
+    # Replacements for the line above, from hs/fix/error-msgs-1. These are built in asp.py
+    # (ErrorHandler.multiple_values_error / no_value_error), not in concretize.lp, so they
+    # cannot be scraped and have to be listed here.
+    (
+        r"Conflicting .+ values are required for package '.+':.*",
+        "Conflicting {attr} values are required for package '{pkg}'",
+    ),
+    (
+        r"No .+ value could be selected for package '.+'",
+        "No {attr} value could be selected for package '{pkg}'",
+    ),
+    # Legacy forms. Message text changes between the runs this tool exists to compare, so
+    # keep superseded wordings classifiable instead of letting old results fall into OTHER:.
+    (
+        r"Multiple providers are required for the same '.+' virtual$",
+        "Multiple providers are required for the same '{0}' virtual [legacy]",
     ),
 ]
 
