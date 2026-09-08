@@ -147,6 +147,12 @@ def assert_actionable_error(exc_info, *required_part: str) -> None:
     the user can recognize in their own input.
     """
     msg = str(exc_info.value)
+    # An unsatisfiable input that trips a hard constraint with no error() rule surfaces as
+    # "Spack concretizer internal error. Please submit a bug report", which can still contain the
+    # requested substrings via the spec echoed after it. That is never an actionable message.
+    assert not isinstance(
+        exc_info.value, spack.solver.asp.InternalConcretizerError
+    ), f"Expected an actionable error, got an internal error:\n{msg}"
     missing = [h for h in required_part if h not in msg]
     assert not missing, f"Error message is missing parts {missing!r}\nFull message:\n{msg}"
 

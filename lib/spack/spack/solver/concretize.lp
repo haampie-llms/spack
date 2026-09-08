@@ -1031,9 +1031,15 @@ error(10, "'{0}' is not a valid dependency for any package in the DAG", Package)
   :- attr("node", node(ID, Package)),
      not needed(node(ID, Package)).
 
-:- depends_on(ParentNode, ChildNode),
-   not edge_needed(ParentNode, ChildNode),
-   build(ParentNode).
+% An edge that nothing in the DAG asks for. Reported rather than forbidden outright: when this
+% is the only thing making a model infeasible, the solver has usually already derived the real
+% explanation (e.g. two providers for one language), and a hard constraint throws it away along
+% with the model. The weight is above every other error so this is only ever a last resort:
+% at a lower weight the solver prefers it over the requirement errors, which are far more useful.
+error(200000, "'{0}' cannot depend on '{1}'", Parent, Child)
+  :- depends_on(node(X, Parent), node(Y, Child)),
+     not edge_needed(node(X, Parent), node(Y, Child)),
+     build(node(X, Parent)).
 
 :- provider(PackageNode, VirtualNode),
    not provider_needed(PackageNode, VirtualNode),
