@@ -4,8 +4,8 @@ Findings from 62 hand-written cases and a 440-case fuzzed corpus run against the
 package repository on macOS arm64 (Darwin 24.6, `os=sequoia target=m4`) with apple-clang 17
 and a Fortran-only gcc 14.2 registered as externals.
 
-The first edition of this report ranked ten fixes. Six commits have since landed on this
-branch: three from `hs/fix/error-msgs-{1,2,3}` and three written against the numbers below.
+The first edition of this report ranked ten fixes. Ten commits have since landed on this
+branch: three from `hs/fix/error-msgs-{1,2,3}` and seven written against the numbers below.
 Every figure here is an A/B on the *same* 440 inputs, replayed with `fuzz.py --replay`.
 
 ## Where things stand
@@ -14,14 +14,18 @@ An error is scored on whether it names the thing the mutation actually broke. "a
 least one such token appears; "all" means every one does, which is the bar for acting on the
 message without guessing.
 
-| | any | all | internal errors | timeouts |
-|---|---|---|---|---|
-| `develop` (b495c19f9e) | 74.3% | 56.6% | 14 | 14 |
-| + `hs/fix/error-msgs-{1,2,3}` | 83.8% | 67.3% | 13 | 17 |
-| + the three fixes on this branch | **85.3%** | **67.3%** | **11** | 14 |
+| | any | all | internal errors |
+|---|---|---|---|
+| `develop` (b495c19f9e) | 75.5% | 58.1% | 14 |
+| + `hs/fix/error-msgs-{1,2,3}` | 86.5% | 69.4% | 13 |
+| + naming the unneeded edge, requirement provenance | 87.2% | 69.4% | 11 |
+| + naming externals and requirements | **87.2%** | **78.3%** | **11** |
 
-Total solve time over the corpus fell from 2742 s to 2440 s; none of these changes cost
-measurable performance.
+Measured over the 418 of 440 cases that never hit the solver timeout in any run. Timeouts are
+wall-clock and this is a shared machine: two runs of *identical* code differed by 4%, and one
+run under load lost five more cases to the timeout and 25% more solve time across every
+bucket, including buckets these changes cannot touch. Solve-time claims below are therefore
+restricted to back-to-back A/Bs of one bucket.
 
 ### Goal
 
@@ -85,6 +89,30 @@ values, and `_mark_str` already formats a `file:line: ` prefix:
 No ASP changes; the text rides on facts that already exist. Requirements set through the API
 carry no mark and get no prefix.
 
+**`solver: quote the requirement that could not be satisfied`.** A `packages.yaml` requirement
+reported only which package it affected, never which entry was at fault:
+
+    -  1. cannot satisfy a requirement for package 'zlib-ng'.
+    +  1. cannot satisfy requirement 'os=ubuntu22.04' from ~/.spack/packages.yaml:3 for package 'zlib-ng'
+
+`cfg_all_require` went from 16/56 complete to 43/56, and its median message from 9 numbered
+lines to 6.
+
+**`solver: name the external on offer`.** `buildable: false` said only "no externals satisfy
+the request"; all ten such cases in the corpus hid the cause:
+
+    +  2. Cannot build cmake, since it is configured `buildable:false`; the external declared
+    +     for it is 'cmake@3.30.0~ownlibs' from ~/.spack/packages.yaml:5
+    +  3. ... and the external cmake@2.8.10.2 does not satisfy 'cmake@3.18:'
+    +     required because hdf5 depends on cmake@3.18: when @1.14:
+
+Two rules: one that names the external whatever the mismatch is, one that pairs it with a
+version constraint it genuinely fails. The first attempt had only the pairing and skipped the
+check that the version was at fault, which produced the false claim that `cmake@3.30.0` does
+not satisfy `cmake@3.18:` when the real mismatch was `~ownlibs`. Versions are the common case,
+but anything can enter a constraint. Both rules live in `error_messages.lp`, so they run on a
+fixed model and cannot affect which model is chosen.
+
 **Fuzzer sampling.** See "Corrections to the method" below.
 
 ## Corrections to the method
@@ -106,7 +134,7 @@ must say which mode it was measured in.
 **2. An internal error scored as a hit.** "Please submit a bug report" quotes the input spec
 back, so substring matching found the expected tokens in it. Replacing one with a real message
 therefore read as a regression — two `compiler_c` cases did exactly that. `analyze.py` now
-counts an internal error as naming nothing, which is why the `develop` row above (74.3%) is
+counts an internal error as naming nothing, which is why the `develop` row above (75.5%) is
 lower than the 78% quoted in the first edition.
 
 **3. `analyze.py` read the wrong tree.** It scraped `error(...)` templates from a hardcoded
@@ -149,29 +177,13 @@ boolean-variant requirements, not the common `requires("%gcc")` form.
 
 ## What is left, ranked
 
-**1. Both sides of a conflict, in the first-pass message (~85 of the ~103 imperfect cases).**
-This is one defect wearing four hats: `cfg_require_version_conflict` (23),
-`cfg_external_too_old` (10/10 incomplete), `dep_version_out_of_range` (6/6),
-`cfg_require_variant_conflict` (4/4), and most of `cfg_all_require` (40/56). The message names
-the value that was chosen and never the constraint that forced it.
+**1. Fan-out on `all:` requirements (up to 127 lines).** Each line now names the requirement,
+but an `all:` requirement still produces one per package in the DAG, all identical. Collapsing
+them changes how many error atoms a model carries, and so which model the optimizer picks, so
+it needs its own before/after on the corpus rather than a local test. *Cost: moderate, and the
+risk is in the optimization, not in the rule.*
 
-`error_messages.lp:109` already does exactly this for one shape —
-`Cannot satisfy '{0}@{1}' and '{0}@{2}'` with both cause trees. Its guards require both
-constraints to be derived and the chosen version to satisfy exactly one, so it does not fire
-when no version was chosen at all. Broadening it is the single highest-payoff change left.
-*Cost: moderate, one `.lp` rule, no Python.*
-
-**2. Requirement messages that name the requirement (56 cases, up to 87 lines each).**
-`error(60000, "cannot satisfy a requirement for package '{0}'.", Package)` at
-`concretize.lp:1421` keys on `requirement_group`, so it prints one line per package in the DAG
-and never the requirement text. The per-member conditions carry it already — the
-`condition_reason` now includes `file:line` — but no error rule reads them.
-
-Emitting the unsatisfied `requirement_group_member` conditions instead would name the
-requirement *and* collapse the fan-out. Needs `#show requirement_group_member/3` and friends in
-`display.lp` first. *Cost: moderate; the data is all present.*
-
-**3. The remaining 11 internal errors.** Instrumenting every integrity constraint — rewriting
+**2. The remaining 11 internal errors.** Instrumenting every integrity constraint — rewriting
 each bare `:-` head into a tagged `error(...)` — identifies the blocker directly. That found
 `concretize.lp:1034` for the compiler case. Two caveats learned the hard way: the pure
 well-formedness constraints (`concretize.lp:81-97`) must stay hard, or the solver dodges
@@ -186,16 +198,13 @@ Dependency cycles are the exception and cannot be done this way at all:
 infeasible with no atom to attach a message to. It needs Python-side detection.
 *Cost: low per constraint, but the diagnosis loop is slow.*
 
-**4. `buildable: false` messages that name the externals considered.** 10/10 fuzzed cases hide
-the cause; the message never says which external was rejected or which constraint it failed.
-
-**5. Slow unsatisfiable inputs (14 timeouts).** Two shapes: `all: require: %gcc@99`, and
+**3. Slow unsatisfiable inputs (14 timeouts).** Two shapes: `all: require: %gcc@99`, and
 `X ^libpng` where libpng is not a dependency. `alglib ^libpng` runs past 45 s while `shc ^gmp`
 — the same mutation — finishes in 5 s. A performance bug, not a message bug, but it costs the
 user the message entirely. The timeout also covers only the clingo solve, not grounding or the
 causation pass.
 
-**6. Precision, not just recall.** Nothing yet measures whether a message names something the
+**4. Precision, not just recall.** Nothing yet measures whether a message names something the
 user did *not* touch, which is the "wrong input blamed" complaint the first report opened with.
 Each mutator would declare taboo tokens alongside `expect`.
 
