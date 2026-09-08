@@ -1426,15 +1426,6 @@ error(60000, "cannot satisfy requirement {1} for package '{0}'", Package, Requir
   not has_requirement_message(Package, X),
   not requirement_group_satisfied(node(ID, Package), X).
 
-% Fallback for a group with no recorded text. One error atom either way, so which model the
-% optimizer picks does not depend on whether the text is available.
-error(60000, "cannot satisfy a requirement for package '{0}'.", Package) :-
-  activate_requirement(node(ID, Package), X),
-  requirement_group(Package, X),
-  not requirement_group_spec(Package, X, _),
-  not has_requirement_message(Package, X),
-  not requirement_group_satisfied(node(ID, Package), X).
-
 
 error(50000, Message) :-
   activate_requirement(node(ID, Package), X),
