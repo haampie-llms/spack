@@ -2002,6 +2002,15 @@ class SpackSolverSetup:
 
             self.gen.fact(fn.requirement_group(pkg_name, requirement_grp_id))
             self.gen.fact(fn.requirement_policy(pkg_name, requirement_grp_id, policy))
+            # What the requirement actually says, so a failure can quote it. Without this the
+            # only thing reported is "cannot satisfy a requirement for package 'X'".
+            requirement_text = "'" + "' or '".join(str(s) for s in requirement_grp) + "'"
+            location = rule.location()
+            if location.endswith(": "):
+                requirement_text += f" from {location[:-2]}"
+            self.gen.fact(
+                fn.requirement_group_spec(pkg_name, requirement_grp_id, requirement_text)
+            )
             if rule.message:
                 self.gen.fact(
                     fn.requirement_message(

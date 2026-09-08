@@ -343,11 +343,12 @@ def test_target_not_compatible_with_host_error(mock_packages, mutable_config: Co
             ["libelf", "must be compiled with clang"],
             id="requirement_unsatisfied_custom_message",
         ),
-        # Generic message must still name the package so the user knows which entry to look at
+        # With no custom message the error must still quote the requirement itself, not just
+        # say that "a requirement" for the package could not be satisfied
         pytest.param(
             {"packages:libelf": {"require": ["%clang"]}},
             "libelf%gcc",
-            ["libelf"],
+            ["libelf", "cannot satisfy requirement '%clang'"],
             id="requirement_unsatisfied_generic",
         ),
         # A `require:` entry names a virtual that does not exist. The error must name the
