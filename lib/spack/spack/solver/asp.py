@@ -2084,6 +2084,17 @@ class SpackSolverSetup:
             if not data.get("buildable", True):
                 self.gen.h2(f"External package: {pkg_name}")
                 self.gen.fact(fn.buildable_false(pkg_name))
+                # Record what is on offer, so that a failure can say which external was
+                # rejected instead of only "no externals satisfy the request". Externals are
+                # usually written "@1.2.3", which is a range, so keep the version list as
+                # written rather than requiring a concrete version.
+                for entry in data.get("externals", []):
+                    try:
+                        versions = spack.spec.Spec(entry["spec"]).versions
+                    except Exception:  # noqa: BLE001
+                        continue
+                    if versions != vn.any_version:
+                        self.gen.pkg_fact(pkg_name, fn.external_version_declared(str(versions)))
 
     def preferred_variants(self, pkg_name):
         """Facts on concretization preferences, as read from packages.yaml"""

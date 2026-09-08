@@ -150,9 +150,9 @@ def assert_actionable_error(exc_info, *required_part: str) -> None:
     # An unsatisfiable input that trips a hard constraint with no error() rule surfaces as
     # "Spack concretizer internal error. Please submit a bug report", which can still contain the
     # requested substrings via the spec echoed after it. That is never an actionable message.
-    assert not isinstance(
-        exc_info.value, spack.solver.asp.InternalConcretizerError
-    ), f"Expected an actionable error, got an internal error:\n{msg}"
+    assert not isinstance(exc_info.value, spack.solver.asp.InternalConcretizerError), (
+        f"Expected an actionable error, got an internal error:\n{msg}"
+    )
     missing = [h for h in required_part if h not in msg]
     assert not missing, f"Error message is missing parts {missing!r}\nFull message:\n{msg}"
 
@@ -247,6 +247,20 @@ def test_input_spec_driven_errors(
     with pytest.raises(spack.error.SpackError) as exc_info:
         spack.concretize.concretize_one(input_spec)
     assert_actionable_error(exc_info, *expected_parts)
+
+
+def test_buildable_false_names_the_external_and_the_constraint(
+    mock_packages, mutable_config: Configuration
+):
+    """`buildable: false` with an external that is too old must name the external on offer and
+    the constraint it failed, not just "no externals satisfy the request"."""
+    mutable_config.set(
+        "packages:libelf",
+        {"buildable": False, "externals": [{"spec": "libelf@0.8.10", "prefix": "/usr"}]},
+    )
+    with pytest.raises(spack.error.SpackError) as exc_info:
+        spack.concretize.concretize_one("libelf@0.8.13:")
+    assert_actionable_error(exc_info, "libelf@0.8.10", "0.8.13:")
 
 
 def test_requirement_error_names_config_location(
