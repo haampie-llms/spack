@@ -158,8 +158,15 @@ print(
 )
 for kind, rs in sorted(by_kind.items()):
     errs = [r for r in rs if r["outcome"] != "sat"]
-    ment = sum(1 for r in errs if r["mentioned"])
-    full = sum(1 for r in errs if len(r["mentioned"]) == len([t for t in r["expect"] if t]))
+    # "Please submit a bug report" quotes the input spec back, so substring matching scores it as
+    # naming the cause. It explains nothing; count it as a miss or a fix that replaces it with a
+    # real message looks like a regression.
+    ment = sum(1 for r in errs if r["mentioned"] and r["outcome"] != "internal")
+    full = sum(
+        1
+        for r in errs
+        if r["outcome"] != "internal" and len(r["mentioned"]) == len([t for t in r["expect"] if t])
+    )
     outs = dict(collections.Counter(r["outcome"] for r in rs))
     lines = sorted(len(message_lines(r["message"])) for r in errs) or [0]
     secs = max(r["seconds"] for r in rs)

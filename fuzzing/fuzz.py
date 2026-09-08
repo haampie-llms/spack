@@ -9,6 +9,7 @@ solve is skipped for speed; the numbered messages of the first pass are kept.
 """
 
 import argparse
+import collections
 import json
 import random
 import sys
@@ -141,11 +142,16 @@ def merge(*specs):
     return s
 
 
+def variant_values(var):
+    """Declared values of a variant. Some are declared without `values=`, and then it is None."""
+    return tuple(var.values or ())
+
+
 def bool_variants(cls):
     out = []
     for when, vs in cls.variant_items():
         for n, v in vs.items():
-            if set(v.values) == {True, False}:
+            if set(variant_values(v)) == {True, False}:
                 out.append((when, n, v))
     return out
 
@@ -167,10 +173,12 @@ def m_cond_variant(cls):
         v = version_not_satisfying(cls, when)
         if v is None:
             continue
-        if set(var.values) == {True, False}:
+        if set(variant_values(var)) == {True, False}:
             val = f"+{name}" if var.default in (False, "False") else f"~{name}"
         else:
-            vals = [x for x in var.values if not isinstance(x, spack.variant.ConditionalValue)]
+            vals = [
+                x for x in variant_values(var) if not isinstance(x, spack.variant.ConditionalValue)
+            ]
             if not vals:
                 continue
             val = f"{name}={random.choice(vals)}"
@@ -187,7 +195,9 @@ def m_cond_value(cls):
     for when, vs in cls.variant_items():
         for name, var in vs.items():
             cvals = [
-                x for x in var.values if isinstance(x, spack.variant.ConditionalValue) and x.when
+                x
+                for x in variant_values(var)
+                if isinstance(x, spack.variant.ConditionalValue) and x.when
             ]
             if not cvals:
                 continue
@@ -209,7 +219,7 @@ def m_bad_value(cls):
         (n, v)
         for _, vs in cls.variant_items()
         for n, v in vs.items()
-        if set(v.values) != {True, False} and n != "build_system"
+        if set(variant_values(v)) != {True, False} and n != "build_system"
     ]
     if not cands:
         return None
@@ -626,7 +636,7 @@ MUTATORS = [
 ]
 
 
-def pick_package(names, max_direct_deps):
+def pick_package(names, max_direct_deps, relax=False):
     while True:
         name = random.choice(names)
         if is_virtual(name):
@@ -638,9 +648,49 @@ def pick_package(names, max_direct_deps):
         if not declared_versions(cls):
             continue
         ndeps = len(cls.dependencies_by_name(when=False))
-        if ndeps > max_direct_deps and random.random() < 0.9:
+        if not relax and ndeps > max_direct_deps and random.random() < 0.9:
             continue
         return cls
+
+
+#: how many packages to try before giving up on a mutator for this round
+TRIES_PER_MUTATOR = 60
+
+
+def generate(names, muts, n, max_direct_deps):
+    """Draw cases mutator-first, fewest-so-far first.
+
+    Picking a package and then a mutator starves every mutator whose precondition is rare: a
+    version-conditional variant exists on 348 of 9020 packages and a `requires()` directive on
+    183, and `--max-deps` skips 90% of the packages that have them, so cond_variant, cond_value
+    and requires_directive produced 0 of 440 cases while unknown_version and unknown_variant --
+    which apply to everything -- produced a quarter of them.
+    """
+    cases, produced, budget = [], collections.Counter(), n * TRIES_PER_MUTATOR
+    for m in muts:
+        produced.setdefault(m.__name__, 0)
+    while len(cases) < n and budget > 0:
+        m = min(muts, key=lambda f: (produced[f.__name__], random.random()))
+        for i in range(TRIES_PER_MUTATOR):
+            if budget <= 0:
+                break
+            budget -= 1
+            # a rare mutator is usually rare among small packages too, so stop honouring
+            # --max-deps once the easy candidates are exhausted
+            cls = pick_package(names, max_direct_deps, relax=i >= TRIES_PER_MUTATOR // 2)
+            try:
+                c = m(cls)
+            except Exception as e:  # noqa: BLE001
+                sys.stderr.write(f"mutator {m.__name__} failed on {cls.name}: {e}\n")
+                continue
+            if c:
+                c["package"] = cls.name
+                cases.append(c)
+                break
+        # count the round either way, so a mutator that cannot apply anywhere is not retried
+        # forever at the expense of the others
+        produced[m.__name__] += 1
+    return cases
 
 
 def mentions(message, expect):
@@ -674,26 +724,25 @@ def main():
     else:
         names = PATH.all_package_names()
         muts = MUTATORS
-        if args.kinds:
-            want = set(args.kinds.split(","))
+        want = set(args.kinds.split(",")) if args.kinds else set()
+        if want:
+            # m_arch and m_compiler each emit several kinds ("arch_target", "compiler_c", ...),
+            # so match a wanted kind against the function name in both directions and filter the
+            # generated cases by their actual kind afterwards.
             muts = [
                 m
                 for m in MUTATORS
-                if m.__name__[2:] in want or any(m.__name__[2:].startswith(w) for w in want)
+                if any(w == m.__name__[2:] or w.startswith(m.__name__[2:]) for w in want)
             ]
-        tries = 0
-        while len(cases) < args.n and tries < args.n * 20:
-            tries += 1
-            cls = pick_package(names, args.max_deps)
-            m = random.choice(muts)
-            try:
-                c = m(cls)
-            except Exception as e:  # noqa: BLE001
-                sys.stderr.write(f"mutator {m.__name__} failed on {cls.name}: {e}\n")
-                continue
-            if c:
-                c["package"] = cls.name
-                cases.append(c)
+            if not muts:
+                sys.exit(f"--kinds {args.kinds} matched no mutator")
+        cases = generate(names, muts, args.n, args.max_deps)
+        if want:
+            cases = [
+                c
+                for c in cases
+                if c["kind"] in want or c["kind"] in {m.__name__[2:] for m in muts}
+            ]
 
     with open(args.out, "w") as out:
         for i, c in enumerate(cases):
