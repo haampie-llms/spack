@@ -2003,7 +2003,11 @@ class SpackSolverSetup:
             self.gen.fact(fn.requirement_group(pkg_name, requirement_grp_id))
             self.gen.fact(fn.requirement_policy(pkg_name, requirement_grp_id, policy))
             if rule.message:
-                self.gen.fact(fn.requirement_message(pkg_name, requirement_grp_id, rule.message))
+                self.gen.fact(
+                    fn.requirement_message(
+                        pkg_name, requirement_grp_id, f"{rule.location()}{rule.message}"
+                    )
+                )
             self.gen.newline()
 
             for input_spec in requirement_grp:
@@ -2031,7 +2035,9 @@ class SpackSolverSetup:
                     # else: for virtuals we want to emit "node" and
                     # "virtual_node" in imposed specs
 
-                    info_msg = f"{input_spec} is a requirement for package {pkg_name}"
+                    info_msg = (
+                        f"{rule.location()}{input_spec} is a requirement for package {pkg_name}"
+                    )
                     if rule.condition != EMPTY_SPEC:
                         info_msg += f" when {rule.condition}"
                     if rule.message:

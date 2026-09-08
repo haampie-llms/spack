@@ -17,6 +17,7 @@ from typing import List
 import pytest
 
 import spack.concretize
+import spack.config
 import spack.error
 import spack.main
 import spack.solver.asp
@@ -240,6 +241,24 @@ def test_input_spec_driven_errors(
     with pytest.raises(spack.error.SpackError) as exc_info:
         spack.concretize.concretize_one(input_spec)
     assert_actionable_error(exc_info, *expected_parts)
+
+
+def test_requirement_error_names_config_location(
+    mock_packages, mutable_config: Configuration, tmp_path: pathlib.Path
+):
+    """A requirement that cannot be satisfied must say which config file and line it came from,
+    so the user knows what to edit."""
+    scope_dir = tmp_path / "myscope"
+    scope_dir.mkdir()
+    (scope_dir / "packages.yaml").write_text(
+        "packages:\n  mpileaks:\n    require:\n    - '@2.3'\n", encoding="utf-8"
+    )
+    mutable_config.push_scope(spack.config.DirectoryConfigScope("myscope", str(scope_dir)))
+    with pytest.raises(spack.error.SpackError) as exc_info:
+        spack.concretize.concretize_one("mpileaks@2.1")
+    assert_actionable_error(
+        exc_info, "@2.3 is a requirement for package mpileaks", "packages.yaml:4: "
+    )
 
 
 def test_target_not_compatible_with_host_error(mock_packages, mutable_config: Configuration):
