@@ -1,243 +1,219 @@
-# Concretization error messages: where they point away from the cause
+# Concretization error messages: what is fixed, what is left
 
-Findings from 61 hand-written cases and 440 fuzzed cases run against the `builtin`
+Findings from 62 hand-written cases and a 440-case fuzzed corpus run against the `builtin`
 package repository on macOS arm64 (Darwin 24.6, `os=sequoia target=m4`) with apple-clang 17
-and a Fortran-only gcc 14.2 registered as externals. Spack was at commit `261e4fbe4b`
-on a branch a few commits ahead of `develop` `b495c19f9e`; the differences do not touch
-error reporting.
+and a Fortran-only gcc 14.2 registered as externals.
 
-All error text quoted below is verbatim from the runs in `results/`.
+The first edition of this report ranked ten fixes. Six commits have since landed on this
+branch: three from `hs/fix/error-msgs-{1,2,3}` and three written against the numbers below.
+Every figure here is an A/B on the *same* 440 inputs, replayed with `fuzz.py --replay`.
 
-## Summary
+## Where things stand
 
-Spack reports concretization failures in two passes. The first pass minimizes weighted
-`error(...)` atoms and prints them. The second pass runs `error_messages.lp` over the
-model to build a "required because ..." causal tree. Both passes share a structural
-problem: the solver is holistic, so when the cheapest way to satisfy the input is to
-change something the user did not mention, the message describes that change rather than
-the input that forced it.
+An error is scored on whether it names the thing the mutation actually broke. "any" means at
+least one such token appears; "all" means every one does, which is the bar for acting on the
+message without guessing.
 
-Four failure patterns account for nearly every bad message:
+| | any | all | internal errors | timeouts |
+|---|---|---|---|---|
+| `develop` (b495c19f9e) | 74.3% | 56.6% | 14 | 14 |
+| + `hs/fix/error-msgs-{1,2,3}` | 83.8% | 67.3% | 13 | 17 |
+| + the three fixes on this branch | **85.3%** | **67.3%** | **11** | 14 |
 
-1. **Wrong input blamed.** The message names something that is not the cause.
-   Systematic for conditional variants, foreign os and platform, and virtuals marked
-   non-buildable.
-2. **"Please submit a bug report" for a user error.** Hard constraints in
-   `concretize.lp` with no matching `error()` rule fall through to the generic internal
-   error. 14 of 440 fuzzed cases (3%).
-3. **Only one side of a conflict named.** Every version conflict says which constraint
-   failed and who wanted it, never who wanted the version that won.
-4. **Generic message, one per node.** Requirements from `packages.yaml` report
-   "cannot satisfy a requirement for package 'X'" with no requirement text, no file, and one
-   line per package in the DAG. Up to 87 numbered lines in the fuzzed set.
+Total solve time over the corpus fell from 2742 s to 2440 s; none of these changes cost
+measurable performance.
 
-## Root cause of pattern 1 for variants
+### Goal
 
-`concretize.lp` has an intended diagnostic at lines 1547 and 1553:
+> Every concretization error names both sides of the conflict and where each side came from;
+> no input ever produces "Please submit a bug report".
 
-    error(100, "Cannot set variant '{0}' for package '{1}' because the variant condition
-                cannot be satisfied for the given spec", Variant, Package)
+Measurable as **any → 100%, all → ≥90%, internal errors → 0, worst fan-out → ≤10 lines.**
 
-but a hard constraint at line 1618 makes the model infeasible before that error can be
-weighed:
+## What the three error-msgs branches fixed
 
-    :- attr("variant_set", node(ID, Package), Variant, Value),
-       not attr("variant_value", node(ID, Package), Variant, Value).
+37 of 437 comparable cases improved, none regressed.
 
-A user-set variant that does not exist on the requested version has no `variant_value`
-choice (the choice rule requires `node_has_variant`), so every model keeping the requested
-version is infeasible. The only feasible models change the version, at a cost of one
-`error(10000, "Cannot satisfy '{0}@{1}'")`. That is what gets reported:
+**Conditional variants** (`error-msgs-3`) — the top finding of the first report. A user-set
+variant that does not exist on the requested version was a hard constraint at
+`concretize.lp:1618`, so the only feasible models changed the version and that is what got
+blamed:
 
     $ spack spec hdf5@1.8.19+java
-    ==> Error: failed to concretize `hdf5@1.8.19+java` for the following reasons:
-           1. Cannot satisfy 'hdf5@1.8.19'
-    ==> Error:      2. Cannot satisfy 'hdf5@1.8.19' (version 1.14.6 does not match)
-            required because hdf5@1.8.19+java requested explicitly
+    -  1. Cannot satisfy 'hdf5@1.8.19' (version 1.14.6 does not match)
+    +  1. Cannot set variant 'java' for 'hdf5@1.8.19': Package hdf5 has variant 'java' when @1.10:
 
-The `java` variant is declared `when="@1.10:"`. The message never mentions java. The
-same shape appears when the requirement comes from `packages.yaml`
-(`hdf5: require: +java` with root `hdf5@1.8.19`) and in environments.
+This also turned one fuzzed internal error into a real message (`sundials cuda_arch=11,86`).
 
-## Hand-written cases
+**Platform and target** (`error-msgs-2`), **os and providers** (`error-msgs-1`):
 
-Inputs and outputs are in `results/handwritten/`. The synthetic `errtest` repository in
-`repo/` isolates one mechanism per package.
+    -  1. Cannot select a single "node_platform" for package "zlib-ng"
+    +  1. 'zlib-ng platform=linux' is not compatible with this machine (platform=darwin)
 
-### Wrong input blamed
+    -  1. Cannot select a single "node_os" for package "zlib-ng"
+    +  1. Conflicting os values are required for package 'zlib-ng': 'sequoia' and 'ubuntu22.04'
 
-| Input | Spack says | Actual cause |
+`arch_os` went from 0/18 to 18/18, `arch_platform` from 2/19 to 19/19. The generic
+`Cannot select a single "{attr}"` template, previously the single most common message in the
+corpus at 74 cases, is gone.
+
+## What was fixed here
+
+**`solver: report unneeded dependency edges instead of failing silently`.** Asking for two
+providers of one language left a dependency edge nothing required, tripping a hard constraint
+at `concretize.lp:1034`. The solver had already derived the real explanation; the constraint
+threw away the model carrying it:
+
+    $ spack spec 'zlib-ng %c=gcc %c=apple-clang'
+    -  ==> Error: Spack concretizer internal error. Please submit a bug report
+    +  1. 'zlib-ng' cannot depend on 'gcc'
+    +  2. zlib-ng cannot have a dependency on c
+    +  3. Only external, or concrete, compilers are allowed for the c language
+
+The weight matters: at anything below the requirement errors the solver *prefers* violating
+this rule, which regressed `libelf %gcc` under `require: "%clang"` from the package's own
+message to two lines about llvm. It is now above every other error, a last resort only.
+
+**`solver: say which config file a requirement came from`.** The provenance existed and was
+dropped one field short of the message — `_rules_from_requirements` already keeps the raw YAML
+values, and `_mark_str` already formats a `file:line: ` prefix:
+
+     3. Cannot satisfy 'hdf5@1.14.6' and 'hdf5@1.8.19'
+    -   required because @1.14.6 is a requirement for package hdf5
+    +   required because /home/user/.spack/packages.yaml:4: @1.14.6 is a requirement for package hdf5
+
+No ASP changes; the text rides on facts that already exist. Requirements set through the API
+carry no mark and get no prefix.
+
+**Fuzzer sampling.** See "Corrections to the method" below.
+
+## Corrections to the method
+
+Three measurement bugs were found while doing the A/B. They matter because they all *flatter*
+or *distort* the numbers above.
+
+**1. The headline rates understate what users see.** `fuzz.py` disables the second-pass
+causation solve by default, so a case costs one solve. But `spack spec` always runs it. For
+`cfg_require_version_conflict` the difference is total:
+
+    causation off:  0/23 name the conflicting requirement
+    causation on:  22/23 name it, both sides, with the cause tree
+
+So the worst-looking bucket in the per-kind table is not actually broken for users; its
+*first-pass* message is just uninformative on its own. Any claim about a message being bad
+must say which mode it was measured in.
+
+**2. An internal error scored as a hit.** "Please submit a bug report" quotes the input spec
+back, so substring matching found the expected tokens in it. Replacing one with a real message
+therefore read as a regression — two `compiler_c` cases did exactly that. `analyze.py` now
+counts an internal error as naming nothing, which is why the `develop` row above (74.3%) is
+lower than the 78% quoted in the first edition.
+
+**3. `analyze.py` read the wrong tree.** It scraped `error(...)` templates from a hardcoded
+`~/spack` path and swallowed the `OSError`, so evaluating a fix in a worktree would have
+silently bucketed every new message as `OTHER:`.
+
+Also stale from the first edition: item 8 claimed every message is printed twice.
+`raise_if_errors` has suppressed exact repeats since upstream #52191, which predates the
+report. What remains is *near*-duplicates — `Cannot satisfy 'hdf5@1.8.19'` followed by the
+same line with `(version 1.14.6 does not match)` appended — plus two chatter lines.
+
+### The fuzzer was not testing what it claimed
+
+Three of the 23 mutators produced **zero** of the 440 cases: `cond_variant`, `cond_value`,
+`requires_directive`. The generator picked a package uniformly from all 9020 builtin packages
+and then applied a random mutator, so a mutator fired only as often as its precondition held:
+
+| precondition | packages | share |
 |---|---|---|
-| `condvar@1.0+feat` | Cannot satisfy condvar@1.0 (version 2.0 does not match) | variant only exists when @2: |
-| `hdf5@1.8.19+java` | Cannot satisfy hdf5@1.8.19 (version 1.14.6 does not match) | variant only when @1.10: |
-| `hdf5: require: +java` with `hdf5@1.8.19` | same, no mention of java or config | config requirement on a conditional variant |
-| `zlib-ng os=ubuntu22.04` | Cannot select a single "node_os" | requested os is not the host os |
-| `zlib-ng platform=linux` | Cannot select a single "node_platform" | host is darwin |
-| `mpi: buildable: false` with `hdf5+mpi` | Cannot build openmpi, buildable:false | the user configured the virtual, not openmpi |
-| `needsfortran %fortran=apple-clang` | 'needsfortran %fortran=apple-clang' cannot depend on apple-clang | apple-clang provides no fortran |
-| `hdf5@1.14 ^cmake@3.12` | fourth message: Cannot satisfy 'cmake@3.12:' and 'cmake@3.12' | false statement; the third message is the right one |
+| any package (`unknown_version`, `unknown_variant`, `arch_*`) | 9020 | 100% |
+| has `conflicts()` | 2819 | 31% |
+| **has a version-conditional variant** (`cond_variant`) | **348** | **3.9%** |
+| has `requires()` (`requires_directive`) | 183 | 2.0% |
+| has a `ConditionalValue` (`cond_value`) | 146 | 1.6% |
 
-### Internal error for a user error
+`--max-deps 5` compounded it: 329 of those 348 conditional-variant packages have more than
+five direct dependencies and were skipped 90% of the time. Four mutators produced 48% of the
+corpus, and `cond_variant` — the one that exercises the report's own top finding — never ran.
 
-- `platdep ^leaf` where the dependency exists only when `platform=linux`.
-- `cyc-a`, a dependency cycle.
-- `hdf5+fortran %fortran=apple-clang`.
-- `zlib-ng %c=gcc %c=apple-clang`, two providers for one language.
+Cases are now drawn mutator-first, fewest-so-far first, searching up to 60 packages per
+mutator and ignoring `--max-deps` for the second half of that search. A 120-case run covers 26
+kinds at 1–6 cases each. Two mutators were added for classes nothing reached
+(`unrelated_dep_no_compiler`, `propagated_variant_conflict`), and a crash was fixed: variants
+declared without `values=` have `values` None, which killed three mutators on every such
+package.
 
-### Only one side named
+`requires_directive` is still under-sampled, and the cause is now known: 169 packages have a
+`one_of` requirement with exactly one spec, but the mutator only knows how to break version and
+boolean-variant requirements, not the common `requires("%gcc")` form.
 
-- `chain-c` (diamond: chain-c needs leaf@2, chain-a -> chain-b needs leaf@1) reports
-  "Cannot satisfy 'leaf@1' (version 2.0 does not match)" with the chain-b path, and never
-  mentions chain-c's own `depends_on("leaf@2")`.
-- `twoconds+x+y` reports only the +x path.
-- `hdf5~mpi ^mpich` says mpich is not a dependency but not that `~mpi` is why.
-- "Multiple providers are required for the same 'mpi' virtual" never names the providers
-  or that one came from `packages.yaml`. Its cause analysis always reports nothing:
-  `error_messages.lp` has a causation rule for a virtual with no provider, but none for
-  two providers. Clingo also prints an "atom does not occur in any rule head" info line
-  about `has_provider` in 11 of the 36 runs that reached the second pass. The atom is
-  defined in `concretize.lp`; it is simply absent from models that contain no virtuals,
-  and the causation program does not declare it with `#defined`.
+## What is left, ranked
 
-### Generic, fan-out
+**1. Both sides of a conflict, in the first-pass message (~85 of the ~103 imperfect cases).**
+This is one defect wearing four hats: `cfg_require_version_conflict` (23),
+`cfg_external_too_old` (10/10 incomplete), `dep_version_out_of_range` (6/6),
+`cfg_require_variant_conflict` (4/4), and most of `cfg_all_require` (40/56). The message names
+the value that was chosen and never the constraint that forced it.
 
-- `all: require: ^mpich` with `hdf5 ^openmpi`: 12 lines of "cannot satisfy a requirement
-  for package 'X'." including zlib-ng and perl, which never depend on MPI.
-- `buildable: false` with an external that fails a constraint never says which external
-  was considered or which constraint it failed. For `chain-a` with external `leaf@2.0`
-  the cause (chain-b needs leaf@1) is invisible.
-- Target errors print four lines; the second is the right one.
+`error_messages.lp:109` already does exactly this for one shape —
+`Cannot satisfy '{0}@{1}' and '{0}@{2}'` with both cause trees. Its guards require both
+constraints to be derived and the chosen version to satisfy exactly one, so it does not fire
+when no version was chosen at all. Broadening it is the single highest-payoff change left.
+*Cost: moderate, one `.lp` rule, no Python.*
 
-### Good
+**2. Requirement messages that name the requirement (56 cases, up to 87 lines each).**
+`error(60000, "cannot satisfy a requirement for package '{0}'.", Package)` at
+`concretize.lp:1421` keys on `requirement_group`, so it prints one line per package in the DAG
+and never the requirement text. The per-member conditions carry it already — the
+`condition_reason` now includes `file:line` — but no error rule reads them.
 
-`conflicts()` and `requires()` with a `msg`, `depends_on` variant conflicts, config
-`require: ~mpi` versus `+mpi`, plain `buildable: false` with no externals, nonexistent
-variant or version in a requirement (caught before the solver), unknown hashes,
-deprecated versions, invalid variant values.
+Emitting the unsatisfied `requirement_group_member` conditions instead would name the
+requirement *and* collapse the fan-out. Needs `#show requirement_group_member/3` and friends in
+`display.lp` first. *Cost: moderate; the data is all present.*
 
-### Silent successes
+**3. The remaining 11 internal errors.** Instrumenting every integrity constraint — rewriting
+each bare `:-` head into a tagged `error(...)` — identifies the blocker directly. That found
+`concretize.lp:1034` for the compiler case. Two caveats learned the hard way: the pure
+well-formedness constraints (`concretize.lp:81-97`) must stay hard, or the solver dodges
+everything else by dropping a node; and relaxing all of them at once makes solving slow enough
+that most cases hit the timeout before yielding an answer. Of 17 internal-error cases swept,
+5 were explained (`1034` ×3, `847`, `1194`); the rest need the sibling `.lp` files
+(`direct_dependency.lp`, `libc_compatibility.lp`, `os_compatibility.lp` hold 5 more
+constraints) and the hard `1 {...} 1` cardinality rules instrumented too.
 
-`hdf5 ^mpi@99` concretizes with mpi-serial because that package provides `mpi` with no
-version. A provider list naming a nonexistent package, and a variant preference that does
-not exist on the chosen version, both pass without a warning. A conditional requirement
-of `+mpi when @1.14` against `hdf5~mpi` is dodged by choosing hdf5@2.2.0.
+Dependency cycles are the exception and cannot be done this way at all:
+`concretize.lp:2170-2171` uses clingo's `#edge` acyclicity extension, not a rule, so a cycle is
+infeasible with no atom to attach a message to. It needs Python-side detection.
+*Cost: low per constraint, but the diagnosis loop is slow.*
 
-## Fuzzed cases
+**4. `buildable: false` messages that name the externals considered.** 10/10 fuzzed cases hide
+the cause; the message never says which external was rejected or which constraint it failed.
 
-`fuzz.py` picks a random real package, reads its directives, and injects one known-bad
-thing. Twenty-three mutators; 440 cases; solver timeout 45 s; causation pass disabled
-for speed and re-enabled on a replayed subset (`results/fuzz/replay_full.jsonl`).
+**5. Slow unsatisfiable inputs (14 timeouts).** Two shapes: `all: require: %gcc@99`, and
+`X ^libpng` where libpng is not a dependency. `alglib ^libpng` runs past 45 s while `shc ^gmp`
+— the same mutation — finishes in 5 s. A performance bug, not a message bug, but it costs the
+user the message entirely. The timeout also covers only the clingo solve, not grounding or the
+causation pass.
 
-| Outcome | Cases |
-|---|---|
-| Unsatisfiable with a message | 258 |
-| Rejected before the solver | 75 |
-| Concretized anyway | 93 |
-| Internal error | 14 |
-| Solver timeout at 45 s | 14 |
+**6. Precision, not just recall.** Nothing yet measures whether a message names something the
+user did *not* touch, which is the "wrong input blamed" complaint the first report opened with.
+Each mutator would declare taboo tokens alongside `expect`.
 
-### Cause-mention rate by mutation
+## Reproducing
 
-"Any" means at least one expected token appeared in the message. "All" means every one
-did, which is the bar for acting on the message without guessing. Full table in
-`results/fuzz/analysis.txt`.
+```sh
+# hand-written CLI cases, ~2 min
+python3 fuzzing/harness.py
 
-| Mutation | Any | All | Typical first-pass message |
-|---|---|---|---|
-| foreign os | 0/18 | 0/18 | Cannot select a single "node_os" |
-| foreign platform | 2/18 | 2/18 | Cannot select a single "node_platform" |
-| config requires another version | 0/23 | 0/23 | Cannot satisfy 'py-funcy@=1.14' |
-| external too old | 10/10 | 0/10 | Cannot build cmake, buildable:false and no externals satisfy |
-| config requires another provider | 5/5 | 0/5 | Multiple providers are required for the same 'qmake' virtual |
-| dependency version out of range | 6/6 | 0/6 | Cannot satisfy 'cmake@=3.0.2' |
-| `all: require` | 46/54 | 16/54 | cannot satisfy a requirement for package 'zlib-ng' |
-| `%c=gcc` with Fortran-only gcc | 16/18 | 16/18 | Only external, or concrete, compilers are allowed for the c language |
-| conflicts directive | 15/15 | 15/15 | the directive's own message |
-| `buildable: false` on a dependency | 26/26 | 26/26 | Cannot build X, buildable:false |
+# fuzz, 4 workers, ~10 min each
+spack python fuzzing/fuzz.py --seed 101 --n 110 --max-deps 5 --out fuzz_1.jsonl
+python3 fuzzing/analyze.py fuzz_*.jsonl
 
-The "any" hits in the middle rows are incidental: the package name appears, the injected
-thing does not.
+# A/B an existing corpus against a change: the records carry everything --replay needs
+spack python fuzzing/fuzz.py --replay results/fuzz/fuzz_1.jsonl --out after_1.jsonl
+```
 
-### What the causation pass rescues
-
-Replaying with the second pass enabled, config version requirements and out-of-range
-dependency versions gained a correct third message naming the requirement or the
-`depends_on` constraint. External too old, foreign os, provider requirement conflicts, two
-providers, and the compiler case gained nothing and printed "No additional error causes
-discovered".
-
-### New internal-error shapes
-
-- Two values of a multi-valued variant whose conditional dependencies are disjoint:
-  `nccl-tests cuda_arch=35,90`, `sundials cuda_arch=11,86`. Both generated cases.
-- A package with no compiler dependencies plus an unrelated `^dep`: `maven ^zlib-ng`,
-  `apktool ^libpng`, `apple-libuuid ^libiconv`. Five cases. The same mutation on a package
-  with compiler dependencies gets the proper "not a dependency" message.
-- One config version requirement (`nccl` at `@=2.9.8-1` with `require: @=2.10.3-1`),
-  unlike the other 22.
-
-### Slow unsatisfiable inputs
-
-All 14 timeouts had one of two shapes: `all: require: %gcc@99` in `packages.yaml`, or
-`X ^libpng` where libpng is not a dependency of X. The libpng cases matter because the
-same mutation with a different dependency finishes in 5 s (`shc ^gmp`) while `alglib
-^libpng` and `perl-http-tiny ^libpng` run past 45 s. Median solve time across the set was
-5.5 s for both satisfiable and unsatisfiable inputs, so these are 10x outliers on trivial
-inputs.
-
-`concretizer:timeout` (seconds) and `concretizer:error_on_timeout` bound this. The cap
-covers only the clingo solve phase, not setup, grounding, or the second-pass causation
-solve. The expiry message names the spec and nothing else. With `error_on_timeout: false`
-Spack reports the best model found so far, which for an unsatisfiable input means the
-error list of that partial model.
-
-### Token cost
-
-Error text is short: median 325 characters, largest 5.5k. The waste is structural. Every
-message is printed twice, once before and once after the causation pass, framed by
-"Analyzing the cause of the failure" and "No additional error causes discovered". The
-five longest messages were all `all: require` cases at 58 to 87 numbered lines, most of
-them unrelated conflicts triggered by the solver's fallback choices ("icu4c:
-platform=darwin conflicts with build_system=msbuild"). A successful `spack spec hdf5` is
-48 lines and 6.5k characters, roughly twenty times a typical error.
-
-### Small wording traps
-
-- `%clang@99` reports "No version exists that satisfies llvm@99", a name the user never
-  typed.
-- Target errors lead with "Cannot select a single node_target" before the correct line.
-- An external Python package declared without an external python is rejected with a
-  message about a missing external for python, which is correct but reads as a typo.
-
-### Expected successes
-
-An undeclared exact version like `@=99.99.99` concretizes 56 of 59 times because Spack
-1.x allows unknown exact versions. `buildable: false` on an already-installed dependency
-succeeds through reuse. A `^dep` that is transitively reachable succeeds. Not bugs, but
-an agent expecting an error will be surprised.
-
-## Suggested fixes, in order of payoff
-
-1. Turn the hard constraint at `concretize.lp:1618` into a weighted error for user-set
-   variants, or emit the conditional-variant error before the version error. Fixes every
-   variant row in pattern 1 and removes the bogus first entry from four otherwise good
-   cases.
-2. Rewrite os, platform, and target messages to "requested os=X, host is Y". Zero
-   mentions in 36 fuzzed cases today.
-3. Give the pattern 2 hard constraints `error()` rules: platform-conditional
-   dependencies, cycles, language providers, multiple compilers per language, disjoint
-   conditional dependencies from a multi-valued variant, unrelated `^dep` on
-   compiler-free roots.
-4. Make the cause tree show both sides of a version or provider conflict.
-5. Put the requirement spec and its config file and line into requirement messages in
-   the first pass, and collapse the per-node fan-out for `all:` requirements. The blame
-   data already exists in `spack config blame`.
-6. Add a causation rule for two providers of the same virtual in `error_messages.lp`,
-   and declare `has_provider/1` there with `#defined` so the clingo info line disappears.
-7. List the externals considered and the failing constraint in `buildable: false`
-   messages. Ten of ten fuzzed cases hid the cause.
-8. Print each message once, drop the chatter when stdout is not a tty, and offer the
-   numbered messages plus cause trees as JSON.
-9. Apply the timeout to the causation pass too, and make the expiry message say the input
-   may be unsatisfiable.
-10. Treat slow unsat as its own bug class; `alglib ^libpng` is a minimal reproducer.
+`results/fuzz/fuzz_*.jsonl` + `analysis.txt` are the `develop` baseline;
+`results/fuzz/after_*.jsonl` + `analysis_after.txt` are the same 440 inputs with all six
+commits applied. Compare like with like: `--full` changes the message text, so a run with the
+causation pass on is not comparable to one without.

@@ -42,9 +42,18 @@ solve. To see the full user-facing message for a subset, replay it with `--full`
 spack python fuzzing/fuzz.py --replay cases.jsonl --full --out cases_full.jsonl
 ```
 
-Useful flags: `--kinds cond_variant,cfg_all_require` restricts mutators, `--timeout N`
-sets `concretizer:timeout` for the run (default 45 s), `--max-deps N` skips packages with
-more direct dependencies most of the time to keep solves fast.
+Useful flags: `--kinds cond_variant,arch_target` restricts mutators (matched against the
+emitted `kind`), `--timeout N` sets `concretizer:timeout` for the run (default 45 s),
+`--max-deps N` skips packages with more direct dependencies most of the time to keep solves
+fast.
+
+**Comparing two runs.** `--replay` reruns a jsonl file verbatim, which is the way to A/B a
+solver change: the records carry `kind`, `specs`, `config` and `expect`, everything needed.
+Compare like with like -- `--full` changes the message text, so a run with the causation pass
+on is not comparable to one without, and the difference can be total (see REPORT.md).
+
+`analyze.py` scrapes message templates from the `concretize.lp` of the checkout it lives in;
+set `SPACK_ROOT` to point it elsewhere.
 
 ## Fuzzer record format
 
@@ -68,4 +77,19 @@ A mutator is a function taking a package class and returning either `None` (not
 applicable) or a dict with `kind`, `specs`, `config`, and `expect`. Add it to `MUTATORS`
 in `fuzz.py`. The package class exposes `versions`, `variant_items()`, `dependencies`,
 `conflicts`, `requirements`, and `provided`, which is enough to construct a spec that
-violates a specific directive.
+violates a specific directive. Use the `variant_values()` helper rather than `var.values`
+directly: a variant declared without `values=` has `None` there.
+
+## How cases are drawn
+
+Mutator first, fewest cases so far first, then up to `TRIES_PER_MUTATOR` packages are tried
+to find one the mutator applies to (ignoring `--max-deps` for the second half of that
+search). Drawing the package first instead starves every mutator with a rare precondition --
+a version-conditional variant exists on 348 of 9020 packages -- and that is how three
+mutators came to produce zero of the first 440 cases. Coverage is worth checking after
+adding a mutator:
+
+```
+spack python fuzzing/fuzz.py --seed 1 --n 60 --max-deps 5 --out /tmp/x.jsonl
+python3 -c "import json,collections;print(collections.Counter(json.loads(l)['kind'] for l in open('/tmp/x.jsonl')))"
+```
