@@ -16,10 +16,11 @@ message without guessing.
 
 | | any | all | internal errors |
 |---|---|---|---|
-| `develop` (b495c19f9e) | 75.5% | 58.1% | 14 |
-| + `hs/fix/error-msgs-{1,2,3}` | 86.5% | 69.4% | 13 |
-| + naming the unneeded edge, requirement provenance | 87.2% | 69.4% | 11 |
-| + naming externals and requirements | **87.2%** | **78.3%** | **11** |
+| `develop` (b495c19f9e) | 75.8% | 58.3% | 14 |
+| + `hs/fix/error-msgs-{1,2,3}` | 86.7% | 69.6% | 13 |
+| + naming the unneeded edge, requirement provenance | 87.4% | 69.6% | 11 |
+| + naming externals and requirements | 87.4% | 78.5% | 11 |
+| + reporting a provider that cannot provide | **87.4%** | **78.5%** | **10** |
 
 Measured over the 418 of 440 cases that never hit the solver timeout in any run. Timeouts are
 wall-clock and this is a shared machine: two runs of *identical* code differed by 4%, and one
@@ -183,7 +184,7 @@ them changes how many error atoms a model carries, and so which model the optimi
 it needs its own before/after on the corpus rather than a local test. *Cost: moderate, and the
 risk is in the optimization, not in the rule.*
 
-**2. The remaining 11 internal errors.** Instrumenting integrity constraints — rewriting each
+**2. The remaining 10 internal errors.** Instrumenting integrity constraints — rewriting each
 bare `:-` head into a tagged `error(...)` — identifies the blocker directly, and found
 `concretize.lp:1034` for the compiler case. Two caveats: the pure well-formedness constraints
 (`concretize.lp:81-97`) must stay hard, or the solver dodges everything else by dropping a
@@ -191,7 +192,7 @@ node; and every relaxation makes the program harder to solve, which bounds how m
 relaxed at once.
 
 The largest remaining class is `X ^dep` where the root has no compiler dependencies
-(`maven ^zlib-ng`, `apktool ^libpng`; 5 of the 11). It resisted the technique entirely, and
+(`maven ^zlib-ng`, `apktool ^libpng`; 5 of the 10). It resisted the technique entirely, and
 the negative results are worth recording:
 
 - **Not an integrity constraint.** All 62 in `concretize.lp` plus the 5 in
