@@ -986,6 +986,10 @@ UNSAT_PROBES: Dict[Tuple[str, int], str] = {
         "no version of '{0}' is available to this solve: every version it declares is ruled out "
         "here, so nothing can depend on it"
     ),
+    ("wrong_build_provider", 3): (
+        "'{2}' has to be provided at build time by something '{0}' depends on, but '{1}' was "
+        "selected to provide it"
+    ),
     ("dangling_edge", 2): ("'{0}' depends on '{1}', but '{1}' could not be added to the DAG"),
 }
 
