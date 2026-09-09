@@ -23,7 +23,7 @@ message without guessing.
 | + reporting a provider that cannot provide | 87.3% | 78.4% | 10 |
 | + explaining a solve with no error atoms | 89.5% | 80.3% | 2 |
 | + naming a package with no version, ranking the probes | 90.7% | 81.8% | 1 |
-| + ranking the probes by specificity | **91.1%** | **81.5%** | **0** |
+| + ranking the probes by specificity, falling back to the user's own input | **91.9%** | **82.3%** | **0** |
 
 Measured over the cases that never hit the solver timeout in any run. Timeouts are wall-clock
 and this is a shared machine: two runs of *identical* code differed by 4%, and one run under
@@ -38,16 +38,21 @@ causation solve by default so a case costs one solve, but `spack spec` always ru
 
 | | any | all | internal errors |
 |---|---|---|---|
-| fuzzer fast mode | 91.1% | 81.5% | 0 |
-| **as users see it** | **99.7%** | **96.0%** | **0** |
+| fuzzer fast mode | 91.9% | 82.3% | 0 |
+| **as users see it** | **100.0%** | **97.2%** | **0** |
 
-No input in the 440-case corpus answers "Please submit a bug report" any more. One still names
-nothing the user wrote: `nccl@=2.9.8-1`, which reports a consequence rather than the `require:`
-behind it. Of the 62 hand-written cases, one still does: `R07_platdep`, `platdep ^leaf` in the
-synthetic errtest repo, where platdep depends on leaf only on another platform. Relaxing all
-five probe guards leaves it unsatisfiable, so its blocker is a constraint none of them covers,
-and the localisation tooling cannot say which (see below). Every figure below is fast mode
-unless it says otherwise, because that is the mode the corpus was originally recorded in.
+**No input produces "Please submit a bug report" any more** -- not one of the 440 fuzzed cases,
+not one of the 62 hand-written ones. Every error names at least one thing the user wrote.
+
+Nine of 321 graded cases still name one side of the conflict and not the other, all in four
+shapes: an external whose version is named without the range it had to satisfy
+(`cfg_external_too_old`), and a virtual where one provider is named but not the one it clashes
+with (`cfg_provider_require_conflict`, `two_providers`, `two_conditional_deps_disjoint`). Four
+further cases are excluded from grading because their package cannot be built here at all,
+mutation or no mutation.
+
+Every figure below is fast mode unless it says otherwise, because that is the mode the corpus
+was originally recorded in.
 
 ### Goal
 

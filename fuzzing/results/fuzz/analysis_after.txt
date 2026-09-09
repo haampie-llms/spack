@@ -1,32 +1,32 @@
 cases: 440  outcomes: {'unsat': 262, 'sat': 93, 'presolver': 85}
 
 == per mutation kind: n, outcomes, cause-mentioned rate among error outcomes, median lines, max seconds
-arch_os                            n= 19 {'unsat': 18, 'sat': 1}                                 mentioned=18/18 any, 18/18 all medlines= 1 max= 15.1s
-arch_platform                      n= 19 {'unsat': 19}                                           mentioned=19/19 any, 19/19 all medlines= 1 max=  8.0s
-arch_target                        n= 18 {'unsat': 17, 'presolver': 1}                           mentioned=18/18 any, 18/18 all medlines= 1 max= 51.3s
+arch_os                            n= 19 {'unsat': 18, 'sat': 1}                                 mentioned=18/18 any, 18/18 all medlines= 1 max= 14.8s
+arch_platform                      n= 19 {'unsat': 19}                                           mentioned=19/19 any, 19/19 all medlines= 1 max=  8.1s
+arch_target                        n= 18 {'unsat': 17, 'presolver': 1}                           mentioned=18/18 any, 18/18 all medlines= 1 max= 52.1s
 bad_variant_value                  n=  3 {'presolver': 3}                                        mentioned=3/3 any, 3/3 all   medlines= 1 max=  1.0s
-cfg_all_require                    n= 59 {'unsat': 56, 'sat': 3}                                 mentioned=43/56 any, 43/56 all medlines= 6 max= 55.6s
-cfg_buildable_false                n= 35 {'unsat': 26, 'sat': 9}                                 mentioned=26/26 any, 26/26 all medlines= 1 max= 21.0s
-cfg_external_too_old               n= 10 {'unsat': 7, 'presolver': 3}                            mentioned=9/10 any, 0/10 all medlines= 1 max= 56.9s
-cfg_provider_require_conflict      n=  5 {'unsat': 2, 'presolver': 3}                            mentioned=5/5 any, 2/5 all   medlines= 1 max=  6.6s
-cfg_require_variant_conflict       n=  4 {'unsat': 4}                                            mentioned=4/4 any, 0/4 all   medlines= 1 max=  5.8s
-cfg_require_version_conflict       n= 23 {'unsat': 22, 'presolver': 1}                           mentioned=0/23 any, 0/23 all medlines= 1 max=  7.1s
-cfg_virtual_buildable_false        n=  6 {'unsat': 6}                                            mentioned=6/6 any, 6/6 all   medlines= 1 max=  5.9s
-compiler_c                         n= 18 {'unsat': 18}                                           mentioned=16/18 any, 14/18 all medlines= 1 max= 45.3s
-compiler_clang                     n=  6 {'presolver': 3, 'unsat': 3}                            mentioned=6/6 any, 6/6 all   medlines= 2 max=  1.0s
-compiler_cxx                       n=  8 {'unsat': 8}                                            mentioned=6/8 any, 6/8 all   medlines= 1 max=  7.1s
-compiler_fortran                   n=  7 {'unsat': 7}                                            mentioned=7/7 any, 7/7 all   medlines= 1 max= 49.5s
-compiler_gcc                       n=  8 {'presolver': 5, 'unsat': 3}                            mentioned=8/8 any, 8/8 all   medlines= 2 max=  3.6s
-conflict_directive                 n= 16 {'unsat': 16}                                           mentioned=16/16 any, 16/16 all medlines= 2 max=  6.8s
-dep_condition_falsified            n=  5 {'presolver': 2, 'sat': 1, 'unsat': 2}                  mentioned=4/4 any, 2/4 all   medlines= 1 max= 15.0s
-dep_version_out_of_range           n=  7 {'unsat': 6, 'sat': 1}                                  mentioned=6/6 any, 0/6 all   medlines= 1 max=  6.6s
-deprecated_version                 n=  1 {'presolver': 1}                                        mentioned=1/1 any, 1/1 all   medlines= 2 max=  0.7s
-env_unify_conflict                 n=  2 {'sat': 2}                                              mentioned=-                  medlines= 0 max=  1.7s
-not_a_dependency                   n= 41 {'unsat': 17, 'sat': 19, 'presolver': 5}                mentioned=22/22 any, 22/22 all medlines= 1 max= 49.9s
-two_conditional_deps_disjoint      n=  2 {'presolver': 1, 'unsat': 1}                            mentioned=2/2 any, 0/2 all   medlines= 5 max= 15.6s
-two_providers                      n=  6 {'presolver': 3, 'unsat': 2, 'sat': 1}                  mentioned=5/5 any, 2/5 all   medlines= 1 max= 16.0s
+cfg_all_require                    n= 58 {'unsat': 55, 'sat': 3}                                 mentioned=43/55 any, 43/55 all medlines= 6 max= 55.7s
+cfg_buildable_false                n= 35 {'unsat': 26, 'sat': 9}                                 mentioned=26/26 any, 26/26 all medlines= 1 max= 19.9s
+cfg_external_too_old               n=  9 {'unsat': 6, 'presolver': 3}                            mentioned=9/9 any, 0/9 all   medlines= 1 max=  6.3s
+cfg_provider_require_conflict      n=  5 {'unsat': 2, 'presolver': 3}                            mentioned=5/5 any, 2/5 all   medlines= 1 max=  6.4s
+cfg_require_variant_conflict       n=  4 {'unsat': 4}                                            mentioned=4/4 any, 0/4 all   medlines= 1 max=  6.3s
+cfg_require_version_conflict       n= 22 {'unsat': 22}                                           mentioned=0/22 any, 0/22 all medlines= 1 max=  6.4s
+cfg_virtual_buildable_false        n=  6 {'unsat': 6}                                            mentioned=6/6 any, 6/6 all   medlines= 1 max=  5.8s
+compiler_c                         n= 18 {'unsat': 18}                                           mentioned=16/18 any, 14/18 all medlines= 1 max= 43.5s
+compiler_clang                     n=  6 {'presolver': 3, 'unsat': 3}                            mentioned=6/6 any, 6/6 all   medlines= 2 max=  0.9s
+compiler_cxx                       n=  8 {'unsat': 8}                                            mentioned=6/8 any, 6/8 all   medlines= 1 max=  6.8s
+compiler_fortran                   n=  7 {'unsat': 7}                                            mentioned=7/7 any, 7/7 all   medlines= 1 max= 50.2s
+compiler_gcc                       n=  8 {'presolver': 5, 'unsat': 3}                            mentioned=8/8 any, 8/8 all   medlines= 2 max=  3.4s
+conflict_directive                 n= 16 {'unsat': 16}                                           mentioned=16/16 any, 16/16 all medlines= 2 max=  6.4s
+dep_condition_falsified            n=  5 {'presolver': 2, 'sat': 1, 'unsat': 2}                  mentioned=4/4 any, 2/4 all   medlines= 1 max= 16.0s
+dep_version_out_of_range           n=  7 {'unsat': 6, 'sat': 1}                                  mentioned=6/6 any, 0/6 all   medlines= 1 max=  6.4s
+deprecated_version                 n=  1 {'presolver': 1}                                        mentioned=1/1 any, 1/1 all   medlines= 2 max=  0.8s
+env_unify_conflict                 n=  2 {'sat': 2}                                              mentioned=-                  medlines= 0 max=  1.8s
+not_a_dependency                   n= 41 {'unsat': 17, 'sat': 19, 'presolver': 5}                mentioned=22/22 any, 22/22 all medlines= 1 max= 50.0s
+two_conditional_deps_disjoint      n=  2 {'presolver': 1, 'unsat': 1}                            mentioned=2/2 any, 0/2 all   medlines= 5 max= 15.0s
+two_providers                      n=  6 {'presolver': 3, 'unsat': 2, 'sat': 1}                  mentioned=5/5 any, 2/5 all   medlines= 1 max= 16.5s
 unknown_variant                    n= 53 {'presolver': 53}                                       mentioned=53/53 any, 53/53 all medlines= 1 max=  0.1s
-unknown_version                    n= 59 {'sat': 56, 'presolver': 1, 'unsat': 2}                 mentioned=1/3 any, 1/3 all   medlines= 1 max=  7.4s
+unknown_version                    n= 57 {'sat': 56, 'presolver': 1}                             mentioned=1/1 any, 1/1 all   medlines= 7 max=  7.3s
 
 == message templates seen (count, mention-rate of cases containing it, example)
   54   53/54   Cannot build {0}, since it is configured `buildable:false` and no externals satisfy the request
