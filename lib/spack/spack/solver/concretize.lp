@@ -1196,9 +1196,15 @@ do_not_impose(EffectID, node(X, Package))
    not language(Virtual).
 
 % A package cannot be the actual provider for a virtual if it does not
-% fulfill the conditions to provide that virtual
-:- provider(PackageNode, node(VirtualID, Virtual)),
-   not virtual_condition_holds(PackageNode, Virtual).
+% fulfill the conditions to provide that virtual.
+%
+% Reported rather than forbidden outright: the sibling rule above covers the provider the user
+% asked for via "provider_set", but not the one the solver actually picked, and a hard
+% constraint here discards the model without saying anything. The weight keeps it a last
+% resort, so any more specific explanation is preferred.
+error(100000, "'{0}' cannot be a provider for the '{1}' virtual", Package, Virtual)
+  :- provider(node(X, Package), node(VirtualID, Virtual)),
+     not virtual_condition_holds(node(X, Package), Virtual).
 
 #defined provided_together/3.
 
