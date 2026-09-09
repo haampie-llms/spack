@@ -310,6 +310,17 @@ def test_requirement_error_names_config_location(mock_packages, concretize_scope
     )
 
 
+def test_unsat_with_no_error_atoms_is_diagnosed(mock_packages, mutable_config):
+    """A hard constraint that has no error() rule leaves the solve unsatisfiable with nothing to
+    report. The #external guards in concretize.lp let the diagnosis name what could not be
+    satisfied instead of asking for a bug report."""
+    with pytest.raises(spack.solver.asp.SolverError) as exc_info:
+        spack.concretize.concretize_one("gcc-runtime ^glibc")
+    msg = str(exc_info.value)
+    assert "'glibc' is not reachable from 'gcc-runtime'" in msg
+    assert "submit a bug report" not in msg
+
+
 def test_target_not_compatible_with_host_error(mock_packages, mutable_config: Configuration):
     """With host-compatible targets only, requesting a target from another family must name the
     spec and say the machine cannot build for it, without a generic "conflicting values" message.

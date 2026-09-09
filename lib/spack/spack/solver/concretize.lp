@@ -88,7 +88,12 @@ has_target_weight(PackageNode) :- node_target_weight(PackageNode, _).
 :- attr("variant_value", PackageNode, _, _), not attr("node", PackageNode).
 :- attr("node_flag", PackageNode, _), not attr("node", PackageNode).
 :- attr("depends_on", ParentNode, _, _), not attr("node", ParentNode).
-:- attr("depends_on", _, ChildNode, _), not attr("node", ChildNode).
+% Guarded for the unsat diagnosis, see `unreachable` below.
+#external dangling_edge(Parent, Child) : attr("depends_on", node(_, Parent), node(_, Child), _).
+
+:- attr("depends_on", node(P, Parent), node(C, Child), _),
+   not attr("node", node(C, Child)),
+   not dangling_edge(Parent, Child).
 :- attr("virtual_node", VirtualNode), not has_provider(VirtualNode).
 :- provider(_, VirtualNode), not attr("virtual_node", VirtualNode).
 :- provider(PackageNode, _), not attr("node", PackageNode).
@@ -315,11 +320,22 @@ associated_with_root(RootNode, ChildNode) :-
    depends_on(ParentNode, ChildNode),
    associated_with_root(RootNode, ParentNode).
 
-% We cannot have a node in the root condition set, that is not associated with that root
-:- attr("root", RootNode),
-   condition_set(RootNode, node(X, Package)),
+% We cannot have a node in the root condition set, that is not associated with that root.
+%
+% The guard is an #external, false unless assumed otherwise, so during a normal solve this is the
+% plain integrity constraint. It gives the constraint a name: when a solve is unsatisfiable with
+% no error atom at all, _explain_unsat in asp.py asks clingo which guards its refutation needed
+% (UNSAT_PROBES lists them). A soft constraint is not an option here: optimizing over models that
+% place the unreachable node anywhere takes far longer than the failing solve itself.
+#external unreachable(Root, Package) : attr("root", node(R, Root)),
+                                       condition_set(node(R, Root), node(X, Package)),
+                                       not virtual(Package).
+
+:- attr("root", node(R, Root)),
+   condition_set(node(R, Root), node(X, Package)),
    not virtual(Package),
-   not associated_with_root(RootNode, node(X, Package)).
+   not associated_with_root(node(R, Root), node(X, Package)),
+   not unreachable(Root, Package).
 
 #defined concretize_everything/0.
 #defined literal/1.
@@ -390,8 +406,16 @@ version_constraint_satisfied(node(ID,Package), Constraint) :-
     pkg_fact(Package, version_range(Constraint, MinIdx, MaxIdx)),
     VersionIdx >= MinIdx, VersionIdx <= MaxIdx.
 
-% Pick a single version among the possible ones
-1 { choose_version(node(ID, Package), Version) : version_declared(Package, Version) } 1 :- attr("node", node(ID, Package)).
+% Pick a single version among the possible ones. A package with no declared version at all
+% makes this infeasible the moment a node for it is required, with nothing to report; the guard
+% is for the unsat diagnosis (see `unreachable` above), and only exists for such packages.
+#external no_version_available(Package) : max_dupes(Package, _),
+                                          not version_declared(Package, _),
+                                          not virtual(Package).
+
+1 { choose_version(node(ID, Package), Version) : version_declared(Package, Version) } 1
+  :- attr("node", node(ID, Package)),
+     not no_version_available(Package).
 
 % To choose the "fake" version of virtual packages, we need a separate rule.
 % Note that a virtual node may or may not have a version, but cannot have more than one.
@@ -871,10 +895,16 @@ error(100, "Cannot satisfy the request on {0} to have the following hash {1}", B
      not attr("dependency_holds", ParentNode, Virtual,"run"),
      virtual(Virtual).
 
-% The virtual build dependency must be on the correct duplicate
-:- virtual_build_requirement(ParentNode, node(X, Virtual)),
-   provider(ProviderNode, node(X, Virtual)),
-   not depends_on(ParentNode, ProviderNode).
+% The virtual build dependency must be on the correct duplicate. Guarded for the unsat
+% diagnosis, see `unreachable` above.
+#external wrong_build_provider(Parent, Provider, Virtual)
+    : virtual_build_requirement(node(_, Parent), node(X, Virtual)),
+      provider(node(_, Provider), node(X, Virtual)).
+
+:- virtual_build_requirement(node(P, Parent), node(X, Virtual)),
+   provider(node(Q, Provider), node(X, Virtual)),
+   not depends_on(node(P, Parent), node(Q, Provider)),
+   not wrong_build_provider(Parent, Provider, Virtual).
 
 attr("virtual_node", VirtualNode)  :- virtual_build_requirement(ParentNode, VirtualNode).
 build_requirement(ParentNode, ProviderNode)  :-
