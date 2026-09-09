@@ -978,19 +978,29 @@ def _make_cache_key(asp_problem: str, control_file_paths: List[str]) -> str:
 #: formatted with the guard's arguments. Adding a constraint here is how it gets explained
 #: without being made soft -- see the comment on `unreachable` in concretize.lp for why soft is
 #: not an option for these.
-UNSAT_PROBES: Dict[Tuple[str, int], str] = {
+#: Guard atoms declared `#external` in the .lp files, one per integrity constraint that has no
+#: error() rule of its own, mapped to (rank, message template). The template is formatted with
+#: the guard's arguments. A refutation often has several guards to choose from and clingo picks
+#: whichever suits it, so the rank decides which explanation is worth showing: a lower number
+#: says more about the request. Without it the last probe below wins cores where `unreachable`
+#: had the better answer, and `maven ^zlib-ng` reports a compiler nobody mentioned.
+UNSAT_PROBES: Dict[Tuple[str, int], Tuple[int, str]] = {
     ("unreachable", 2): (
-        "'{1}' is not reachable from '{0}': nothing in the DAG rooted at '{0}' depends on it"
+        0,
+        "'{1}' is not reachable from '{0}': nothing in the DAG rooted at '{0}' depends on it",
     ),
+    ("dangling_edge", 2): (0, "'{0}' depends on '{1}', but '{1}' could not be added to the DAG"),
     ("no_version_available", 1): (
+        1,
         "no version of '{0}' is available to this solve: every version it declares is ruled out "
-        "here, so nothing can depend on it"
+        "here, so nothing can depend on it",
     ),
+    # last resort: says which mechanism failed rather than what about the request was wrong
     ("wrong_build_provider", 3): (
+        2,
         "'{2}' has to be provided at build time by something '{0}' depends on, but '{1}' was "
-        "selected to provide it"
+        "selected to provide it",
     ),
-    ("dangling_edge", 2): ("'{0}' depends on '{1}', but '{1}' could not be added to the DAG"),
 }
 
 
@@ -1104,9 +1114,10 @@ def _explain_unsat(control, specs=()) -> List[str]:
         symbol = literal_to_symbol.get(abs(literal))
         if symbol is None:
             continue
-        template = UNSAT_PROBES.get((symbol.name, len(symbol.arguments)))
-        if template is None:
+        probe = UNSAT_PROBES.get((symbol.name, len(symbol.arguments)))
+        if probe is None:
             continue
+        probe_rank, template = probe
         args = [str(a).strip('"') for a in symbol.arguments]
         # a root is trivially in its own condition set, and an edge from a package to itself is
         # not news; neither instance explains anything
@@ -1115,15 +1126,15 @@ def _explain_unsat(control, specs=()) -> List[str]:
         message = template.format(*args)
         if message not in messages:
             if any(a in typed for a in args):
-                rank = 0
+                name_rank = 0
             elif any(a in declared for a in args):
-                rank = 1
+                name_rank = 1
             else:
-                rank = 2
-            messages.append((rank, message))
-    # relevant first, order otherwise preserved; a long list buries the useful line
-    messages.sort(key=lambda pair: pair[0])
-    return [message for _, message in messages][:5]
+                name_rank = 2
+            messages.append((name_rank, probe_rank, message))
+    # names the user wrote first, then the more specific probes; a long list buries the answer
+    messages.sort(key=lambda entry: (entry[0], entry[1]))
+    return [message for _, _, message in messages][:5]
 
 
 class PyclingoDriver:
