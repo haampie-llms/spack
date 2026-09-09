@@ -96,7 +96,7 @@ def deepcopy_as_builtin(obj: Any, *, line_info: bool = False) -> Any:
             }
         )
         if line_info:
-            result.line_info = _line_info(obj)
+            result.line_info = source_location(obj)
         return result
     elif isinstance(obj, list):
         return [deepcopy_as_builtin(x, line_info=line_info) for x in obj]
@@ -277,15 +277,14 @@ def dump(data, stream=None, default_flow_style=False):
     return handler.dump(data, stream=stream)
 
 
-def _line_info(obj):
-    """Format a mark as <file>:<line> information."""
+def source_location(obj) -> str:
+    """Return "<file>:<line>" for where *obj* was written in YAML, "<file>" if the line is
+    unknown, or "" if the object carries no mark. Lines are numbered as an editor counts them."""
     m = get_mark_from_yaml_data(obj)
     if m is None:
         return ""
     if m.line is None:
         return m.name
-    # marks are 0-indexed; report the line as an editor numbers it, matching `spack config
-    # blame` and _mark_str in spack.solver.requirements
     return f"{m.name}:{m.line + 1:d}"
 
 

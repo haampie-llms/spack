@@ -147,27 +147,23 @@ error(0, "'{0}' requires conflicting variant values 'Spec({1}={2})' and 'Spec({1
      condition_holds(Cause2, node(X, TriggerPkg2)),
      Value1 < Value2. % see[1] in concretize.lp
 
-% What is actually on offer, whatever the mismatch turns out to be. Versions are the common
-% case but anything can enter a constraint -- a variant, a target, a compiler -- and this line
-% is true regardless, where a version-specific one would blame the wrong thing.
+% A `buildable:false` package that has to be built: name what is on offer. This line is true
+% whatever the mismatch turns out to be -- a variant or a target just as easily as a version.
 error(0, "Cannot build {0}, since it is configured `buildable:false`; the external declared for it is {1}", Package, ExternalSpec)
   :- buildable_false(Package),
      attr("node", node(ID, Package)),
      build(node(ID, Package)),
-     pkg_fact(Package, external_spec_declared(ExternalSpec)).
+     pkg_fact(Package, external_declared(ExternalSpec, _)).
 
-% A package configured `buildable: false` whose external is too old. The first-pass message
-% names neither the external on offer nor the constraint it failed, which is everything the user
-% needs to fix it.
-%
-% The version check is required, not redundant: an external can fail to match on a variant while
-% its version is perfectly fine, and without this guard the message blames the version for a
-% mismatch that has nothing to do with it.
+% ... and when its version is the mismatch, say which constraint it failed. The version check is
+% what keeps this from blaming the version for a variant mismatch. ":" is an external declared
+% without a version, which cannot fail on it.
 error(0, "Cannot build {0}, since it is configured `buildable:false` and the external {0}@{1} does not satisfy '{0}@{2}'", Package, ExternalVersion, Constraint, startcauses, Cause, CauseID)
   :- buildable_false(Package),
      attr("node", node(ID, Package)),
      build(node(ID, Package)),
-     pkg_fact(Package, external_version_declared(ExternalVersion)),
+     pkg_fact(Package, external_declared(_, ExternalVersion)),
+     ExternalVersion != ":",
      attr("node_version_satisfies", node(ID, Package), Constraint),
      not pkg_fact(Package, version_satisfies(Constraint, ExternalVersion)),
      pkg_fact(TriggerPkg, condition_effect(Cause, EffectID)),
@@ -241,5 +237,4 @@ pkg_fact(Package, version_satisfies(Constraint, Version)) :-
 #defined variant_single_value/2.
 #defined has_provider/1.
 #defined buildable_false/1.
-#defined external_version_declared/1.
-#defined external_spec_declared/1.
+#defined external_declared/2.

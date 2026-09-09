@@ -88,9 +88,7 @@ has_target_weight(PackageNode) :- node_target_weight(PackageNode, _).
 :- attr("variant_value", PackageNode, _, _), not attr("node", PackageNode).
 :- attr("node_flag", PackageNode, _), not attr("node", PackageNode).
 :- attr("depends_on", ParentNode, _, _), not attr("node", ParentNode).
-% Guarded like `unreachable` above: a dependency edge whose child never became a node leaves
-% the solve unsatisfiable with nothing to report, and the guard gives the failure a name the
-% diagnosis can turn into a message.
+% Guarded for the unsat diagnosis, see `unreachable` below.
 #external dangling_edge(Parent, Child) : attr("depends_on", node(_, Parent), node(_, Child), _).
 
 :- attr("depends_on", node(P, Parent), node(C, Child), _),
@@ -324,18 +322,11 @@ associated_with_root(RootNode, ChildNode) :-
 
 % We cannot have a node in the root condition set, that is not associated with that root.
 %
-% The "unreachable" guard is an #external, which clingo assigns false unless told otherwise, so
-% this behaves exactly as the plain constraint did during a normal solve. Its purpose is to give
-% the constraint a name the solver can report: when the solve comes back unsatisfiable with no
-% error atom at all, Spack re-solves assuming every guard false and asks clingo which ones its
-% refutation needed. That is how "foo ^bar" gets an explanation when bar cannot be reached from
-% foo -- the error(1, ...) rule above covers the same situation but is guarded by
-% `not unification_set("root", ...)`, so it is silent exactly when bar lands in the root
-% unification set.
-%
-% A soft constraint would be the obvious alternative and is not viable: the solver then has to
-% optimize over models that place the unreachable node anywhere, which for these inputs takes
-% far longer than the failing solve itself.
+% The guard is an #external, false unless assumed otherwise, so during a normal solve this is the
+% plain integrity constraint. It gives the constraint a name: when a solve is unsatisfiable with
+% no error atom at all, _explain_unsat in asp.py asks clingo which guards its refutation needed
+% (UNSAT_PROBES lists them). A soft constraint is not an option here: optimizing over models that
+% place the unreachable node anywhere takes far longer than the failing solve itself.
 #external unreachable(Root, Package) : attr("root", node(R, Root)),
                                        condition_set(node(R, Root), node(X, Package)),
                                        not virtual(Package).
@@ -349,31 +340,48 @@ associated_with_root(RootNode, ChildNode) :-
 #defined concretize_everything/0.
 #defined literal/1.
 
-% Attributes for node packages which must have a single value
-attr_single_value("version").
-attr_single_value("node_platform").
-attr_single_value("node_os").
-attr_single_value("node_target").
+% Attributes for node packages which must have a single value, and the name users know them by
+attr_single_value("version", "version").
+attr_single_value("node_platform", "platform").
+attr_single_value("node_os", "os").
+attr_single_value("node_target", "target").
 
 node_has_single_value_attr(node(ID, Package), Attribute) :-
   attr(Attribute, node(ID, Package), _).
 
 % Error when no attribute is selected
-error(10000, no_value_error, Attribute, Package)
+error(10000, "No {0} value could be selected for package '{1}'", Name, Package)
   :- attr("node", node(ID, Package)),
-     attr_single_value(Attribute),
+     attr_single_value(Attribute, Name),
      not node_has_single_value_attr(node(ID, Package), Attribute).
 
+% The values this machine can build for. A value outside them is reported on its own, and the
+% conflicting-values error below stays quiet about it: the second value is the one this machine
+% picked, and reporting the pair would only add noise.
+machine_value("node_platform", Platform) :- allowed_platform(Platform).
+machine_value("node_target", Target) :- target(Target).
+
+foreign_value(node(ID, Package), Attribute)
+  :- machine_value(Attribute, _),
+     attr(Attribute, node(ID, Package), Value),
+     not machine_value(Attribute, Value).
+
+error(100, "'{0} {1}={2}' is not compatible with this machine", Package, Name, Value)
+  :- machine_value(Attribute, _),
+     attr(Attribute, node(ID, Package), Value),
+     not machine_value(Attribute, Value),
+     attr_single_value(Attribute, Name).
+
 % Error when multiple attr need to be selected
-error(100, multiple_values_error, Attribute, Package)
+error(100, "Conflicting {0} values are required for package '{1}'", Name, Package)
   :- attr("node", node(ID, Package)),
-     not multiple_values_explained(node(ID, Package), Attribute),
-     attr_single_value(Attribute),
+     attr_single_value(Attribute, Name),
+     not foreign_value(node(ID, Package), Attribute),
      2 { attr(Attribute, node(ID, Package), Value) },
      Attribute != "node_os".
 
 % For the os the message includes the conflicting values, which is cheap enough to ground.
-error(100, multiple_values_error, "node_os", Package, OS1, OS2)
+error(100, "Conflicting os values are required for package '{0}': '{1}' and '{2}'", Package, OS1, OS2)
   :- attr("node", node(ID, Package)),
      attr("node_os", node(ID, Package), OS1),
      attr("node_os", node(ID, Package), OS2),
@@ -398,15 +406,11 @@ version_constraint_satisfied(node(ID,Package), Constraint) :-
     pkg_fact(Package, version_range(Constraint, MinIdx, MaxIdx)),
     VersionIdx >= MinIdx, VersionIdx <= MaxIdx.
 
-% Pick a single version among the possible ones
-% A package with no declared version at all makes this rule infeasible the moment a node for it
-% is required, with nothing to report -- that is `gpuscout`, which needs cuda@12:, on a platform
-% where every cuda version is gated out. Guarded for diagnosis only, like `unreachable` above;
-% the domain is restricted to packages that really have no version, so this adds a handful of
-% externals rather than one per package.
-has_declared_version(Package) :- version_declared(Package, _).
+% Pick a single version among the possible ones. A package with no declared version at all
+% makes this infeasible the moment a node for it is required, with nothing to report; the guard
+% is for the unsat diagnosis (see `unreachable` above), and only exists for such packages.
 #external no_version_available(Package) : max_dupes(Package, _),
-                                          not has_declared_version(Package),
+                                          not version_declared(Package, _),
                                           not virtual(Package).
 
 1 { choose_version(node(ID, Package), Version) : version_declared(Package, Version) } 1
@@ -891,7 +895,8 @@ error(100, "Cannot satisfy the request on {0} to have the following hash {1}", B
      not attr("dependency_holds", ParentNode, Virtual,"run"),
      virtual(Virtual).
 
-% The virtual build dependency must be on the correct duplicate.
+% The virtual build dependency must be on the correct duplicate. Guarded for the unsat
+% diagnosis, see `unreachable` above.
 #external wrong_build_provider(Parent, Provider, Virtual)
     : virtual_build_requirement(node(_, Parent), node(X, Virtual)),
       provider(node(_, Provider), node(X, Virtual)).
@@ -1084,11 +1089,10 @@ error(10, "'{0}' is not a valid dependency for any package in the DAG", Package)
   :- attr("node", node(ID, Package)),
      not needed(node(ID, Package)).
 
-% An edge that nothing in the DAG asks for. Reported rather than forbidden outright: when this
-% is the only thing making a model infeasible, the solver has usually already derived the real
-% explanation (e.g. two providers for one language), and a hard constraint throws it away along
-% with the model. The weight is above every other error so this is only ever a last resort:
-% at a lower weight the solver prefers it over the requirement errors, which are far more useful.
+% An edge that nothing in the DAG asks for. Reported rather than forbidden outright: a hard
+% constraint would discard the model together with the real explanation the solver usually has
+% by then (e.g. two providers for one language). The weight keeps it a last resort below the
+% requirement errors.
 error(200000, "'{0}' cannot depend on '{1}'", Parent, Child)
   :- depends_on(node(X, Parent), node(Y, Child)),
      not edge_needed(node(X, Parent), node(Y, Child)),
@@ -1249,12 +1253,8 @@ do_not_impose(EffectID, node(X, Package))
    not language(Virtual).
 
 % A package cannot be the actual provider for a virtual if it does not
-% fulfill the conditions to provide that virtual.
-%
-% Reported rather than forbidden outright: the sibling rule above covers the provider the user
-% asked for via "provider_set", but not the one the solver actually picked, and a hard
-% constraint here discards the model without saying anything. The weight keeps it a last
-% resort, so any more specific explanation is preferred.
+% fulfill the conditions to provide that virtual. Reported rather than forbidden outright, since a
+% hard constraint discards the model without saying anything; the weight keeps it a last resort.
 error(100000, "'{0}' cannot be a provider for the '{1}' virtual", Package, Virtual)
   :- provider(node(X, Package), node(VirtualID, Virtual)),
      not virtual_condition_holds(node(X, Package), Virtual).
@@ -1626,8 +1626,6 @@ variant_set_but_missing(PackageNode, Variant)
      not pkg_has_variant(PackageNode, Variant),
      build(PackageNode).
 
-variant_has_condition(Package, Variant) :- pkg_fact(Package, variant_condition(Variant, _, _)).
-
 % error when a variant has to be set, but its when condition cannot hold
 % "Cannot set variant 'java' for 'hdf5@1.8.19': Package hdf5 has variant 'java' when @1.10:"
 error(100, "Cannot set variant '{0}' for '{1}@{2}': {3}", Variant, Package, Version, Reason)
@@ -1638,9 +1636,10 @@ error(100, "Cannot set variant '{0}' for '{1}@{2}': {3}", Variant, Package, Vers
 
 error(100, "Cannot set variant '{0}' for package '{1}' because the variant condition cannot be satisfied for the given spec", Variant, Package)
   :- variant_set_but_missing(node(ID, Package), Variant),
-     not variant_has_condition(Package, Variant).
+     not pkg_fact(Package, variant_condition(Variant, _, _)).
 
-% together with the errors above, this ensures every variant that is set has a value
+% every variant that is set has a value; exempt the case the errors above report, so the model
+% carrying the error is not discarded along with it
 :- attr("variant_set", PackageNode, Variant, Value),
    not attr("variant_value", PackageNode, Variant, Value),
    not variant_set_but_missing(PackageNode, Variant).
@@ -2003,15 +2002,6 @@ will_build_packages() :- build(X).
 1 { attr("node_platform", PackageNode, Platform) : allowed_platform(Platform) } 1
   :- attr("node", PackageNode).
 
-error(100, "'{0} platform={1}' is not compatible with this machine (platform={2})", Package, Platform, Allowed)
-  :- attr("node_platform", node(X, Package), Platform),
-     not allowed_platform(Platform),
-     allowed_platform(Allowed).
-
-% The error above explains the situation; the generic multiple-values error would only add noise.
-multiple_values_explained(node(X, Package), "node_platform")
-  :- attr("node_platform", node(X, Package), Platform), not allowed_platform(Platform).
-
 % setting platform on a node is a hard constraint
 attr("node_platform", PackageNode, Platform)
  :- attr("node", PackageNode), attr("node_platform_set", PackageNode, Platform).
@@ -2052,13 +2042,13 @@ attr("node_os", PackageNode, OS) :- attr("node_os_set", PackageNode, OS), attr("
 % Each node has only one target chosen among the known targets
 1 { attr("node_target", PackageNode, Target) : target(Target) } 1 :- attr("node", PackageNode).
 
-% If a node must satisfy a target constraint, enforce it. A target unknown to this machine is
-% reported by a dedicated error below, so don't repeat the mismatch for it here.
+% If a node must satisfy a target constraint, enforce it. A target this machine cannot build for
+% is reported as such (see `machine_value`), so don't repeat the mismatch for it here.
 error(10, "'{0} target={1}' cannot satisfy constraint 'target={2}'", Package, Target, Constraint)
   :- attr("node_target", node(X, Package), Target),
      attr("node_target_satisfies", node(X, Package), Constraint),
      not target_satisfies(Constraint, Target),
-     not multiple_values_explained(node(X, Package), "node_target").
+     not foreign_value(node(X, Package), "node_target").
 
 % If a node has a target and the target satisfies a constraint, then the target
 % associated with the node satisfies the same constraint
@@ -2125,16 +2115,6 @@ node_target_match(ParentNode, DependencyNode)
 node_target_mismatch(ParentNode, DependencyNode)
   :- attr("depends_on", ParentNode, DependencyNode, Type), Type != "build",
      not node_target_match(ParentNode, DependencyNode).
-
-% disallow reusing concrete specs that don't have a compatible target
-error(100, "'{0} target={1}' is not compatible with this machine", Package, Target)
-  :- attr("node", node(X, Package)),
-     attr("node_target", node(X, Package), Target),
-     not target(Target).
-
-% The error above explains the situation; the generic multiple-values error would only add noise.
-multiple_values_explained(node(X, Package), "node_target")
-  :- attr("node_target", node(X, Package), Target), not target(Target).
 
 %-----------------------------------------------------------------------------
 % Compiler flags
