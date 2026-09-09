@@ -1,6 +1,6 @@
 # spec platdep ^leaf
 # note: leaf is a dep only on platform=linux
-# exit=1 time=4.5s lines=3 chars=284
+# exit=1 time=4.1s lines=3 chars=284
 ==> Error: failed to concretize platdep ^leaf. Spack could not pinpoint a single cause; the solver could not satisfy:
      1. 'leaf' is not reachable from 'platdep': nothing in the DAG rooted at 'platdep' depends on it
     Please report this if the cause is not clear from the above.

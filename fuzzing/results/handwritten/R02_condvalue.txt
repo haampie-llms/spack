@@ -1,12 +1,12 @@
 # spec condvalue@1.0 mode=c
 # note: value 'c' only valid when @2:
-# exit=1 time=5.4s lines=9 chars=602
+# exit=1 time=5.2s lines=9 chars=602
 ==> Error: failed to concretize `condvalue@1.0 mode=c` for the following reasons:
        1. Cannot satisfy 'condvalue@1.0'
   Analyzing the cause of the failure, this may take a moment...
 ==> Error:      2. Cannot satisfy 'condvalue@1.0' (version 2.0 does not match)
         required because condvalue@1.0 mode=c requested explicitly 
      3. Cannot satisfy 'condvalue@2:' and 'condvalue@1.0'
+        required because condvalue@1.0 mode=c requested explicitly 
         required because condvalue variant mode has value 'c' when @2: 
           required because condvalue@1.0 mode=c requested explicitly 
-        required because condvalue@1.0 mode=c requested explicitly 

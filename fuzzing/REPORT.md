@@ -40,29 +40,23 @@ causation solve by default so a case costs one solve, but `spack spec` always ru
 | | any | all | internal errors |
 |---|---|---|---|
 | fuzzer fast mode | 91.8% | 84.3% | 0 |
-| **as users see it** | **100.0%** | **98.1%** | **0** |
+| **as users see it** | **100.0%** | **99.1%** | **0** |
 
 **No input produces "Please submit a bug report" any more** -- not one of the 440 fuzzed cases,
 not one of the 62 hand-written ones. Every error names at least one thing the user wrote.
 
-Six of 321 graded cases still fall short of naming every part, and four of those are the
-fuzzer's expectation rather than the message:
+Three of 319 graded cases still fall short of naming every part, and all three are the fuzzer's
+expectation rather than the message:
 
 - `py-branca`, `py-lightning-lite`: the external declared is a Python extension, so the solve
   fails on the missing external `python` before it ever reaches the version range the mutation
-  was testing. The message is right; the mutator no longer picks such packages, but the
-  committed corpus predates that.
-- `grackle ^mpilander ^cray-mpich`, `minighost+mpi ^openmpi ^spectrum-mpi`: the second provider
-  is not available on this machine at all, so the message says so and never mentions the first.
-  That is the real reason, not the two-provider clash the mutation intended.
-- `sundials cuda_arch=11,86`: reports the conditional variant, which is what actually fails,
-  rather than the disjoint cuda ranges the mutation aimed at.
+  was testing. The mutator no longer picks such packages; the committed corpus predates that.
+- `sundials cuda_arch=11,86`: reports that `cuda_arch` only exists `when +cuda`, which is what
+  actually fails, rather than the disjoint cuda ranges the mutation aimed at.
 
-That leaves one genuine gap: `spades ^zlib ^zlib-ng` says zlib is not a dependency of spades
-without mentioning that both provide `zlib-api`, which is why only one of them can be used.
-
-Four further cases are excluded from grading because their package cannot be built here at all,
-mutation or no mutation.
+Six further cases are excluded from grading because they fail without their mutation at all --
+either the package cannot be built here (no cuda on this machine), or one of the `^` literals is
+unavailable on its own, so the combination the mutation intended is never reached.
 
 Every figure below is fast mode unless it says otherwise, because that is the mode the corpus
 was originally recorded in.

@@ -1,6 +1,6 @@
 # -e /Users/bot/spack/fuzzing/cases/E03_unify_ok_when_possible/env concretize -f
 # note: should succeed
-# exit=0 time=2.9s lines=5 chars=291
+# exit=0 time=9.3s lines=5 chars=291
 ==> Concretized 2 specs:
  -   5czy5me  chain-b@1.0 build_system=generic platform=darwin os=sequoia target=m4
  -   utn2l67      ^leaf@1.0+shared build_system=generic platform=darwin os=sequoia target=m4

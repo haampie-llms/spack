@@ -1,6 +1,6 @@
 # spec reqdir@1+feat
 # note: requires('@2:', when='+feat', msg=...)
-# exit=1 time=5.5s lines=9 chars=601
+# exit=1 time=4.9s lines=9 chars=601
 ==> Error: failed to concretize `reqdir@1+feat` for the following reasons:
        1. Cannot satisfy 'reqdir@1'
   Analyzing the cause of the failure, this may take a moment...

@@ -1,6 +1,6 @@
 # -C /Users/bot/spack/fuzzing/cases/C16_all_noshared spec zlib-ng
 # note: all: variant that not every package has (probably succeeds)
-# exit=0 time=1.9s lines=6 chars=522
+# exit=0 time=5.3s lines=6 chars=522
  -   zlib-ng@2.3.3+compat+new_strategies+opt+pic~shared build_system=autotools platform=darwin os=sequoia target=m4 %c,cxx=apple-clang@17.0.0
 [e]      ^apple-clang@17.0.0 build_system=bundle platform=darwin os=sequoia target=aarch64
 [+]      ^compiler-wrapper@1.1.0 build_system=generic platform=darwin os=sequoia target=m4
