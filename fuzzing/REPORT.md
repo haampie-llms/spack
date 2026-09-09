@@ -21,7 +21,8 @@ message without guessing.
 | + naming the unneeded edge, requirement provenance | 87.3% | 69.5% | 11 |
 | + naming externals and requirements | 87.3% | 78.4% | 11 |
 | + reporting a provider that cannot provide | 87.3% | 78.4% | 10 |
-| + explaining a solve with no error atoms | **89.5%** | **80.3%** | **2** |
+| + explaining a solve with no error atoms | 89.5% | 80.3% | 2 |
+| + naming a package with no version, ranking the probes | **90.7%** | **81.8%** | **1** |
 
 Measured over the cases that never hit the solver timeout in any run. Timeouts are wall-clock
 and this is a shared machine: two runs of *identical* code differed by 4%, and one run under
@@ -36,11 +37,12 @@ causation solve by default so a case costs one solve, but `spack spec` always ru
 
 | | any | all | internal errors |
 |---|---|---|---|
-| fuzzer fast mode | 89.5% | 80.3% | 2 |
-| **as users see it** | **99.1%** | **94.8%** | **2** |
+| fuzzer fast mode | 90.7% | 81.8% | 1 |
+| **as users see it** | **99.4%** | **96.0%** | **1** |
 
-Three of the 440 inputs still fail to name anything the user wrote, and two of those are the
-remaining internal errors. Every figure below is fast mode unless it says otherwise, because
+Two of the 440 inputs still fail to name anything the user wrote: `geode ^icedtea`, the last
+"Please submit a bug report", and `nccl@=2.9.8-1`, which reports a consequence rather than the
+`require:` that caused it. Every figure below is fast mode unless it says otherwise, because
 that is the mode the corpus was originally recorded in.
 
 ### Goal
