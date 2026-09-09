@@ -23,11 +23,25 @@ message without guessing.
 | + reporting a provider that cannot provide | 87.3% | 78.4% | 10 |
 | + explaining a solve with no error atoms | **89.5%** | **80.3%** | **2** |
 
-Measured over the 418 of 440 cases that never hit the solver timeout in any run. Timeouts are
-wall-clock and this is a shared machine: two runs of *identical* code differed by 4%, and one
-run under load lost five more cases to the timeout and 25% more solve time across every
-bucket, including buckets these changes cannot touch. Solve-time claims below are therefore
-restricted to back-to-back A/Bs of one bucket.
+Measured over the cases that never hit the solver timeout in any run. Timeouts are wall-clock
+and this is a shared machine: two runs of *identical* code differed by 4%, and one run under
+load lost five more cases to the timeout and 25% more solve time across every bucket,
+including buckets these changes cannot touch — some of that load turned out to be an orphaned
+process of my own. Solve-time claims below are therefore restricted to back-to-back A/Bs of one
+bucket.
+
+**The table above understates what users see, by a lot.** `fuzz.py` disables the second-pass
+causation solve by default so a case costs one solve, but `spack spec` always runs it. The same
+416 cases, scored on the message a user actually gets:
+
+| | any | all | internal errors |
+|---|---|---|---|
+| fuzzer fast mode | 89.5% | 80.3% | 2 |
+| **as users see it** | **99.1%** | **94.8%** | **2** |
+
+Three of the 440 inputs still fail to name anything the user wrote, and two of those are the
+remaining internal errors. Every figure below is fast mode unless it says otherwise, because
+that is the mode the corpus was originally recorded in.
 
 ### Goal
 
@@ -114,6 +128,17 @@ check that the version was at fault, which produced the false claim that `cmake@
 not satisfy `cmake@3.18:` when the real mismatch was `~ownlibs`. Versions are the common case,
 but anything can enter a constraint. Both rules live in `error_messages.lp`, so they run on a
 fixed model and cannot affect which model is chosen.
+
+**`solver: echo back the compiler name the user typed`.** `%clang` is rewritten to `llvm` while
+parsing, so the error named a package the user never mentioned:
+
+    $ spack spec 'umap %clang@99'
+    -  No version exists that satisfies these input specs:
+    -      llvm@99
+    +      llvm@99 (requested as 'clang@99')
+
+`spack.aliases` already knew the way back. This was three of the six cases that still named
+nothing.
 
 **Fuzzer sampling.** See "Corrections to the method" below.
 
