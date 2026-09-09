@@ -1,12 +1,9 @@
 # spec condvalue@1.0 mode=c
 # note: value 'c' only valid when @2:
-# exit=1 time=5.0s lines=12 chars=748
+# exit=1 time=5.2s lines=9 chars=602
 ==> Error: failed to concretize `condvalue@1.0 mode=c` for the following reasons:
        1. Cannot satisfy 'condvalue@1.0'
   Analyzing the cause of the failure, this may take a moment...
-<spack>/lib/spack/spack/solver/error_messages.lp:129:10-40: info: atom does not occur in any rule head:
-  has_provider(node(X,Virtual))
-
 ==> Error:      2. Cannot satisfy 'condvalue@1.0' (version 2.0 does not match)
         required because condvalue@1.0 mode=c requested explicitly 
      3. Cannot satisfy 'condvalue@2:' and 'condvalue@1.0'

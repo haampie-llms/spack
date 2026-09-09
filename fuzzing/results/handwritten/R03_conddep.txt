@@ -1,6 +1,6 @@
 # spec conddep ^leaf
 # note: leaf is a dep only when +withleaf (default off)
-# exit=0 time=4.9s lines=3 chars=169
+# exit=0 time=5.1s lines=3 chars=169
  -   conddep@1.0+withleaf build_system=generic platform=darwin os=sequoia target=m4
  -       ^leaf@3.0+shared build_system=generic platform=darwin os=sequoia target=m4
 

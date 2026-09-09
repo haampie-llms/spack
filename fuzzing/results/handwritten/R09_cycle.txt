@@ -1,5 +1,10 @@
 # spec cyc-a
 # note: dependency cycle cyc-a <-> cyc-b
-# exit=1 time=4.5s lines=2 chars=188
-==> Error: Spack concretizer internal error. Please submit a bug report at https://github.com/spack/spack and include the command and environment if applicable.
-    cyc-a is unsatisfiable
+# exit=1 time=4.6s lines=7 chars=740
+==> Error: failed to concretize cyc-a. Spack could not pinpoint a single cause; the solver could not satisfy:
+     1. 'cyc-b' is not reachable from 'cyc-a': nothing in the DAG rooted at 'cyc-a' depends on it
+     2. 'cyc-a' depends on 'cyc-b', but 'cyc-b' could not be added to the DAG
+     3. no version of 'atlas' is available to this solve: every version it declares is ruled out here, so nothing can depend on it
+     4. no version of 'cuda' is available to this solve: every version it declares is ruled out here, so nothing can depend on it
+     5. no version of 'fj' is available to this solve: every version it declares is ruled out here, so nothing can depend on it
+    Please report this if the cause is not clear from the above.

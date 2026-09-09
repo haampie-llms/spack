@@ -1,10 +1,7 @@
 # spec zlib-ng target=x86_64
 # note: host is aarch64/m4
-# exit=1 time=5.2s lines=7 chars=479
+# exit=1 time=5.3s lines=4 chars=259
 ==> Error: failed to concretize `zlib-ng target=x86_64` for the following reasons:
-       1. Cannot select a single "node_target" for package "zlib-ng"
-     2. 'zlib-ng target=x86_64' is not compatible with this machine
-     3. 'zlib-ng target=x86_64' cannot satisfy constraint 'target=aarch64:'
-     4. 'zlib-ng target=armv8.1a' cannot satisfy constraint 'target=x86_64:'
+       1. 'zlib-ng target=x86_64' is not compatible with this machine
   Analyzing the cause of the failure, this may take a moment...
 ==> No additional error causes discovered

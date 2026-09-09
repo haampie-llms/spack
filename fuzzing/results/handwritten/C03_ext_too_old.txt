@@ -1,7 +1,9 @@
-# -C <fuzzing>/cases/C03_ext_too_old spec cmake@3.25:
+# -C /Users/bot/spack/fuzzing/cases/C03_ext_too_old spec cmake@3.25:
 # note: only external is too old
-# exit=1 time=5.4s lines=4 chars=287
+# exit=1 time=5.8s lines=6 chars=630
 ==> Error: failed to concretize `cmake@3.25:` for the following reasons:
        1. Cannot build cmake, since it is configured `buildable:false` and no externals satisfy the request
   Analyzing the cause of the failure, this may take a moment...
-==> No additional error causes discovered
+==> Error:      2. Cannot build cmake, since it is configured `buildable:false`; the external declared for it is 'cmake@3.20.0' from /Users/bot/spack/fuzzing/cases/C03_ext_too_old/packages.yaml:5
+     3. Cannot build cmake, since it is configured `buildable:false` and the external cmake@3.20.0 does not satisfy 'cmake@3.25:'
+        required because cmake@3.25: requested explicitly 

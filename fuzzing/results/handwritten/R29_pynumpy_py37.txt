@@ -1,6 +1,6 @@
 # spec py-numpy ^python@3.7
 # note: py-numpy requires python@3.11: or so
-# exit=1 time=1.8s lines=3 chars=158
+# exit=1 time=1.6s lines=3 chars=158
 ==> Error: The following input specs can only be satisfied by deprecated versions:
     python@3.7
 Run with --deprecated to allow Spack to use these versions.

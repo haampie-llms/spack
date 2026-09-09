@@ -1,7 +1,7 @@
-# -C <fuzzing>/cases/C10_virtual_require spec hdf5 ^mpich
+# -C /Users/bot/spack/fuzzing/cases/C10_virtual_require spec hdf5 ^mpich
 # note: virtual requirement openmpi vs root mpich
-# exit=1 time=5.7s lines=4 chars=248
+# exit=1 time=6.0s lines=4 chars=271
 ==> Error: failed to concretize `hdf5 ^mpich` for the following reasons:
-       1. Multiple providers are required for the same 'mpi' virtual
+       1. Multiple providers are required for the same 'mpi' virtual: 'mpich' and 'openmpi'
   Analyzing the cause of the failure, this may take a moment...
 ==> No additional error causes discovered

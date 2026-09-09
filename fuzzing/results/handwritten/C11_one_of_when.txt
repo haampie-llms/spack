@@ -1,12 +1,12 @@
-# -C <fuzzing>/cases/C11_one_of_when spec hdf5@1.14+mpi
+# -C /Users/bot/spack/fuzzing/cases/C11_one_of_when spec hdf5@1.14+mpi
 # note: conditional one_of excludes requested version
-# exit=1 time=5.8s lines=9 chars=566
+# exit=1 time=6.1s lines=9 chars=630
 ==> Error: failed to concretize `hdf5@1.14+mpi` for the following reasons:
        1. Cannot satisfy 'hdf5@1.14'
   Analyzing the cause of the failure, this may take a moment...
 ==> Error:      2. Cannot satisfy 'hdf5@1.14' (version 1.12.3 does not match)
         required because hdf5@1.14+mpi requested explicitly 
      3. Cannot satisfy 'hdf5@1.12' and 'hdf5@1.14'
-        required because @1.12 is a requirement for package hdf5 when +mpi 
-          required because hdf5@1.14+mpi requested explicitly 
         required because hdf5@1.14+mpi requested explicitly 
+        required because /Users/bot/spack/fuzzing/cases/C11_one_of_when/packages.yaml:4: @1.12 is a requirement for package hdf5 when +mpi 
+          required because hdf5@1.14+mpi requested explicitly 

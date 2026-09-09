@@ -1,7 +1,7 @@
-# -C <fuzzing>/cases/C19_ext_variant spec cmake+ncurses
+# -C /Users/bot/spack/fuzzing/cases/C19_ext_variant spec cmake+ncurses
 # note: external lacks requested variant
-# exit=1 time=5.5s lines=4 chars=289
+# exit=1 time=5.6s lines=4 chars=451
 ==> Error: failed to concretize `cmake+ncurses` for the following reasons:
        1. Cannot build cmake, since it is configured `buildable:false` and no externals satisfy the request
   Analyzing the cause of the failure, this may take a moment...
-==> No additional error causes discovered
+==> Error:      2. Cannot build cmake, since it is configured `buildable:false`; the external declared for it is 'cmake@3.30.0~ncurses' from /Users/bot/spack/fuzzing/cases/C19_ext_variant/packages.yaml:5

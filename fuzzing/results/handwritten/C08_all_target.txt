@@ -1,14 +1,11 @@
-# -C <fuzzing>/cases/C08_all_target spec zlib-ng
+# -C /Users/bot/spack/fuzzing/cases/C08_all_target spec zlib-ng
 # note: all: require foreign target
-# exit=1 time=5.9s lines=11 chars=730
+# exit=1 time=6.1s lines=8 chars=818
 ==> Error: failed to concretize `zlib-ng` for the following reasons:
-       1. cannot satisfy a requirement for package 'zlib-ng'.
-     2. cannot satisfy a requirement for package 'gnuconfig'.
-     3. cannot satisfy a requirement for package 'gmake'.
-     4. cannot satisfy a requirement for package 'compiler-wrapper'.
-     5. Cannot select a single "node_target" for package "apple-clang"
-     6. 'apple-clang target=x86_64' is not compatible with this machine
-     7. 'apple-clang target=x86_64' cannot satisfy constraint 'target=aarch64:'
-     8. 'apple-clang target=armv8.1a' cannot satisfy constraint 'target=x86_64:'
+       1. cannot satisfy requirement 'target=x86_64' from /Users/bot/spack/fuzzing/cases/C08_all_target/packages.yaml:3 for package 'zlib-ng'
+     2. cannot satisfy requirement 'target=x86_64' from /Users/bot/spack/fuzzing/cases/C08_all_target/packages.yaml:3 for package 'gnuconfig'
+     3. cannot satisfy requirement 'target=x86_64' from /Users/bot/spack/fuzzing/cases/C08_all_target/packages.yaml:3 for package 'gmake'
+     4. cannot satisfy requirement 'target=x86_64' from /Users/bot/spack/fuzzing/cases/C08_all_target/packages.yaml:3 for package 'compiler-wrapper'
+     5. 'apple-clang target=x86_64' is not compatible with this machine
   Analyzing the cause of the failure, this may take a moment...
 ==> No additional error causes discovered
