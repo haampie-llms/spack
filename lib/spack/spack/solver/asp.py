@@ -1018,6 +1018,22 @@ def _as_requested(spec: spack.spec.Spec) -> str:
     return f"{text} (requested as '{legacy}{text[len(spec.name) :]}')"
 
 
+def _provider_requirement_note(virtual: str) -> str:
+    """A parenthetical naming the provider a virtual is pinned to, or "" if it is not pinned.
+
+    Half of a provider conflict lives in configuration, and a message about the provider the
+    solver rejected is only one side of it.
+    """
+    packages = spack.config.CONFIG.get("packages", {})
+    requirement = packages.get(virtual, {}).get("require")
+    if not requirement:
+        return ""
+    text = requirement if isinstance(requirement, str) else str(requirement)
+    location = getattr(requirement, "line_info", "") or ""
+    where = f", {location}" if location else ""
+    return f" (the '{virtual}' virtual is required to be '{text}'{where})"
+
+
 def _excluded_by_provider_requirement(name: str) -> str:
     """Explain a rejected `^dep` that a virtual requirement rules out.
 
@@ -1159,8 +1175,8 @@ def _explain_unsat(control, specs=()) -> List[str]:
         # not news; neither instance explains anything
         if len(args) > 1 and len(set(args)) == 1:
             continue
-        message = template.format(*args)
-        if message not in messages:
+        message = template.format(*args) + "".join(_provider_requirement_note(a) for a in args)
+        if message not in [m for _, _, m in messages]:
             if any(a in typed for a in args):
                 name_rank = 0
             elif any(a in declared for a in args):
@@ -1182,7 +1198,7 @@ def _explain_unsat(control, specs=()) -> List[str]:
                 continue
             if not all(a in typed for a in args):
                 continue
-            message = probe[1].format(*args)
+            message = probe[1].format(*args) + "".join(_provider_requirement_note(a) for a in args)
             if message not in [m for _, _, m in messages]:
                 messages.append((0, probe[0], message))
 
