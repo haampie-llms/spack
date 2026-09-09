@@ -4,8 +4,8 @@ Findings from 62 hand-written cases and a 440-case fuzzed corpus run against the
 package repository on macOS arm64 (Darwin 24.6, `os=sequoia target=m4`) with apple-clang 17
 and a Fortran-only gcc 14.2 registered as externals.
 
-The first edition of this report ranked ten fixes. Ten commits have since landed on this
-branch: three from `hs/fix/error-msgs-{1,2,3}` and seven written against the numbers below.
+The first edition of this report ranked ten fixes. Nineteen commits have since landed on this branch: three from
+`hs/fix/error-msgs-{1,2,3}` and the rest written against the numbers below.
 Every figure here is an A/B on the *same* 440 inputs, replayed with `fuzz.py --replay`.
 
 ## Where things stand
@@ -16,11 +16,12 @@ message without guessing.
 
 | | any | all | internal errors |
 |---|---|---|---|
-| `develop` (b495c19f9e) | 75.8% | 58.3% | 14 |
-| + `hs/fix/error-msgs-{1,2,3}` | 86.7% | 69.6% | 13 |
-| + naming the unneeded edge, requirement provenance | 87.4% | 69.6% | 11 |
-| + naming externals and requirements | 87.4% | 78.5% | 11 |
-| + reporting a provider that cannot provide | **87.4%** | **78.5%** | **10** |
+| `develop` (b495c19f9e) | 75.7% | 58.2% | 14 |
+| + `hs/fix/error-msgs-{1,2,3}` | 86.6% | 69.5% | 13 |
+| + naming the unneeded edge, requirement provenance | 87.3% | 69.5% | 11 |
+| + naming externals and requirements | 87.3% | 78.4% | 11 |
+| + reporting a provider that cannot provide | 87.3% | 78.4% | 10 |
+| + explaining a solve with no error atoms | **89.5%** | **80.3%** | **2** |
 
 Measured over the 418 of 440 cases that never hit the solver timeout in any run. Timeouts are
 wall-clock and this is a shared machine: two runs of *identical* code differed by 4%, and one
@@ -184,56 +185,54 @@ them changes how many error atoms a model carries, and so which model the optimi
 it needs its own before/after on the corpus rather than a local test. *Cost: moderate, and the
 risk is in the optimization, not in the rule.*
 
-**2. The remaining 10 internal errors.** Instrumenting integrity constraints — rewriting each
-bare `:-` head into a tagged `error(...)` — identifies the blocker directly, and found
-`concretize.lp:1034` for the compiler case. Two caveats: the pure well-formedness constraints
-(`concretize.lp:81-97`) must stay hard, or the solver dodges everything else by dropping a
-node; and every relaxation makes the program harder to solve, which bounds how much can be
-relaxed at once.
+**2. The last two internal errors.** A model that violates an integrity constraint is discarded
+outright, so the solve returns unsatisfiable with no error() atom and Spack had nothing to say.
+Constraints now carry an `#external` guard atom; clingo assigns an external false unless told
+otherwise, so a normal solve is unchanged, and on the failure path Spack re-solves the
+already-grounded control assuming every guard false and asks which assumptions the refutation
+needed. Two guards took the corpus from 14 internal errors to 2.
 
-The largest remaining class is `X ^dep` where the root has no compiler dependencies
-(`maven ^zlib-ng`, `apktool ^libpng`; 5 of the 10). It resisted the technique entirely, and
-the negative results are worth recording:
+The technique matters more than the two guards. Relaxing a constraint into a soft `error(...)`
+is the obvious alternative and is a trap twice over:
 
-- **Not an integrity constraint.** All 62 in `concretize.lp` plus the 5 in
-  `direct_dependency.lp`, `libc_compatibility.lp` and `os_compatibility.lp` were relaxed at
-  once. Still no model.
-- **Not the acyclicity extension.** Disabling `#edge` at `concretize.lp:2221` changes nothing.
-- **Not reachable by a pre-solve check.** `zlib-ng` is in maven's optimistic possible-dependency
-  closure — 607 packages, via openjdk — so no closure-based check can reject `maven ^zlib-ng`
-  without also rejecting legitimate transitive `^` specs.
-- The rule that *should* cover it, `error(10, "'{0}' is not a valid dependency for any package
-  in the DAG")` at `concretize.lp:1030`, is present and unguarded by anything that was relaxed.
+- **It is slow.** The solver then has to optimize over models that place the offending node
+  anywhere. On `maven ^zlib-ng` that ran past ten minutes; the refutation with assumptions takes
+  3.7 s, less than the failing solve itself, because it skips optimization entirely.
+- **It invents explanations.** Softening `concretize.lp:847` removes three internal errors and
+  brings two back as confident nonsense: `maven ^zlib-ng` reports a java provider conflict
+  between icedtea and openjdk, with no configuration requiring either and no mention of
+  `^zlib-ng`. Once the constraint is soft, violating it is cheaper than the real explanation.
+  A wrong answer stated confidently is worse than "submit a bug report".
 
-What remains is that the fully relaxed program does not finish: an unbounded solve ran past ten
-minutes without producing a model. Every one of these cases is also in the slow-unsat class
-below — `maven ^zlib-ng` takes 48 s unrelaxed. The likeliest reading is that the solver *can*
-express the error and cannot find it in the time available, which makes this the same problem
-as item 3 rather than a missing rule. A diagnosis needs either a faster encoding or clingo
-unsat cores via assumptions, not more instrumentation.
+What the probes recover is honest but not always the root cause: each line is true of the failed
+solve, yet the one that matters may be a consequence. `py-datalad-deprecated@=99.99.99` reports
+the conditional dependencies that could not attach rather than the version that does not exist.
+The wording says so, and the list is capped at five.
 
-One structural bug found along the way, unrelated to these cases but real:
-`impossible_dependencies_check` (`asp.py:2564`) tests membership in `self.pkgs`, which is the
-closure of the *input specs* and so already contains everything the user wrote after `^`. The
-check cannot reject `foo ^bar` on those grounds. Recomputing the closure from the root names
-alone makes it well-formed, but does not help here, for the reason above.
+Two cases resist: `gpuscout target=x86_64` and `geode ^icedtea`. Their cores are diffuse — 89
+assumptions for the first — and both look like genuine encoding bugs rather than user errors, so
+"please report this" is the right message for them. A guard on `concretize.lp:847` was tried for
+the second and reverted: it produces `'icedtea' needs the 'java' virtual at build time, but
+'icedtea' was selected to provide it`, which is self-referential and never mentions that
+`packages.yaml` requires openjdk.
 
-Not every silent constraint is worth relaxing. Turning `concretize.lp:847` ("the virtual build
-dependency must be on the correct duplicate") into an error removes three of the ten internal
-errors, but two of them come back as confident nonsense: `maven ^zlib-ng` starts reporting
+Two limits of the method, both worth knowing before extending it. Cores are not minimal, and
+deletion-based minimization needs the dropped guard assumed *true*: an unassigned `#external`
+defaults to false, which leaves its constraint active, so naive deletion silently minimizes
+everything to nothing. And minimizing honestly shows that even with every guarded constraint
+disabled the program stays unsatisfiable, so the true minimal cause lies outside the guard set
+— in a cardinality rule, the `#edge` acyclicity, or `heuristic.lp`. The core is one valid
+explanation of clingo's refutation, not the unique cause.
 
-    1. 'icedtea' cannot use 'icedtea' as a build-time provider of the 'java' virtual
-    3. Multiple providers are required for the same 'java' virtual: 'icedtea' and 'openjdk'
+One structural bug found along the way: `impossible_dependencies_check` (`asp.py`) tests
+membership in `self.pkgs`, the closure of the *input specs*, which already contains everything
+the user wrote after `^`. It cannot reject `foo ^bar` on those grounds. Recomputing the closure
+from the root names alone makes it well-formed but does not help these cases: `zlib-ng` is in
+maven's optimistic closure, 607 packages, via openjdk.
 
-with no configuration requiring either provider, and never a word about `^zlib-ng`. With the
-constraint relaxed, a model that violates it — even at weight 100000 — is cheaper than the real
-explanation, which remains out of reach. A wrong answer stated confidently is worse than
-"submit a bug report", so this one stays hard. The same trade decided the weight of the
-`concretize.lp:1034` rule, which is above every other error for exactly this reason.
-
-Dependency cycles are a separate exception: `concretize.lp:2220-2221` uses clingo's `#edge`
-acyclicity extension, not a rule, so a cycle is infeasible with no atom to attach a message to.
-That one needs Python-side detection.
+Dependency cycles remain a separate exception: `concretize.lp` uses clingo's `#edge` acyclicity
+extension, not a rule, so a cycle is infeasible with no atom to attach a message to, and no
+guard can name it. That one needs Python-side detection.
 
 **3. Slow unsatisfiable inputs (14 timeouts).** Two shapes: `all: require: %gcc@99`, and
 `X ^libpng` where libpng is not a dependency. `alglib ^libpng` runs past 45 s while `shc ^gmp`
