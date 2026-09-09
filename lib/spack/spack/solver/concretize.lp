@@ -304,11 +304,29 @@ associated_with_root(RootNode, ChildNode) :-
    depends_on(ParentNode, ChildNode),
    associated_with_root(RootNode, ParentNode).
 
-% We cannot have a node in the root condition set, that is not associated with that root
-:- attr("root", RootNode),
-   condition_set(RootNode, node(X, Package)),
+% We cannot have a node in the root condition set, that is not associated with that root.
+%
+% The "unreachable" guard is an #external, which clingo assigns false unless told otherwise, so
+% this behaves exactly as the plain constraint did during a normal solve. Its purpose is to give
+% the constraint a name the solver can report: when the solve comes back unsatisfiable with no
+% error atom at all, Spack re-solves assuming every guard false and asks clingo which ones its
+% refutation needed. That is how "foo ^bar" gets an explanation when bar cannot be reached from
+% foo -- the error(1, ...) rule above covers the same situation but is guarded by
+% `not unification_set("root", ...)`, so it is silent exactly when bar lands in the root
+% unification set.
+%
+% A soft constraint would be the obvious alternative and is not viable: the solver then has to
+% optimize over models that place the unreachable node anywhere, which for these inputs takes
+% far longer than the failing solve itself.
+#external unreachable(Root, Package) : attr("root", node(R, Root)),
+                                       condition_set(node(R, Root), node(X, Package)),
+                                       not virtual(Package).
+
+:- attr("root", node(R, Root)),
+   condition_set(node(R, Root), node(X, Package)),
    not virtual(Package),
-   not associated_with_root(RootNode, node(X, Package)).
+   not associated_with_root(node(R, Root), node(X, Package)),
+   not unreachable(Root, Package).
 
 #defined concretize_everything/0.
 #defined literal/1.

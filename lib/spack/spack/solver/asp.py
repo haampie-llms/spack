@@ -398,9 +398,16 @@ class Result:
         self._concrete_specs_by_input = None
         self._concrete_specs = None
         self._unsolved_specs = None
+        #: Explanations recovered from an unsatisfiable solve that produced no error() atoms
+        self.unsat_explanations: List[str] = []
 
     def raise_if_unsat(self):
-        """Raise a generic internal error if the result is unsatisfiable."""
+        """Raise an error if the result is unsatisfiable.
+
+        The solver normally explains itself with error() atoms, but a model that violates an
+        integrity constraint is discarded outright, and then there is nothing to report. In that
+        case ``unsat_explanations`` holds whatever the guard probes recovered.
+        """
         if self.satisfiable:
             return
 
@@ -408,7 +415,7 @@ class Result:
         if len(constraints) == 1:
             constraints = constraints[0]
 
-        raise SolverError(constraints)
+        raise SolverError(constraints, self.unsat_explanations)
 
     @property
     def specs(self):
@@ -965,6 +972,74 @@ def _make_cache_key(asp_problem: str, control_file_paths: List[str]) -> str:
     return "\n".join(components)
 
 
+#: Guard atoms declared `#external` in the .lp files, one per integrity constraint that has no
+#: error() rule of its own. Each entry maps the guard's name and arity to a message template
+#: formatted with the guard's arguments. Adding a constraint here is how it gets explained
+#: without being made soft -- see the comment on `unreachable` in concretize.lp for why soft is
+#: not an option for these.
+UNSAT_PROBES: Dict[Tuple[str, int], str] = {
+    ("unreachable", 2): (
+        "'{1}' is not reachable from '{0}': nothing in the DAG rooted at '{0}' depends on it"
+    )
+}
+
+
+def _explain_unsat(control) -> List[str]:
+    """Ask clingo which guarded constraints its refutation needed.
+
+    The program is left exactly as tight as it was, so this is a second refutation rather than a
+    search: on the inputs that reach it, it costs a fraction of the failing solve.
+    """
+    solve = getattr(control, "solve", None)
+    atoms = getattr(control, "symbolic_atoms", None)
+    if solve is None or atoms is None:
+        return []
+
+    guards: List[Any] = []
+    for name, arity in UNSAT_PROBES:
+        try:
+            guards.extend(a.symbol for a in atoms.by_signature(name, arity))
+        except Exception:  # noqa: BLE001
+            continue
+    if not guards:
+        return []
+
+    literal_to_symbol = {}
+    for symbol in guards:
+        atom = atoms[symbol]
+        if atom is not None:
+            literal_to_symbol[atom.literal] = symbol
+
+    try:
+        with solve(assumptions=[(g, False) for g in guards], yield_=True, async_=True) as handle:
+            handle.wait()
+            if not handle.get().unsatisfiable:
+                return []
+            # clingo returns None rather than an empty core when the refutation needed no
+            # assumption at all
+            core = handle.core() or []
+    except Exception:  # noqa: BLE001
+        # never let the diagnosis turn one failure into another
+        return []
+
+    messages = []
+    for literal in core:
+        symbol = literal_to_symbol.get(abs(literal))
+        if symbol is None:
+            continue
+        template = UNSAT_PROBES.get((symbol.name, len(symbol.arguments)))
+        if template is None:
+            continue
+        args = [str(a).strip('"') for a in symbol.arguments]
+        # a root is trivially in its own condition set; that instance explains nothing
+        if len(set(args)) == 1:
+            continue
+        message = template.format(*args)
+        if message not in messages:
+            messages.append(message)
+    return messages
+
+
 class PyclingoDriver:
     def __init__(self, conc_cache: Optional[ConcretizationCache] = None) -> None:
         """Driver for the Python clingo interface.
@@ -1049,6 +1124,8 @@ class PyclingoDriver:
         result = Result(specs)
         result.satisfiable = solve_result.satisfiable
         if not result.satisfiable:
+            with timer.measure("diagnose"):
+                result.unsat_explanations = _explain_unsat(self.control)
             return result
 
         timer.start("construct_specs")
@@ -3973,13 +4050,18 @@ class SolverError(InternalConcretizerError):
     get a solution.
     """
 
-    def __init__(self, provided):
-        msg = (
-            "Spack concretizer internal error. Please submit a bug report at "
-            "https://github.com/spack/spack and include the command and environment "
-            "if applicable."
-            f"\n    {provided} is unsatisfiable"
-        )
+    def __init__(self, provided, explanations: Optional[List[str]] = None):
+        if explanations:
+            msg = f"failed to concretize {provided} for the following reasons:\n" + "\n".join(
+                f"    {i:2}. {e}" for i, e in enumerate(explanations, start=1)
+            )
+        else:
+            msg = (
+                "Spack concretizer internal error. Please submit a bug report at "
+                "https://github.com/spack/spack and include the command and environment "
+                "if applicable."
+                f"\n    {provided} is unsatisfiable"
+            )
 
         super().__init__(msg)
 
