@@ -217,6 +217,19 @@ closure of the *input specs* and so already contains everything the user wrote a
 check cannot reject `foo ^bar` on those grounds. Recomputing the closure from the root names
 alone makes it well-formed, but does not help here, for the reason above.
 
+Not every silent constraint is worth relaxing. Turning `concretize.lp:847` ("the virtual build
+dependency must be on the correct duplicate") into an error removes three of the ten internal
+errors, but two of them come back as confident nonsense: `maven ^zlib-ng` starts reporting
+
+    1. 'icedtea' cannot use 'icedtea' as a build-time provider of the 'java' virtual
+    3. Multiple providers are required for the same 'java' virtual: 'icedtea' and 'openjdk'
+
+with no configuration requiring either provider, and never a word about `^zlib-ng`. With the
+constraint relaxed, a model that violates it — even at weight 100000 — is cheaper than the real
+explanation, which remains out of reach. A wrong answer stated confidently is worse than
+"submit a bug report", so this one stays hard. The same trade decided the weight of the
+`concretize.lp:1034` rule, which is above every other error for exactly this reason.
+
 Dependency cycles are a separate exception: `concretize.lp:2220-2221` uses clingo's `#edge`
 acyclicity extension, not a rule, so a cycle is infeasible with no atom to attach a message to.
 That one needs Python-side detection.
