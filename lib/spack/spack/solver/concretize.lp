@@ -88,7 +88,14 @@ has_target_weight(PackageNode) :- node_target_weight(PackageNode, _).
 :- attr("variant_value", PackageNode, _, _), not attr("node", PackageNode).
 :- attr("node_flag", PackageNode, _), not attr("node", PackageNode).
 :- attr("depends_on", ParentNode, _, _), not attr("node", ParentNode).
-:- attr("depends_on", _, ChildNode, _), not attr("node", ChildNode).
+% Guarded like `unreachable` above: a dependency edge whose child never became a node leaves
+% the solve unsatisfiable with nothing to report, and the guard gives the failure a name the
+% diagnosis can turn into a message.
+#external dangling_edge(Parent, Child) : attr("depends_on", node(_, Parent), node(_, Child), _).
+
+:- attr("depends_on", node(P, Parent), node(C, Child), _),
+   not attr("node", node(C, Child)),
+   not dangling_edge(Parent, Child).
 :- attr("virtual_node", VirtualNode), not has_provider(VirtualNode).
 :- provider(_, VirtualNode), not attr("virtual_node", VirtualNode).
 :- provider(PackageNode, _), not attr("node", PackageNode).

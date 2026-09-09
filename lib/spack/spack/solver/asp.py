@@ -980,7 +980,8 @@ def _make_cache_key(asp_problem: str, control_file_paths: List[str]) -> str:
 UNSAT_PROBES: Dict[Tuple[str, int], str] = {
     ("unreachable", 2): (
         "'{1}' is not reachable from '{0}': nothing in the DAG rooted at '{0}' depends on it"
-    )
+    ),
+    ("dangling_edge", 2): ("'{0}' depends on '{1}', but '{1}' could not be added to the DAG"),
 }
 
 
@@ -1037,7 +1038,8 @@ def _explain_unsat(control) -> List[str]:
         message = template.format(*args)
         if message not in messages:
             messages.append(message)
-    return messages
+    # a long list of consequences buries the useful line; keep the report short
+    return messages[:5]
 
 
 class PyclingoDriver:
@@ -4052,8 +4054,14 @@ class SolverError(InternalConcretizerError):
 
     def __init__(self, provided, explanations: Optional[List[str]] = None):
         if explanations:
-            msg = f"failed to concretize {provided} for the following reasons:\n" + "\n".join(
-                f"    {i:2}. {e}" for i, e in enumerate(explanations, start=1)
+            # Deliberately weaker wording than the error() path. These come from the solver's
+            # refutation, so each is true of the failed solve, but the one that matters to the
+            # user may be a consequence rather than the cause.
+            msg = (
+                f"failed to concretize {provided}. Spack could not pinpoint a single cause; "
+                f"the solver could not satisfy:\n"
+                + "\n".join(f"    {i:2}. {e}" for i, e in enumerate(explanations, start=1))
+                + "\n    Please report this if the cause is not clear from the above."
             )
         else:
             msg = (
