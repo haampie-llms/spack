@@ -984,6 +984,12 @@ def _make_cache_key(asp_problem: str, control_file_paths: List[str]) -> str:
 #: whichever suits it, so the rank decides which explanation is worth showing: a lower number
 #: says more about the request. Without it the last probe below wins cores where `unreachable`
 #: had the better answer, and `maven ^zlib-ng` reports a compiler nobody mentioned.
+#: probes at this rank name the failed mechanism, not the request; see _explain_unsat
+LAST_RESORT_RANK = 2
+
+#: messages at this rank name nothing the request mentions, directly or as a dependency
+UNRELATED_RANK = 2
+
 UNSAT_PROBES: Dict[Tuple[str, int], Tuple[int, str]] = {
     ("unreachable", 2): (
         0,
@@ -1201,6 +1207,16 @@ def _explain_unsat(control, specs=()) -> List[str]:
             message = probe[1].format(*args) + "".join(_provider_requirement_note(a) for a in args)
             if message not in [m for _, _, m in messages]:
                 messages.append((0, probe[0], message))
+
+    # Drop the weakest tier of each ranking whenever a better one was found. A last-resort probe
+    # names the mechanism that failed rather than anything about the request, and an unrelated
+    # tier names packages the request never mentions; `maven ^zlib-ng` otherwise leads with the
+    # right line and follows it with three about a compiler nobody asked for and three about
+    # packages that have no version on this machine and nothing to do with maven.
+    if any(probe_rank < LAST_RESORT_RANK for _, probe_rank, _ in messages):
+        messages = [entry for entry in messages if entry[1] < LAST_RESORT_RANK]
+    if any(name_rank < UNRELATED_RANK for name_rank, _, _ in messages):
+        messages = [entry for entry in messages if entry[0] < UNRELATED_RANK]
 
     # names the user wrote first, then the more specific probes; a long list buries the answer
     messages.sort(key=lambda entry: (entry[0], entry[1]))
