@@ -1,0 +1,10 @@
+# -e /Users/bot/spack/fuzzing/cases/E05_env_require_conflict/env concretize -f
+# note: requirement inside spack.yaml
+# exit=1 time=5.7s lines=7 chars=538
+==> Error: failed to concretize `hdf5+mpi` for the following reasons:
+       1. 'hdf5' requires conflicting variant values '~mpi' and '+mpi'
+  Analyzing the cause of the failure, this may take a moment...
+==> Error:      2. 'hdf5' requires conflicting variant values '~mpi' and '+mpi'
+        required because hdf5+mpi requested explicitly 
+        required because /Users/bot/spack/fuzzing/cases/E05_env_require_conflict/env/spack.yaml:5: ~mpi is a requirement for package hdf5 
+          required because hdf5+mpi requested explicitly 

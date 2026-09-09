@@ -1,0 +1,16 @@
+# spec hdf5@1.14 ^cmake@3.12
+# note: hdf5@1.14 needs cmake@3.18:
+# exit=1 time=6.0s lines=13 chars=842
+==> Error: failed to concretize `hdf5@1.14 ^cmake@3.12` for the following reasons:
+       1. Cannot satisfy 'cmake@3.12'
+  Analyzing the cause of the failure, this may take a moment...
+==> Error:      2. Cannot satisfy 'cmake@3.12' (version 3.31.12 does not match)
+        required because hdf5@1.14 ^cmake@3.12 requested explicitly 
+     3. Cannot satisfy 'cmake@3.18:' and 'cmake@3.12'
+        required because hdf5 depends on cmake@3.18: when @1.14: 
+          required because hdf5@1.14 ^cmake@3.12 requested explicitly 
+        required because hdf5@1.14 ^cmake@3.12 requested explicitly 
+     4. Cannot satisfy 'cmake@3.12:' and 'cmake@3.12'
+        required because hdf5 depends on cmake@3.12: 
+          required because hdf5@1.14 ^cmake@3.12 requested explicitly 
+        required because hdf5@1.14 ^cmake@3.12 requested explicitly 

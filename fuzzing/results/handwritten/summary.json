@@ -1,0 +1,498 @@
+[
+ {
+  "name": "R01_condvar",
+  "exit": 1,
+  "time": 5.2,
+  "lines": 4,
+  "chars": 283,
+  "note": "variant 'feat' only exists when @2:"
+ },
+ {
+  "name": "R02_condvalue",
+  "exit": 1,
+  "time": 5.2,
+  "lines": 9,
+  "chars": 602,
+  "note": "value 'c' only valid when @2:"
+ },
+ {
+  "name": "R03_conddep",
+  "exit": 0,
+  "time": 5.0,
+  "lines": 3,
+  "chars": 169,
+  "note": "leaf is a dep only when +withleaf (default off)"
+ },
+ {
+  "name": "R04_chain",
+  "exit": 1,
+  "time": 5.1,
+  "lines": 7,
+  "chars": 421,
+  "note": "chain-a -> chain-b requires leaf@1"
+ },
+ {
+  "name": "R05_diamond",
+  "exit": 1,
+  "time": 4.8,
+  "lines": 8,
+  "chars": 464,
+  "note": "chain-c needs leaf@2, chain-a->chain-b needs leaf@1 (no user input at fault)"
+ },
+ {
+  "name": "R06_twoconds",
+  "exit": 1,
+  "time": 4.9,
+  "lines": 6,
+  "chars": 367,
+  "note": "+x needs leaf@1, +y needs leaf@2"
+ },
+ {
+  "name": "R07_platdep",
+  "exit": 1,
+  "time": 4.1,
+  "lines": 3,
+  "chars": 284,
+  "note": "leaf is a dep only on platform=linux"
+ },
+ {
+  "name": "R08_reqdir",
+  "exit": 1,
+  "time": 4.9,
+  "lines": 9,
+  "chars": 601,
+  "note": "requires('@2:', when='+feat', msg=...)"
+ },
+ {
+  "name": "R09_cycle",
+  "exit": 1,
+  "time": 5.2,
+  "lines": 7,
+  "chars": 586,
+  "note": "dependency cycle cyc-a <-> cyc-b"
+ },
+ {
+  "name": "R10_virtdep",
+  "exit": 0,
+  "time": 5.7,
+  "lines": 24,
+  "chars": 3291,
+  "note": "virtdep needs mpi@4:, mpich@3.4 too old"
+ },
+ {
+  "name": "R11_needsfortran",
+  "exit": 1,
+  "time": 0.4,
+  "lines": 1,
+  "chars": 76,
+  "note": "apple-clang provides no fortran"
+ },
+ {
+  "name": "R12_depvariant",
+  "exit": 1,
+  "time": 5.2,
+  "lines": 7,
+  "chars": 516,
+  "note": "depvariant requires leaf~shared"
+ },
+ {
+  "name": "R13_langc_fortran",
+  "exit": 1,
+  "time": 0.4,
+  "lines": 1,
+  "chars": 57,
+  "note": "edge attribute for virtual fortran, langc never depends on fortran"
+ },
+ {
+  "name": "R14_deep",
+  "exit": 0,
+  "time": 4.8,
+  "lines": 6,
+  "chars": 423,
+  "note": "chain-a->chain-b->leaf@1 vs deep-mid(+newleaf default)->leaf@3"
+ },
+ {
+  "name": "R15_versiondep",
+  "exit": 0,
+  "time": 4.7,
+  "lines": 3,
+  "chars": 163,
+  "note": "versiondep@2 needs leaf@2: (ok!), @1 needs leaf@1; this should SUCCEED with @2"
+ },
+ {
+  "name": "R16_versiondep_pin",
+  "exit": 1,
+  "time": 5.1,
+  "lines": 6,
+  "chars": 385,
+  "note": "versiondep@1 needs leaf@1"
+ },
+ {
+  "name": "R20_hdf5_java",
+  "exit": 1,
+  "time": 5.7,
+  "lines": 4,
+  "chars": 283,
+  "note": "java variant only when @1.10:"
+ },
+ {
+  "name": "R21_hdf5_libaec",
+  "exit": 0,
+  "time": 5.8,
+  "lines": 49,
+  "chars": 6635,
+  "note": "szip virtual dep only when +szip (default off)"
+ },
+ {
+  "name": "R22_hdf5_api",
+  "exit": 1,
+  "time": 5.6,
+  "lines": 8,
+  "chars": 521,
+  "note": "conflicts() with msg"
+ },
+ {
+  "name": "R23_hdf5_notdep",
+  "exit": 1,
+  "time": 27.4,
+  "lines": 4,
+  "chars": 307,
+  "note": "mpi dep only when +mpi"
+ },
+ {
+  "name": "R24_target",
+  "exit": 1,
+  "time": 5.2,
+  "lines": 4,
+  "chars": 259,
+  "note": "host is aarch64/m4"
+ },
+ {
+  "name": "R25_os",
+  "exit": 1,
+  "time": 8.0,
+  "lines": 4,
+  "chars": 286,
+  "note": "host os is sequoia"
+ },
+ {
+  "name": "R26_platform",
+  "exit": 1,
+  "time": 5.6,
+  "lines": 4,
+  "chars": 279,
+  "note": "host platform is darwin"
+ },
+ {
+  "name": "R27_gcc99",
+  "exit": 1,
+  "time": 1.6,
+  "lines": 2,
+  "chars": 74,
+  "note": "no gcc@99 exists"
+ },
+ {
+  "name": "R28_mpi99",
+  "exit": 0,
+  "time": 6.2,
+  "lines": 25,
+  "chars": 3298,
+  "note": "no mpi provider at version 99"
+ },
+ {
+  "name": "R29_pynumpy_py37",
+  "exit": 1,
+  "time": 1.6,
+  "lines": 3,
+  "chars": 158,
+  "note": "py-numpy requires python@3.11: or so"
+ },
+ {
+  "name": "R30_hash",
+  "exit": 1,
+  "time": 0.3,
+  "lines": 1,
+  "chars": 206,
+  "note": "unknown hash"
+ },
+ {
+  "name": "R31_hdf5_cmake_old",
+  "exit": 1,
+  "time": 6.0,
+  "lines": 13,
+  "chars": 842,
+  "note": "hdf5@1.14 needs cmake@3.18:"
+ },
+ {
+  "name": "R32_hdf5_fortran_clang",
+  "exit": 1,
+  "time": 13.9,
+  "lines": 8,
+  "chars": 597,
+  "note": "apple-clang has no fortran"
+ },
+ {
+  "name": "R33_deprecated",
+  "exit": 1,
+  "time": 1.7,
+  "lines": 2,
+  "chars": 82,
+  "note": "deprecated version, config:deprecated false"
+ },
+ {
+  "name": "R34_intelmpi_darwin",
+  "exit": 1,
+  "time": 5.6,
+  "lines": 13,
+  "chars": 935,
+  "note": "intel mpi not available on darwin (conflict?)"
+ },
+ {
+  "name": "R35_buildsys",
+  "exit": 1,
+  "time": 1.7,
+  "lines": 2,
+  "chars": 82,
+  "note": "invalid variant value"
+ },
+ {
+  "name": "R36_two_c_compilers",
+  "exit": 1,
+  "time": 9.7,
+  "lines": 6,
+  "chars": 363,
+  "note": "two providers for c"
+ },
+ {
+  "name": "R37_gcc_no_c",
+  "exit": 1,
+  "time": 6.9,
+  "lines": 5,
+  "chars": 340,
+  "note": "external gcc only provides fortran; gcc buildable so may just build gcc (long!)"
+ },
+ {
+  "name": "C01_nonbuildable",
+  "exit": 1,
+  "time": 5.1,
+  "lines": 4,
+  "chars": 285,
+  "note": "buildable:false, no external"
+ },
+ {
+  "name": "C02_mpi_nonbuildable",
+  "exit": 1,
+  "time": 6.0,
+  "lines": 4,
+  "chars": 286,
+  "note": "virtual buildable:false, no external provider"
+ },
+ {
+  "name": "C03_ext_too_old",
+  "exit": 1,
+  "time": 5.8,
+  "lines": 6,
+  "chars": 630,
+  "note": "only external is too old"
+ },
+ {
+  "name": "C04_require_conflict",
+  "exit": 1,
+  "time": 6.0,
+  "lines": 7,
+  "chars": 533,
+  "note": "config requires ~mpi, root asks +mpi"
+ },
+ {
+  "name": "C05_require_badversion",
+  "exit": 1,
+  "time": 1.0,
+  "lines": 1,
+  "chars": 111,
+  "note": "config requires nonexistent version"
+ },
+ {
+  "name": "C06_require_badvariant",
+  "exit": 3,
+  "time": 1.1,
+  "lines": 1,
+  "chars": 98,
+  "note": "config requires nonexistent variant"
+ },
+ {
+  "name": "C07_all_gcc99",
+  "exit": 1,
+  "time": 6.4,
+  "lines": 11,
+  "chars": 839,
+  "note": "all: require nonexistent compiler version"
+ },
+ {
+  "name": "C08_all_target",
+  "exit": 1,
+  "time": 6.0,
+  "lines": 8,
+  "chars": 818,
+  "note": "all: require foreign target"
+ },
+ {
+  "name": "C09_all_mpich_vs_openmpi",
+  "exit": 1,
+  "time": 5.7,
+  "lines": 25,
+  "chars": 2802,
+  "note": "config forces mpich, root asks openmpi"
+ },
+ {
+  "name": "C10_virtual_require",
+  "exit": 1,
+  "time": 6.1,
+  "lines": 4,
+  "chars": 271,
+  "note": "virtual requirement openmpi vs root mpich"
+ },
+ {
+  "name": "C11_one_of_when",
+  "exit": 1,
+  "time": 6.3,
+  "lines": 9,
+  "chars": 630,
+  "note": "conditional one_of excludes requested version"
+ },
+ {
+  "name": "C12_require_condvar",
+  "exit": 1,
+  "time": 6.2,
+  "lines": 5,
+  "chars": 315,
+  "note": "config requires conditional variant on old version"
+ },
+ {
+  "name": "C13_gcc_nonbuildable",
+  "exit": 1,
+  "time": 7.4,
+  "lines": 6,
+  "chars": 585,
+  "note": "gcc external has no c compiler and can't be built"
+ },
+ {
+  "name": "C14_bad_provider",
+  "exit": 0,
+  "time": 6.2,
+  "lines": 48,
+  "chars": 6485,
+  "note": "provider list names nonexistent package (pref, may succeed)"
+ },
+ {
+  "name": "C15_zlibapi_require",
+  "exit": 1,
+  "time": 5.8,
+  "lines": 4,
+  "chars": 277,
+  "note": "virtual require zlib vs root zlib-ng"
+ },
+ {
+  "name": "C16_all_noshared",
+  "exit": 0,
+  "time": 5.3,
+  "lines": 6,
+  "chars": 522,
+  "note": "all: variant that not every package has (probably succeeds)"
+ },
+ {
+  "name": "C17_python_ext_old",
+  "exit": 0,
+  "time": 6.3,
+  "lines": 14,
+  "chars": 1678,
+  "note": "only python external too old for py-numpy"
+ },
+ {
+  "name": "C18_pref_ignored",
+  "exit": 0,
+  "time": 6.0,
+  "lines": 48,
+  "chars": 6498,
+  "note": "preference on conditional variant; should succeed silently?"
+ },
+ {
+  "name": "C19_ext_variant",
+  "exit": 1,
+  "time": 5.6,
+  "lines": 4,
+  "chars": 451,
+  "note": "external lacks requested variant"
+ },
+ {
+  "name": "C20_require_when_bad",
+  "exit": 0,
+  "time": 5.5,
+  "lines": 22,
+  "chars": 2821,
+  "note": "conditional requirement +mpi vs root ~mpi"
+ },
+ {
+  "name": "C21_all_require_version",
+  "exit": 1,
+  "time": 5.6,
+  "lines": 7,
+  "chars": 750,
+  "note": "all: require version that most packages lack"
+ },
+ {
+  "name": "C22_leaf_nonbuildable_chain",
+  "exit": 1,
+  "time": 5.3,
+  "lines": 8,
+  "chars": 729,
+  "note": "external leaf@2 but chain-b needs leaf@1"
+ },
+ {
+  "name": "C23_timeout",
+  "exit": 0,
+  "time": 6.0,
+  "lines": 48,
+  "chars": 6497,
+  "note": "what a timeout looks like"
+ },
+ {
+  "name": "E01_unify_version",
+  "exit": 1,
+  "time": 5.3,
+  "lines": 6,
+  "chars": 358,
+  "note": "unify:true, roots need leaf@2 and leaf@1"
+ },
+ {
+  "name": "E02_unify_mpi",
+  "exit": 1,
+  "time": 6.5,
+  "lines": 4,
+  "chars": 292,
+  "note": "unify:true, two mpi providers"
+ },
+ {
+  "name": "E03_unify_ok_when_possible",
+  "exit": 0,
+  "time": 9.3,
+  "lines": 5,
+  "chars": 291,
+  "note": "should succeed"
+ },
+ {
+  "name": "E04_env_condvar",
+  "exit": 1,
+  "time": 5.2,
+  "lines": 4,
+  "chars": 291,
+  "note": "same as R01 but in env with another root"
+ },
+ {
+  "name": "E05_env_require_conflict",
+  "exit": 1,
+  "time": 5.7,
+  "lines": 7,
+  "chars": 538,
+  "note": "requirement inside spack.yaml"
+ }
+]

@@ -1,0 +1,5 @@
+# spec zlib-ng %gcc@99
+# note: no gcc@99 exists
+# exit=1 time=1.6s lines=2 chars=74
+==> Error: No version exists that satisfies these input specs:
+    gcc@99

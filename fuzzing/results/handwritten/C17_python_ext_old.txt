@@ -1,0 +1,17 @@
+# -C /Users/bot/spack/fuzzing/cases/C17_python_ext_old spec py-numpy
+# note: only python external too old for py-numpy
+# exit=0 time=6.3s lines=14 chars=1678
+ -   py-numpy@1.21.6 build_system=python_pip patches=802970a,873745d platform=darwin os=sequoia target=m4 %c,cxx=apple-clang@17.0.0
+[e]      ^apple-clang@17.0.0 build_system=bundle platform=darwin os=sequoia target=aarch64
+[+]      ^compiler-wrapper@1.1.0 build_system=generic platform=darwin os=sequoia target=m4
+ -       ^openblas@0.3.34~bignuma~consistent_fpcsr+dynamic_dispatch+fortran~ilp64+locking+pic+shared~static build_system=makefile patches=e192335 symbol_suffix=none threads=none platform=darwin os=sequoia target=m4 %c,cxx=apple-clang@17.0.0 %fortran=gcc@14.2.0
+[e]          ^gcc@14.2.0+binutils+bootstrap~graphite+libsanitizer~mold~nvptx~piclibs~profiled~strip build_system=autotools build_type=RelWithDebInfo languages:=fortran platform=darwin os=sequoia target=aarch64
+ -           ^gcc-runtime@14.2.0 build_system=generic platform=darwin os=sequoia target=m4
+[+]          ^gmake@4.4.1~guile build_system=generic platform=darwin os=sequoia target=m4 %c=apple-clang@17.0.0
+ -       ^py-cython@0.29.36 build_system=python_pip patches=c4369ad platform=darwin os=sequoia target=m4 %c,cxx=apple-clang@17.0.0
+ -       ^py-pip@24.0 build_system=generic platform=darwin os=sequoia target=m4
+ -       ^py-setuptools@59.4.0 build_system=generic platform=darwin os=sequoia target=m4
+ -       ^py-wheel@0.42.0 build_system=generic platform=darwin os=sequoia target=m4
+[e]      ^python@3.7.0+bz2+crypt+ctypes+dbm~debug+libxml2+lzma~optimizations+pic+pyexpat+pythoncmd+readline+shared+sqlite3+ssl~static~tests~tkinter+uuid+zlib build_system=generic platform=darwin os=sequoia target=aarch64
+ -       ^python-venv@1.0 build_system=generic platform=darwin os=sequoia target=m4
+

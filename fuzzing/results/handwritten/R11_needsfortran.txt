@@ -1,0 +1,4 @@
+# spec needsfortran %fortran=apple-clang
+# note: apple-clang provides no fortran
+# exit=1 time=0.4s lines=1 chars=76
+==> Error: 'needsfortran %fortran=apple-clang' cannot depend on apple-clang

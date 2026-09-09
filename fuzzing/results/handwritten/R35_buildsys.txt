@@ -1,0 +1,5 @@
+# spec zlib-ng build_system=meson
+# note: invalid variant value
+# exit=1 time=1.7s lines=2 chars=82
+==> Error: invalid values for variant 'build_system' in package zlib-ng: 'meson'
+
