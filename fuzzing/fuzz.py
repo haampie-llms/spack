@@ -804,7 +804,9 @@ def main():
             # solve when nothing was mentioned, which is where the false negatives are.
             base_unsat = False
             if outcome != "sat" and not mentioned:
-                base_unsat = solve([c["package"]], None, False)[0] != "sat"
+                # must use the same mode: solve() patches the causation pass out permanently
+                # when full is false, which would silently disable it for every later case
+                base_unsat = solve([c["package"]], None, args.full)[0] != "sat"
             rec = dict(c)
             rec.update(
                 outcome=outcome,
