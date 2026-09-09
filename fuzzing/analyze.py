@@ -157,6 +157,11 @@ print(
     "== per mutation kind: n, outcomes, cause-mentioned rate among error outcomes, median lines, max seconds"  # noqa: E501
 )
 for kind, rs in sorted(by_kind.items()):
+    # a case whose package could not concretize before the mutation grades the message against a
+    # cause that is not the cause; it says nothing about the message
+    rs = [r for r in rs if not r.get("base_unsat")]
+    if not rs:
+        continue
     errs = [r for r in rs if r["outcome"] != "sat"]
     # "Please submit a bug report" quotes the input spec back, so substring matching scores it as
     # naming the cause. It explains nothing; count it as a miss or a fix that replaces it with a

@@ -797,12 +797,21 @@ def main():
     with open(args.out, "w") as out:
         for i, c in enumerate(cases):
             outcome, msg, dt = solve(c["specs"], c.get("config"), args.full)
+            mentioned = mentions(msg, c["expect"])
+            # A mutation only explains a failure if the package concretized before it. `nccl`
+            # cannot be built on a machine with no cuda at all, so grading its message against a
+            # version requirement asks for a cause that is not the cause. Only worth the extra
+            # solve when nothing was mentioned, which is where the false negatives are.
+            base_unsat = False
+            if outcome != "sat" and not mentioned:
+                base_unsat = solve([c["package"]], None, False)[0] != "sat"
             rec = dict(c)
             rec.update(
                 outcome=outcome,
                 message=msg,
                 seconds=round(dt, 1),
-                mentioned=mentions(msg, c["expect"]),
+                base_unsat=base_unsat,
+                mentioned=mentioned,
             )
             out.write(json.dumps(rec) + "\n")
             out.flush()
