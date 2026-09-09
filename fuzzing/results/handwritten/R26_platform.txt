@@ -1,6 +1,6 @@
 # spec zlib-ng platform=linux
 # note: host platform is darwin
-# exit=1 time=5.2s lines=4 chars=279
+# exit=1 time=5.4s lines=4 chars=279
 ==> Error: failed to concretize `zlib-ng platform=linux` for the following reasons:
        1. 'zlib-ng platform=linux' is not compatible with this machine (platform=darwin)
   Analyzing the cause of the failure, this may take a moment...

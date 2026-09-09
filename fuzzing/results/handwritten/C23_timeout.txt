@@ -1,4 +1,4 @@
 # -C /Users/bot/spack/fuzzing/cases/C23_timeout spec hdf5+mpi+fortran ^openmpi
 # note: what a timeout looks like
-# exit=1 time=5.2s lines=1 chars=111
+# exit=1 time=5.4s lines=1 chars=111
 ==> Error: Spack is taking more than 1 seconds to solve for hdf5+fortran+mpi ^openmpi, stopping concretization

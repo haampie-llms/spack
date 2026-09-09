@@ -1,6 +1,6 @@
 # spec cyc-a
 # note: dependency cycle cyc-a <-> cyc-b
-# exit=1 time=4.8s lines=7 chars=586
+# exit=1 time=5.2s lines=7 chars=586
 ==> Error: failed to concretize cyc-a. Spack could not pinpoint a single cause; the solver could not satisfy:
      1. 'cyc-b' is not reachable from 'cyc-a': nothing in the DAG rooted at 'cyc-a' depends on it
      2. 'cyc-a' depends on 'cyc-b', but 'cyc-b' could not be added to the DAG

@@ -1,6 +1,6 @@
 # -C /Users/bot/spack/fuzzing/cases/C22_leaf_nonbuildable_chain spec chain-a
 # note: external leaf@2 but chain-b needs leaf@1
-# exit=1 time=5.5s lines=8 chars=729
+# exit=1 time=5.7s lines=8 chars=729
 ==> Error: failed to concretize `chain-a` for the following reasons:
        1. Cannot build leaf, since it is configured `buildable:false` and no externals satisfy the request
   Analyzing the cause of the failure, this may take a moment...

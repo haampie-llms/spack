@@ -1,6 +1,6 @@
 # -e /Users/bot/spack/fuzzing/cases/E02_unify_mpi/env concretize -f
 # note: unify:true, two mpi providers
-# exit=1 time=6.2s lines=4 chars=292
+# exit=1 time=6.7s lines=4 chars=292
 ==> Error: failed to concretize `hdf5 ^mpich`, `netcdf-c ^openmpi` for the following reasons:
        1. Multiple providers are required for the same 'mpi' virtual: 'mpich' and 'openmpi'
   Analyzing the cause of the failure, this may take a moment...

@@ -1,6 +1,6 @@
 # -C /Users/bot/spack/fuzzing/cases/C09_all_mpich_vs_openmpi spec hdf5 ^openmpi
 # note: config forces mpich, root asks openmpi
-# exit=1 time=5.8s lines=25 chars=2802
+# exit=1 time=6.0s lines=25 chars=2802
 ==> Warning: /Users/bot/spack/fuzzing/cases/C09_all_mpich_vs_openmpi/packages.yaml:3: 'packages: all: require: ["^mpich"]' applies a dependency constraint to all packages. This often leads to concretization errors. This was likely intended as a requirement for a provider of a (language) virtual. Consider instead:
 # For each virtual:
 packages:

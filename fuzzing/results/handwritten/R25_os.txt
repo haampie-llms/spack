@@ -1,6 +1,6 @@
 # spec zlib-ng os=ubuntu22.04
 # note: host os is sequoia
-# exit=1 time=7.6s lines=4 chars=286
+# exit=1 time=7.9s lines=4 chars=286
 ==> Error: failed to concretize `zlib-ng os=ubuntu22.04` for the following reasons:
        1. Conflicting os values are required for package 'zlib-ng': 'sequoia' and 'ubuntu22.04'
   Analyzing the cause of the failure, this may take a moment...

@@ -1,6 +1,6 @@
 # -C /Users/bot/spack/fuzzing/cases/C07_all_gcc99 spec zlib-ng
 # note: all: require nonexistent compiler version
-# exit=1 time=6.5s lines=11 chars=839
+# exit=1 time=6.7s lines=11 chars=839
 ==> Warning: /Users/bot/spack/fuzzing/cases/C07_all_gcc99/packages.yaml:3: 'packages: all: require: ["%gcc@99"]' applies a dependency constraint to all packages. This often leads to concretization errors. This was likely intended as a requirement for a provider of a (language) virtual. Consider instead:
 # For each language virtual (c, cxx, fortran, ...):
 packages:

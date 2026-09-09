@@ -1,6 +1,6 @@
 # -C /Users/bot/spack/fuzzing/cases/C14_bad_provider spec hdf5+mpi
 # note: provider list names nonexistent package (pref, may succeed)
-# exit=0 time=1.9s lines=48 chars=6485
+# exit=0 time=2.0s lines=48 chars=6485
  -   hdf5@1.14.6~cxx~fortran~hl~ipo~java~map+mpi+shared~subfiling~szip~threadsafe+tools api=default build_system=cmake build_type=Release generator=make platform=darwin os=sequoia target=m4 %c=apple-clang@17.0.0
 [e]      ^apple-clang@17.0.0 build_system=bundle platform=darwin os=sequoia target=aarch64
  -       ^cmake@3.31.12~doc+ncurses+ownlibs~qtgui build_system=generic build_type=Release platform=darwin os=sequoia target=m4 %c,cxx=apple-clang@17.0.0

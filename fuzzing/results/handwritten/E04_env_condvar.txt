@@ -1,6 +1,6 @@
 # -e /Users/bot/spack/fuzzing/cases/E04_env_condvar/env concretize -f
 # note: same as R01 but in env with another root
-# exit=1 time=5.4s lines=4 chars=291
+# exit=1 time=5.8s lines=4 chars=291
 ==> Error: failed to concretize `condvar@1.0+feat`, `leaf` for the following reasons:
        1. Cannot set variant 'feat' for 'condvar@1.0': Package condvar has variant 'feat' when @2:
   Analyzing the cause of the failure, this may take a moment...

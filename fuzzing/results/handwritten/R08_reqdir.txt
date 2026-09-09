@@ -1,12 +1,12 @@
 # spec reqdir@1+feat
 # note: requires('@2:', when='+feat', msg=...)
-# exit=1 time=5.1s lines=9 chars=601
+# exit=1 time=5.5s lines=9 chars=601
 ==> Error: failed to concretize `reqdir@1+feat` for the following reasons:
        1. Cannot satisfy 'reqdir@1'
   Analyzing the cause of the failure, this may take a moment...
 ==> Error:      2. Cannot satisfy 'reqdir@1' (version 2.0 does not match)
         required because reqdir@1+feat requested explicitly 
      3. Cannot satisfy 'reqdir@2:' and 'reqdir@1'
-        required because reqdir@1+feat requested explicitly 
         required because @2: is a requirement for package reqdir when +feat (reqdir: feat needs version 2 or newer) 
           required because reqdir@1+feat requested explicitly 
+        required because reqdir@1+feat requested explicitly 

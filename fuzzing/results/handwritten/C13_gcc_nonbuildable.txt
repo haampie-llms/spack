@@ -1,6 +1,6 @@
 # -C /Users/bot/spack/fuzzing/cases/C13_gcc_nonbuildable spec zlib-ng %c=gcc
 # note: gcc external has no c compiler and can't be built
-# exit=1 time=7.4s lines=6 chars=585
+# exit=1 time=7.7s lines=6 chars=585
 ==> Error: failed to concretize `zlib-ng %c=gcc` for the following reasons:
        1. Cannot build gcc, since it is configured `buildable:false` and no externals satisfy the request
      2. Only external, or concrete, compilers are allowed for the cxx language

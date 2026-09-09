@@ -1,6 +1,6 @@
 # spec chain-a ^leaf@2
 # note: chain-a -> chain-b requires leaf@1
-# exit=1 time=5.0s lines=7 chars=421
+# exit=1 time=5.5s lines=7 chars=421
 ==> Error: failed to concretize `chain-a ^leaf@2` for the following reasons:
        1. Cannot satisfy 'leaf@1'
   Analyzing the cause of the failure, this may take a moment...

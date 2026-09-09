@@ -1,6 +1,6 @@
 # -C /Users/bot/spack/fuzzing/cases/C03_ext_too_old spec cmake@3.25:
 # note: only external is too old
-# exit=1 time=5.6s lines=6 chars=630
+# exit=1 time=5.8s lines=6 chars=630
 ==> Error: failed to concretize `cmake@3.25:` for the following reasons:
        1. Cannot build cmake, since it is configured `buildable:false` and no externals satisfy the request
   Analyzing the cause of the failure, this may take a moment...

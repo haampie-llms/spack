@@ -1132,6 +1132,24 @@ def _explain_unsat(control, specs=()) -> List[str]:
             else:
                 name_rank = 2
             messages.append((name_rank, probe_rank, message))
+    if not messages:
+        # A refutation can avoid the guards entirely when a shorter one exists, and then the core
+        # names none of them. Fall back to the guarded constraints that talk only about packages
+        # the user actually wrote: they are still constraints this solve could not satisfy, and
+        # one of them naming the user's own input beats saying nothing at all.
+        for symbol in guards:
+            probe = UNSAT_PROBES.get((symbol.name, len(symbol.arguments)))
+            if probe is None:
+                continue
+            args = [str(a).strip('"') for a in symbol.arguments]
+            if len(args) > 1 and len(set(args)) == 1:
+                continue
+            if not all(a in typed for a in args):
+                continue
+            message = probe[1].format(*args)
+            if message not in [m for _, _, m in messages]:
+                messages.append((0, probe[0], message))
+
     # names the user wrote first, then the more specific probes; a long list buries the answer
     messages.sort(key=lambda entry: (entry[0], entry[1]))
     return [message for _, _, message in messages][:5]

@@ -1,6 +1,6 @@
 # -C /Users/bot/spack/fuzzing/cases/C18_pref_ignored spec hdf5@1.8.19
 # note: preference on conditional variant; should succeed silently?
-# exit=0 time=1.9s lines=48 chars=6498
+# exit=0 time=2.0s lines=48 chars=6498
  -   hdf5@1.8.19~cxx~fortran~hl~ipo+mpi+shared~szip~threadsafe+tools api=default build_system=cmake build_type=Release generator=make patches=0e20187,b61e2f0,f42732a platform=darwin os=sequoia target=m4 %c=apple-clang@17.0.0
 [e]      ^apple-clang@17.0.0 build_system=bundle platform=darwin os=sequoia target=aarch64
  -       ^cmake@3.31.12~doc+ncurses+ownlibs~qtgui build_system=generic build_type=Release platform=darwin os=sequoia target=m4 %c,cxx=apple-clang@17.0.0
