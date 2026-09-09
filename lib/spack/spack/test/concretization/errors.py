@@ -230,6 +230,12 @@ def assert_actionable_error(exc_info, *required_part: str) -> None:
             ["fortan", "cxxxx", "zlib %c,cxxxx,fortan=gcc"],
             id="two_unknown_virtuals_on_edge",
         ),
+        # Two "^" literals providing the same virtual: the error must name both and the virtual.
+        pytest.param(
+            "mpileaks ^mpich ^zmpi",
+            ["'mpich'", "'zmpi'", "'mpi' virtual"],
+            id="two_literals_provide_one_virtual",
+        ),
         # Two providers requested for the same virtual: the error must name both.
         pytest.param(
             "mpileaks ^mpich ^zmpi",

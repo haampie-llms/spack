@@ -294,6 +294,17 @@ error(1, "'{0}' is not a direct 'build' or 'test' dependency of '{1}', nor a tra
      not depends_on(node(min_dupe_id, RootPackage), node(X, Literal)),
      not unification_set("root", node(X, Literal)).
 
+% Two "^" literals that provide the same virtual: only one of them can be used, and the message
+% above would otherwise name the one that lost without ever mentioning the one that won.
+error(1, "'{0}' and '{2}' both provide the '{1}' virtual, so '{3}' can only use one of them", Literal, Virtual, Other, RootPackage)
+  :- literal_node(RootPackage, node(X, Literal)),
+     not depends_on(node(min_dupe_id, RootPackage), node(X, Literal)),
+     not unification_set("root", node(X, Literal)),
+     pkg_fact(Literal, provider_condition(_, Virtual)),
+     literal_node(RootPackage, node(_, Other)),
+     Other != Literal,
+     pkg_fact(Other, provider_condition(_, Virtual)).
+
 :- build_dependency_of_literal_node(LiteralNode, BuildNode),
    not attr("depends_on", LiteralNode, BuildNode, "build").
 
