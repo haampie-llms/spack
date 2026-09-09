@@ -1018,6 +1018,42 @@ def _as_requested(spec: spack.spec.Spec) -> str:
     return f"{text} (requested as '{legacy}{text[len(spec.name) :]}')"
 
 
+def _excluded_by_provider_requirement(name: str) -> str:
+    """Explain a rejected `^dep` that a virtual requirement rules out.
+
+    Asking for `^jdk` where packages.yaml says `java: require: openjdk` leaves jdk out of the
+    possible dependencies entirely, and the bare "not a possible dependency" says nothing about
+    the requirement that put it there.
+    """
+    try:
+        pkg_cls = spack.repo.PATH.get_pkg_class(name)
+        provided = {v.name for versions in pkg_cls.provided.values() for v in versions}
+    except Exception:  # noqa: BLE001
+        return ""
+    if not provided:
+        return ""
+    packages = spack.config.CONFIG.get("packages", {})
+    for virtual in sorted(provided):
+        requirement = packages.get(virtual, {}).get("require")
+        if not requirement:
+            continue
+        text = requirement if isinstance(requirement, str) else str(requirement)
+        # compare package names, not substrings: "jdk" occurs inside "openjdk"
+        try:
+            required_names = {spack.spec.Spec(part).name for part in text.split()}
+        except Exception:  # noqa: BLE001
+            required_names = set()
+        if name in required_names:
+            continue
+        location = getattr(requirement, "line_info", "") or ""
+        where = f" ({location})" if location else ""
+        return (
+            f": the '{virtual}' virtual it provides is required to be "
+            f"'{text}'{where}, which '{name}' is not"
+        )
+    return ""
+
+
 def _relevant_names(specs) -> Tuple[Set[str], Set[str]]:
     """Names the user typed, and the direct dependencies those packages declare.
 
@@ -2759,9 +2795,12 @@ class SpackSolverSetup:
             if spack.repo.PATH.is_virtual(edge.spec.name):
                 possible_deps = self.possible_virtuals
             if edge.spec.name not in possible_deps and not str(edge.when):
-                raise InvalidDependencyError(
-                    f"'{edge.spec.name}' is not a possible dependency of any root spec"
-                )
+                # name what it was asked of, not just what was asked for
+                parent = edge.parent.name if edge.parent is not None else None
+                of = f"'{parent}'" if parent else "any root spec"
+                message = f"'{edge.spec.name}' is not a possible dependency of {of}"
+                because = _excluded_by_provider_requirement(edge.spec.name)
+                raise InvalidDependencyError(f"{message}{because}")
 
     def input_spec_version_check(self, specs, allow_deprecated: bool) -> None:
         """Raise an error early if no versions available in the solve can satisfy the inputs."""

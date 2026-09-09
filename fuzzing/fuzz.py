@@ -515,6 +515,11 @@ def m_cfg_external_old(cls):
             dcls = PATH.get_pkg_class(dname)
         except Exception:  # noqa: BLE001
             continue
+        # An external that extends another package needs that package declared external too, so
+        # the solve fails on the missing one and never reaches the version. Correct behaviour,
+        # but it is not the failure this mutation is trying to produce.
+        if getattr(dcls, "extendees", None):
+            continue
         bad = version_not_satisfying(dcls, dep.spec)
         if bad is None:
             continue
