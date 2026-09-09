@@ -1,6 +1,6 @@
 # spec hdf5+mpi ^intel-oneapi-mpi
 # note: intel mpi not available on darwin (conflict?)
-# exit=1 time=5.5s lines=13 chars=935
+# exit=1 time=5.7s lines=13 chars=935
 ==> Error: failed to concretize `hdf5+mpi ^intel-oneapi-mpi` for the following reasons:
        1. intel-oneapi-mpi: This package in only available for x86_64 and Linux
   Analyzing the cause of the failure, this may take a moment...
@@ -10,7 +10,7 @@
         required because conflict constraint  
           required because hdf5+mpi ^intel-oneapi-mpi requested explicitly 
      3. intel-oneapi-mpi: This package in only available for x86_64 and Linux
-        required because conflict constraint  
-          required because hdf5+mpi ^intel-oneapi-mpi requested explicitly 
         required because conflict is triggered when target=aarch64: 
+          required because hdf5+mpi ^intel-oneapi-mpi requested explicitly 
+        required because conflict constraint  
           required because hdf5+mpi ^intel-oneapi-mpi requested explicitly 

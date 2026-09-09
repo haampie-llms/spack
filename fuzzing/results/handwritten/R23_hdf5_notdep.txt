@@ -1,6 +1,6 @@
 # spec hdf5~mpi ^mpich
 # note: mpi dep only when +mpi
-# exit=1 time=25.8s lines=4 chars=298
+# exit=1 time=27.8s lines=4 chars=298
 ==> Error: failed to concretize `hdf5~mpi ^mpich` for the following reasons:
        1. mpich is not a direct 'build' or 'test' dependency, or transitive 'link' or 'run' dependency of any root
   Analyzing the cause of the failure, this may take a moment...

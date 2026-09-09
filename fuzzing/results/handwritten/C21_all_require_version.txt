@@ -1,6 +1,6 @@
 # -C /Users/bot/spack/fuzzing/cases/C21_all_require_version spec zlib-ng
 # note: all: require version that most packages lack
-# exit=1 time=5.8s lines=7 chars=750
+# exit=1 time=5.7s lines=7 chars=750
 ==> Error: failed to concretize `zlib-ng` for the following reasons:
        1. cannot satisfy requirement '@2.2' from /Users/bot/spack/fuzzing/cases/C21_all_require_version/packages.yaml:3 for package 'gnuconfig'
      2. cannot satisfy requirement '@2.2' from /Users/bot/spack/fuzzing/cases/C21_all_require_version/packages.yaml:3 for package 'gmake'

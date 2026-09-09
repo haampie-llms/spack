@@ -1,6 +1,6 @@
 # -C /Users/bot/spack/fuzzing/cases/C02_mpi_nonbuildable spec hdf5+mpi
 # note: virtual buildable:false, no external provider
-# exit=1 time=5.9s lines=4 chars=286
+# exit=1 time=5.8s lines=4 chars=286
 ==> Error: failed to concretize `hdf5+mpi` for the following reasons:
        1. Cannot build openmpi, since it is configured `buildable:false` and no externals satisfy the request
   Analyzing the cause of the failure, this may take a moment...

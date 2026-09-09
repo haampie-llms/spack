@@ -1,5 +1,5 @@
 # spec openssl@1.1.1w
 # note: deprecated version, config:deprecated false
-# exit=1 time=1.7s lines=2 chars=82
+# exit=1 time=1.6s lines=2 chars=82
 ==> Error: No version exists that satisfies these input specs:
     openssl@1.1.1w

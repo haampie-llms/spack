@@ -1,10 +1,10 @@
 # spec cyc-a
 # note: dependency cycle cyc-a <-> cyc-b
-# exit=1 time=4.6s lines=7 chars=740
+# exit=1 time=4.8s lines=7 chars=586
 ==> Error: failed to concretize cyc-a. Spack could not pinpoint a single cause; the solver could not satisfy:
      1. 'cyc-b' is not reachable from 'cyc-a': nothing in the DAG rooted at 'cyc-a' depends on it
      2. 'cyc-a' depends on 'cyc-b', but 'cyc-b' could not be added to the DAG
-     3. no version of 'atlas' is available to this solve: every version it declares is ruled out here, so nothing can depend on it
-     4. no version of 'cuda' is available to this solve: every version it declares is ruled out here, so nothing can depend on it
-     5. no version of 'fj' is available to this solve: every version it declares is ruled out here, so nothing can depend on it
+     3. 'fujitsu-ssl2' depends on 'fj', but 'fj' could not be added to the DAG
+     4. 'knem' depends on 'gcc', but 'gcc' could not be added to the DAG
+     5. 'alsa-lib' depends on 'python', but 'python' could not be added to the DAG
     Please report this if the cause is not clear from the above.

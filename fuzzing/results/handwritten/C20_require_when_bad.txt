@@ -1,6 +1,6 @@
 # -C /Users/bot/spack/fuzzing/cases/C20_require_when_bad spec hdf5~mpi
 # note: conditional requirement +mpi vs root ~mpi
-# exit=0 time=5.6s lines=22 chars=2821
+# exit=0 time=1.8s lines=22 chars=2821
  -   hdf5@2.2.0~cxx~fortran~hl~ipo~java~map~mpi+shared~szip~threadsafe+tools api=default build_system=cmake build_type=Release generator=make platform=darwin os=sequoia target=m4 %c=apple-clang@17.0.0
 [e]      ^apple-clang@17.0.0 build_system=bundle platform=darwin os=sequoia target=aarch64
  -       ^cmake@3.31.12~doc+ncurses+ownlibs~qtgui build_system=generic build_type=Release platform=darwin os=sequoia target=m4 %c,cxx=apple-clang@17.0.0

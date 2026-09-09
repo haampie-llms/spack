@@ -1,6 +1,6 @@
 # -C /Users/bot/spack/fuzzing/cases/C15_zlibapi_require spec hdf5 ^zlib-ng
 # note: virtual require zlib vs root zlib-ng
-# exit=1 time=5.8s lines=4 chars=277
+# exit=1 time=6.0s lines=4 chars=277
 ==> Error: failed to concretize `hdf5 ^zlib-ng` for the following reasons:
        1. Multiple providers are required for the same 'zlib-api' virtual: 'zlib' and 'zlib-ng'
   Analyzing the cause of the failure, this may take a moment...

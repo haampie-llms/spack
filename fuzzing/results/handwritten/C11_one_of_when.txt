@@ -1,6 +1,6 @@
 # -C /Users/bot/spack/fuzzing/cases/C11_one_of_when spec hdf5@1.14+mpi
 # note: conditional one_of excludes requested version
-# exit=1 time=6.1s lines=9 chars=630
+# exit=1 time=6.3s lines=9 chars=630
 ==> Error: failed to concretize `hdf5@1.14+mpi` for the following reasons:
        1. Cannot satisfy 'hdf5@1.14'
   Analyzing the cause of the failure, this may take a moment...

@@ -1,6 +1,6 @@
 # spec twoconds+x+y
 # note: +x needs leaf@1, +y needs leaf@2
-# exit=1 time=5.0s lines=6 chars=367
+# exit=1 time=4.9s lines=6 chars=367
 ==> Error: failed to concretize `twoconds+x+y` for the following reasons:
        1. Cannot satisfy 'leaf@1'
   Analyzing the cause of the failure, this may take a moment...

@@ -1,6 +1,6 @@
 # spec zlib-ng %c=gcc %c=apple-clang
 # note: two providers for c
-# exit=1 time=8.2s lines=6 chars=363
+# exit=1 time=9.9s lines=6 chars=363
 ==> Error: failed to concretize `zlib-ng %c=apple-clang %c=gcc` for the following reasons:
        1. 'zlib-ng' cannot depend on 'gcc'
      2. zlib-ng cannot have a dependency on c

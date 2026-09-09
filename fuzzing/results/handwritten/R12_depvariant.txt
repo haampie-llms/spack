@@ -1,6 +1,6 @@
 # spec depvariant ^leaf+shared
 # note: depvariant requires leaf~shared
-# exit=1 time=5.1s lines=7 chars=516
+# exit=1 time=5.0s lines=7 chars=516
 ==> Error: failed to concretize `depvariant ^leaf+shared` for the following reasons:
        1. 'leaf' requires conflicting variant values '~shared' and '+shared'
   Analyzing the cause of the failure, this may take a moment...

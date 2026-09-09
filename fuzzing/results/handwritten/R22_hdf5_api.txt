@@ -1,11 +1,11 @@
 # spec hdf5@1.12 api=v114
 # note: conflicts() with msg
-# exit=1 time=5.8s lines=8 chars=521
+# exit=1 time=5.9s lines=8 chars=521
 ==> Error: failed to concretize `hdf5@1.12 api=v114` for the following reasons:
        1. hdf5: v114 is not compatible with this release
   Analyzing the cause of the failure, this may take a moment...
 ==> Error:      2. hdf5: v114 is not compatible with this release
-        required because conflict constraint @1.6:1.12 
-          required because hdf5@1.12 api=v114 requested explicitly 
         required because conflict is triggered when api=v114 
+          required because hdf5@1.12 api=v114 requested explicitly 
+        required because conflict constraint @1.6:1.12 
           required because hdf5@1.12 api=v114 requested explicitly 
