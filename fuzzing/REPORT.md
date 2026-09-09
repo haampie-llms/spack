@@ -23,7 +23,8 @@ message without guessing.
 | + reporting a provider that cannot provide | 87.3% | 78.4% | 10 |
 | + explaining a solve with no error atoms | 89.5% | 80.3% | 2 |
 | + naming a package with no version, ranking the probes | 90.7% | 81.8% | 1 |
-| + ranking the probes by specificity, falling back to the user's own input | **91.9%** | **82.3%** | **0** |
+| + ranking the probes by specificity, falling back to the user's own input | 91.9% | 82.3% | 0 |
+| + naming both sides of a rejected dependency or provider | **91.8%** | **84.3%** | **0** |
 
 Measured over the cases that never hit the solver timeout in any run. Timeouts are wall-clock
 and this is a shared machine: two runs of *identical* code differed by 4%, and one run under
@@ -38,17 +39,29 @@ causation solve by default so a case costs one solve, but `spack spec` always ru
 
 | | any | all | internal errors |
 |---|---|---|---|
-| fuzzer fast mode | 91.9% | 82.3% | 0 |
-| **as users see it** | **100.0%** | **97.2%** | **0** |
+| fuzzer fast mode | 91.8% | 84.3% | 0 |
+| **as users see it** | **100.0%** | **98.1%** | **0** |
 
 **No input produces "Please submit a bug report" any more** -- not one of the 440 fuzzed cases,
 not one of the 62 hand-written ones. Every error names at least one thing the user wrote.
 
-Nine of 321 graded cases still name one side of the conflict and not the other, all in four
-shapes: an external whose version is named without the range it had to satisfy
-(`cfg_external_too_old`), and a virtual where one provider is named but not the one it clashes
-with (`cfg_provider_require_conflict`, `two_providers`, `two_conditional_deps_disjoint`). Four
-further cases are excluded from grading because their package cannot be built here at all,
+Six of 321 graded cases still fall short of naming every part, and four of those are the
+fuzzer's expectation rather than the message:
+
+- `py-branca`, `py-lightning-lite`: the external declared is a Python extension, so the solve
+  fails on the missing external `python` before it ever reaches the version range the mutation
+  was testing. The message is right; the mutator no longer picks such packages, but the
+  committed corpus predates that.
+- `grackle ^mpilander ^cray-mpich`, `minighost+mpi ^openmpi ^spectrum-mpi`: the second provider
+  is not available on this machine at all, so the message says so and never mentions the first.
+  That is the real reason, not the two-provider clash the mutation intended.
+- `sundials cuda_arch=11,86`: reports the conditional variant, which is what actually fails,
+  rather than the disjoint cuda ranges the mutation aimed at.
+
+That leaves one genuine gap: `spades ^zlib ^zlib-ng` says zlib is not a dependency of spades
+without mentioning that both provide `zlib-api`, which is why only one of them can be used.
+
+Four further cases are excluded from grading because their package cannot be built here at all,
 mutation or no mutation.
 
 Every figure below is fast mode unless it says otherwise, because that is the mode the corpus
