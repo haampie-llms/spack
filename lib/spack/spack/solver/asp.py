@@ -39,6 +39,7 @@ from typing import (
 import spack.vendor.archspec.cpu
 
 import spack
+import spack.aliases
 import spack.caches
 import spack.compilers.config
 import spack.compilers.flags
@@ -776,12 +777,6 @@ class ErrorHandler:
         self.input_specs = input_specs
         self.full_model = None
 
-    def multiple_values_error(self, attribute, pkg):
-        return f'Cannot select a single "{attribute}" for package "{pkg}"'
-
-    def no_value_error(self, attribute, pkg):
-        return f'Cannot select a single "{attribute}" for package "{pkg}"'
-
     def _get_cause_tree(
         self,
         cause: Tuple[str, str],
@@ -826,12 +821,6 @@ class ErrorHandler:
 
     def handle_error(self, msg, *args):
         """Handle an error state derived by the solver."""
-        if msg == "multiple_values_error":
-            return self.multiple_values_error(*args)
-
-        if msg == "no_value_error":
-            return self.no_value_error(*args)
-
         try:
             idx = args.index("startcauses")
         except ValueError:
@@ -953,6 +942,55 @@ def _make_cache_key(asp_problem: str, control_file_paths: List[str]) -> str:
         with open(path, "r", encoding="utf-8") as f:
             components.append(f.read())
     return "\n".join(components)
+
+
+def _as_requested(edge: spack.spec.DependencySpec) -> str:
+    """Render the spec on an input edge the way the user wrote it.
+
+    The parser turns "%clang@99" into a direct dependency on llvm@99, so an error that names the
+    node alone talks about a package the user never mentioned.
+    """
+    text = str(edge.spec)
+    legacy = spack.aliases.BUILTIN_TO_LEGACY_COMPILER.get(edge.spec.name)
+    if edge.direct and legacy and text.startswith(edge.spec.name):
+        return f"%{legacy}{text[len(edge.spec.name) :]}"
+    return text
+
+
+def _virtual_requirements(virtual: str, parser: RequirementParser) -> List[RequirementRule]:
+    """The unconditional `require:` rules for a virtual, i.e. the ones that pin its provider."""
+    return [
+        rule
+        for rule in parser.rules_from_virtual(virtual)
+        if rule.origin == RequirementOrigin.REQUIRE_YAML and rule.condition == EMPTY_SPEC
+    ]
+
+
+def _requirement_text(rule: RequirementRule) -> str:
+    text = "'" + "' or '".join(str(s) for s in rule.requirements) + "'"
+    return f"{text} ({rule.location})" if rule.location else text
+
+
+def _excluded_by_provider_requirement(name: str, parser: RequirementParser) -> str:
+    """Explain a rejected `^dep` that a virtual requirement rules out.
+
+    Asking for `^jdk` where packages.yaml says `java: require: openjdk` leaves jdk out of the
+    possible dependencies entirely, and the bare "not a possible dependency" says nothing about
+    the requirement that put it there.
+    """
+    try:
+        pkg_cls = spack.repo.PATH.get_pkg_class(name)
+    except spack.repo.UnknownPackageError:
+        return ""
+    for virtual in pkg_cls.provided_virtual_names():
+        for rule in _virtual_requirements(virtual, parser):
+            required = {s.name for s in rule.requirements if s.name}
+            if required and name not in required:
+                return (
+                    f": the '{virtual}' virtual it provides is required to be "
+                    f"{_requirement_text(rule)}, which '{name}' is not"
+                )
+    return ""
 
 
 class PyclingoDriver:
@@ -1992,8 +2030,22 @@ class SpackSolverSetup:
 
             self.gen.fact(fn.requirement_group(pkg_name, requirement_grp_id))
             self.gen.fact(fn.requirement_policy(pkg_name, requirement_grp_id, policy))
+            # What the requirement actually says, so a failure can quote it. Without this the
+            # only thing reported is "cannot satisfy a requirement for package 'X'".
+            requirement_text = "'" + "' or '".join(str(s) for s in requirement_grp) + "'"
+            location_prefix = ""
+            if rule.location:
+                requirement_text += f" from {rule.location}"
+                location_prefix = f"{rule.location}: "
+            self.gen.fact(
+                fn.requirement_group_spec(pkg_name, requirement_grp_id, requirement_text)
+            )
             if rule.message:
-                self.gen.fact(fn.requirement_message(pkg_name, requirement_grp_id, rule.message))
+                self.gen.fact(
+                    fn.requirement_message(
+                        pkg_name, requirement_grp_id, f"{location_prefix}{rule.message}"
+                    )
+                )
             self.gen.newline()
 
             for input_spec in requirement_grp:
@@ -2021,7 +2073,9 @@ class SpackSolverSetup:
                     # else: for virtuals we want to emit "node" and
                     # "virtual_node" in imposed specs
 
-                    info_msg = f"{input_spec} is a requirement for package {pkg_name}"
+                    info_msg = (
+                        f"{location_prefix}{input_spec} is a requirement for package {pkg_name}"
+                    )
                     if rule.condition != EMPTY_SPEC:
                         info_msg += f" when {rule.condition}"
                     if rule.message:
@@ -2068,6 +2122,19 @@ class SpackSolverSetup:
             if not data.get("buildable", True):
                 self.gen.h2(f"External package: {pkg_name}")
                 self.gen.fact(fn.buildable_false(pkg_name))
+                # Record what is on offer, so that a failure can name the external that was
+                # rejected instead of only "no externals satisfy the request": the spec as
+                # written, and its versions as written for the version-mismatch message.
+                for entry in data.get("externals", []):
+                    try:
+                        versions = spack.spec.Spec(entry["spec"]).versions
+                    except Exception:  # noqa: BLE001
+                        continue
+                    # packages_with_externals is deepcopy_as_builtin(..., line_info=True), so
+                    # each entry carries its YAML mark as line_info
+                    location = getattr(entry, "line_info", "")
+                    as_written = f"'{entry['spec']}'" + (f" from {location}" if location else "")
+                    self.gen.pkg_fact(pkg_name, fn.external_declared(as_written, str(versions)))
 
     def preferred_variants(self, pkg_name):
         """Facts on concretization preferences, as read from packages.yaml"""
@@ -2517,16 +2584,22 @@ class SpackSolverSetup:
             if spack.repo.PATH.is_virtual(edge.spec.name):
                 possible_deps = self.possible_virtuals
             if edge.spec.name not in possible_deps and not str(edge.when):
-                raise InvalidDependencyError(
-                    f"'{edge.spec.name}' is not a possible dependency of any root spec"
+                # name what it was asked of, not just what was asked for
+                parent = edge.parent.name if edge.parent is not None else None
+                of = f"'{parent}'" if parent else "any root spec"
+                message = f"'{edge.spec.name}' is not a possible dependency of {of}"
+                because = _excluded_by_provider_requirement(
+                    edge.spec.name, self.requirement_parser
                 )
+                raise InvalidDependencyError(f"{message}{because}")
 
     def input_spec_version_check(self, specs, allow_deprecated: bool) -> None:
         """Raise an error early if no versions available in the solve can satisfy the inputs."""
         only_deprecated = []
         impossible = []
 
-        for spec in traverse.traverse_nodes(specs):
+        for edge in traverse.traverse_edges(specs):
+            spec = edge.spec
             if spack.repo.PATH.is_virtual(spec.name):
                 continue
             if spec.name not in self.pkgs:
@@ -2542,7 +2615,7 @@ class SpackSolverSetup:
                 only_deprecated.append(spec)
 
             if not sat_deprecated and not sat_possible:
-                impossible.append(spec)
+                impossible.append(_as_requested(edge))
 
         if not allow_deprecated and only_deprecated:
             raise DeprecatedVersionError(
@@ -2556,7 +2629,7 @@ class SpackSolverSetup:
         if impossible:
             raise InvalidVersionError(
                 "No version exists that satisfies these input specs:",
-                "    " + ", ".join(str(spec) for spec in impossible),
+                "    " + ", ".join(impossible),
             )
 
     def _validate_input_specs(self, specs: Sequence[spack.spec.Spec]) -> None:
