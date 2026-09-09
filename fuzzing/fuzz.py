@@ -803,7 +803,8 @@ def main():
             # version requirement asks for a cause that is not the cause. Only worth the extra
             # solve when nothing was mentioned, which is where the false negatives are.
             base_unsat = False
-            if outcome != "sat" and not mentioned:
+            expected = [t for t in c["expect"] if t]
+            if outcome != "sat" and len(mentioned) < len(expected):
                 # must use the same mode: solve() patches the causation pass out permanently
                 # when full is false, which would silently disable it for every later case
                 base_unsat = solve([c["package"]], None, args.full)[0] != "sat"
