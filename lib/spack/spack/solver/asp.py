@@ -39,6 +39,7 @@ from typing import (
 import spack.vendor.archspec.cpu
 
 import spack
+import spack.aliases
 import spack.caches
 import spack.compilers.config
 import spack.compilers.flags
@@ -983,6 +984,20 @@ UNSAT_PROBES: Dict[Tuple[str, int], str] = {
     ),
     ("dangling_edge", 2): ("'{0}' depends on '{1}', but '{1}' could not be added to the DAG"),
 }
+
+
+def _as_requested(spec: spack.spec.Spec) -> str:
+    """Render a spec, noting the legacy compiler name if the user is likely to have typed it.
+
+    "%clang@99" is rewritten to "llvm@99" while parsing, so an error about it otherwise names a
+    package the user never mentioned.
+    """
+    legacy = spack.aliases.BUILTIN_TO_LEGACY_COMPILER.get(spec.name)
+    text = str(spec)
+    if legacy is None or not text.startswith(spec.name):
+        return text
+    # keep the constraints, swap the name back, so the user sees "clang@99" and not just "clang"
+    return f"{text} (requested as '{legacy}{text[len(spec.name) :]}')"
 
 
 def _explain_unsat(control) -> List[str]:
@@ -2685,7 +2700,7 @@ class SpackSolverSetup:
         if impossible:
             raise InvalidVersionError(
                 "No version exists that satisfies these input specs:",
-                "    " + ", ".join(str(spec) for spec in impossible),
+                "    " + ", ".join(_as_requested(spec) for spec in impossible),
             )
 
     def _validate_input_specs(self, specs: Sequence[spack.spec.Spec]) -> None:

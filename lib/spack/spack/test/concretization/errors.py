@@ -249,6 +249,14 @@ def test_input_spec_driven_errors(
     assert_actionable_error(exc_info, *expected_parts)
 
 
+def test_legacy_compiler_name_is_echoed_back(mock_packages, mutable_config):
+    """`%clang` is rewritten to `llvm` while parsing, so an error about it must still mention
+    the name the user actually typed."""
+    with pytest.raises(spack.error.SpackError) as exc_info:
+        spack.concretize.concretize_one("mpileaks %clang@99")
+    assert_actionable_error(exc_info, "clang")
+
+
 def test_buildable_false_names_the_external_and_the_constraint(
     mock_packages, mutable_config: Configuration
 ):
