@@ -982,6 +982,10 @@ UNSAT_PROBES: Dict[Tuple[str, int], str] = {
     ("unreachable", 2): (
         "'{1}' is not reachable from '{0}': nothing in the DAG rooted at '{0}' depends on it"
     ),
+    ("no_version_available", 1): (
+        "no version of '{0}' is available to this solve: every version it declares is ruled out "
+        "here, so nothing can depend on it"
+    ),
     ("dangling_edge", 2): ("'{0}' depends on '{1}', but '{1}' could not be added to the DAG"),
 }
 
@@ -1000,7 +1004,31 @@ def _as_requested(spec: spack.spec.Spec) -> str:
     return f"{text} (requested as '{legacy}{text[len(spec.name) :]}')"
 
 
-def _explain_unsat(control) -> List[str]:
+def _relevant_names(specs) -> Tuple[Set[str], Set[str]]:
+    """Names the user typed, and the direct dependencies those packages declare.
+
+    The probes fire for anything the refutation found convenient, including packages with no
+    bearing on the request -- `maven ^zlib-ng` turns up atlas, which has no version here and
+    nothing to do with maven. A message about a name the user wrote answers "what about my input
+    is wrong", so it comes first; one about a declared dependency comes next; the rest last.
+    """
+    typed: Set[str] = set()
+    declared: Set[str] = set()
+    for spec in specs:
+        for node in spec.traverse():
+            if not node.name:
+                continue
+            typed.add(node.name)
+            try:
+                declared.update(
+                    spack.repo.PATH.get_pkg_class(node.name).dependencies_by_name(when=False)
+                )
+            except Exception:  # noqa: BLE001
+                continue
+    return typed, declared - typed
+
+
+def _explain_unsat(control, specs=()) -> List[str]:
     """Ask clingo which guarded constraints its refutation needed.
 
     The program is left exactly as tight as it was, so this is a second refutation rather than a
@@ -1026,6 +1054,20 @@ def _explain_unsat(control) -> List[str]:
         if atom is not None:
             literal_to_symbol[atom.literal] = symbol
 
+    def unsatisfiable_without(relaxed) -> bool:
+        """Is the program still unsatisfiable once the *relaxed* guards are lifted?
+
+        Every guard has to be assigned: an unassigned #external is false, which leaves its
+        constraint in force. Assuming one true lifts that constraint. Everything outside
+        `relaxed` stays enforced, so this asks about the real program minus a few constraints
+        rather than about some much weaker program.
+        """
+        with solve(
+            assumptions=[(g, g in relaxed) for g in guards], yield_=True, async_=True
+        ) as handle:
+            handle.wait()
+            return handle.get().unsatisfiable
+
     try:
         with solve(assumptions=[(g, False) for g in guards], yield_=True, async_=True) as handle:
             handle.wait()
@@ -1034,11 +1076,26 @@ def _explain_unsat(control) -> List[str]:
             # clingo returns None rather than an empty core when the refutation needed no
             # assumption at all
             core = handle.core() or []
+
+        # Cores are not minimal, and the extras are actively misleading: `gpuscout` needs cuda,
+        # but its core also names atlas, which has nothing to do with the failure. Drop each
+        # guard that the refutation turns out not to need. One solve per candidate, so this is
+        # only worth doing while the core is small.
+        candidates = [literal_to_symbol[abs(x)] for x in core if abs(x) in literal_to_symbol]
+        if 1 < len(candidates) <= 16:
+            relaxed: set = set()
+            for symbol in candidates:
+                if unsatisfiable_without(relaxed | {symbol}):
+                    relaxed.add(symbol)
+            keep = [s for s in candidates if s not in relaxed]
+            if keep:
+                core = [atoms[s].literal for s in keep]
     except Exception:  # noqa: BLE001
         # never let the diagnosis turn one failure into another
         return []
 
-    messages = []
+    typed, declared = _relevant_names(specs)
+    messages: List[Any] = []
     for literal in core:
         symbol = literal_to_symbol.get(abs(literal))
         if symbol is None:
@@ -1047,14 +1104,22 @@ def _explain_unsat(control) -> List[str]:
         if template is None:
             continue
         args = [str(a).strip('"') for a in symbol.arguments]
-        # a root is trivially in its own condition set; that instance explains nothing
-        if len(set(args)) == 1:
+        # a root is trivially in its own condition set, and an edge from a package to itself is
+        # not news; neither instance explains anything
+        if len(args) > 1 and len(set(args)) == 1:
             continue
         message = template.format(*args)
         if message not in messages:
-            messages.append(message)
-    # a long list of consequences buries the useful line; keep the report short
-    return messages[:5]
+            if any(a in typed for a in args):
+                rank = 0
+            elif any(a in declared for a in args):
+                rank = 1
+            else:
+                rank = 2
+            messages.append((rank, message))
+    # relevant first, order otherwise preserved; a long list buries the useful line
+    messages.sort(key=lambda pair: pair[0])
+    return [message for _, message in messages][:5]
 
 
 class PyclingoDriver:
@@ -1142,7 +1207,7 @@ class PyclingoDriver:
         result.satisfiable = solve_result.satisfiable
         if not result.satisfiable:
             with timer.measure("diagnose"):
-                result.unsat_explanations = _explain_unsat(self.control)
+                result.unsat_explanations = _explain_unsat(self.control, specs)
             return result
 
         timer.start("construct_specs")

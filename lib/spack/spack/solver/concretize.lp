@@ -388,7 +388,19 @@ version_constraint_satisfied(node(ID,Package), Constraint) :-
     VersionIdx >= MinIdx, VersionIdx <= MaxIdx.
 
 % Pick a single version among the possible ones
-1 { choose_version(node(ID, Package), Version) : version_declared(Package, Version) } 1 :- attr("node", node(ID, Package)).
+% A package with no declared version at all makes this rule infeasible the moment a node for it
+% is required, with nothing to report -- that is `gpuscout`, which needs cuda@12:, on a platform
+% where every cuda version is gated out. Guarded for diagnosis only, like `unreachable` above;
+% the domain is restricted to packages that really have no version, so this adds a handful of
+% externals rather than one per package.
+has_declared_version(Package) :- version_declared(Package, _).
+#external no_version_available(Package) : max_dupes(Package, _),
+                                          not has_declared_version(Package),
+                                          not virtual(Package).
+
+1 { choose_version(node(ID, Package), Version) : version_declared(Package, Version) } 1
+  :- attr("node", node(ID, Package)),
+     not no_version_available(Package).
 
 % To choose the "fake" version of virtual packages, we need a separate rule.
 % Note that a virtual node may or may not have a version, but cannot have more than one.
