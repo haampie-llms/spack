@@ -880,15 +880,10 @@ error(100, "Cannot satisfy the request on {0} to have the following hash {1}", B
      not attr("dependency_holds", ParentNode, Virtual,"run"),
      virtual(Virtual).
 
-% The virtual build dependency must be on the correct duplicate.
-#external wrong_build_provider(Parent, Provider, Virtual)
-    : virtual_build_requirement(node(_, Parent), node(X, Virtual)),
-      provider(node(_, Provider), node(X, Virtual)).
-
-:- virtual_build_requirement(node(P, Parent), node(X, Virtual)),
-   provider(node(Q, Provider), node(X, Virtual)),
-   not depends_on(node(P, Parent), node(Q, Provider)),
-   not wrong_build_provider(Parent, Provider, Virtual).
+% The virtual build dependency must be on the correct duplicate
+:- virtual_build_requirement(ParentNode, node(X, Virtual)),
+   provider(ProviderNode, node(X, Virtual)),
+   not depends_on(ParentNode, ProviderNode).
 
 attr("virtual_node", VirtualNode)  :- virtual_build_requirement(ParentNode, VirtualNode).
 build_requirement(ParentNode, ProviderNode)  :-
