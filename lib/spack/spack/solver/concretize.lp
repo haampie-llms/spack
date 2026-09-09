@@ -88,7 +88,12 @@ has_target_weight(PackageNode) :- node_target_weight(PackageNode, _).
 :- attr("variant_value", PackageNode, _, _), not attr("node", PackageNode).
 :- attr("node_flag", PackageNode, _), not attr("node", PackageNode).
 :- attr("depends_on", ParentNode, _, _), not attr("node", ParentNode).
-:- attr("depends_on", _, ChildNode, _), not attr("node", ChildNode).
+% Guarded for the unsat diagnosis, see `unreachable` below.
+#external dangling_edge(Parent, Child) : attr("depends_on", node(_, Parent), node(_, Child), _).
+
+:- attr("depends_on", node(P, Parent), node(C, Child), _),
+   not attr("node", node(C, Child)),
+   not dangling_edge(Parent, Child).
 :- attr("virtual_node", VirtualNode), not has_provider(VirtualNode).
 :- provider(_, VirtualNode), not attr("virtual_node", VirtualNode).
 :- provider(PackageNode, _), not attr("node", PackageNode).
@@ -282,10 +287,21 @@ condition_set(LiteralNode, BuildNode) :- build_dependency_of_literal_node(Litera
 
 % Generate a comprehensible error for cases like 'foo ^bar' where 'bar' is a build dependency
 % of a transitive dependency of 'foo'
-error(1, "{0} is not a direct 'build' or 'test' dependency, or transitive 'link' or 'run' dependency of any root", Literal)
+error(1, "'{0}' is not a direct 'build' or 'test' dependency of '{1}', nor a transitive 'link' or 'run' dependency of it", Literal, RootPackage)
   :- literal_node(RootPackage, node(X, Literal)),
      not depends_on(node(min_dupe_id, RootPackage), node(X, Literal)),
      not unification_set("root", node(X, Literal)).
+
+% Two "^" literals that provide the same virtual: only one of them can be used, and the message
+% above would otherwise name the one that lost without ever mentioning the one that won.
+error(1, "'{0}' and '{2}' both provide the '{1}' virtual, so '{3}' can only use one of them", Literal, Virtual, Other, RootPackage)
+  :- literal_node(RootPackage, node(X, Literal)),
+     not depends_on(node(min_dupe_id, RootPackage), node(X, Literal)),
+     not unification_set("root", node(X, Literal)),
+     pkg_fact(Literal, provider_condition(_, Virtual)),
+     literal_node(RootPackage, node(_, Other)),
+     Other != Literal,
+     pkg_fact(Other, provider_condition(_, Virtual)).
 
 :- build_dependency_of_literal_node(LiteralNode, BuildNode),
    not attr("depends_on", LiteralNode, BuildNode, "build").
@@ -304,35 +320,72 @@ associated_with_root(RootNode, ChildNode) :-
    depends_on(ParentNode, ChildNode),
    associated_with_root(RootNode, ParentNode).
 
-% We cannot have a node in the root condition set, that is not associated with that root
-:- attr("root", RootNode),
-   condition_set(RootNode, node(X, Package)),
+% We cannot have a node in the root condition set, that is not associated with that root.
+%
+% The guard is an #external, false unless assumed otherwise, so during a normal solve this is the
+% plain integrity constraint. It gives the constraint a name: when a solve is unsatisfiable with
+% no error atom at all, _explain_unsat in asp.py asks clingo which guards its refutation needed
+% (UNSAT_PROBES lists them). A soft constraint is not an option here: optimizing over models that
+% place the unreachable node anywhere takes far longer than the failing solve itself.
+#external unreachable(Root, Package) : attr("root", node(R, Root)),
+                                       condition_set(node(R, Root), node(X, Package)),
+                                       not virtual(Package).
+
+:- attr("root", node(R, Root)),
+   condition_set(node(R, Root), node(X, Package)),
    not virtual(Package),
-   not associated_with_root(RootNode, node(X, Package)).
+   not associated_with_root(node(R, Root), node(X, Package)),
+   not unreachable(Root, Package).
 
 #defined concretize_everything/0.
 #defined literal/1.
 
-% Attributes for node packages which must have a single value
-attr_single_value("version").
-attr_single_value("node_platform").
-attr_single_value("node_os").
-attr_single_value("node_target").
+% Attributes for node packages which must have a single value, and the name users know them by
+attr_single_value("version", "version").
+attr_single_value("node_platform", "platform").
+attr_single_value("node_os", "os").
+attr_single_value("node_target", "target").
 
 node_has_single_value_attr(node(ID, Package), Attribute) :-
   attr(Attribute, node(ID, Package), _).
 
 % Error when no attribute is selected
-error(10000, no_value_error, Attribute, Package)
+error(10000, "No {0} value could be selected for package '{1}'", Name, Package)
   :- attr("node", node(ID, Package)),
-     attr_single_value(Attribute),
+     attr_single_value(Attribute, Name),
      not node_has_single_value_attr(node(ID, Package), Attribute).
 
+% The values this machine can build for. A value outside them is reported on its own, and the
+% conflicting-values error below stays quiet about it: the second value is the one this machine
+% picked, and reporting the pair would only add noise.
+machine_value("node_platform", Platform) :- allowed_platform(Platform).
+machine_value("node_target", Target) :- target(Target).
+
+foreign_value(node(ID, Package), Attribute)
+  :- machine_value(Attribute, _),
+     attr(Attribute, node(ID, Package), Value),
+     not machine_value(Attribute, Value).
+
+error(100, "'{0} {1}={2}' is not compatible with this machine", Package, Name, Value)
+  :- machine_value(Attribute, _),
+     attr(Attribute, node(ID, Package), Value),
+     not machine_value(Attribute, Value),
+     attr_single_value(Attribute, Name).
+
 % Error when multiple attr need to be selected
-error(100, multiple_values_error, Attribute, Package)
+error(100, "Conflicting {0} values are required for package '{1}'", Name, Package)
   :- attr("node", node(ID, Package)),
-     attr_single_value(Attribute),
-     2 { attr(Attribute, node(ID, Package), Value) }.
+     attr_single_value(Attribute, Name),
+     not foreign_value(node(ID, Package), Attribute),
+     2 { attr(Attribute, node(ID, Package), Value) },
+     Attribute != "node_os".
+
+% For the os the message includes the conflicting values, which is cheap enough to ground.
+error(100, "Conflicting os values are required for package '{0}': '{1}' and '{2}'", Package, OS1, OS2)
+  :- attr("node", node(ID, Package)),
+     attr("node_os", node(ID, Package), OS1),
+     attr("node_os", node(ID, Package), OS2),
+     OS1 < OS2.
 
 %-----------------------------------------------------------------------------
 % Version semantics
@@ -353,8 +406,16 @@ version_constraint_satisfied(node(ID,Package), Constraint) :-
     pkg_fact(Package, version_range(Constraint, MinIdx, MaxIdx)),
     VersionIdx >= MinIdx, VersionIdx <= MaxIdx.
 
-% Pick a single version among the possible ones
-1 { choose_version(node(ID, Package), Version) : version_declared(Package, Version) } 1 :- attr("node", node(ID, Package)).
+% Pick a single version among the possible ones. A package with no declared version at all
+% makes this infeasible the moment a node for it is required, with nothing to report; the guard
+% is for the unsat diagnosis (see `unreachable` above), and only exists for such packages.
+#external no_version_available(Package) : max_dupes(Package, _),
+                                          not version_declared(Package, _),
+                                          not virtual(Package).
+
+1 { choose_version(node(ID, Package), Version) : version_declared(Package, Version) } 1
+  :- attr("node", node(ID, Package)),
+     not no_version_available(Package).
 
 % To choose the "fake" version of virtual packages, we need a separate rule.
 % Note that a virtual node may or may not have a version, but cannot have more than one.
@@ -834,10 +895,16 @@ error(100, "Cannot satisfy the request on {0} to have the following hash {1}", B
      not attr("dependency_holds", ParentNode, Virtual,"run"),
      virtual(Virtual).
 
-% The virtual build dependency must be on the correct duplicate
-:- virtual_build_requirement(ParentNode, node(X, Virtual)),
-   provider(ProviderNode, node(X, Virtual)),
-   not depends_on(ParentNode, ProviderNode).
+% The virtual build dependency must be on the correct duplicate. Guarded for the unsat
+% diagnosis, see `unreachable` above.
+#external wrong_build_provider(Parent, Provider, Virtual)
+    : virtual_build_requirement(node(_, Parent), node(X, Virtual)),
+      provider(node(_, Provider), node(X, Virtual)).
+
+:- virtual_build_requirement(node(P, Parent), node(X, Virtual)),
+   provider(node(Q, Provider), node(X, Virtual)),
+   not depends_on(node(P, Parent), node(Q, Provider)),
+   not wrong_build_provider(Parent, Provider, Virtual).
 
 attr("virtual_node", VirtualNode)  :- virtual_build_requirement(ParentNode, VirtualNode).
 build_requirement(ParentNode, ProviderNode)  :-
@@ -1022,9 +1089,14 @@ error(10, "'{0}' is not a valid dependency for any package in the DAG", Package)
   :- attr("node", node(ID, Package)),
      not needed(node(ID, Package)).
 
-:- depends_on(ParentNode, ChildNode),
-   not edge_needed(ParentNode, ChildNode),
-   build(ParentNode).
+% An edge that nothing in the DAG asks for. Reported rather than forbidden outright: a hard
+% constraint would discard the model together with the real explanation the solver usually has
+% by then (e.g. two providers for one language). The weight keeps it a last resort below the
+% requirement errors.
+error(200000, "'{0}' cannot depend on '{1}'", Parent, Child)
+  :- depends_on(node(X, Parent), node(Y, Child)),
+     not edge_needed(node(X, Parent), node(Y, Child)),
+     build(node(X, Parent)).
 
 :- provider(PackageNode, VirtualNode),
    not provider_needed(PackageNode, VirtualNode),
@@ -1140,9 +1212,11 @@ error(100, "Cannot find valid provider for virtual {0}", Virtual)
   :- attr("virtual_node", node(X, Virtual)),
      not has_provider(node(X, Virtual)).
 
-error(100, "Multiple providers are required for the same '{0}' virtual", Virtual)
+error(100, "Multiple providers are required for the same '{0}' virtual: '{1}' and '{2}'", Virtual, Provider1, Provider2)
   :- attr("virtual_node", node(X, Virtual)),
-     2 { provider(P, node(X, Virtual)) }.
+     provider(node(_, Provider1), node(X, Virtual)),
+     provider(node(_, Provider2), node(X, Virtual)),
+     Provider1 < Provider2.
 
 % virtual roots imply virtual nodes, and that one provider is a root
 attr("virtual_node", VirtualNode) :- attr("virtual_root", VirtualNode).
@@ -1179,9 +1253,11 @@ do_not_impose(EffectID, node(X, Package))
    not language(Virtual).
 
 % A package cannot be the actual provider for a virtual if it does not
-% fulfill the conditions to provide that virtual
-:- provider(PackageNode, node(VirtualID, Virtual)),
-   not virtual_condition_holds(PackageNode, Virtual).
+% fulfill the conditions to provide that virtual. Reported rather than forbidden outright, since a
+% hard constraint discards the model without saying anything; the weight keeps it a last resort.
+error(100000, "'{0}' cannot be a provider for the '{1}' virtual", Package, Virtual)
+  :- provider(node(X, Package), node(VirtualID, Virtual)),
+     not virtual_condition_holds(node(X, Package), Virtual).
 
 #defined provided_together/3.
 
@@ -1402,9 +1478,10 @@ requirement_penalty(PackageNode, Language, Group, W) :-
   attr("concrete_build_dependency", PackageNode, CompilerName, CompilerHash),
   attr("virtual_on_build_edge", PackageNode, CompilerName, Language).
 
-error(60000, "cannot satisfy a requirement for package '{0}'.", Package) :-
+error(60000, "cannot satisfy requirement {1} for package '{0}'", Package, Requirement) :-
   activate_requirement(node(ID, Package), X),
   requirement_group(Package, X),
+  requirement_group_spec(Package, X, Requirement),
   not has_requirement_message(Package, X),
   not requirement_group_satisfied(node(ID, Package), X).
 
@@ -1422,6 +1499,7 @@ error(50000, Message) :-
 #defined requirement_group_member/3.
 #defined requirement_has_weight/2.
 #defined requirement_policy/3.
+#defined requirement_group_spec/3.
 
 %-----------------------------------------------------------------------------
 % Variant semantics
@@ -1543,16 +1621,34 @@ attr("variant_selected", PackageNode, Variant, Value, VariantType, VariantID) :-
   node_has_variant(PackageNode, Variant, VariantID),
   variant_type(VariantID, VariantType).
 
-% a variant cannot be set if it is not a variant on the package
+variant_set_but_missing(PackageNode, Variant)
+  :- attr("variant_set", PackageNode, Variant),
+     not pkg_has_variant(PackageNode, Variant),
+     build(PackageNode).
+
+% error when a variant has to be set, but its when condition cannot hold
+% "Cannot set variant 'java' for 'hdf5@1.8.19': Package hdf5 has variant 'java' when @1.10:"
+error(100, "Cannot set variant '{0}' for '{1}@{2}': {3}", Variant, Package, Version, Reason)
+  :- variant_set_but_missing(node(ID, Package), Variant),
+     attr("version", node(ID, Package), Version),
+     pkg_fact(Package, variant_condition(Variant, _, ConditionID)),
+     condition_reason(ConditionID, Reason).
+
 error(100, "Cannot set variant '{0}' for package '{1}' because the variant condition cannot be satisfied for the given spec", Variant, Package)
-  :- attr("variant_set", node(ID, Package), Variant),
-     not pkg_has_variant(node(ID, Package), Variant),
-     build(node(ID, Package)).
+  :- variant_set_but_missing(node(ID, Package), Variant),
+     not pkg_fact(Package, variant_condition(Variant, _, _)).
+
+% every variant that is set has a value; exempt the case the errors above report, so the model
+% carrying the error is not discarded along with it
+:- attr("variant_set", PackageNode, Variant, Value),
+   not attr("variant_value", PackageNode, Variant, Value),
+   not variant_set_but_missing(PackageNode, Variant).
 
 % a variant cannot take on a value if it is not a variant of the package
 error(100, "Cannot set variant '{0}' for package '{1}' because the variant condition cannot be satisfied for the given spec", Variant, Package)
   :- attr("variant_value", node(ID, Package), Variant, _),
      not pkg_has_variant(node(ID, Package), Variant),
+     not attr("variant_set", node(ID, Package), Variant),
      build(node(ID, Package)).
 
 % at most one variant value for single-valued variants.
@@ -1614,9 +1710,6 @@ error(100, "{0} variant '{1}' cannot have values '{2}' and '{3}' as they come fr
      variant_value_from_disjoint_sets(node(ID, Package), Variant, Value2, Set2),
      Set1 < Set2, % see[1]
      build(node(ID, Package)).
-
-:- attr("variant_set", node(ID, Package), Variant, Value),
-   not attr("variant_value", node(ID, Package), Variant, Value).
 
 % In a case with `variant("foo", when="+bar")` and a user request for +foo or ~foo,
 % force +bar to be set too. This gives no penalty if `+bar` is not the default value, and
@@ -1949,11 +2042,13 @@ attr("node_os", PackageNode, OS) :- attr("node_os_set", PackageNode, OS), attr("
 % Each node has only one target chosen among the known targets
 1 { attr("node_target", PackageNode, Target) : target(Target) } 1 :- attr("node", PackageNode).
 
-% If a node must satisfy a target constraint, enforce it
+% If a node must satisfy a target constraint, enforce it. A target this machine cannot build for
+% is reported as such (see `machine_value`), so don't repeat the mismatch for it here.
 error(10, "'{0} target={1}' cannot satisfy constraint 'target={2}'", Package, Target, Constraint)
   :- attr("node_target", node(X, Package), Target),
      attr("node_target_satisfies", node(X, Package), Constraint),
-     not target_satisfies(Constraint, Target).
+     not target_satisfies(Constraint, Target),
+     not foreign_value(node(X, Package), "node_target").
 
 % If a node has a target and the target satisfies a constraint, then the target
 % associated with the node satisfies the same constraint
@@ -2020,12 +2115,6 @@ node_target_match(ParentNode, DependencyNode)
 node_target_mismatch(ParentNode, DependencyNode)
   :- attr("depends_on", ParentNode, DependencyNode, Type), Type != "build",
      not node_target_match(ParentNode, DependencyNode).
-
-% disallow reusing concrete specs that don't have a compatible target
-error(100, "'{0} target={1}' is not compatible with this machine", Package, Target)
-  :- attr("node", node(X, Package)),
-     attr("node_target", node(X, Package), Target),
-     not target(Target).
 
 %-----------------------------------------------------------------------------
 % Compiler flags

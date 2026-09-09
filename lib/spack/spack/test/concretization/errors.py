@@ -146,6 +146,12 @@ def assert_actionable_error(exc_info, *required_part: str) -> None:
     the user can recognize in their own input.
     """
     msg = str(exc_info.value)
+    # An unsatisfiable input that trips a hard constraint with no error() rule surfaces as
+    # "Spack concretizer internal error. Please submit a bug report", which can still contain the
+    # requested substrings via the spec echoed after it. That is never an actionable message.
+    assert not isinstance(exc_info.value, spack.solver.asp.InternalConcretizerError), (
+        f"Expected an actionable error, got an internal error:\n{msg}"
+    )
     missing = [h for h in required_part if h not in msg]
     assert not missing, f"Error message is missing parts {missing!r}\nFull message:\n{msg}"
 
@@ -163,6 +169,13 @@ def assert_actionable_error(exc_info, *required_part: str) -> None:
             "quantum-espresso+nonexistent",
             ["quantum-espresso", "nonexistent", "No such variant"],
             id="variant_undefined",
+        ),
+        # The variant exists only when @2.0:, but the user pinned @1.0. The error must name the
+        # variant and its condition, instead of saying it cannot pick a version.
+        pytest.param(
+            "conditional-variant-pkg@1.0+version_based",
+            ["Cannot set variant 'version_based' for 'conditional-variant-pkg@1.0'", "when @2.0:"],
+            id="conditional_variant_unsatisfied",
         ),
         # quantum-espresso has only version 1.0; @:0.1 cannot be satisfied.
         pytest.param(
@@ -187,7 +200,7 @@ def assert_actionable_error(exc_info, *required_part: str) -> None:
         # via link/run from multivalue-variant.
         pytest.param(
             "multivalue-variant ^gmake",
-            ["gmake is not a direct 'build' or"],
+            ["'gmake' is not a direct 'build' or 'test' dependency of 'multivalue-variant'"],
             id="literal_not_in_dag",
         ),
         # mvapich2 file_systems uses auto_or_any_combination_of, but "auto" and "lustre"
@@ -196,6 +209,12 @@ def assert_actionable_error(exc_info, *required_part: str) -> None:
             "mvapich2 file_systems=auto,lustre",
             ["mvapich2", "file_systems", "the value 'auto' is mutually exclusive"],
             id="variant_disjoint_sets",
+        ),
+        # The requested platform is not the one Spack runs on. The error must name both.
+        pytest.param(
+            "libelf platform=linux",
+            ["'libelf platform=linux' is not compatible with this machine"],
+            id="platform_mismatch",
         ),
         # "fortan" is not a known virtual (typo of "fortran"). The error must name the
         # unknown virtual and quote the originating spec, and must not be a generic internal error.
@@ -210,6 +229,12 @@ def assert_actionable_error(exc_info, *required_part: str) -> None:
             ["fortan", "cxxxx", "zlib %c,cxxxx,fortan=gcc"],
             id="two_unknown_virtuals_on_edge",
         ),
+        # Two providers requested for the same virtual: the error must name both and the virtual.
+        pytest.param(
+            "mpileaks ^mpich ^zmpi",
+            ["Multiple providers are required for the same 'mpi' virtual: 'mpich' and 'zmpi'"],
+            id="two_providers_for_virtual",
+        ),
     ],
 )
 def test_input_spec_driven_errors(
@@ -221,6 +246,92 @@ def test_input_spec_driven_errors(
     with pytest.raises(spack.error.SpackError) as exc_info:
         spack.concretize.concretize_one(input_spec)
     assert_actionable_error(exc_info, *expected_parts)
+
+
+def test_legacy_compiler_name_is_echoed_back(mock_packages, mutable_config):
+    """`%clang` is rewritten to `llvm` while parsing, so an error about it must still mention
+    the name the user actually typed."""
+    with pytest.raises(spack.error.SpackError) as exc_info:
+        spack.concretize.concretize_one("mpileaks %clang@99")
+    assert_actionable_error(exc_info, "clang")
+
+
+def test_provider_excluded_by_requirement_names_both(mock_packages, mutable_config: Configuration):
+    """Asking for a provider that a virtual requirement rules out must name the provider that is
+    required, not just say the one asked for is impossible."""
+    mutable_config.set("packages:mpi", {"require": ["mpich"]})
+    with pytest.raises(spack.error.SpackError) as exc_info:
+        spack.concretize.concretize_one("mpileaks ^zmpi")
+    assert_actionable_error(exc_info, "zmpi", "mpich", "mpi")
+
+
+def test_buildable_false_names_the_external_and_the_constraint(
+    mock_packages, mutable_config: Configuration
+):
+    """`buildable: false` with an external that is too old must name the external on offer and
+    the constraint it failed, not just "no externals satisfy the request"."""
+    mutable_config.set(
+        "packages:libelf",
+        {"buildable": False, "externals": [{"spec": "libelf@0.8.10", "prefix": "/usr"}]},
+    )
+    with pytest.raises(spack.error.SpackError) as exc_info:
+        spack.concretize.concretize_one("libelf@0.8.13:")
+    assert_actionable_error(exc_info, "libelf@0.8.10", "0.8.13:")
+
+
+def test_buildable_false_names_the_external_on_a_variant_mismatch(
+    mock_packages, mutable_config: Configuration
+):
+    """When the external fails on something other than its version, the message must still name
+    it, and must not claim the version is at fault."""
+    mutable_config.set(
+        "packages:quantum-espresso",
+        {
+            "buildable": False,
+            "externals": [{"spec": "quantum-espresso@1.0~veritas", "prefix": "/u"}],
+        },
+    )
+    with pytest.raises(spack.error.SpackError) as exc_info:
+        spack.concretize.concretize_one("quantum-espresso+veritas")
+    assert_actionable_error(exc_info, "quantum-espresso@1.0~veritas")
+    assert "does not satisfy" not in str(exc_info.value)
+
+
+def test_requirement_error_names_config_location(mock_packages, concretize_scope):
+    """A requirement that cannot be satisfied must say which config file and line it came from,
+    so the user knows what to edit."""
+    pathlib.Path(concretize_scope, "packages.yaml").write_text(
+        "packages:\n  mpileaks:\n    require:\n    - '@2.3'\n", encoding="utf-8"
+    )
+    with pytest.raises(spack.error.SpackError) as exc_info:
+        spack.concretize.concretize_one("mpileaks@2.1")
+    assert_actionable_error(
+        exc_info, "@2.3 is a requirement for package mpileaks", "packages.yaml:4: "
+    )
+
+
+def test_unsat_with_no_error_atoms_is_diagnosed(mock_packages, mutable_config):
+    """A hard constraint that has no error() rule leaves the solve unsatisfiable with nothing to
+    report. The #external guards in concretize.lp let the diagnosis name what could not be
+    satisfied instead of asking for a bug report."""
+    with pytest.raises(spack.solver.asp.SolverError) as exc_info:
+        spack.concretize.concretize_one("gcc-runtime ^glibc")
+    msg = str(exc_info.value)
+    assert "'glibc' is not reachable from 'gcc-runtime'" in msg
+    assert "submit a bug report" not in msg
+
+
+def test_target_not_compatible_with_host_error(mock_packages, mutable_config: Configuration):
+    """With host-compatible targets only, requesting a target from another family must name the
+    spec and say the machine cannot build for it, without a generic "conflicting values" message.
+    """
+    mutable_config.set("concretizer:targets:host_compatible", True)
+    with pytest.raises(spack.error.SpackError) as exc_info:
+        spack.concretize.concretize_one("libelf target=ppc64le")
+    assert_actionable_error(
+        exc_info, "'libelf target=ppc64le' is not compatible with this machine"
+    )
+    assert "Conflicting target values" not in str(exc_info.value)
 
 
 @pytest.mark.parametrize(
@@ -254,11 +365,12 @@ def test_input_spec_driven_errors(
             ["libelf", "must be compiled with clang"],
             id="requirement_unsatisfied_custom_message",
         ),
-        # Generic message must still name the package so the user knows which entry to look at
+        # With no custom message the error must still quote the requirement itself, not just
+        # say that "a requirement" for the package could not be satisfied
         pytest.param(
             {"packages:libelf": {"require": ["%clang"]}},
             "libelf%gcc",
-            ["libelf"],
+            ["libelf", "cannot satisfy requirement '%clang'"],
             id="requirement_unsatisfied_generic",
         ),
         # A `require:` entry names a virtual that does not exist. The error must name the

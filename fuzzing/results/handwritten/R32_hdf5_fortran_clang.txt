@@ -1,0 +1,11 @@
+# spec hdf5+fortran %fortran=apple-clang
+# note: apple-clang has no fortran
+# exit=1 time=13.9s lines=8 chars=597
+==> Error: failed to concretize `hdf5+fortran %fortran=apple-clang` for the following reasons:
+       1. 'apple-clang' cannot be a provider for the 'fortran' virtual
+     2. Multiple providers are required for the same 'fortran' virtual: 'apple-clang' and 'gcc'
+     3. 'apple-clang' cannot be a provider for the 'fortran' virtual
+     4. Only external, or concrete, compilers are allowed for the fortran language
+     5. Only external, or concrete, compilers are allowed for the c language
+  Analyzing the cause of the failure, this may take a moment...
+==> No additional error causes discovered

@@ -1,0 +1,299 @@
+cases: 440  outcomes: {'unsat': 258, 'sat': 93, 'presolver': 75, 'internal': 14}
+
+== per mutation kind: n, outcomes, cause-mentioned rate among error outcomes, median lines, max seconds
+arch_os                            n= 19 {'unsat': 18, 'sat': 1}                                 mentioned=0/18 any, 0/18 all medlines= 1 max= 14.0s
+arch_platform                      n= 19 {'unsat': 19}                                           mentioned=2/19 any, 2/19 all medlines= 1 max=  8.1s
+arch_target                        n= 18 {'unsat': 17, 'internal': 1}                            mentioned=18/18 any, 18/18 all medlines= 4 max= 11.7s
+bad_variant_value                  n=  3 {'presolver': 3}                                        mentioned=3/3 any, 3/3 all   medlines= 1 max=  1.2s
+cfg_all_require                    n= 59 {'sat': 3, 'unsat': 56}                                 mentioned=47/56 any, 16/56 all medlines= 9 max= 52.9s
+cfg_buildable_false                n= 35 {'unsat': 26, 'sat': 9}                                 mentioned=26/26 any, 26/26 all medlines= 1 max= 14.1s
+cfg_external_too_old               n= 10 {'unsat': 7, 'presolver': 3}                            mentioned=10/10 any, 0/10 all medlines= 1 max= 17.5s
+cfg_provider_require_conflict      n=  5 {'unsat': 2, 'internal': 1, 'presolver': 2}             mentioned=5/5 any, 0/5 all   medlines= 1 max=  5.9s
+cfg_require_variant_conflict       n=  4 {'unsat': 4}                                            mentioned=4/4 any, 0/4 all   medlines= 1 max=  5.8s
+cfg_require_version_conflict       n= 23 {'unsat': 22, 'internal': 1}                            mentioned=0/23 any, 0/23 all medlines= 1 max=  6.0s
+cfg_virtual_buildable_false        n=  6 {'unsat': 6}                                            mentioned=6/6 any, 6/6 all   medlines= 1 max=  6.5s
+compiler_c                         n= 18 {'unsat': 16, 'internal': 2}                            mentioned=16/18 any, 16/18 all medlines= 1 max= 26.5s
+compiler_clang                     n=  6 {'unsat': 3, 'presolver': 3}                            mentioned=3/6 any, 3/6 all   medlines= 2 max=  1.2s
+compiler_cxx                       n=  8 {'unsat': 8}                                            mentioned=6/8 any, 6/8 all   medlines= 1 max=  7.0s
+compiler_fortran                   n=  7 {'unsat': 6, 'internal': 1}                             mentioned=7/7 any, 7/7 all   medlines= 1 max=  4.9s
+compiler_gcc                       n=  8 {'presolver': 5, 'unsat': 3}                            mentioned=8/8 any, 8/8 all   medlines= 2 max=  3.3s
+conflict_directive                 n= 16 {'unsat': 16}                                           mentioned=16/16 any, 16/16 all medlines= 2 max=  5.9s
+dep_condition_falsified            n=  5 {'presolver': 2, 'sat': 1, 'unsat': 2}                  mentioned=4/4 any, 2/4 all   medlines= 1 max= 13.0s
+dep_version_out_of_range           n=  7 {'unsat': 6, 'sat': 1}                                  mentioned=6/6 any, 0/6 all   medlines= 1 max=  8.7s
+deprecated_version                 n=  1 {'presolver': 1}                                        mentioned=1/1 any, 1/1 all   medlines= 2 max=  1.3s
+env_unify_conflict                 n=  2 {'sat': 2}                                              mentioned=-                  medlines= 0 max=  7.8s
+not_a_dependency                   n= 41 {'unsat': 17, 'sat': 19, 'internal': 5}                 mentioned=22/22 any, 22/22 all medlines= 1 max= 49.5s
+two_conditional_deps_disjoint      n=  2 {'internal': 2}                                         mentioned=2/2 any, 0/2 all   medlines= 2 max=  9.9s
+two_providers                      n=  6 {'unsat': 2, 'presolver': 3, 'sat': 1}                  mentioned=5/5 any, 1/5 all   medlines= 1 max=  8.4s
+unknown_variant                    n= 53 {'presolver': 53}                                       mentioned=53/53 any, 53/53 all medlines= 1 max=  0.1s
+unknown_version                    n= 59 {'sat': 56, 'unsat': 2, 'internal': 1}                  mentioned=1/3 any, 1/3 all   medlines= 1 max= 18.0s
+
+== message templates seen (count, mention-rate of cases containing it, example)
+  74   39/74   Cannot select a single "{attr}" for package "{pkg}"
+           e.g. [conflict_directive] cry build_system=makefile platform=windows  cfg=-
+                -> 1. Cannot select a single "node_platform" for package "cry"
+  58   57/58   Cannot build {0}, since it is configured `buildable:false` and no externals satisfy the request
+           e.g. [cfg_buildable_false] perl-sys-sigaction  cfg={"packages": {"perl": {"buildable": false}}}
+                -> 1. Cannot build perl, since it is configured `buildable:false` and no externals satisfy the request
+  53   53/53   OTHER: UnknownVariantError: No such variant {'nosuchvariant'} for s
+           e.g. [unknown_variant] fasttext+nosuchvariant  cfg=-
+                -> UnknownVariantError: No such variant {'nosuchvariant'} for spec: 'fasttext+nosuchvariant'
+  48   48/48   cannot satisfy a requirement for package '{0}'.
+           e.g. [cfg_all_require] soqt  cfg={"packages": {"all": {"require": "os=ubuntu22.04"}}}
+                -> 1. cannot satisfy a requirement for package 'zlib-ng'.
+  35   13/35   Cannot satisfy '{0}@{1}'
+           e.g. [cfg_all_require] soqt  cfg={"packages": {"all": {"require": "os=ubuntu22.04"}}}
+                -> 51. Cannot satisfy 'qt@5'
+  32   32/32   '{spec}' cannot depend on {x}
+           e.g. [compiler_clang] py-wget %clang@99  cfg=-
+                -> 'py-wget %clang@99' cannot depend on llvm
+  28   28/28   '{0} target={1}' cannot satisfy constraint 'target={2}'
+           e.g. [arch_target] libiberty target=power9le  cfg=-
+                -> 3. 'libiberty target=power9le' cannot satisfy constraint 'target=aarch64:'
+  26   26/26   '{0} target={1}' is not compatible with this machine
+           e.g. [arch_target] libiberty target=power9le  cfg=-
+                -> 2. 'libiberty target=power9le' is not compatible with this machine
+  15   15/15   {0} is not a direct 'build' or 'test' dependency, or transitive 'link' or 'run' dependency of any root
+           e.g. [not_a_dependency] shc ^gmp  cfg=-
+                -> 1. gmp is not a direct 'build' or 'test' dependency, or transitive 'link' or 'run' dependency of any root
+  14    5/14   TIMEOUT
+           e.g. [not_a_dependency] hardlink ^libpng  cfg=-
+                -> Spack is taking more than 45 seconds to solve for hardlink ^libpng, stopping concretization
+  14   13/14   INTERNAL ERROR
+           e.g. [not_a_dependency] win-file ^libpng  cfg=-
+                -> Spack concretizer internal error. Please submit a bug report at https://github.com/spack/spack and include the command and environment if applicable.
+  12    8/12   Only external, or concrete, compilers are allowed for the {0} language
+           e.g. [cfg_all_require] r-randomfieldsutils  cfg={"packages": {"all": {"require": "target=x86_64"}}}
+                -> 37. Only external, or concrete, compilers are allowed for the fortran language
+   9    6/9    OTHER: InvalidVersionError: No version exists that satisfies these 
+           e.g. [compiler_gcc] examl %gcc@99  cfg=-
+                -> InvalidVersionError: No version exists that satisfies these input specs:
+   8    8/8    OTHER: icu4c: 'platform=darwin' conflicts with 'build_system=msbuil
+           e.g. [cfg_all_require] soqt  cfg={"packages": {"all": {"require": "os=ubuntu22.04"}}}
+                -> 58. icu4c: 'platform=darwin' conflicts with 'build_system=msbuild'
+   7    7/7    Cannot find compatible targets for {0} and {1}
+           e.g. [arch_target] fasttransforms target=power9le  cfg=-
+                -> 2. Cannot find compatible targets for fasttransforms and openblas
+   5    5/5    InvalidDependencyError: not a possible dependency
+           e.g. [two_providers] minighost+mpi ^openmpi ^spectrum-mpi  cfg=-
+                -> InvalidDependencyError: 'spectrum-mpi' is not a possible dependency of any root spec
+   5    5/5    OTHER: gcc@99
+           e.g. [compiler_gcc] examl %gcc@99  cfg=-
+                -> gcc@99
+   3    2/3    OTHER: intel-oneapi-mpi: This package in only available for x86_64 
+           e.g. [two_providers] mumps+mpi ^intel-oneapi-mpi ^mvapich-plus  cfg=-
+                -> 2. intel-oneapi-mpi: This package in only available for x86_64 and Linux
+   3    0/3    OTHER: llvm@99
+           e.g. [compiler_clang] tinyxml2 %clang@99  cfg=-
+                -> llvm@99
+   2    2/2    Multiple providers are required for the same '{0}' virtual
+           e.g. [two_providers] mumps+mpi ^intel-oneapi-mpi ^mvapich-plus  cfg=-
+                -> 1. Multiple providers are required for the same 'mpi' virtual
+   2    2/2    DeprecatedVersionError
+           e.g. [deprecated_version] ninja@=kitware  cfg=-
+                -> DeprecatedVersionError: The following input specs can only be satisfied by deprecated versions:
+   2    2/2    OTHER: intel-oneapi-advisor: This package in only available for x86
+           e.g. [cfg_all_require] intel-oneapi-advisor  cfg={"packages": {"all": {"require": "@99.99"}}}
+                -> 4. intel-oneapi-advisor: This package in only available for x86_64 and Linux
+   2    2/2    OTHER: InvalidVariantValueError: invalid values for variant 'libs' 
+           e.g. [bad_variant_value] gosam-contrib libs=zzz  cfg=-
+                -> InvalidVariantValueError: invalid values for variant 'libs' in package gosam-contrib: 'zzz'
+   1    1/1    OTHER: qt: QT 4 for macOS is only patched for 4.8.7
+           e.g. [cfg_all_require] soqt  cfg={"packages": {"all": {"require": "os=ubuntu22.04"}}}
+                -> 53. qt: QT 4 for macOS is only patched for 4.8.7
+   1    1/1    OTHER: qt: Apple Silicon requires a very new version of qt
+           e.g. [cfg_all_require] soqt  cfg={"packages": {"all": {"require": "os=ubuntu22.04"}}}
+                -> 54. qt: Apple Silicon requires a very new version of qt
+   1    1/1    OTHER: qt: '%apple-clang@15:' conflicts with '@:5.12.0'
+           e.g. [cfg_all_require] soqt  cfg={"packages": {"all": {"require": "os=ubuntu22.04"}}}
+                -> 55. qt: '%apple-clang@15:' conflicts with '@:5.12.0'
+   1    1/1    OTHER: qt: '%apple-clang@13:' conflicts with '@:5.13'
+           e.g. [cfg_all_require] soqt  cfg={"packages": {"all": {"require": "os=ubuntu22.04"}}}
+                -> 56. qt: '%apple-clang@13:' conflicts with '@:5.13'
+   1    1/1    OTHER: libpng: '@:1.6.44' conflicts with '%apple-clang@17:'
+           e.g. [cfg_all_require] soqt  cfg={"packages": {"all": {"require": "os=ubuntu22.04"}}}
+                -> 57. libpng: '@:1.6.44' conflicts with '%apple-clang@17:'
+   1    1/1    OTHER: cry: 'platform=windows' conflicts with 'build_system=makefil
+           e.g. [conflict_directive] cry build_system=makefile platform=windows  cfg=-
+                -> 2. cry: 'platform=windows' conflicts with 'build_system=makefile'
+   1    1/1    OTHER: raxml: conflicts with '%apple-clang'
+           e.g. [cfg_all_require] treesub  cfg={"packages": {"all": {"require": "@99.99"}}}
+                -> 10. raxml: conflicts with '%apple-clang'
+   1    1/1    OTHER: ninja@=kitware
+           e.g. [deprecated_version] ninja@=kitware  cfg=-
+                -> ninja@=kitware
+   1    1/1    OTHER: py-pillow-simd
+           e.g. [two_providers] py-reportlab@3.6.10: ^py-pillow-simd ^py-pillow  cfg=-
+                -> py-pillow-simd
+   1    1/1    OTHER: libmpdclient: '^python@3.12:' conflicts with 'build_system=m
+           e.g. [conflict_directive] libmpdclient build_system=meson %meson@:1.0 ^python@3.12:  cfg=-
+                -> 2. libmpdclient: '^python@3.12:' conflicts with 'build_system=meson %meson@:1.0'
+   1    1/1    OTHER: tclap: 'platform=windows' conflicts with 'build_system=autot
+           e.g. [arch_platform] tclap platform=windows  cfg=-
+                -> 2. tclap: 'platform=windows' conflicts with 'build_system=autotools'
+   1    1/1    OTHER: neartree: 'platform=windows' conflicts with 'build_system=ma
+           e.g. [conflict_directive] neartree build_system=makefile platform=windows  cfg=-
+                -> 2. neartree: 'platform=windows' conflicts with 'build_system=makefile'
+   1    1/1    OTHER: r-lazyeval: '^r@4.6:' conflicts with '@:0.2.2'
+           e.g. [conflict_directive] r-lazyeval@:0.2.2 ^r@4.6:  cfg=-
+                -> 1. r-lazyeval: '^r@4.6:' conflicts with '@:0.2.2'
+   1    1/1    OTHER: intel-oneapi-dnn: This package in only available for x86_64 
+           e.g. [conflict_directive] intel-oneapi-dnn target=ppc64le:  cfg=-
+                -> 2. intel-oneapi-dnn: This package in only available for x86_64 and Linux
+   1    1/1    OTHER: parallel: 'platform=windows' conflicts with 'build_system=au
+           e.g. [conflict_directive] parallel build_system=autotools platform=windows  cfg=-
+                -> 2. parallel: 'platform=windows' conflicts with 'build_system=autotools'
+   1    1/1    OTHER: xabclib: 'platform=windows' conflicts with 'build_system=mak
+           e.g. [conflict_directive] xabclib build_system=makefile platform=windows  cfg=-
+                -> 2. xabclib: 'platform=windows' conflicts with 'build_system=makefile'
+   1    1/1    OTHER: 'modylas' requires conflicting variant values '~mpi' and '+m
+           e.g. [cfg_require_variant_conflict] modylas +mpi  cfg={"packages": {"modylas": {"require": "~mpi"}}}
+                -> 1. 'modylas' requires conflicting variant values '~mpi' and '+mpi'
+   1    1/1    OTHER: argon2: 'platform=windows' conflicts with 'build_system=make
+           e.g. [conflict_directive] argon2 build_system=makefile platform=windows  cfg=-
+                -> 2. argon2: 'platform=windows' conflicts with 'build_system=makefile'
+   1    1/1    OTHER: py-scipy: '%apple-clang@15:' conflicts with '@:1.9'
+           e.g. [cfg_all_require] py-pymc3  cfg={"packages": {"all": {"require": "target=x86_64"}}}
+                -> 82. py-scipy: '%apple-clang@15:' conflicts with '@:1.9'
+   1    1/1    OTHER: r-rmpi: conflicts with '^mpi=intel-oneapi-mpi'
+           e.g. [conflict_directive] r-rmpi ^mpi=intel-oneapi-mpi  cfg=-
+                -> 1. r-rmpi: conflicts with '^mpi=intel-oneapi-mpi'
+   1    1/1    OTHER: 'ocaml' requires conflicting variant values '~force-safe-str
+           e.g. [cfg_require_variant_conflict] ocaml +force-safe-string  cfg={"packages": {"ocaml": {"require": "~force-safe-string"}}}
+                -> 1. 'ocaml' requires conflicting variant values '~force-safe-string' and '+force-safe-string'
+   1    1/1    OTHER: ExternalDependencyError: the spec 'py-maturin@=0.13.7' depen
+           e.g. [cfg_external_too_old] py-pywinpty  cfg={"packages": {"py-maturin": {"buildable": false, "externals": [{"spec": "py-maturin@=0.13.7", "prefix": "/usr"}]}}}
+                -> ExternalDependencyError: the spec 'py-maturin@=0.13.7' depends on 'python', but there is no such external spec in packages.yaml
+   1    1/1    OTHER: libxsmm: 'platform=windows' conflicts with 'build_system=mak
+           e.g. [conflict_directive] libxsmm build_system=makefile platform=windows  cfg=-
+                -> 2. libxsmm: 'platform=windows' conflicts with 'build_system=makefile'
+   1    1/1    OTHER: f2c: 'platform=windows' conflicts with 'build_system=makefil
+           e.g. [conflict_directive] f2c build_system=makefile platform=windows  cfg=-
+                -> 2. f2c: 'platform=windows' conflicts with 'build_system=makefile'
+   1    1/1    OTHER: intel-mlc: Installation of intel-mlc requires acceptance of 
+           e.g. [cfg_all_require] intel-mlc  cfg={"packages": {"all": {"require": "os=ubuntu22.04"}}}
+                -> 2. intel-mlc: Installation of intel-mlc requires acceptance of the EULA found at https://www.intel.com/content/www/us/en/download/736633/intel-memory-latency-ch
+   1    1/1    OTHER: llvm-amdgpu: conflicts with 'platform=darwin'
+           e.g. [arch_target] hipify-clang target=riscv64  cfg=-
+                -> 7. llvm-amdgpu: conflicts with 'platform=darwin'
+   1    1/1    OTHER: cuda
+           e.g. [dep_condition_falsified] nccl-tests ~cuda ^cuda  cfg=-
+                -> cuda
+   1    1/1    OTHER: InvalidVariantValueError: invalid values for variant 'thread
+           e.g. [bad_variant_value] armpl-gcc threads=zzz  cfg=-
+                -> InvalidVariantValueError: invalid values for variant 'threads' in package armpl-gcc: 'zzz'
+   1    1/1    OTHER: libjpeg: 'platform=windows' conflicts with 'build_system=aut
+           e.g. [conflict_directive] libjpeg build_system=autotools platform=windows  cfg=-
+                -> 2. libjpeg: 'platform=windows' conflicts with 'build_system=autotools'
+   1    1/1    OTHER: 'intel-oneapi-tbb' requires conflicting variant values '~env
+           e.g. [cfg_require_variant_conflict] intel-oneapi-tbb +envmods  cfg={"packages": {"intel-oneapi-tbb": {"require": "~envmods"}}}
+                -> 1. 'intel-oneapi-tbb' requires conflicting variant values '~envmods' and '+envmods'
+   1    1/1    OTHER: intel-oneapi-tbb: This package in only available for x86_64 
+           e.g. [cfg_require_variant_conflict] intel-oneapi-tbb +envmods  cfg={"packages": {"intel-oneapi-tbb": {"require": "~envmods"}}}
+                -> 2. intel-oneapi-tbb: This package in only available for x86_64 and Linux
+   1    1/1    OTHER: ExternalDependencyError: the spec 'py-lightning-utilities@=0
+           e.g. [cfg_external_too_old] py-lightning-lite  cfg={"packages": {"py-lightning-utilities": {"buildable": false, "externals": [{"spec": "py-lightning-utilities@=0.15.3", "prefix": "/usr"}]}}}
+                -> ExternalDependencyError: the spec 'py-lightning-utilities@=0.15.3' depends on 'python', but there is no such external spec in packages.yaml
+   1    1/1    OTHER: 'spark' requires conflicting variant values '~hadoop' and '+
+           e.g. [cfg_require_variant_conflict] spark +hadoop  cfg={"packages": {"spark": {"require": "~hadoop"}}}
+                -> 1. 'spark' requires conflicting variant values '~hadoop' and '+hadoop'
+   1    1/1    OTHER: intel-oneapi-dpl: This package in only available for x86_64 
+           e.g. [conflict_directive] intel-oneapi-dpl target=ppc64le:  cfg=-
+                -> 2. intel-oneapi-dpl: This package in only available for x86_64 and Linux
+   1    1/1    OTHER: 'fenics-dolfinx' requires conflicting variant values '~slepc
+           e.g. [dep_condition_falsified] fenics-dolfinx ~slepc ^slepc  cfg=-
+                -> 1. 'fenics-dolfinx' requires conflicting variant values '~slepc' and '+slepc'
+   1    1/1    OTHER: unifdef: 'platform=windows' conflicts with 'build_system=mak
+           e.g. [conflict_directive] unifdef build_system=makefile platform=windows  cfg=-
+                -> 2. unifdef: 'platform=windows' conflicts with 'build_system=makefile'
+   1    1/1    OTHER: infernal: 'platform=windows' conflicts with 'build_system=au
+           e.g. [arch_platform] infernal platform=windows  cfg=-
+                -> 2. infernal: 'platform=windows' conflicts with 'build_system=autotools'
+   1    1/1    OTHER: py-dotnetcore2: py-dotnetcore2 is only available for x86_64
+           e.g. [not_a_dependency] py-dotnetcore2 ^gmp  cfg=-
+                -> 2. py-dotnetcore2: py-dotnetcore2 is only available for x86_64
+   1    1/1    OTHER: faketime: 'platform=windows' conflicts with 'build_system=ma
+           e.g. [conflict_directive] faketime build_system=makefile platform=windows  cfg=-
+                -> 2. faketime: 'platform=windows' conflicts with 'build_system=makefile'
+   1    1/1    OTHER: ExternalDependencyError: the spec 'py-jinja2@=2.7' depends o
+           e.g. [cfg_external_too_old] py-branca  cfg={"packages": {"py-jinja2": {"buildable": false, "externals": [{"spec": "py-jinja2@=2.7", "prefix": "/usr"}]}}}
+                -> ExternalDependencyError: the spec 'py-jinja2@=2.7' depends on 'python', but there is no such external spec in packages.yaml
+   1    1/1    OTHER: miniamr: 'platform=windows' conflicts with 'build_system=mak
+           e.g. [conflict_directive] miniamr build_system=makefile platform=windows  cfg=-
+                -> 2. miniamr: 'platform=windows' conflicts with 'build_system=makefile'
+
+== cases with NO expected token mentioned (grouped by kind), up to 3 each
+[arch_os] brynet os=ubuntu22.04 cfg=- expect=['ubuntu22.04']
+     | 1. Cannot select a single "node_os" for package "brynet"
+[arch_os] r-popgenome os=windows10 cfg=- expect=['windows10']
+     | 1. Cannot select a single "node_os" for package "r-popgenome"
+[arch_os] py-chemiscope os=windows10 cfg=- expect=['windows10']
+     | 1. Cannot select a single "node_os" for package "py-chemiscope"
+[arch_platform] py-svgpath platform=freebsd cfg=- expect=['freebsd']
+     | 1. Cannot select a single "node_platform" for package "py-svgpath"
+[arch_platform] r-gitcreds platform=linux cfg=- expect=['linux']
+     | 1. Cannot select a single "node_platform" for package "r-gitcreds"
+[arch_platform] perl-class-method-modifiers platform=freebsd cfg=- expect=['freebsd']
+     | 1. Cannot select a single "node_platform" for package "perl-class-method-modifiers"
+[cfg_all_require] mad-numdiff cfg={"packages": {"all": {"require": "%gcc@99"}}} expect=['gcc', 'requirement']
+     | Spack is taking more than 45 seconds to solve for mad-numdiff, stopping concretization
+[cfg_all_require] r-rcppensmallen cfg={"packages": {"all": {"require": "%gcc@99"}}} expect=['gcc', 'requirement']
+     | Spack is taking more than 45 seconds to solve for r-rcppensmallen, stopping concretization
+[cfg_all_require] libpressio-tools cfg={"packages": {"all": {"require": "%gcc@99"}}} expect=['gcc', 'requirement']
+     | Spack is taking more than 45 seconds to solve for libpressio-tools, stopping concretization
+[cfg_require_version_conflict] py-funcy@=1.14 cfg={"packages": {"py-funcy": {"require": "@=1.15"}}} expect=['1.15', 'requirement']
+     | 1. Cannot satisfy 'py-funcy@=1.14'
+[cfg_require_version_conflict] perl-package-deprecationmanager@=0.17 cfg={"packages": {"perl-package-deprecationmanager": {"require": "@=0.18"}}} expect=['0.18', 'requirement']
+     | 1. Cannot satisfy 'perl-package-deprecationmanager@=0.17'
+[cfg_require_version_conflict] heppdt@=2.06.01 cfg={"packages": {"heppdt": {"require": "@=3.03.01"}}} expect=['3.03.01', 'requirement']
+     | 1. Cannot satisfy 'heppdt@=2.06.01'
+[compiler_c] cscope %c=gcc cfg=- expect=['gcc']
+     | 1. Only external, or concrete, compilers are allowed for the c language
+[compiler_c] r-beeswarm %c=gcc cfg=- expect=['gcc']
+     | 1. Only external, or concrete, compilers are allowed for the c language
+[compiler_clang] tinyxml2 %clang@99 cfg=- expect=['clang@99']
+     | InvalidVersionError: No version exists that satisfies these input specs:
+     | llvm@99
+[compiler_clang] centrifuge %clang@99 cfg=- expect=['clang@99']
+     | InvalidVersionError: No version exists that satisfies these input specs:
+     | llvm@99
+[compiler_clang] umap %clang@99 cfg=- expect=['clang@99']
+     | InvalidVersionError: No version exists that satisfies these input specs:
+     | llvm@99
+[compiler_cxx] prism %cxx=gcc cfg=- expect=['gcc']
+     | 1. Only external, or concrete, compilers are allowed for the cxx language
+     | 2. Only external, or concrete, compilers are allowed for the c language
+[compiler_cxx] functionalplus %cxx=gcc cfg=- expect=['gcc']
+     | 1. Only external, or concrete, compilers are allowed for the cxx language
+     | 2. Only external, or concrete, compilers are allowed for the c language
+[unknown_version] intel-oneapi-mpi@=99.99.99 cfg=- expect=['99.99.99']
+     | 1. intel-oneapi-mpi: This package in only available for x86_64 and Linux
+[unknown_version] essl@=99.99.99 cfg=- expect=['99.99.99']
+     | 1. Cannot build essl, since it is configured `buildable:false` and no externals satisfy the request
+
+== internal errors / exceptions / timeouts
+[not_a_dependency] win-file ^libpng cfg=- -> internal: 'Spack concretizer internal error. Please submit a bug report at https://github.com/spack/spack and include the command and environment if applicable.\n    win-file ^libpng is unsatisfiable'
+[cfg_provider_require_conflict] geode ^icedtea cfg={"packages": {"java": {"require": "openjdk"}}} -> internal: 'Spack concretizer internal error. Please submit a bug report at https://github.com/spack/spack and include the command and environment if applicable.\n    geode ^icedtea is unsatisfiable'
+[two_conditional_deps_disjoint] nccl-tests cuda_arch=35,90 cfg=- -> internal: 'Spack concretizer internal error. Please submit a bug report at https://github.com/spack/spack and include the command and environment if applicable.\n    nccl-tests cuda_arch=35,90 is unsatisfiable'
+[compiler_c] timedatex %c=gcc %c=apple-clang cfg=- -> internal: 'Spack concretizer internal error. Please submit a bug report at https://github.com/spack/spack and include the command and environment if applicable.\n    timedatex %c=apple-clang %c=gcc is unsatisfiab'
+[compiler_c] sccache %c=gcc %c=apple-clang cfg=- -> internal: 'Spack concretizer internal error. Please submit a bug report at https://github.com/spack/spack and include the command and environment if applicable.\n    sccache %c=apple-clang %c=gcc is unsatisfiable'
+[unknown_version] py-datalad-deprecated@=99.99.99 cfg=- -> internal: 'Spack concretizer internal error. Please submit a bug report at https://github.com/spack/spack and include the command and environment if applicable.\n    py-datalad-deprecated@=99.99.99 is unsatisfiab'
+[cfg_require_version_conflict] nccl@=2.9.8-1 cfg={"packages": {"nccl": {"require": "@=2.10.3-1"}}} -> internal: 'Spack concretizer internal error. Please submit a bug report at https://github.com/spack/spack and include the command and environment if applicable.\n    nccl@=2.9.8-1 is unsatisfiable'
+[not_a_dependency] maven ^zlib-ng cfg=- -> internal: 'Spack concretizer internal error. Please submit a bug report at https://github.com/spack/spack and include the command and environment if applicable.\n    maven ^zlib-ng is unsatisfiable'
+[two_conditional_deps_disjoint] sundials cuda_arch=11,86 cfg=- -> internal: 'Spack concretizer internal error. Please submit a bug report at https://github.com/spack/spack and include the command and environment if applicable.\n    sundials cuda_arch=11,86 is unsatisfiable'
+[not_a_dependency] mumax ^libiconv cfg=- -> internal: 'Spack concretizer internal error. Please submit a bug report at https://github.com/spack/spack and include the command and environment if applicable.\n    mumax ^libiconv is unsatisfiable'
+[not_a_dependency] apple-libuuid ^libiconv cfg=- -> internal: 'Spack concretizer internal error. Please submit a bug report at https://github.com/spack/spack and include the command and environment if applicable.\n    apple-libuuid ^libiconv is unsatisfiable'
+[compiler_fortran] cmaq %fortran=apple-clang cfg=- -> internal: 'Spack concretizer internal error. Please submit a bug report at https://github.com/spack/spack and include the command and environment if applicable.\n    cmaq %fortran=apple-clang is unsatisfiable'
+[arch_target] gpuscout target=x86_64 cfg=- -> internal: 'Spack concretizer internal error. Please submit a bug report at https://github.com/spack/spack and include the command and environment if applicable.\n    gpuscout target=x86_64 is unsatisfiable'
+[not_a_dependency] apktool ^libpng cfg=- -> internal: 'Spack concretizer internal error. Please submit a bug report at https://github.com/spack/spack and include the command and environment if applicable.\n    apktool ^libpng is unsatisfiable'
+
+== unexpected successes (mutation did not make it unsat)
+arch_os                            1/19  e.g. star-ccm-plus os=ubuntu22.04 cfg=-
+cfg_all_require                    3/59  e.g. kafka cfg={"packages": {"all": {"require": "^zlib-ng@99"}}}
+cfg_buildable_false                9/35  e.g. xload cfg={"packages": {"gmake": {"buildable": false}}}
+dep_condition_falsified            1/5  e.g. trimgalore ~pigz ^pigz cfg=-
+dep_version_out_of_range           1/7  e.g. py-flox ^py-setuptools-scm@=7.1.0 cfg=-
+env_unify_conflict                 2/2  e.g. cmake@=2.8.10.2 , latte cfg=-
+not_a_dependency                   19/41  e.g. r-rcppprogress ^gmp cfg=-
+two_providers                      1/6  e.g. cdo+szip ^libaec ^libszip cfg=-
+unknown_version                    56/59  e.g. r-scs@=99.99.99 cfg=-

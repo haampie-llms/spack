@@ -1,0 +1,392 @@
+cases: 440  outcomes: {'unsat': 262, 'sat': 93, 'presolver': 85}
+
+== per mutation kind: n, outcomes, cause-mentioned rate among error outcomes, median lines, max seconds
+arch_os                            n= 19 {'unsat': 18, 'sat': 1}                                 mentioned=18/18 any, 18/18 all medlines= 1 max= 12.2s
+arch_platform                      n= 19 {'unsat': 19}                                           mentioned=19/19 any, 19/19 all medlines= 1 max=  6.8s
+arch_target                        n= 18 {'unsat': 17, 'presolver': 1}                           mentioned=18/18 any, 18/18 all medlines= 1 max= 50.7s
+bad_variant_value                  n=  3 {'presolver': 3}                                        mentioned=3/3 any, 3/3 all   medlines= 1 max=  0.8s
+cfg_all_require                    n= 59 {'unsat': 56, 'sat': 3}                                 mentioned=43/56 any, 43/56 all medlines= 6 max= 54.1s
+cfg_buildable_false                n= 35 {'unsat': 26, 'sat': 9}                                 mentioned=26/26 any, 26/26 all medlines= 1 max= 18.6s
+cfg_external_too_old               n=  8 {'unsat': 6, 'presolver': 2}                            mentioned=8/8 any, 0/8 all   medlines= 1 max=  5.7s
+cfg_provider_require_conflict      n=  5 {'unsat': 2, 'presolver': 3}                            mentioned=5/5 any, 5/5 all   medlines= 1 max=  5.2s
+cfg_require_variant_conflict       n=  3 {'unsat': 3}                                            mentioned=3/3 any, 0/3 all   medlines= 1 max=  6.1s
+cfg_require_version_conflict       n= 22 {'unsat': 22}                                           mentioned=0/22 any, 0/22 all medlines= 1 max=  6.4s
+cfg_virtual_buildable_false        n=  6 {'unsat': 6}                                            mentioned=6/6 any, 6/6 all   medlines= 1 max=  5.4s
+compiler_c                         n= 18 {'unsat': 18}                                           mentioned=16/18 any, 14/18 all medlines= 1 max= 37.8s
+compiler_clang                     n=  6 {'presolver': 3, 'unsat': 3}                            mentioned=6/6 any, 6/6 all   medlines= 2 max=  0.8s
+compiler_cxx                       n=  8 {'unsat': 8}                                            mentioned=6/8 any, 6/8 all   medlines= 1 max=  6.0s
+compiler_fortran                   n=  7 {'unsat': 7}                                            mentioned=7/7 any, 7/7 all   medlines= 1 max= 49.7s
+compiler_gcc                       n=  8 {'presolver': 5, 'unsat': 3}                            mentioned=8/8 any, 8/8 all   medlines= 2 max=  2.9s
+conflict_directive                 n= 16 {'unsat': 16}                                           mentioned=16/16 any, 16/16 all medlines= 2 max=  6.1s
+dep_condition_falsified            n=  4 {'presolver': 1, 'sat': 1, 'unsat': 2}                  mentioned=3/3 any, 2/3 all   medlines= 1 max= 13.1s
+dep_version_out_of_range           n=  7 {'unsat': 6, 'sat': 1}                                  mentioned=6/6 any, 0/6 all   medlines= 1 max=  5.9s
+deprecated_version                 n=  1 {'presolver': 1}                                        mentioned=1/1 any, 1/1 all   medlines= 2 max=  0.6s
+env_unify_conflict                 n=  2 {'sat': 2}                                              mentioned=-                  medlines= 0 max=  1.6s
+not_a_dependency                   n= 41 {'unsat': 17, 'sat': 19, 'presolver': 5}                mentioned=22/22 any, 22/22 all medlines= 1 max= 49.1s
+two_conditional_deps_disjoint      n=  1 {'unsat': 1}                                            mentioned=1/1 any, 0/1 all   medlines= 1 max= 13.3s
+two_providers                      n=  6 {'presolver': 3, 'unsat': 2, 'sat': 1}                  mentioned=5/5 any, 2/5 all   medlines= 1 max= 14.5s
+unknown_variant                    n= 53 {'presolver': 53}                                       mentioned=53/53 any, 53/53 all medlines= 1 max=  0.1s
+unknown_version                    n= 57 {'sat': 56, 'presolver': 1}                             mentioned=1/1 any, 1/1 all   medlines= 7 max=  7.6s
+
+== message templates seen (count, mention-rate of cases containing it, example)
+  54   53/54   Cannot build {0}, since it is configured `buildable:false` and no externals satisfy the request
+           e.g. [cfg_buildable_false] perl-sys-sigaction  cfg={"packages": {"perl": {"buildable": false}}}
+                -> 1. Cannot build perl, since it is configured `buildable:false` and no externals satisfy the request
+  53   53/53   OTHER: UnknownVariantError: No such variant {'nosuchvariant'} for s
+           e.g. [unknown_variant] r-bio3d+nosuchvariant  cfg=-
+                -> UnknownVariantError: No such variant {'nosuchvariant'} for spec: 'r-bio3d+nosuchvariant'
+  44   44/44   cannot satisfy requirement {1} for package '{0}'
+           e.g. [cfg_all_require] soqt  cfg={"packages": {"all": {"require": "os=ubuntu22.04"}}}
+                -> 1. cannot satisfy requirement 'os=ubuntu22.04' from fuzz for package 'zlib-ng'
+  34   12/34   Cannot satisfy '{0}@{1}'
+           e.g. [cfg_all_require] soqt  cfg={"packages": {"all": {"require": "os=ubuntu22.04"}}}
+                -> 51. Cannot satisfy 'qt@5'
+  32   32/32   '{spec}' cannot depend on {x}
+           e.g. [compiler_c] plink %c=gcc %c=apple-clang  cfg=-
+                -> 'plink %c=apple-clang %c=gcc' cannot depend on apple-clang, c, gcc
+  30   30/30   '{0} platform={1}' is not compatible with this machine (platform={2})
+           e.g. [arch_platform] r-gitcreds platform=linux  cfg=-
+                -> 1. 'r-gitcreds platform=linux' is not compatible with this machine (platform=darwin)
+  24   24/24   '{0} target={1}' is not compatible with this machine
+           e.g. [arch_target] hmmer target=power9le  cfg=-
+                -> 1. 'hmmer target=power9le' is not compatible with this machine
+  21    7/21   TIMEOUT
+           e.g. [not_a_dependency] hardlink ^libpng  cfg=-
+                -> Spack is taking more than 45 seconds to solve for hardlink ^libpng, stopping concretization
+  18   18/18   Conflicting {attr} values are required for package '{pkg}'
+           e.g. [arch_os] brynet os=ubuntu22.04  cfg=-
+                -> 1. Conflicting os values are required for package 'brynet': 'sequoia' and 'ubuntu22.04'
+  15   15/15   '{0}' is not a direct 'build' or 'test' dependency of '{1}', nor a transitive 'link' or 'run' dependency of it
+           e.g. [not_a_dependency] shc ^gmp  cfg=-
+                -> 1. 'gmp' is not a direct 'build' or 'test' dependency of 'shc', nor a transitive 'link' or 'run' dependency of it
+  13    9/13   Only external, or concrete, compilers are allowed for the {0} language
+           e.g. [compiler_c] r-beeswarm %c=gcc  cfg=-
+                -> 1. Only external, or concrete, compilers are allowed for the c language
+  10   10/10   OTHER: Please report this if the cause is not clear from the above.
+           e.g. [unknown_version] py-datalad-deprecated@=99.99.99  cfg=-
+                -> Please report this if the cause is not clear from the above.
+   9    9/9    OTHER: InvalidVersionError: No version exists that satisfies these 
+           e.g. [compiler_gcc] examl %gcc@99  cfg=-
+                -> InvalidVersionError: No version exists that satisfies these input specs:
+   8    8/8    OTHER: icu4c: 'platform=darwin' conflicts with 'build_system=msbuil
+           e.g. [cfg_all_require] soqt  cfg={"packages": {"all": {"require": "os=ubuntu22.04"}}}
+                -> 58. icu4c: 'platform=darwin' conflicts with 'build_system=msbuild'
+   6    6/6    Cannot find compatible targets for {0} and {1}
+           e.g. [arch_target] py-python3-openid target=zen4  cfg=-
+                -> 1. Cannot find compatible targets for py-python3-openid and python-venv
+   5    5/5    OTHER: gcc@99
+           e.g. [compiler_gcc] examl %gcc@99  cfg=-
+                -> gcc@99
+   3    2/3    OTHER: intel-oneapi-mpi: This package in only available for x86_64 
+           e.g. [conflict_directive] r-rmpi ^mpi=intel-oneapi-mpi  cfg=-
+                -> 2. intel-oneapi-mpi: This package in only available for x86_64 and Linux
+   3    3/3    OTHER: llvm@99 (requested as 'clang@99')
+           e.g. [compiler_clang] umap %clang@99  cfg=-
+                -> llvm@99 (requested as 'clang@99')
+   3    3/3    OTHER: no version of 'cuda' is available to this solve: every versi
+           e.g. [arch_target] gpuscout target=x86_64  cfg=-
+                -> 1. no version of 'cuda' is available to this solve: every version it declares is ruled out here, so nothing can depend on it
+   2    2/2    Multiple providers are required for the same '{0}' virtual: '{1}' and '{2}'
+           e.g. [cfg_provider_require_conflict] audacious@4.4: ^qt-base  cfg={"packages": {"qmake": {"require": "qt"}}}
+                -> 1. Multiple providers are required for the same 'qmake' virtual: 'qt' and 'qt-base'
+   2    2/2    '{0} target={1}' cannot satisfy constraint 'target={2}'
+           e.g. [conflict_directive] intel-oneapi-dnn target=ppc64le:  cfg=-
+                -> 1. 'intel-oneapi-dnn target=m4' cannot satisfy constraint 'target=ppc64le:'
+   2    2/2    OTHER: intel-oneapi-advisor: This package in only available for x86
+           e.g. [arch_target] intel-oneapi-advisor target=skylake  cfg=-
+                -> 2. intel-oneapi-advisor: This package in only available for x86_64 and Linux
+   2    2/2    OTHER: 'cxx' has to be provided at build time by something 'libpng'
+           e.g. [not_a_dependency] apktool ^libpng  cfg=-
+                -> 2. 'cxx' has to be provided at build time by something 'libpng' depends on, but 'aocc' was selected to provide it
+   2    2/2    OTHER: 'c' has to be provided at build time by something 'libpng' d
+           e.g. [not_a_dependency] apktool ^libpng  cfg=-
+                -> 3. 'c' has to be provided at build time by something 'libpng' depends on, but 'aocc' was selected to provide it
+   2    2/2    OTHER: 'nccl' depends on 'cuda', but 'cuda' could not be added to t
+           e.g. [two_conditional_deps_disjoint] nccl-tests cuda_arch=35,90  cfg=-
+                -> 2. 'nccl' depends on 'cuda', but 'cuda' could not be added to the DAG
+   2    2/2    OTHER: InvalidDependencyError: 'jdk' is not a possible dependency o
+           e.g. [cfg_provider_require_conflict] kibana ^jdk  cfg={"packages": {"java": {"require": "openjdk"}}}
+                -> InvalidDependencyError: 'jdk' is not a possible dependency of 'kibana': the 'java' virtual it provides is required to be 'openjdk', which 'jdk' is not
+   2    2/2    OTHER: InvalidVariantValueError: invalid values for variant 'libs' 
+           e.g. [bad_variant_value] gosam-contrib libs=zzz  cfg=-
+                -> InvalidVariantValueError: invalid values for variant 'libs' in package gosam-contrib: 'zzz'
+   2    2/2    DeprecatedVersionError
+           e.g. [deprecated_version] ninja@=kitware  cfg=-
+                -> DeprecatedVersionError: The following input specs can only be satisfied by deprecated versions:
+   2    2/2    '{0}' cannot depend on '{1}'
+           e.g. [compiler_c] timedatex %c=gcc %c=apple-clang  cfg=-
+                -> 1. 'timedatex' cannot depend on 'apple-clang'
+   2    2/2    {0} cannot have a dependency on {1}
+           e.g. [compiler_c] timedatex %c=gcc %c=apple-clang  cfg=-
+                -> 2. timedatex cannot have a dependency on c
+   1    1/1    OTHER: qt: QT 4 for macOS is only patched for 4.8.7
+           e.g. [cfg_all_require] soqt  cfg={"packages": {"all": {"require": "os=ubuntu22.04"}}}
+                -> 53. qt: QT 4 for macOS is only patched for 4.8.7
+   1    1/1    OTHER: qt: Apple Silicon requires a very new version of qt
+           e.g. [cfg_all_require] soqt  cfg={"packages": {"all": {"require": "os=ubuntu22.04"}}}
+                -> 54. qt: Apple Silicon requires a very new version of qt
+   1    1/1    OTHER: qt: '%apple-clang@15:' conflicts with '@:5.12.0'
+           e.g. [cfg_all_require] soqt  cfg={"packages": {"all": {"require": "os=ubuntu22.04"}}}
+                -> 55. qt: '%apple-clang@15:' conflicts with '@:5.12.0'
+   1    1/1    OTHER: qt: '%apple-clang@13:' conflicts with '@:5.13'
+           e.g. [cfg_all_require] soqt  cfg={"packages": {"all": {"require": "os=ubuntu22.04"}}}
+                -> 56. qt: '%apple-clang@13:' conflicts with '@:5.13'
+   1    1/1    OTHER: libpng: '@:1.6.44' conflicts with '%apple-clang@17:'
+           e.g. [cfg_all_require] soqt  cfg={"packages": {"all": {"require": "os=ubuntu22.04"}}}
+                -> 57. libpng: '@:1.6.44' conflicts with '%apple-clang@17:'
+   1    1/1    OTHER: raxml: conflicts with '%apple-clang'
+           e.g. [cfg_all_require] treesub  cfg={"packages": {"all": {"require": "@99.99"}}}
+                -> 10. raxml: conflicts with '%apple-clang'
+   1    1/1    OTHER: intel-oneapi-dnn: This package in only available for x86_64 
+           e.g. [conflict_directive] intel-oneapi-dnn target=ppc64le:  cfg=-
+                -> 2. intel-oneapi-dnn: This package in only available for x86_64 and Linux
+   1    1/1    OTHER: SolverError: failed to concretize py-datalad-deprecated@=99.
+           e.g. [unknown_version] py-datalad-deprecated@=99.99.99  cfg=-
+                -> SolverError: failed to concretize py-datalad-deprecated@=99.99.99. Spack could not pinpoint a single cause; the solver could not satisfy:
+   1    1/1    OTHER: 'py-python-xmp-toolkit' is not reachable from 'py-datalad-de
+           e.g. [unknown_version] py-datalad-deprecated@=99.99.99  cfg=-
+                -> 1. 'py-python-xmp-toolkit' is not reachable from 'py-datalad-deprecated': nothing in the DAG rooted at 'py-datalad-deprecated' depends on it
+   1    1/1    OTHER: 'py-exifread' is not reachable from 'py-datalad-deprecated':
+           e.g. [unknown_version] py-datalad-deprecated@=99.99.99  cfg=-
+                -> 2. 'py-exifread' is not reachable from 'py-datalad-deprecated': nothing in the DAG rooted at 'py-datalad-deprecated' depends on it
+   1    1/1    OTHER: 'py-mutagen' is not reachable from 'py-datalad-deprecated': 
+           e.g. [unknown_version] py-datalad-deprecated@=99.99.99  cfg=-
+                -> 3. 'py-mutagen' is not reachable from 'py-datalad-deprecated': nothing in the DAG rooted at 'py-datalad-deprecated' depends on it
+   1    1/1    OTHER: 'py-pyyaml' is not reachable from 'py-datalad-deprecated': n
+           e.g. [unknown_version] py-datalad-deprecated@=99.99.99  cfg=-
+                -> 4. 'py-pyyaml' is not reachable from 'py-datalad-deprecated': nothing in the DAG rooted at 'py-datalad-deprecated' depends on it
+   1    1/1    OTHER: 'py-whoosh' is not reachable from 'py-datalad-deprecated': n
+           e.g. [unknown_version] py-datalad-deprecated@=99.99.99  cfg=-
+                -> 5. 'py-whoosh' is not reachable from 'py-datalad-deprecated': nothing in the DAG rooted at 'py-datalad-deprecated' depends on it
+   1    1/1    OTHER: xabclib: 'platform=windows' conflicts with 'build_system=mak
+           e.g. [conflict_directive] xabclib build_system=makefile platform=windows  cfg=-
+                -> 2. xabclib: 'platform=windows' conflicts with 'build_system=makefile'
+   1    1/1    OTHER: r-rmpi: conflicts with '^mpi=intel-oneapi-mpi'
+           e.g. [conflict_directive] r-rmpi ^mpi=intel-oneapi-mpi  cfg=-
+                -> 1. r-rmpi: conflicts with '^mpi=intel-oneapi-mpi'
+   1    1/1    OTHER: ExternalDependencyError: the spec 'py-maturin@=0.13.7' depen
+           e.g. [cfg_external_too_old] py-pywinpty  cfg={"packages": {"py-maturin": {"buildable": false, "externals": [{"spec": "py-maturin@=0.13.7", "prefix": "/usr"}]}}}
+                -> ExternalDependencyError: the spec 'py-maturin@=0.13.7' depends on 'python', but there is no such external spec in packages.yaml
+   1    1/1    OTHER: 'intel-oneapi-tbb' requires conflicting variant values '~env
+           e.g. [cfg_require_variant_conflict] intel-oneapi-tbb +envmods  cfg={"packages": {"intel-oneapi-tbb": {"require": "~envmods"}}}
+                -> 1. 'intel-oneapi-tbb' requires conflicting variant values '~envmods' and '+envmods'
+   1    1/1    OTHER: intel-oneapi-tbb: This package in only available for x86_64 
+           e.g. [cfg_require_variant_conflict] intel-oneapi-tbb +envmods  cfg={"packages": {"intel-oneapi-tbb": {"require": "~envmods"}}}
+                -> 2. intel-oneapi-tbb: This package in only available for x86_64 and Linux
+   1    1/1    OTHER: SolverError: failed to concretize apple-libuuid ^libiconv. S
+           e.g. [not_a_dependency] apple-libuuid ^libiconv  cfg=-
+                -> SolverError: failed to concretize apple-libuuid ^libiconv. Spack could not pinpoint a single cause; the solver could not satisfy:
+   1    1/1    OTHER: 'libiconv' is not reachable from 'apple-libuuid': nothing in
+           e.g. [not_a_dependency] apple-libuuid ^libiconv  cfg=-
+                -> 1. 'libiconv' is not reachable from 'apple-libuuid': nothing in the DAG rooted at 'apple-libuuid' depends on it
+   1    1/1    OTHER: 'c' has to be provided at build time by something 'libiconv'
+           e.g. [not_a_dependency] apple-libuuid ^libiconv  cfg=-
+                -> 2. 'c' has to be provided at build time by something 'libiconv' depends on, but 'aocc' was selected to provide it
+   1    1/1    OTHER: 'uuid' has to be provided at build time by something 'fontco
+           e.g. [not_a_dependency] apple-libuuid ^libiconv  cfg=-
+                -> 4. 'uuid' has to be provided at build time by something 'fontconfig' depends on, but 'apple-libuuid' was selected to provide it
+   1    1/1    OTHER: 'uuid' has to be provided at build time by something 'glib' 
+           e.g. [not_a_dependency] apple-libuuid ^libiconv  cfg=-
+                -> 5. 'uuid' has to be provided at build time by something 'glib' depends on, but 'apple-libuuid' was selected to provide it
+   1    1/1    OTHER: SolverError: failed to concretize gpuscout target=x86_64. Sp
+           e.g. [arch_target] gpuscout target=x86_64  cfg=-
+                -> SolverError: failed to concretize gpuscout target=x86_64. Spack could not pinpoint a single cause; the solver could not satisfy:
+   1    1/1    OTHER: no version of 'atlas' is available to this solve: every vers
+           e.g. [arch_target] gpuscout target=x86_64  cfg=-
+                -> 2. no version of 'atlas' is available to this solve: every version it declares is ruled out here, so nothing can depend on it
+   1    1/1    OTHER: SolverError: failed to concretize apktool ^libpng. Spack cou
+           e.g. [not_a_dependency] apktool ^libpng  cfg=-
+                -> SolverError: failed to concretize apktool ^libpng. Spack could not pinpoint a single cause; the solver could not satisfy:
+   1    1/1    OTHER: 'libpng' is not reachable from 'apktool': nothing in the DAG
+           e.g. [not_a_dependency] apktool ^libpng  cfg=-
+                -> 1. 'libpng' is not reachable from 'apktool': nothing in the DAG rooted at 'apktool' depends on it
+   1    1/1    OTHER: infernal: 'platform=windows' conflicts with 'build_system=au
+           e.g. [arch_platform] infernal platform=windows  cfg=-
+                -> 2. infernal: 'platform=windows' conflicts with 'build_system=autotools'
+   1    1/1    OTHER: cry: 'platform=windows' conflicts with 'build_system=makefil
+           e.g. [conflict_directive] cry build_system=makefile platform=windows  cfg=-
+                -> 2. cry: 'platform=windows' conflicts with 'build_system=makefile'
+   1    1/1    OTHER: SolverError: failed to concretize nccl-tests cuda_arch=35,90
+           e.g. [two_conditional_deps_disjoint] nccl-tests cuda_arch=35,90  cfg=-
+                -> SolverError: failed to concretize nccl-tests cuda_arch=35,90. Spack could not pinpoint a single cause; the solver could not satisfy:
+   1    1/1    OTHER: 'nccl-tests' depends on 'nccl', but 'nccl' could not be adde
+           e.g. [two_conditional_deps_disjoint] nccl-tests cuda_arch=35,90  cfg=-
+                -> 1. 'nccl-tests' depends on 'nccl', but 'nccl' could not be added to the DAG
+   1    1/1    OTHER: r-lazyeval: '^r@4.6:' conflicts with '@:0.2.2'
+           e.g. [conflict_directive] r-lazyeval@:0.2.2 ^r@4.6:  cfg=-
+                -> 1. r-lazyeval: '^r@4.6:' conflicts with '@:0.2.2'
+   1    1/1    OTHER: argon2: 'platform=windows' conflicts with 'build_system=make
+           e.g. [conflict_directive] argon2 build_system=makefile platform=windows  cfg=-
+                -> 2. argon2: 'platform=windows' conflicts with 'build_system=makefile'
+   1    1/1    OTHER: cuda
+           e.g. [dep_condition_falsified] nccl-tests ~cuda ^cuda  cfg=-
+                -> cuda
+   1    1/1    Cannot set variant '{0}' for '{1}@{2}': {3}
+           e.g. [two_conditional_deps_disjoint] sundials cuda_arch=11,86  cfg=-
+                -> 1. Cannot set variant 'cuda_arch' for 'sundials@7.8.0': Package sundials has variant 'cuda_arch' when +cuda
+   1    1/1    OTHER: 'spark' requires conflicting variant values '~hadoop' and '+
+           e.g. [cfg_require_variant_conflict] spark +hadoop  cfg={"packages": {"spark": {"require": "~hadoop"}}}
+                -> 1. 'spark' requires conflicting variant values '~hadoop' and '+hadoop'
+   1    1/1    OTHER: faketime: 'platform=windows' conflicts with 'build_system=ma
+           e.g. [conflict_directive] faketime build_system=makefile platform=windows  cfg=-
+                -> 2. faketime: 'platform=windows' conflicts with 'build_system=makefile'
+   1    1/1    OTHER: SolverError: failed to concretize win-file ^libpng. Spack co
+           e.g. [not_a_dependency] win-file ^libpng  cfg=-
+                -> SolverError: failed to concretize win-file ^libpng. Spack could not pinpoint a single cause; the solver could not satisfy:
+   1    1/1    OTHER: 'libpng' is not reachable from 'win-file': nothing in the DA
+           e.g. [not_a_dependency] win-file ^libpng  cfg=-
+                -> 1. 'libpng' is not reachable from 'win-file': nothing in the DAG rooted at 'win-file' depends on it
+   1    1/1    OTHER: ninja@=kitware
+           e.g. [deprecated_version] ninja@=kitware  cfg=-
+                -> ninja@=kitware
+   1    1/1    OTHER: tclap: 'platform=windows' conflicts with 'build_system=autot
+           e.g. [arch_platform] tclap platform=windows  cfg=-
+                -> 2. tclap: 'platform=windows' conflicts with 'build_system=autotools'
+   1    1/1    OTHER: SolverError: failed to concretize geode ^icedtea. Spack coul
+           e.g. [cfg_provider_require_conflict] geode ^icedtea  cfg={"packages": {"java": {"require": "openjdk"}}}
+                -> SolverError: failed to concretize geode ^icedtea. Spack could not pinpoint a single cause; the solver could not satisfy:
+   1    1/1    OTHER: 'java' has to be provided at build time by something 'icedte
+           e.g. [cfg_provider_require_conflict] geode ^icedtea  cfg={"packages": {"java": {"require": "openjdk"}}}
+                -> 1. 'java' has to be provided at build time by something 'icedtea' depends on, but 'icedtea' was selected to provide it (the 'java' virtual is required to be 'op
+   1    1/1    OTHER: InvalidDependencyError: 'nvpl-blas' is not a possible depend
+           e.g. [dep_condition_falsified] nvpl-lapack ~ilp64 ^nvpl-blas  cfg=-
+                -> InvalidDependencyError: 'nvpl-blas' is not a possible dependency of 'nvpl-lapack'
+   1    1/1    OTHER: SolverError: failed to concretize maven ^zlib-ng. Spack coul
+           e.g. [not_a_dependency] maven ^zlib-ng  cfg=-
+                -> SolverError: failed to concretize maven ^zlib-ng. Spack could not pinpoint a single cause; the solver could not satisfy:
+   1    1/1    OTHER: 'zlib-ng' is not reachable from 'maven': nothing in the DAG 
+           e.g. [not_a_dependency] maven ^zlib-ng  cfg=-
+                -> 1. 'zlib-ng' is not reachable from 'maven': nothing in the DAG rooted at 'maven' depends on it
+   1    1/1    OTHER: 'cxx' has to be provided at build time by something 'zlib-ng
+           e.g. [not_a_dependency] maven ^zlib-ng  cfg=-
+                -> 2. 'cxx' has to be provided at build time by something 'zlib-ng' depends on, but 'aocc' was selected to provide it
+   1    1/1    OTHER: 'c' has to be provided at build time by something 'zlib-ng' 
+           e.g. [not_a_dependency] maven ^zlib-ng  cfg=-
+                -> 3. 'c' has to be provided at build time by something 'zlib-ng' depends on, but 'aocc' was selected to provide it
+   1    1/1    OTHER: InvalidDependencyError: 'cray-mpich' is not a possible depen
+           e.g. [two_providers] grackle ^mpilander ^cray-mpich  cfg=-
+                -> InvalidDependencyError: 'cray-mpich' is not a possible dependency of 'grackle'
+   1    1/1    OTHER: f2c: 'platform=windows' conflicts with 'build_system=makefil
+           e.g. [conflict_directive] f2c build_system=makefile platform=windows  cfg=-
+                -> 2. f2c: 'platform=windows' conflicts with 'build_system=makefile'
+   1    1/1    OTHER: intel-mlc: Installation of intel-mlc requires acceptance of 
+           e.g. [cfg_all_require] intel-mlc  cfg={"packages": {"all": {"require": "os=ubuntu22.04"}}}
+                -> 2. intel-mlc: Installation of intel-mlc requires acceptance of the EULA found at https://www.intel.com/content/www/us/en/download/736633/intel-memory-latency-ch
+   1    1/1    OTHER: InvalidVariantValueError: invalid values for variant 'thread
+           e.g. [bad_variant_value] armpl-gcc threads=zzz  cfg=-
+                -> InvalidVariantValueError: invalid values for variant 'threads' in package armpl-gcc: 'zzz'
+   1    1/1    OTHER: libjpeg: 'platform=windows' conflicts with 'build_system=aut
+           e.g. [conflict_directive] libjpeg build_system=autotools platform=windows  cfg=-
+                -> 2. libjpeg: 'platform=windows' conflicts with 'build_system=autotools'
+   1    1/1    OTHER: SolverError: failed to concretize mumax ^libiconv. Spack cou
+           e.g. [not_a_dependency] mumax ^libiconv  cfg=-
+                -> SolverError: failed to concretize mumax ^libiconv. Spack could not pinpoint a single cause; the solver could not satisfy:
+   1    1/1    OTHER: 'libiconv' is not reachable from 'mumax': nothing in the DAG
+           e.g. [not_a_dependency] mumax ^libiconv  cfg=-
+                -> 1. 'libiconv' is not reachable from 'mumax': nothing in the DAG rooted at 'mumax' depends on it
+   1    1/1    OTHER: 'gnuplot' is not reachable from 'mumax': nothing in the DAG 
+           e.g. [not_a_dependency] mumax ^libiconv  cfg=-
+                -> 2. 'gnuplot' is not reachable from 'mumax': nothing in the DAG rooted at 'mumax' depends on it
+   1    1/1    OTHER: 'go' is not reachable from 'mumax': nothing in the DAG roote
+           e.g. [not_a_dependency] mumax ^libiconv  cfg=-
+                -> 3. 'go' is not reachable from 'mumax': nothing in the DAG rooted at 'mumax' depends on it
+   1    1/1    OTHER: 'gmake' is not reachable from 'mumax': nothing in the DAG ro
+           e.g. [not_a_dependency] mumax ^libiconv  cfg=-
+                -> 4. 'gmake' is not reachable from 'mumax': nothing in the DAG rooted at 'mumax' depends on it
+   1    1/1    OTHER: 'cuda' is not reachable from 'mumax': nothing in the DAG roo
+           e.g. [not_a_dependency] mumax ^libiconv  cfg=-
+                -> 5. 'cuda' is not reachable from 'mumax': nothing in the DAG rooted at 'mumax' depends on it
+   1    1/1    OTHER: ExternalDependencyError: the spec 'py-lightning-utilities@=0
+           e.g. [cfg_external_too_old] py-lightning-lite  cfg={"packages": {"py-lightning-utilities": {"buildable": false, "externals": [{"spec": "py-lightning-utilities@=0.15.3", "prefix": "/usr"}]}}}
+                -> ExternalDependencyError: the spec 'py-lightning-utilities@=0.15.3' depends on 'python', but there is no such external spec in packages.yaml
+   1    1/1    OTHER: intel-oneapi-dpl: This package in only available for x86_64 
+           e.g. [conflict_directive] intel-oneapi-dpl target=ppc64le:  cfg=-
+                -> 2. intel-oneapi-dpl: This package in only available for x86_64 and Linux
+   1    1/1    OTHER: unifdef: 'platform=windows' conflicts with 'build_system=mak
+           e.g. [conflict_directive] unifdef build_system=makefile platform=windows  cfg=-
+                -> 2. unifdef: 'platform=windows' conflicts with 'build_system=makefile'
+   1    1/1    OTHER: miniamr: 'platform=windows' conflicts with 'build_system=mak
+           e.g. [conflict_directive] miniamr build_system=makefile platform=windows  cfg=-
+                -> 2. miniamr: 'platform=windows' conflicts with 'build_system=makefile'
+   1    1/1    OTHER: InvalidDependencyError: 'spectrum-mpi' is not a possible dep
+           e.g. [two_providers] minighost+mpi ^openmpi ^spectrum-mpi  cfg=-
+                -> InvalidDependencyError: 'spectrum-mpi' is not a possible dependency of 'minighost'
+   1    1/1    OTHER: py-pillow-simd
+           e.g. [two_providers] py-reportlab@3.6.10: ^py-pillow-simd ^py-pillow  cfg=-
+                -> py-pillow-simd
+   1    1/1    OTHER: libmpdclient: '^python@3.12:' conflicts with 'build_system=m
+           e.g. [conflict_directive] libmpdclient build_system=meson %meson@:1.0 ^python@3.12:  cfg=-
+                -> 1. libmpdclient: '^python@3.12:' conflicts with 'build_system=meson %meson@:1.0'
+   1    1/1    OTHER: neartree: 'platform=windows' conflicts with 'build_system=ma
+           e.g. [conflict_directive] neartree build_system=makefile platform=windows  cfg=-
+                -> 2. neartree: 'platform=windows' conflicts with 'build_system=makefile'
+   1    1/1    OTHER: parallel: 'platform=windows' conflicts with 'build_system=au
+           e.g. [conflict_directive] parallel build_system=autotools platform=windows  cfg=-
+                -> 2. parallel: 'platform=windows' conflicts with 'build_system=autotools'
+   1    1/1    OTHER: SolverError: failed to concretize nccl@=2.9.8-1. Spack could
+           e.g. [cfg_require_version_conflict] nccl@=2.9.8-1  cfg={"packages": {"nccl": {"require": "@=2.10.3-1"}}}
+                -> SolverError: failed to concretize nccl@=2.9.8-1. Spack could not pinpoint a single cause; the solver could not satisfy:
+   1    1/1    OTHER: 'modylas' requires conflicting variant values '~mpi' and '+m
+           e.g. [cfg_require_variant_conflict] modylas +mpi  cfg={"packages": {"modylas": {"require": "~mpi"}}}
+                -> 1. 'modylas' requires conflicting variant values '~mpi' and '+mpi'
+   1    1/1    OTHER: 'ocaml' requires conflicting variant values '~force-safe-str
+           e.g. [cfg_require_variant_conflict] ocaml +force-safe-string  cfg={"packages": {"ocaml": {"require": "~force-safe-string"}}}
+                -> 1. 'ocaml' requires conflicting variant values '~force-safe-string' and '+force-safe-string'
+   1    1/1    OTHER: libxsmm: 'platform=windows' conflicts with 'build_system=mak
+           e.g. [conflict_directive] libxsmm build_system=makefile platform=windows  cfg=-
+                -> 2. libxsmm: 'platform=windows' conflicts with 'build_system=makefile'
+   1    1/1    OTHER: llvm-amdgpu: conflicts with 'platform=darwin'
+           e.g. [arch_target] hipify-clang target=riscv64  cfg=-
+                -> 4. llvm-amdgpu: conflicts with 'platform=darwin'
+   1    1/1    OTHER: 'fenics-dolfinx' requires conflicting variant values '~slepc
+           e.g. [dep_condition_falsified] fenics-dolfinx ~slepc ^slepc  cfg=-
+                -> 1. 'fenics-dolfinx' requires conflicting variant values '~slepc' and '+slepc'
+   1    1/1    OTHER: py-dotnetcore2: py-dotnetcore2 is only available for x86_64
+           e.g. [not_a_dependency] py-dotnetcore2 ^gmp  cfg=-
+                -> 1. py-dotnetcore2: py-dotnetcore2 is only available for x86_64
+   1    1/1    OTHER: ExternalDependencyError: the spec 'py-jinja2@=2.7' depends o
+           e.g. [cfg_external_too_old] py-branca  cfg={"packages": {"py-jinja2": {"buildable": false, "externals": [{"spec": "py-jinja2@=2.7", "prefix": "/usr"}]}}}
+                -> ExternalDependencyError: the spec 'py-jinja2@=2.7' depends on 'python', but there is no such external spec in packages.yaml
+
+== cases with NO expected token mentioned (grouped by kind), up to 3 each
+[cfg_all_require] r-rcppensmallen cfg={"packages": {"all": {"require": "%gcc@99"}}} expect=['gcc', 'requirement']
+     | Spack is taking more than 45 seconds to solve for r-rcppensmallen, stopping concretization
+[cfg_all_require] libpressio-tools cfg={"packages": {"all": {"require": "%gcc@99"}}} expect=['gcc', 'requirement']
+     | Spack is taking more than 45 seconds to solve for libpressio-tools, stopping concretization
+[cfg_all_require] perl-error cfg={"packages": {"all": {"require": "%gcc@99"}}} expect=['gcc', 'requirement']
+     | Spack is taking more than 45 seconds to solve for perl-error, stopping concretization
+[cfg_external_too_old] py-tomopy cfg={"packages": {"cmake": {"buildable": false, "externals": [{"spec": "cmake@=3.3.1", "prefix": "/usr"}]}}} expect=['cmake', '3.3.1', '3.17:']
+     | Spack is taking more than 45 seconds to solve for py-tomopy, stopping concretization
+[cfg_require_version_conflict] perl-package-deprecationmanager@=0.17 cfg={"packages": {"perl-package-deprecationmanager": {"require": "@=0.18"}}} expect=['0.18', 'requirement']
+     | 1. Cannot satisfy 'perl-package-deprecationmanager@=0.17'
+[cfg_require_version_conflict] routinator@=0.14.0 cfg={"packages": {"routinator": {"require": "@=0.12.1"}}} expect=['0.12.1', 'requirement']
+     | 1. Cannot satisfy 'routinator@=0.14.0'
+[cfg_require_version_conflict] pigz@=2.7 cfg={"packages": {"pigz": {"require": "@=2.8"}}} expect=['2.8', 'requirement']
+     | 1. Cannot satisfy 'pigz@=2.7'
+[compiler_c] r-beeswarm %c=gcc cfg=- expect=['gcc']
+     | 1. Only external, or concrete, compilers are allowed for the c language
+[compiler_c] cscope %c=gcc cfg=- expect=['gcc']
+     | 1. Only external, or concrete, compilers are allowed for the c language
+[compiler_cxx] functionalplus %cxx=gcc cfg=- expect=['gcc']
+     | 1. Only external, or concrete, compilers are allowed for the cxx language
+     | 2. Only external, or concrete, compilers are allowed for the c language
+[compiler_cxx] prism %cxx=gcc cfg=- expect=['gcc']
+     | 1. Only external, or concrete, compilers are allowed for the cxx language
+     | 2. Only external, or concrete, compilers are allowed for the c language
+[unknown_version] intel-oneapi-mpi@=99.99.99 cfg=- expect=['99.99.99']
+     | 1. intel-oneapi-mpi: This package in only available for x86_64 and Linux
+[unknown_version] essl@=99.99.99 cfg=- expect=['99.99.99']
+     | 1. Cannot build essl, since it is configured `buildable:false` and no externals satisfy the request
+
+== internal errors / exceptions / timeouts
+
+== unexpected successes (mutation did not make it unsat)
+arch_os                            1/19  e.g. star-ccm-plus os=ubuntu22.04 cfg=-
+cfg_all_require                    3/59  e.g. kafka cfg={"packages": {"all": {"require": "^zlib-ng@99"}}}
+cfg_buildable_false                9/35  e.g. adol-c cfg={"packages": {"gnuconfig": {"buildable": false}}}
+dep_condition_falsified            1/5  e.g. trimgalore ~pigz ^pigz cfg=-
+dep_version_out_of_range           1/7  e.g. py-flox ^py-setuptools-scm@=7.1.0 cfg=-
+env_unify_conflict                 2/2  e.g. cmake@=2.8.10.2 , latte cfg=-
+not_a_dependency                   19/41  e.g. py-sacrebleu ^libpng cfg=-
+two_providers                      1/6  e.g. cdo+szip ^libaec ^libszip cfg=-
+unknown_version                    56/59  e.g. topaz@=99.99.99 cfg=-

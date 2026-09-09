@@ -39,6 +39,7 @@ from typing import (
 import spack.vendor.archspec.cpu
 
 import spack
+import spack.aliases
 import spack.caches
 import spack.compilers.config
 import spack.compilers.flags
@@ -398,9 +399,16 @@ class Result:
         self._concrete_specs_by_input = None
         self._concrete_specs = None
         self._unsolved_specs = None
+        #: Explanations recovered from an unsatisfiable solve that produced no error() atoms
+        self.unsat_explanations: List[str] = []
 
     def raise_if_unsat(self):
-        """Raise a generic internal error if the result is unsatisfiable."""
+        """Raise an error if the result is unsatisfiable.
+
+        The solver normally explains itself with error() atoms, but a model that violates an
+        integrity constraint is discarded outright, and then there is nothing to report. In that
+        case ``unsat_explanations`` holds whatever the guard probes recovered.
+        """
         if self.satisfiable:
             return
 
@@ -408,7 +416,7 @@ class Result:
         if len(constraints) == 1:
             constraints = constraints[0]
 
-        raise SolverError(constraints)
+        raise SolverError(constraints, self.unsat_explanations)
 
     @property
     def specs(self):
@@ -776,12 +784,6 @@ class ErrorHandler:
         self.input_specs = input_specs
         self.full_model = None
 
-    def multiple_values_error(self, attribute, pkg):
-        return f'Cannot select a single "{attribute}" for package "{pkg}"'
-
-    def no_value_error(self, attribute, pkg):
-        return f'Cannot select a single "{attribute}" for package "{pkg}"'
-
     def _get_cause_tree(
         self,
         cause: Tuple[str, str],
@@ -826,12 +828,6 @@ class ErrorHandler:
 
     def handle_error(self, msg, *args):
         """Handle an error state derived by the solver."""
-        if msg == "multiple_values_error":
-            return self.multiple_values_error(*args)
-
-        if msg == "no_value_error":
-            return self.no_value_error(*args)
-
         try:
             idx = args.index("startcauses")
         except ValueError:
@@ -955,6 +951,214 @@ def _make_cache_key(asp_problem: str, control_file_paths: List[str]) -> str:
     return "\n".join(components)
 
 
+#: Guard atoms declared `#external` in the .lp files, one per integrity constraint that has no
+#: error() rule of its own, mapped to (rank, message template). The template is formatted with
+#: the guard's arguments. A refutation often has several guards to choose from and clingo picks
+#: whichever suits it, so the rank decides which explanation is worth showing: a lower number
+#: says more about the request. Adding a constraint here is how it gets explained without being
+#: made soft -- see the comment on `unreachable` in concretize.lp for why soft is not an option.
+UNSAT_PROBES: Dict[Tuple[str, int], Tuple[int, str]] = {
+    ("unreachable", 2): (
+        0,
+        "'{1}' is not reachable from '{0}': nothing in the DAG rooted at '{0}' depends on it",
+    ),
+    ("dangling_edge", 2): (0, "'{0}' depends on '{1}', but '{1}' could not be added to the DAG"),
+    ("no_version_available", 1): (
+        1,
+        "no version of '{0}' is available to this solve: every version it declares is ruled out "
+        "here, so nothing can depend on it",
+    ),
+    # last resort: says which mechanism failed rather than what about the request was wrong
+    ("wrong_build_provider", 3): (
+        2,
+        "'{2}' has to be provided at build time by something '{0}' depends on, but '{1}' was "
+        "selected to provide it",
+    ),
+}
+
+#: An explanation ranked here says the least: for the probe rank it names the failed mechanism
+#: rather than the request, for the name rank it names nothing the request mentions. Either tier
+#: is dropped whenever a better one was found.
+WEAKEST_RANK = 2
+
+
+def _as_requested(edge: spack.spec.DependencySpec) -> str:
+    """Render the spec on an input edge the way the user wrote it.
+
+    The parser turns "%clang@99" into a direct dependency on llvm@99, so an error that names the
+    node alone talks about a package the user never mentioned.
+    """
+    text = str(edge.spec)
+    legacy = spack.aliases.BUILTIN_TO_LEGACY_COMPILER.get(edge.spec.name)
+    if edge.direct and legacy and text.startswith(edge.spec.name):
+        return f"%{legacy}{text[len(edge.spec.name) :]}"
+    return text
+
+
+def _virtual_requirements(virtual: str, parser: RequirementParser) -> List[RequirementRule]:
+    """The unconditional `require:` rules for a virtual, i.e. the ones that pin its provider."""
+    return [
+        rule
+        for rule in parser.rules_from_virtual(virtual)
+        if rule.origin == RequirementOrigin.REQUIRE_YAML and rule.condition == EMPTY_SPEC
+    ]
+
+
+def _requirement_text(rule: RequirementRule) -> str:
+    text = "'" + "' or '".join(str(s) for s in rule.requirements) + "'"
+    return f"{text} ({rule.location})" if rule.location else text
+
+
+def _provider_requirement_note(name: str, parser: RequirementParser) -> str:
+    """A parenthetical naming the provider a virtual is pinned to, or "" if it is not pinned.
+
+    Half of a provider conflict lives in configuration, and a message about the provider the
+    solver rejected is only one side of it.
+    """
+    if not spack.repo.PATH.is_virtual(name):
+        return ""
+    rules = _virtual_requirements(name, parser)
+    if not rules:
+        return ""
+    return f" (the '{name}' virtual is required to be {_requirement_text(rules[0])})"
+
+
+def _excluded_by_provider_requirement(name: str, parser: RequirementParser) -> str:
+    """Explain a rejected `^dep` that a virtual requirement rules out.
+
+    Asking for `^jdk` where packages.yaml says `java: require: openjdk` leaves jdk out of the
+    possible dependencies entirely, and the bare "not a possible dependency" says nothing about
+    the requirement that put it there.
+    """
+    try:
+        pkg_cls = spack.repo.PATH.get_pkg_class(name)
+    except spack.repo.UnknownPackageError:
+        return ""
+    for virtual in pkg_cls.provided_virtual_names():
+        for rule in _virtual_requirements(virtual, parser):
+            required = {s.name for s in rule.requirements if s.name}
+            if required and name not in required:
+                return (
+                    f": the '{virtual}' virtual it provides is required to be "
+                    f"{_requirement_text(rule)}, which '{name}' is not"
+                )
+    return ""
+
+
+def _relevant_names(specs) -> Tuple[Set[str], Set[str]]:
+    """Names the user typed, and the direct dependencies those packages declare.
+
+    The probes fire for anything the refutation found convenient, including packages with no
+    bearing on the request. A message about a name the user wrote answers "what about my input
+    is wrong", so it comes first; one about a declared dependency comes next; the rest last.
+    """
+    typed: Set[str] = set()
+    declared: Set[str] = set()
+    for spec in specs:
+        for node in spec.traverse():
+            if not node.name:
+                continue
+            typed.add(node.name)
+            try:
+                declared.update(
+                    spack.repo.PATH.get_pkg_class(node.name).dependencies_by_name(when=False)
+                )
+            except Exception:  # noqa: BLE001
+                continue
+    return typed, declared - typed
+
+
+def _explain_unsat(control, specs, parser: RequirementParser) -> List[str]:
+    """Ask clingo which guarded constraints its refutation needed.
+
+    Every guard is an #external, false unless assumed otherwise, so assuming one true lifts its
+    constraint. The program is left exactly as tight as it was, so this is a second refutation
+    rather than a search: on the inputs that reach it, it costs a fraction of the failing solve.
+    """
+    atoms = control.symbolic_atoms
+    guards = [a for name, arity in UNSAT_PROBES for a in atoms.by_signature(name, arity)]
+    if not guards:
+        return []
+    by_literal = {a.literal: a for a in guards}
+
+    def refute(relaxed: Set[int]) -> Optional[List[int]]:
+        """The core of the program with the *relaxed* guards lifted, or None if it is satisfiable.
+
+        Everything outside `relaxed` stays enforced, so this asks about the real program minus a
+        few constraints rather than about some much weaker program.
+        """
+        assumptions = [(a.symbol, a.literal in relaxed) for a in guards]
+        with control.solve(assumptions=assumptions, yield_=True, async_=True) as handle:
+            handle.wait()
+            if not handle.get().unsatisfiable:
+                return None
+            # clingo returns None rather than an empty core when the refutation needed no
+            # assumption at all
+            return handle.core() or []
+
+    try:
+        core = refute(set())
+        if core is None:
+            return []
+        needed = [abs(x) for x in core if abs(x) in by_literal]
+        # Cores are not minimal, and the extras are actively misleading. Drop each guard that the
+        # refutation turns out not to need. One solve per candidate, so this is only worth doing
+        # while the core is small.
+        if 1 < len(needed) <= 16:
+            relaxed: Set[int] = set()
+            for literal in needed:
+                if refute(relaxed | {literal}) is not None:
+                    relaxed.add(literal)
+            needed = [x for x in needed if x not in relaxed] or needed
+    except Exception:  # noqa: BLE001
+        # never let the diagnosis turn one failure into another
+        return []
+
+    typed, declared = _relevant_names(specs)
+
+    def explain(symbol) -> Optional[Tuple[List[str], Tuple[int, int], str]]:
+        """The guard's arguments, its (name rank, probe rank) and its message, or None."""
+        probe_rank, template = UNSAT_PROBES[(symbol.name, len(symbol.arguments))]
+        args = [str(a).strip('"') for a in symbol.arguments]
+        # a root is trivially in its own condition set, and an edge from a package to itself is
+        # not news; neither instance explains anything
+        if len(args) > 1 and len(set(args)) == 1:
+            return None
+        if any(a in typed for a in args):
+            name_rank = 0
+        elif any(a in declared for a in args):
+            name_rank = 1
+        else:
+            name_rank = WEAKEST_RANK
+        notes = "".join(_provider_requirement_note(a, parser) for a in args)
+        return args, (name_rank, probe_rank), template.format(*args) + notes
+
+    ranked: Dict[str, Tuple[int, int]] = {}
+    for literal in needed:
+        explained = explain(by_literal[literal].symbol)
+        if explained:
+            ranked.setdefault(explained[2], explained[1])
+    if not ranked:
+        # A refutation can avoid the guards entirely when a shorter one exists, and then the core
+        # names none of them. Fall back to the guarded constraints that talk only about packages
+        # the user actually wrote: they are still constraints this solve could not satisfy, and
+        # one of them naming the user's own input beats saying nothing at all.
+        for atom in guards:
+            explained = explain(atom.symbol)
+            if explained and all(a in typed for a in explained[0]):
+                ranked.setdefault(explained[2], explained[1])
+
+    # Drop the weakest tier of each ranking whenever a better one was found: a last-resort probe
+    # names the mechanism that failed rather than anything about the request, and an unrelated
+    # tier names packages the request never mentions.
+    entries = [(rank, message) for message, rank in ranked.items()]
+    for column in (0, 1):
+        entries = [e for e in entries if e[0][column] < WEAKEST_RANK] or entries
+    # names the user wrote first, then the more specific probes; a long list buries the answer
+    entries.sort(key=lambda entry: entry[0])
+    return [message for _, message in entries][:5]
+
+
 class PyclingoDriver:
     def __init__(self, conc_cache: Optional[ConcretizationCache] = None) -> None:
         """Driver for the Python clingo interface.
@@ -1039,6 +1243,10 @@ class PyclingoDriver:
         result = Result(specs)
         result.satisfiable = solve_result.satisfiable
         if not result.satisfiable:
+            with timer.measure("diagnose"):
+                result.unsat_explanations = _explain_unsat(
+                    self.control, specs, setup.requirement_parser
+                )
             return result
 
         timer.start("construct_specs")
@@ -1992,8 +2200,22 @@ class SpackSolverSetup:
 
             self.gen.fact(fn.requirement_group(pkg_name, requirement_grp_id))
             self.gen.fact(fn.requirement_policy(pkg_name, requirement_grp_id, policy))
+            # What the requirement actually says, so a failure can quote it. Without this the
+            # only thing reported is "cannot satisfy a requirement for package 'X'".
+            requirement_text = "'" + "' or '".join(str(s) for s in requirement_grp) + "'"
+            location_prefix = ""
+            if rule.location:
+                requirement_text += f" from {rule.location}"
+                location_prefix = f"{rule.location}: "
+            self.gen.fact(
+                fn.requirement_group_spec(pkg_name, requirement_grp_id, requirement_text)
+            )
             if rule.message:
-                self.gen.fact(fn.requirement_message(pkg_name, requirement_grp_id, rule.message))
+                self.gen.fact(
+                    fn.requirement_message(
+                        pkg_name, requirement_grp_id, f"{location_prefix}{rule.message}"
+                    )
+                )
             self.gen.newline()
 
             for input_spec in requirement_grp:
@@ -2020,7 +2242,9 @@ class SpackSolverSetup:
                     # else: for virtuals we want to emit "node" and
                     # "virtual_node" in imposed specs
 
-                    info_msg = f"{input_spec} is a requirement for package {pkg_name}"
+                    info_msg = (
+                        f"{location_prefix}{input_spec} is a requirement for package {pkg_name}"
+                    )
                     if rule.condition != EMPTY_SPEC:
                         info_msg += f" when {rule.condition}"
                     if rule.message:
@@ -2067,6 +2291,19 @@ class SpackSolverSetup:
             if not data.get("buildable", True):
                 self.gen.h2(f"External package: {pkg_name}")
                 self.gen.fact(fn.buildable_false(pkg_name))
+                # Record what is on offer, so that a failure can name the external that was
+                # rejected instead of only "no externals satisfy the request": the spec as
+                # written, and its versions as written for the version-mismatch message.
+                for entry in data.get("externals", []):
+                    try:
+                        versions = spack.spec.Spec(entry["spec"]).versions
+                    except Exception:  # noqa: BLE001
+                        continue
+                    # packages_with_externals is deepcopy_as_builtin(..., line_info=True), so
+                    # each entry carries its YAML mark as line_info
+                    location = getattr(entry, "line_info", "")
+                    as_written = f"'{entry['spec']}'" + (f" from {location}" if location else "")
+                    self.gen.pkg_fact(pkg_name, fn.external_declared(as_written, str(versions)))
 
     def preferred_variants(self, pkg_name):
         """Facts on concretization preferences, as read from packages.yaml"""
@@ -2516,16 +2753,22 @@ class SpackSolverSetup:
             if spack.repo.PATH.is_virtual(edge.spec.name):
                 possible_deps = self.possible_virtuals
             if edge.spec.name not in possible_deps and not str(edge.when):
-                raise InvalidDependencyError(
-                    f"'{edge.spec.name}' is not a possible dependency of any root spec"
+                # name what it was asked of, not just what was asked for
+                parent = edge.parent.name if edge.parent is not None else None
+                of = f"'{parent}'" if parent else "any root spec"
+                message = f"'{edge.spec.name}' is not a possible dependency of {of}"
+                because = _excluded_by_provider_requirement(
+                    edge.spec.name, self.requirement_parser
                 )
+                raise InvalidDependencyError(f"{message}{because}")
 
     def input_spec_version_check(self, specs, allow_deprecated: bool) -> None:
         """Raise an error early if no versions available in the solve can satisfy the inputs."""
         only_deprecated = []
         impossible = []
 
-        for spec in traverse.traverse_nodes(specs):
+        for edge in traverse.traverse_edges(specs):
+            spec = edge.spec
             if spack.repo.PATH.is_virtual(spec.name):
                 continue
             if spec.name not in self.pkgs:
@@ -2541,7 +2784,7 @@ class SpackSolverSetup:
                 only_deprecated.append(spec)
 
             if not sat_deprecated and not sat_possible:
-                impossible.append(spec)
+                impossible.append(_as_requested(edge))
 
         if not allow_deprecated and only_deprecated:
             raise DeprecatedVersionError(
@@ -2555,7 +2798,7 @@ class SpackSolverSetup:
         if impossible:
             raise InvalidVersionError(
                 "No version exists that satisfies these input specs:",
-                "    " + ", ".join(str(spec) for spec in impossible),
+                "    " + ", ".join(impossible),
             )
 
     def _validate_input_specs(self, specs: Sequence[spack.spec.Spec]) -> None:
@@ -3921,13 +4164,24 @@ class SolverError(InternalConcretizerError):
     get a solution.
     """
 
-    def __init__(self, provided):
-        msg = (
-            "Spack concretizer internal error. Please submit a bug report at "
-            "https://github.com/spack/spack and include the command and environment "
-            "if applicable."
-            f"\n    {provided} is unsatisfiable"
-        )
+    def __init__(self, provided, explanations: Optional[List[str]] = None):
+        if explanations:
+            # Deliberately weaker wording than the error() path. These come from the solver's
+            # refutation, so each is true of the failed solve, but the one that matters to the
+            # user may be a consequence rather than the cause.
+            msg = (
+                f"failed to concretize {provided}. Spack could not pinpoint a single cause; "
+                f"the solver could not satisfy:\n"
+                + "\n".join(f"    {i:2}. {e}" for i, e in enumerate(explanations, start=1))
+                + "\n    Please report this if the cause is not clear from the above."
+            )
+        else:
+            msg = (
+                "Spack concretizer internal error. Please submit a bug report at "
+                "https://github.com/spack/spack and include the command and environment "
+                "if applicable."
+                f"\n    {provided} is unsatisfiable"
+            )
 
         super().__init__(msg)
 
