@@ -813,6 +813,20 @@ def main():
                 # must use the same mode: solve() patches the causation pass out permanently
                 # when full is false, which would silently disable it for every later case
                 base_unsat = solve([c["package"]], None, args.full)[0] != "sat"
+                # A mutation that combines two things only tests the combination if each works
+                # on its own. `grackle ^mpilander ^cray-mpich` fails on cray-mpich alone, which
+                # is not available here at all, so the two-provider clash is never reached.
+                if not base_unsat and len(c["specs"]) == 1 and "^" in c["specs"][0]:
+                    root, *literals = c["specs"][0].split("^")
+                    for literal in literals:
+                        if (
+                            solve(
+                                [f"{root.strip()} ^{literal.strip()}"], c.get("config"), args.full
+                            )[0]
+                            != "sat"
+                        ):
+                            base_unsat = True
+                            break
             rec = dict(c)
             rec.update(
                 outcome=outcome,
