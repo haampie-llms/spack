@@ -25,6 +25,7 @@ import spack.paths
 import spack.repo
 import spack.schema.env
 import spack.solver.asp
+import spack.spec_parser
 import spack.stage
 import spack.store
 import spack.util.environment
@@ -2807,7 +2808,9 @@ spack:
 
             assert before_user == after_user
 
-            mpileaks_spec = Spec("mpileaks target=default_target")
+            mpileaks_spec = spack.spec_parser.parse_one_or_raise(
+                "mpileaks target=default_target", user_input=spack.spec_parser.UserInput()
+            )
             assert mpileaks_spec in {x.root for x in concretized_roots_before}
             assert mpileaks_spec not in {x.root for x in concretized_roots_after}
 
