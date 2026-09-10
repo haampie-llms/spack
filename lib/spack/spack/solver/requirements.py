@@ -174,13 +174,12 @@ class RequirementParser:
         self.runtime_pkgs = spack.repo.PATH.packages_with_tags("runtime")
         self.compiler_pkgs = spack.repo.PATH.packages_with_tags("compiler")
         self.preferences_from_input: List[Tuple[spack.spec.Spec, str]] = []
-        self.toolchains = configuration.get_config("toolchains")
+        self.user_input = spack.spec_parser.UserInput.from_config(configuration)
         self._warned_compiler_all: set = set()
 
     def _parse_and_expand(self, string: str, *, named: bool = False) -> spack.spec.Spec:
         result = parse_spec_from_yaml_string(string, named=named)
-        if self.toolchains:
-            spack.spec_parser.expand_toolchains(result, self.toolchains)
+        spack.spec_parser.evaluate(result, self.user_input)
         return result
 
     def rules(self, pkg: spack.package_base.PackageBase) -> List[RequirementRule]:

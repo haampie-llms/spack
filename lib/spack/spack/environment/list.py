@@ -9,12 +9,17 @@ import spack.util.spack_yaml
 import spack.variant
 from spack.error import SpackError
 from spack.spec import Spec
-from spack.spec_parser import expand_toolchains
+from spack.spec_parser import UserInput, evaluate
 
 
 class SpecList:
     def __init__(
-        self, *, name: str = "specs", yaml_list=None, expanded_list=None, toolchains=None
+        self,
+        *,
+        name: str = "specs",
+        yaml_list=None,
+        expanded_list=None,
+        user_input: Optional[UserInput] = None,
     ):
         self.name = name
         self.yaml_list = yaml_list[:] if yaml_list is not None else []
@@ -23,7 +28,7 @@ class SpecList:
         self.specs_as_yaml_list = expanded_list or []
         self._constraints = None
         self._specs: Optional[List[Spec]] = None
-        self._toolchains = toolchains
+        self._user_input = user_input or UserInput()
 
     @property
     def is_matrix(self):
@@ -55,8 +60,7 @@ class SpecList:
                 spec = constraint_list[0].copy()
                 for const in constraint_list[1:]:
                     spec.constrain(const)
-                if self._toolchains:
-                    expand_toolchains(spec, self._toolchains)
+                evaluate(spec, self._user_input)
                 specs.append(spec)
             self._specs = specs
 
@@ -74,12 +78,17 @@ class SpecList:
         self._constraints = None
         self._specs = None
 
+    def _evaluated(self, spec_str: str) -> Spec:
+        spec = Spec(spec_str)
+        evaluate(spec, self._user_input)
+        return spec
+
     def remove(self, spec):
         # Get spec to remove from list
         remove = [
             s
             for s in self.yaml_list
-            if (isinstance(s, str) and not s.startswith("$")) and Spec(s) == Spec(spec)
+            if (isinstance(s, str) and not s.startswith("$")) and self._evaluated(s) == Spec(spec)
         ]
         if not remove:
             msg = f"Cannot remove {spec} from SpecList {self.name}.\n"
@@ -187,9 +196,9 @@ class Definition(NamedTuple):
 class SpecListParser:
     """Parse definitions and user specs from data in environments"""
 
-    def __init__(self, *, toolchains=None):
+    def __init__(self, *, user_input: Optional[UserInput] = None):
         self.definitions: Dict[str, SpecList] = {}
-        self._toolchains = toolchains
+        self._user_input = user_input
 
     def parse_definitions(self, *, data: List[Dict[str, Any]]) -> Dict[str, SpecList]:
         definitions_from_yaml: Dict[str, List[Definition]] = {}
@@ -239,7 +248,7 @@ class SpecListParser:
             name=name,
             yaml_list=combined_yaml_list,
             expanded_list=expanded_list,
-            toolchains=self._toolchains,
+            user_input=self._user_input,
         )
 
     def _expand_yaml_list(self, raw_yaml_list):

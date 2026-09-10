@@ -2285,6 +2285,16 @@ class SpackSolverSetup:
 
         for root in specs:
             for s in root.traverse():
+                arch = s.architecture
+                if arch and (
+                    arch.os in spack.platforms.Platform.reserved_oss
+                    or str(arch.target) in spack.platforms.Platform.reserved_targets
+                ):
+                    raise spack.error.SpecError(
+                        f"cannot concretize '{root}': default_os and default_target are only "
+                        f"resolved in user input (see spack.spec_parser.UserInput)"
+                    )
+
                 if repo.is_virtual(s.name):
                     # Constraints beyond versions could refer to the virtual or its provider;
                     # the solver supports neither interpretation.
