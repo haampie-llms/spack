@@ -3,13 +3,26 @@
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
 # mypy: disallow-untyped-defs
 
+"""``spack info``: show what a package recipe declares.
+
+The command has two layouts, chosen from whether stdout is a terminal:
+
+* On a terminal, entries are laid out in aligned columns, long text is wrapped to the terminal
+  width, and an entry with a lot of detail (a variant with a ``when`` condition and a list of
+  allowed values, say) spans several lines.
+* In a pipe, every entry is exactly one line and nothing is wrapped, so ``grep`` and other tools
+  see each fact together with the name it belongs to.
+
+Both layouts show the same information in the same order.
+"""
+
 import argparse
 import collections
+import re
 import shutil
 import sys
-import textwrap
 from argparse import Namespace
-from typing import Any, Callable, Dict, Iterable, List, Optional, TextIO, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, TextIO, Tuple
 
 import spack.builder
 import spack.cmd
@@ -27,73 +40,38 @@ from spack.package_base import PackageBase
 from spack.util import tty
 from spack.util.tty import color
 from spack.util.tty.colify import colify
-from spack.util.typing import SupportsRichComparison
 
 description = "get detailed information on a particular package"
 section = "query"
 level = "short"
 
-header_color = "@*b"
-plain_format = "@."
+#: color of section titles and labels
+HEADER_COLOR = "@*b"
+#: color of the ``when`` keyword in front of conditions
+WHEN_COLOR = "@*"
 
-#: Allow at least this much room for values when formatting definitions
-#: Wrap after a long variant name/condition if we need to do so to preserve this width.
-MIN_VALUES_WIDTH = 30
-
-
-class Formatter:
-    """Generic formatter for elements displayed by `spack info`.
-
-    Elements have four parts: name, values, when condition, and description. They can
-    be formatted two ways (shown here for variants):
-
-    Grouped by when (default)::
-
-        when +cuda
-          cuda_arch [none]                            none, 10, 100, 100a, 101,
-                                                      101a, 11, 12, 120, 120a, 13
-              CUDA architecture
-
-    Or, by name (each name has a when nested under it)::
-
-        cuda_arch [none]                              none, 10, 100, 100a, 101,
-                                                      101a, 11, 12, 120, 120a, 13
-          when +cuda
-            CUDA architecture
-
-    The values and description will be wrapped if needed. the name (and any additional info)
-    will not (so they should be kept short).
-
-    Subclasses are responsible for generating colorized text, but not wrapping,
-    indentation, or other formatting, for the name, values, and description.
-
-    """
-
-    def format_name(self, element: Any) -> str:
-        return str(element)
-
-    def format_values(self, element: Any) -> str:
-        return ""
-
-    def format_description(self, element: Any) -> str:
-        return ""
-
-
-def padder(str_list: Iterable, extra: int = 0) -> Callable:
-    """Return a function to pad elements of a list."""
-    length = max(len(str(s)) for s in str_list) + extra
-
-    def pad(string: str) -> str:
-        string = str(string)
-        padding = max(0, length - len(string))
-        return string + (padding * " ")
-
-    return pad
+#: Indentation of entries under a section title
+INDENT = 4
+#: Blanks between columns
+GUTTER = 2
+#: Never squeeze the text column (descriptions, conditions) narrower than this on a terminal
+MIN_TEXT_WIDTH = 30
+#: In a pipe, do not pad the name column beyond this for the sake of a few overlong names
+MAX_NAME_WIDTH_IN_PIPE = 48
+#: Placeholder for a variant value that is forwarded from the package to a dependency, e.g. in
+#: ``kokkos cuda_arch=* when cuda_arch=*``
+PLACEHOLDER = "*"
+#: Suggest disabling a boolean variant when at least this many dependencies are conditional on it
+SUGGESTION_THRESHOLD = 20
 
 
 def setup_parser(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument(
-        "-a", "--all", action="store_true", default=False, help="output all package information"
+        "-a",
+        "--all",
+        action="store_true",
+        default=False,
+        help="output all package information, including download URLs for every version",
     )
 
     by = subparser.add_mutually_exclusive_group()
@@ -139,15 +117,268 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     arguments.add_common_arguments(subparser, ["spec"])
 
 
-def section_title(s: str) -> str:
-    return header_color + s + plain_format
+#: Whether stdout is a terminal. A function so that tests can pretend either way.
+def _stdout_is_tty() -> bool:
+    try:
+        return sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
 
 
-def version(s: str) -> str:
-    return spack.spec.VERSION_COLOR + s + plain_format
+class Layout:
+    """How entries are laid out: ``tty`` selects the multi-line terminal layout over the
+    one-line-per-entry layout for pipes; ``width`` is the wrapping width (``None``: no wrapping).
+    """
+
+    __slots__ = ("tty", "width")
+
+    def __init__(self, tty: bool, width: Optional[int]) -> None:
+        self.tty = tty
+        self.width = width
+
+    @staticmethod
+    def detect() -> "Layout":
+        if _stdout_is_tty():
+            return Layout(tty=True, width=shutil.get_terminal_size().columns)
+        return Layout(tty=False, width=None)
 
 
-def format_deptype(depflag: int) -> str:
+class Entry:
+    """One thing to list under a section: a variant, a dependency, a license, ...
+
+    Attributes:
+        name: what the entry is about, e.g. ``cuda_arch [none]`` or ``kokkos+cuda`` (colorized)
+        head: leading part of the plain ``name`` shared by consecutive entries about the same
+            thing (e.g. the ``kokkos`` in ``kokkos+cuda``); on a terminal it is shown only once
+        attr: short attribute shown in its own column, e.g. dependency types (colorized)
+        description: free text, wrapped on a terminal
+        when: condition under which the entry applies, if any
+        when_text: how the condition is displayed (colorized; may contain placeholders)
+        extra: further lines of detail, e.g. the allowed values of a variant (colorized)
+        sort_key: entries of a section are listed in this order
+    """
+
+    __slots__ = ("name", "head", "attr", "description", "when", "when_text", "extra", "sort_key")
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        head: str = "",
+        attr: str = "",
+        description: str = "",
+        when: Optional[spack.spec.Spec] = None,
+        when_text: Optional[str] = None,
+        extra: Sequence[str] = (),
+        sort_key: Any = None,
+    ) -> None:
+        self.name = name
+        self.head = head
+        self.attr = attr
+        self.description = description
+        self.when = when if when is not None and when != spack.spec.Spec() else None
+        self.when_text = when_text if when_text is not None else _spec_text(self.when)
+        self.extra = list(extra)
+        self.sort_key = sort_key
+
+    @property
+    def when_key(self) -> str:
+        """Plain text of the condition, for grouping and sorting."""
+        return color.csub(self.when_text)
+
+    def fields(self, show_when: bool) -> List[str]:
+        """The text fields after the name and attribute columns, in display order."""
+        result = []
+        if self.description:
+            result.append(self.description)
+        if show_when and self.when_text:
+            result.append(color.colorize(f"{WHEN_COLOR}{{when}} ") + self.when_text)
+        result.extend(self.extra)
+        return result
+
+
+def _spec_text(spec: Optional[spack.spec.Spec]) -> str:
+    """Colorized (if enabled) string for a spec, empty for no spec or an empty spec."""
+    if spec is None or spec == spack.spec.Spec():
+        return ""
+    # an anonymous spec with only key=value variants renders with a leading blank inside the
+    # color codes, e.g. "\x1b[0;94m build_system=cmake\x1b[0m"
+    return re.sub(r"^((?:\x1b\[[0-9;]*m)*)\s+", r"\1", spec.clong_spec)
+
+
+def _title(text: str) -> str:
+    return color.colorize(f"{HEADER_COLOR}{{{color.cescape(text)}}}")
+
+
+def _ljust(text: str, width: int) -> str:
+    """Left-justify text that may contain color codes."""
+    return text + " " * max(0, width - color.clen(text))
+
+
+def _wrap(text: str, first_indent: str, indent: str, width: Optional[int]) -> List[str]:
+    """Wrap ``text`` to ``width``, honoring explicit line breaks. ``first_indent`` may contain
+    color codes; it is what the first line starts with, later lines start with ``indent``."""
+    lines: List[str] = []
+    for i, paragraph in enumerate(text.split("\n")):
+        if i > 0:
+            first_indent = indent
+        if width is None:
+            lines.append(first_indent + paragraph)
+            continue
+        # textwrap counts color codes in the indent, so wrap with blanks of the same visible
+        # width and put the real prefix back afterwards
+        blanks = " " * color.clen(first_indent)
+        wrapped = color.cwrap(
+            paragraph,
+            width=max(width - 1, color.clen(indent) + MIN_TEXT_WIDTH),
+            initial_indent=blanks,
+            subsequent_indent=indent,
+            break_long_words=False,
+            break_on_hyphens=False,
+        ) or [blanks]
+        wrapped[0] = first_indent + wrapped[0][len(blanks) :]
+        lines.extend(wrapped)
+    return lines
+
+
+class EntryPrinter:
+    """Prints entries in aligned columns: name, attribute (optional), then text fields.
+
+    Column widths are computed over all entries passed at construction so that groups printed
+    separately (e.g. per ``when`` condition) still line up.
+    """
+
+    def __init__(
+        self,
+        entries: Iterable[Entry],
+        layout: Layout,
+        indent: int = INDENT,
+        out: Optional[TextIO] = None,
+    ) -> None:
+        entries = list(entries)
+        self.layout = layout
+        self.indent = indent
+        self.out = out or sys.stdout
+        self.name_width = max((color.clen(e.name) for e in entries), default=0)
+        self.attr_width = max((color.clen(e.attr) for e in entries), default=0)
+        if layout.width is not None:
+            # leave room for the text column, at the expense of overlong names
+            available = layout.width - indent - GUTTER - MIN_TEXT_WIDTH
+            if self.attr_width:
+                available -= self.attr_width + GUTTER
+            self.name_width = max(min(self.name_width, available), 1)
+        else:
+            self.name_width = min(self.name_width, MAX_NAME_WIDTH_IN_PIPE)
+
+    def print(self, entries: Sequence[Entry], show_when: bool = True) -> None:
+        previous_head: Optional[str] = None
+        for entry in entries:
+            name = entry.name
+            plain = color.csub(name)
+            # e.g. print `kokkos` once for a run of `kokkos@...`, `kokkos+cuda`, ... entries
+            if (
+                self.layout.tty
+                and entry.head
+                and entry.head == previous_head
+                and name.startswith(entry.head)  # colors start after the head
+                and plain != entry.head
+            ):
+                name = " " * len(entry.head) + name[len(entry.head) :]
+            previous_head = entry.head
+
+            if self.layout.tty:
+                self._print_tty(name, entry.attr, entry.fields(show_when))
+            else:
+                self._print_line(name, entry.attr, entry.fields(show_when))
+
+    def _print_line(self, name: str, attr: str, fields: List[str]) -> None:
+        """One line per entry. Only a description with explicit line breaks (detailed help for a
+        variant, say) continues on further lines, indented; the first line still carries the
+        condition and the values."""
+        columns = [" " * self.indent + _ljust(name, self.name_width)]
+        if self.attr_width:
+            columns.append(_ljust(attr, self.attr_width))
+        continuation: List[str] = []
+        for i, field in enumerate(fields):
+            lines = [" ".join(line.split()) for line in field.split("\n")]
+            columns.append(lines[0])
+            if i == 0:
+                continuation = lines[1:]
+            else:
+                columns[-1] = " ".join(lines)
+        text_column = self.indent + self.name_width + GUTTER
+        if self.attr_width:
+            text_column += self.attr_width + GUTTER
+        self.out.write((" " * GUTTER).join(columns).rstrip() + "\n")
+        for line in continuation:
+            self.out.write(" " * text_column + line + "\n")
+
+    def _print_tty(self, name: str, attr: str, fields: List[str]) -> None:
+        """Name and attribute in their columns, then the fields one below the other, wrapped."""
+        text_column = self.indent + self.name_width + GUTTER
+        if self.attr_width:
+            text_column += self.attr_width + GUTTER
+
+        prefix = " " * self.indent + _ljust(name, self.name_width) + " " * GUTTER
+        if color.clen(name) > self.name_width:
+            # overlong name: continue on the next line at the attribute column
+            self.out.write(prefix.rstrip() + "\n")
+            prefix = " " * (self.indent + self.name_width + GUTTER)
+        if self.attr_width:
+            prefix += _ljust(attr, self.attr_width) + " " * GUTTER
+
+        if not fields:
+            self.out.write(prefix.rstrip() + "\n")
+            return
+
+        indent = " " * text_column
+        for i, field in enumerate(fields):
+            first_indent = prefix if i == 0 else indent
+            for line in _wrap(field, first_indent, indent, self.layout.width):
+                self.out.write(line.rstrip() + "\n")
+
+
+def print_section(title: str, entries: List[Entry], layout: Layout, by_name: bool) -> None:
+    """Print a titled section of entries, either in name order with their conditions inline, or
+    grouped by condition (unconditional entries first)."""
+    print()
+    print(_title(f"{title}:"))
+    if not entries:
+        print(" " * INDENT + "None")
+        return
+
+    printer = EntryPrinter(entries, layout)
+    if by_name:
+        printer.print(entries, show_when=True)
+        return
+
+    groups: Dict[str, List[Entry]] = collections.OrderedDict()
+    for entry in sorted(entries, key=lambda e: (e.when_key != "", e.when_key)):
+        groups.setdefault(entry.when_key, []).append(entry)
+
+    for i, (when_key, group) in enumerate(groups.items()):
+        if when_key:
+            if i > 0:
+                print()
+            when = color.colorize(f"{WHEN_COLOR}{{when}} ") + group[0].when_text
+            print(" " * (INDENT - 2) + when)
+        printer.print(group, show_when=False)
+
+
+def print_labeled(rows: List[Tuple[str, str]]) -> None:
+    """Print ``Label:  value`` rows with the values aligned. Multi-line values continue under the
+    first line of the value."""
+    if not rows:
+        return
+    width = max(len(label) for label, _ in rows) + 1  # for the colon
+    for label, value in rows:
+        lines = value.split("\n") or [""]
+        print(f"{_ljust(_title(label + ':'), width)}{' ' * GUTTER}{lines[0]}".rstrip())
+        for line in lines[1:]:
+            print(" " * (width + GUTTER) + line)
+
+
+def _deptypes(depflag: int) -> str:
     color_flags = zip("gcbm", dt.ALL_FLAGS)
     return ", ".join(
         color.colorize(f"@{c}{{{dt.flag_to_string(depflag & flag)}}}")
@@ -156,482 +387,334 @@ def format_deptype(depflag: int) -> str:
     )
 
 
-class DependencyFormatter(Formatter):
-    def format_name(self, dep: spack.dependency.Dependency) -> str:
-        return dep.spec.clong_spec
-
-    def format_values(self, dep: spack.dependency.Dependency) -> str:
-        return str(format_deptype(dep.depflag))
+# --- Dependencies -------------------------------------------------------------------------------
 
 
-def count_bool_variant_conditions(
-    when_indexed_dictionary: Dict[spack.spec.Spec, Any],
-) -> List[Tuple[int, Tuple[str, bool]]]:
-    """Counts boolean variants in whens in a dictionary.
+def _forwarded_variants(when: spack.spec.Spec, dep: spack.spec.Spec) -> List[str]:
+    """Names of single-valued variants that a dependency receives from the package unchanged,
+    as in ``depends_on("kokkos cuda_arch=80", when="cuda_arch=80")``."""
+    result = []
+    for name, condition in when.variants.items():
+        forwarded = dep.variants.get(name)
+        if (
+            forwarded is not None
+            and condition.type != spack.variant.VariantType.BOOL
+            and forwarded.type != spack.variant.VariantType.BOOL
+            and not condition.propagate
+            and not forwarded.propagate
+            and len(condition.values) == 1
+            and condition.values == forwarded.values
+        ):
+            result.append(name)
+    return result
 
-    Returns a list of the most used when conditions for boolean variants along with their value.
+
+def _replace_variant(text: str, needle: str, replacement: str) -> str:
+    """Replace a rendered ``name=value`` variant in (possibly colorized) spec text."""
+    # the value may be followed by a blank, a color code, or the end of the text, not by more
+    # characters of a longer value (cuda_arch=10 must not match inside cuda_arch=100)
+    return re.sub(re.escape(needle) + r"(?![^\s\x1b])", replacement.replace("\\", r"\\"), text)
+
+
+def _placeholder_legend(pkg: PackageBase, variant: str, values: List[str]) -> str:
+    """Explain what ``*`` stands for in a collapsed group of forwarded dependencies."""
+    possible: List[str] = []
+    for _, definition in pkg.variant_definitions(variant):
+        possible.extend(str(v) for v in definition.possible_values() or ())
+    possible = [v for v in possible if v != "none"]
+
+    seen = set(values)
+    if possible and seen >= set(possible):
+        which = f"any of the {len(possible)} {variant} values"
+    elif len(values) <= 10:
+        which = f"one of {variant}={', '.join(values)}"
+    else:
+        which = f"one of {len(values)} {variant} values"
+    return color.colorize(f"({PLACEHOLDER} = {color.cescape(which)})")
+
+
+def dependency_entries(pkg: PackageBase) -> List[Entry]:
+    """Entries for the dependencies of ``pkg`` that are possible for its spec.
+
+    Runs of dependencies that only forward a variant value, e.g. ``kokkos cuda_arch=X`` when
+    ``cuda_arch=X`` for every ``X``, are collapsed into a single entry with a placeholder.
     """
-    top: Dict = collections.defaultdict(int)
-    for when, _ in when_indexed_dictionary.items():
-        for v, variant in when.variants.items():
-            if type(variant.value) is bool:
-                top[(variant.name, variant.value)] += 1
+    entries: List[Entry] = []
+    for name in spack.package_base._subkeys(pkg.dependencies):
+        # group (when, dependency) pairs by what they look like with forwarded values replaced
+        Group = List[Tuple[spack.spec.Spec, spack.dependency.Dependency]]
+        groups: Dict[Tuple[str, str, int], Group] = collections.OrderedDict()
+        forwarded_by_group: Dict[Tuple[str, str, int], List[str]] = {}
+        for when, dep in spack.package_base._definitions(pkg.dependencies, name):
+            if not pkg.intersects(when):
+                continue
+            forwarded = _forwarded_variants(when, dep.spec)
+            dep_key, when_key = dep.spec.long_spec, when.long_spec
+            for variant in forwarded:
+                needle = when.format(f"{{variants.{variant}}}")
+                dep_key = _replace_variant(dep_key, needle, f"{variant}={PLACEHOLDER}")
+                when_key = _replace_variant(when_key, needle, f"{variant}={PLACEHOLDER}")
+            key = (dep_key, when_key, dep.depflag)
+            groups.setdefault(key, []).append((when, dep))
+            forwarded_by_group[key] = forwarded
 
-    # sorted by frequency, highest first
-    return list(reversed(sorted((n, t) for t, n in top.items())))
+        def sort_key(when: spack.spec.Spec, dep: spack.dependency.Dependency) -> Tuple:
+            # unconstrained and unconditional first; then keep conditions of the same shape
+            # together (e.g. all `when cuda_arch=...` rows), ordered by version constraint
+            return (
+                name,
+                dep.spec != spack.spec.Spec(name),
+                when != spack.spec.Spec(),
+                sorted(when.variants),
+                dep.spec.versions,
+                dep.spec.long_spec,
+            )
+
+        for key, group in groups.items():
+            when, dep = group[0]
+            forwarded = forwarded_by_group[key]
+            if len(group) < 2 or not forwarded:
+                for when, dep in group:
+                    entries.append(
+                        Entry(
+                            _spec_text(dep.spec),
+                            head=name,
+                            attr=_deptypes(dep.depflag),
+                            when=when,
+                            sort_key=sort_key(when, dep) + (when.long_spec,),
+                        )
+                    )
+                continue
+
+            dep_text, when_text = _spec_text(dep.spec), _spec_text(when)
+            legend = []
+            for variant in forwarded:
+                needle = when.format(f"{{variants.{variant}}}")
+                replacement = f"{variant}={PLACEHOLDER}"
+                dep_text = _replace_variant(dep_text, needle, replacement)
+                when_text = _replace_variant(when_text, needle, replacement)
+                values = [str(w.variants[variant].values[0]) for w, _ in group]
+                legend.append(_placeholder_legend(pkg, variant, values))
+            entries.append(
+                Entry(
+                    dep_text,
+                    head=name,
+                    attr=_deptypes(dep.depflag),
+                    when=when,
+                    when_text=when_text,
+                    extra=legend,
+                    sort_key=sort_key(when, dep) + (key[1],),
+                )
+            )
+
+    entries.sort(key=lambda e: e.sort_key)
+    return entries
 
 
 def print_dependencies(pkg: PackageBase, args: Namespace) -> None:
     """output build, link, and run package dependencies"""
-    print_definitions(pkg, "Dependencies", pkg.dependencies, DependencyFormatter(), args.by_name)
+    print_section("Dependencies", dependency_entries(pkg), args.layout, args.by_name)
 
 
-def print_dependency_suggestion(pkg: PackageBase) -> None:
-    variant_counts = count_bool_variant_conditions(pkg.dependencies)
-    big_variants = [
-        (name, val)
-        for n, (name, val) in variant_counts
-        # make a note of variants with large counts that aren't already toggled by the user.
-        if n >= 20 and not (name in pkg.spec.variants and pkg.spec.variants[name].value != val)
-    ]
+def print_dependency_suggestion(pkg: PackageBase, entries: List[Entry]) -> None:
+    """Suggest disabling boolean variants that many dependencies are conditional on."""
+    counts: Dict[Tuple[str, bool], int] = collections.defaultdict(int)
+    for entry in entries:
+        if entry.when is None:
+            continue
+        for variant in entry.when.variants.values():
+            if variant.type == spack.variant.VariantType.BOOL:
+                counts[(variant.name, variant.value)] += 1
 
-    if big_variants:
-        spec = spack.spec.Spec(pkg.name)
-        for name, val in big_variants:
-            # skip if user specified, or already saw a value (e.g. many +mpi and ~mpi)
-            if name in spec.variants or name in pkg.spec.variants:
-                continue
-            spec.variants.set(spack.variant.BoolValuedVariant(name, not val))
+    spec = spack.spec.Spec(pkg.name)
+    for (name, value), count in sorted(counts.items(), key=lambda kv: -kv[1]):
+        # skip variants the user already set, and variants that appear with both values
+        if count < SUGGESTION_THRESHOLD or name in pkg.spec.variants or name in spec.variants:
+            continue
+        spec.variants.set(spack.variant.BoolValuedVariant(name, not value))
 
-        # if there is new stuff to add beyond the input
-        if spec.variants:
-            spec.constrain(pkg.spec)  # include already specified constraints
-            print()
-            tty.info(
-                f"{pkg.name} has many complex dependencies; consider this for a simpler view:",
-                f"spack info {spec.format(color=tty.color.get_color_when())}",
-                format="y",
-            )
-
-
-def print_detectable(pkg: PackageBase, args: Namespace) -> None:
-    """output information on external detection"""
-
-    color.cprint("")
-    color.cprint(section_title("Externally Detectable:"))
-
-    # If the package has an 'executables' of 'libraries' field, it
-    # can detect an installation
-    if hasattr(pkg, "executables") or hasattr(pkg, "libraries"):
-        find_attributes = []
-        if hasattr(pkg, "determine_version"):
-            find_attributes.append("version")
-
-        if hasattr(pkg, "determine_variants"):
-            find_attributes.append("variants")
-
-        # If the package does not define 'determine_version' nor
-        # 'determine_variants', then it must use some custom detection
-        # mechanism. In this case, just inform the user it's detectable somehow.
-        color.cprint(
-            "    True{0}".format(
-                " (" + ", ".join(find_attributes) + ")" if find_attributes else ""
-            )
+    if spec.variants:
+        spec.constrain(pkg.spec)  # include already specified constraints
+        print()
+        tty.info(
+            f"{pkg.name} has many conditional dependencies; for a simpler view, try:",
+            f"spack info {spec.format(color=color.get_color_when())}",
+            format="y",
         )
-    else:
-        color.cprint("    False")
 
 
-def print_maintainers(pkg: PackageBase, args: Namespace) -> None:
-    """output package maintainers"""
-
-    if len(pkg.maintainers) > 0:
-        mnt = " ".join(["@@" + m for m in pkg.maintainers])
-        color.cprint("")
-        color.cprint(section_title("Maintainers: ") + mnt)
+# --- Variants -----------------------------------------------------------------------------------
 
 
-def print_namespace(pkg: PackageBase, args: Namespace) -> None:
-    """output package namespace"""
-
-    repo = spack.repo.PATH.get_repo(pkg.namespace)
-    color.cprint("")
-    color.cprint(section_title("Namespace:"))
-    color.cprint(f"    @c{{{repo.namespace}}} at {repo.root}")
-
-
-def print_phases(pkg: PackageBase, args: Namespace) -> None:
-    """output installation phases"""
-
-    builder = spack.builder.create(pkg)
-
-    if hasattr(builder, "phases") and builder.phases:
-        color.cprint("")
-        color.cprint(section_title("Installation Phases:"))
-        phase_str = ""
-        for phase in builder.phases:
-            phase_str += "    {0}".format(phase)
-        color.cprint(phase_str)
-
-
-def print_tags(pkg: PackageBase, args: Namespace) -> None:
-    """output package tags"""
-
-    color.cprint("")
-    color.cprint(section_title("Tags: "))
-    if hasattr(pkg, "tags"):
-        tags = sorted(pkg.tags)
-        colify(tags, indent=4)
-    else:
-        color.cprint("    None")
-
-
-def print_tests(pkg: PackageBase, args: Namespace) -> None:
-    """output relevant build-time and stand-alone tests"""
-
-    # Some built-in base packages (e.g., Autotools) define callback (e.g.,
-    # check) inherited by descendant packages. These checks may not result
-    # in build-time testing if the package's build does not implement the
-    # expected functionality (e.g., a 'check' or 'test' targets).
-    #
-    # So the presence of a callback in Spack does not necessarily correspond
-    # to the actual presence of built-time tests for a package.
-    for callbacks, phase in [
-        (getattr(pkg, "build_time_test_callbacks", None), "Build"),
-        (getattr(pkg, "install_time_test_callbacks", None), "Install"),
-    ]:
-        color.cprint("")
-        color.cprint(section_title("Available {0} Phase Test Methods:".format(phase)))
-        names = []
-        if callbacks:
-            for name in callbacks:
-                if getattr(pkg, name, False):
-                    names.append(name)
-
-        if names:
-            colify(sorted(names), indent=4)
-        else:
-            color.cprint("    None")
-
-    # PackageBase defines an empty install/smoke test but we want to know
-    # if it has been overridden and, therefore, assumed to be implemented.
-    color.cprint("")
-    color.cprint(section_title("Stand-Alone/Smoke Test Methods:"))
-    names = spack.install_test.test_function_names(pkg, add_virtuals=True)
-    if names:
-        colify(sorted(names), indent=4)
-    else:
-        color.cprint("    None")
-
-
-def _fmt_when(when: "spack.spec.Spec", indent: int) -> str:
-    return color.colorize(f"{indent * ' '}@B{{when}} {color.cescape(when.clong_spec)}")
-
-
-def _fmt_variant_value(v: Any) -> str:
+def _variant_value(v: Any) -> str:
     return str(v).lower() if v is None or isinstance(v, bool) else str(v)
 
 
-def _print_definition(
-    name_field: str,
-    values_field: str,
-    description: str,
-    max_name_len: int,
-    indent: int,
-    when: Optional[spack.spec.Spec] = None,
-    out: Optional[TextIO] = None,
-) -> None:
-    """Print a definition entry for `spack info` output.
-
-    Arguments:
-        name_field: name and optional info, e.g. a default; should be short.
-        values_field: possible values for the entry; Wrapped if long.
-        description: description of the field (wrapped if overly long)
-        max_name_len: max length of any definition to be printed
-        indent: size of leading indent for entry
-        when: optional when condition
-        out: stream to print to
-
-    Caller is expected to calculate the max name length in advance and pass it to
-    ``_print_definition``.
-
-    """
-    out = out or sys.stdout
-    cols = shutil.get_terminal_size().columns
-
-    # prevent values from being compressed by really long names
-    name_col_width = min(max_name_len, cols - MIN_VALUES_WIDTH - indent)
-    name_len = color.clen(name_field)
-
-    pad = 4  # min padding between name and values
-    value_indent = (indent + name_col_width + pad) * " "  # left edge of values
-
-    formatted_name_and_values = f"{indent * ' '}{name_field}"
-    if values_field:
-        formatted_values = "\n".join(
-            color.cwrap(
-                values_field,
-                width=cols - 2,
-                initial_indent=value_indent,
-                subsequent_indent=value_indent,
-            )
-        )
-
-        if name_len > name_col_width:
-            # for overlong names, values appear aligned on next line
-            formatted_name_and_values += f"\n{formatted_values}"
-        else:
-            # for regular names, trim indentation to make room for name on same line
-            formatted_values = formatted_values[indent + name_len + pad :]
-
-            # e.g,. name [default]   value1, value2, value3, ...
-            formatted_name_and_values += f"{pad * ' '}{formatted_values}"
-
-    out.write(f"{formatted_name_and_values}\n")
-
-    # when <spec>
-    description_indent = indent + 4
-    if when is not None and when != spack.spec.Spec():
-        out.write(_fmt_when(when, description_indent - 2))
-        out.write("\n")
-
-    # description, preserving explicit line breaks from the way it's written in the
-    # package file, but still wrapoing long lines for small terminals. This allows
-    # descriptions to provide detailed help in descriptions (see, e.g., gasnet's variants).
-    if description:
-        formatted_description = "\n".join(
-            textwrap.fill(
-                line,
-                width=cols - 2,
-                initial_indent=description_indent * " ",
-                subsequent_indent=description_indent * " ",
-            )
-            for line in description.split("\n")
-        )
-        out.write(formatted_description)
-        out.write("\n")
+def _variant_values(variant: spack.variant.Variant) -> str:
+    """The allowed values of a non-boolean variant, empty for boolean variants and for variants
+    whose values are checked by a validator function."""
+    values = variant.possible_values()
+    if values is None or len(values) < 2 or all(isinstance(v, bool) for v in values):
+        return ""
+    rendered = ", ".join(color.cescape(_variant_value(v)) for v in values)
+    kind = "any of" if variant.multi else "one of"
+    return color.colorize(f"{kind}: @c{{{rendered}}}")
 
 
-def print_header(header: str, when_indexed_dictionary: Dict, formatter: Formatter) -> bool:
-    color.cprint("")
-    color.cprint(section_title(f"{header}:"))
-
-    if not when_indexed_dictionary:
-        print("    None")
-        return False
-    return True
-
-
-def max_name_length(when_indexed_dictionary: Dict, formatter: Formatter) -> int:
-    # Calculate the max length of the first field of the definition. Lets us know how
-    # much to pad other fields on the first line.
-    return max(
-        color.clen(formatter.format_name(definition))
-        for subkey in spack.package_base._subkeys(when_indexed_dictionary)
-        for _, definition in spack.package_base._definitions(when_indexed_dictionary, subkey)
-    )
-
-
-def print_grouped_by_when(
-    pkg: PackageBase, header: str, when_indexed_dictionary: Dict, formatter: Formatter
-) -> None:
-    """Generic method to print metadata grouped by when conditions."""
-    if not print_header(header, when_indexed_dictionary, formatter):
-        return
-
-    max_name_len = max_name_length(when_indexed_dictionary, formatter)
-
-    # ensure that items without conditions come first
-    unconditional_first = lambda item: (item[0] != spack.spec.Spec(), item)
-
-    indent = 4
-    for when, by_name in sorted(when_indexed_dictionary.items(), key=unconditional_first):
-        if not pkg.intersects(when):
-            continue
-
-        start_indent = indent
-        values_indent = max_name_len + 4
-
-        if when != spack.spec.Spec():
-            sys.stdout.write("\n")
-            sys.stdout.write(_fmt_when(when, indent))
-            sys.stdout.write("\n")
-
-            # indent names slightly inside 'when', but line up values
-            start_indent += 2
-            values_indent -= 2
-
-        for subkey, definition in sorted(by_name.items()):
-            _print_definition(
-                formatter.format_name(definition),
-                formatter.format_values(definition),
-                formatter.format_description(definition),
-                values_indent,
-                start_indent,
-                when=None,
-                out=sys.stdout,
-            )
-
-
-def print_by_name(
-    pkg: PackageBase, header: str, when_indexed_dictionary: Dict, formatter: Formatter
-) -> None:
-    if not print_header(header, when_indexed_dictionary, formatter):
-        return
-
-    max_name_len = max_name_length(when_indexed_dictionary, formatter)
-    max_name_len += 4
-
-    indent = 4
-
-    def unconditional_first(definition: Any) -> SupportsRichComparison:
-        spec = getattr(definition, "spec", None)
-        if spec:
-            return (spec != spack.spec.Spec(spec.name), spec)
-        else:
-            return getattr(definition, "name", None)  # type: ignore[return-value]
-
-    for subkey in spack.package_base._subkeys(when_indexed_dictionary):
-        for when, definition in sorted(
-            spack.package_base._definitions(when_indexed_dictionary, subkey),
-            key=lambda t: unconditional_first(t[1]),
-        ):
+def variant_entries(pkg: PackageBase) -> List[Entry]:
+    entries = []
+    for name in spack.package_base._subkeys(pkg.variants):
+        for when, variant in spack.package_base._definitions(pkg.variants, name):
             if not pkg.intersects(when):
                 continue
-
-            _print_definition(
-                formatter.format_name(definition),
-                formatter.format_values(definition),
-                formatter.format_description(definition),
-                max_name_len,
-                indent,
-                when=when,
-                out=sys.stdout,
+            default = color.cescape(_variant_value(variant.default))
+            values = _variant_values(variant)
+            entries.append(
+                Entry(
+                    color.colorize(f"@c{{{color.cescape(name)}}} @C{{[{default}]}}"),
+                    description=variant.description,
+                    when=when,
+                    extra=[values] if values else [],
+                )
             )
-            sys.stdout.write("\n")
-
-
-def print_definitions(
-    pkg: PackageBase,
-    header: str,
-    when_indexed_dictionary: Dict,
-    formatter: Formatter,
-    by_name: bool,
-) -> None:
-    # convert simple dictionaries to dicts of dicts before formatting.
-    # subkeys are ignored in formatting, so use stringified numbers.
-    values = when_indexed_dictionary.values()
-    if when_indexed_dictionary and not isinstance(next(iter(values)), dict):
-        when_indexed_dictionary = {
-            when: {str(i): element}
-            for i, (when, element) in enumerate(when_indexed_dictionary.items())
-        }
-
-    if by_name:
-        print_by_name(pkg, header, when_indexed_dictionary, formatter)
-    else:
-        print_grouped_by_when(pkg, header, when_indexed_dictionary, formatter)
-
-
-class VariantFormatter(Formatter):
-    def format_name(self, variant: spack.variant.Variant) -> str:
-        return color.colorize(
-            f"@c{{{variant.name}}} @C{{[{_fmt_variant_value(variant.default)}]}}"
-        )
-
-    def format_values(self, variant: spack.variant.Variant) -> str:
-        values = (
-            [variant.values]
-            if not isinstance(variant.values, (tuple, list, spack.variant.DisjointSetsOfValues))
-            else variant.values
-        )
-
-        # put 'none' first, sort the rest by value
-        sorted_values = sorted(values, key=lambda v: (v != "none", v))
-
-        return color.colorize(f"@c{{{', '.join(_fmt_variant_value(v) for v in sorted_values)}}}")
-
-    def format_description(self, variant: spack.variant.Variant) -> str:
-        return variant.description
+    return entries
 
 
 def print_variants(pkg: PackageBase, args: Namespace) -> None:
     """output variants"""
-    print_definitions(pkg, "Variants", pkg.variants, VariantFormatter(), args.by_name)
+    print_section("Variants", variant_entries(pkg), args.layout, args.by_name)
 
 
-def print_licenses(pkg: PackageBase, args: Namespace) -> None:
-    """Output the licenses of the project."""
-    print_definitions(pkg, "Licenses", pkg.licenses, Formatter(), args.by_name)
+# --- Versions -----------------------------------------------------------------------------------
+
+
+def _version_text(v: Any) -> str:
+    return color.colorize(f"{spack.spec.VERSION_COLOR}{{{color.cescape(str(v))}}}")
 
 
 def print_versions(pkg: PackageBase, args: Namespace) -> None:
     """output versions"""
+    versions = sorted((v for v in pkg.versions if pkg.spec.versions.intersects(v)), reverse=True)
+    preferred = spack.package_base.preferred_version(pkg) if versions else None
+    safe = [v for v in versions if not pkg.versions[v].get("deprecated", False)]
+    deprecated = [v for v in versions if pkg.versions[v].get("deprecated", False)]
 
-    color.cprint("")
-    color.cprint(section_title("Preferred version:  "))
+    def url_for(version: spack.version.VersionType) -> str:
+        if not pkg.has_code:
+            return ""
+        try:
+            return str(spack.package_base.for_package_version(pkg, version))
+        except fs.InvalidArgsError:
+            return "No URL"
 
-    versions = [v for v in pkg.versions if pkg.spec.versions.intersects(v)]
-
-    if not versions:
-        color.cprint(version("    None"))
-        color.cprint("")
-        color.cprint(section_title("Safe versions:  "))
-        color.cprint(version("    None"))
-        color.cprint("")
-        color.cprint(section_title("Deprecated versions:  "))
-        color.cprint(version("    None"))
-    else:
-        pad = padder(versions, 4)
-
-        preferred = spack.package_base.preferred_version(pkg)
-
-        def get_url(version: spack.version.VersionType) -> str:
-            try:
-                return str(spack.package_base.for_package_version(pkg, version))
-            except fs.InvalidArgsError:
-                return "No URL"
-
-        url = get_url(preferred) if pkg.has_code else ""
-        line = version("    {0}".format(pad(preferred))) + color.cescape(str(url))
-        color.cwrite(line)
-
+    def print_list(title: str, items: List[Any]) -> None:
         print()
+        print(_title(f"{title}:"))
+        if not items:
+            print(" " * INDENT + "None")
+        elif args.all:
+            # one version per line with its download URL
+            pad = max(len(str(v)) for v in items) + INDENT
+            for v in items:
+                print(f"{' ' * INDENT}{_ljust(_version_text(v), pad)}{url_for(v)}".rstrip())
+        elif args.layout.tty:
+            colify([_version_text(v) for v in items], indent=INDENT, tty=True)
+        else:
+            print(" " * INDENT + "  ".join(_version_text(v) for v in items))
 
-        safe = []
-        deprecated = []
-        for v in reversed(sorted(versions)):
-            if pkg.has_code:
-                url = get_url(v)
-            if pkg.versions[v].get("deprecated", False):
-                deprecated.append((v, url))
-            else:
-                safe.append((v, url))
+    print_list("Preferred version", [preferred] if preferred is not None else [])
+    print_list("Safe versions", safe)
+    if deprecated:
+        print_list("Deprecated versions", deprecated)
 
-        for title, vers in [("Safe", safe), ("Deprecated", deprecated)]:
-            color.cprint("")
-            color.cprint(section_title("{0} versions:  ".format(title)))
-            if not vers:
-                color.cprint(version("    None"))
-                continue
 
-            for v, url in vers:
-                line = version("    {0}".format(pad(v))) + color.cescape(str(url))
-                color.cprint(line)
+# --- Small sections shown in the labeled block at the top ---------------------------------------
+
+
+def print_maintainers(pkg: PackageBase, args: Namespace) -> None:
+    """output package maintainers"""
+    if pkg.maintainers:
+        args.rows.append(("Maintainers", " ".join(f"@{m}" for m in pkg.maintainers)))
+
+
+def print_namespace(pkg: PackageBase, args: Namespace) -> None:
+    """output package namespace"""
+    repo = spack.repo.PATH.get_repo(pkg.namespace)
+    args.rows.append(("Namespace", f"{color.colorize(f'@c{{{repo.namespace}}}')} at {repo.root}"))
+
+
+def print_detectable(pkg: PackageBase, args: Namespace) -> None:
+    """output information on external detection"""
+    # A package with an 'executables' or 'libraries' attribute can detect installations. Without
+    # determine_version/determine_variants it uses some custom detection mechanism.
+    if hasattr(pkg, "executables") or hasattr(pkg, "libraries"):
+        finds = [a for a in ("version", "variants") if hasattr(pkg, f"determine_{a}")]
+        text = "True" + (f" ({', '.join(finds)})" if finds else "")
+    else:
+        text = "False"
+    args.rows.append(("Externally detectable", text))
+
+
+def print_tags(pkg: PackageBase, args: Namespace) -> None:
+    """output package tags"""
+    tags = sorted(getattr(pkg, "tags", ()))
+    args.rows.append(("Tags", ", ".join(tags) if tags else "None"))
+
+
+def print_phases(pkg: PackageBase, args: Namespace) -> None:
+    """output installation phases"""
+    builder = spack.builder.create(pkg)
+    phases = getattr(builder, "phases", None)
+    if phases:
+        args.rows.append(("Phases", ", ".join(phases)))
 
 
 def print_virtuals(pkg: PackageBase, args: Namespace) -> None:
     """output virtual packages"""
+    lines = []
+    for when, specs in reversed(sorted(pkg.provided.items())):
+        provided = ", ".join(s.cformat() for s in sorted(specs))
+        condition = "" if when == spack.spec.Spec(pkg.name) else f" when {when.cformat()}"
+        lines.append(f"{provided}{condition}")
+    args.rows.append(("Provides", "\n".join(lines) if lines else "None"))
 
-    color.cprint("")
-    color.cprint(section_title("Virtual Packages: "))
-    if pkg.provided:
-        for when, specs in reversed(sorted(pkg.provided.items())):
-            line = "    %s provides %s" % (when.cformat(), ", ".join(s.cformat() for s in specs))
-            print(line)
 
-    else:
-        color.cprint("    None")
+def print_licenses(pkg: PackageBase, args: Namespace) -> None:
+    """output the licenses of the project"""
+    licenses = [
+        f"{spdx} when {when.cformat()}" if when != spack.spec.Spec() else spdx
+        for when, spdx in pkg.licenses.items()
+        if pkg.intersects(when)
+    ]
+    if licenses:
+        args.rows.append(("Licenses", "\n".join(licenses)))
+    elif args.all:
+        args.rows.append(("Licenses", "None"))
+
+
+def print_tests(pkg: PackageBase, args: Namespace) -> None:
+    """output relevant build-time and stand-alone tests"""
+    # Some built-in base packages (e.g., Autotools) define callback (e.g., check) inherited by
+    # descendant packages. These checks may not result in build-time testing if the package's
+    # build does not implement the expected functionality (e.g., a 'check' or 'test' target). So
+    # the presence of a callback in Spack does not necessarily correspond to the actual presence
+    # of build-time tests for a package.
+    rows = []
+    for attribute, phase in [
+        ("build_time_test_callbacks", "Build phase tests"),
+        ("install_time_test_callbacks", "Install phase tests"),
+    ]:
+        callbacks = getattr(pkg, attribute, None) or []
+        names = sorted(name for name in callbacks if getattr(pkg, name, False))
+        rows.append((phase, ", ".join(names) if names else "None"))
+
+    # PackageBase defines an empty install/smoke test but we want to know if it has been
+    # overridden and, therefore, assumed to be implemented.
+    names = sorted(spack.install_test.test_function_names(pkg, add_virtuals=True))
+    rows.append(("Stand-alone tests", ", ".join(names) if names else "None"))
+
+    print()
+    print_labeled(rows)
 
 
 def info(parser: argparse.ArgumentParser, args: Namespace) -> None:
@@ -646,38 +729,43 @@ def info(parser: argparse.ArgumentParser, args: Namespace) -> None:
     pkg_cls.validate_variant_names(spec)
     pkg = pkg_cls(spec)
 
-    # Output core package information
-    header = section_title("{0}:   ").format(pkg.build_system_class) + pkg.name
-    color.cprint(header)
+    args.layout = Layout.detect()
 
-    color.cprint("")
-    color.cprint(section_title("Description:"))
-    if pkg.__doc__:
-        color.cprint(color.cescape(pkg.format_doc(indent=4)))
-    else:
-        color.cprint("    None")
+    # name, build system and description
+    print(color.colorize(f"@*{{{color.cescape(pkg.name)}}} ({pkg.build_system_class})"))
+    doc = pkg.format_doc(indent=INDENT)
+    print(doc.rstrip("\n") if doc else " " * INDENT + "No description")
 
-    if getattr(pkg, "homepage"):
-        color.cprint(section_title("Homepage: ") + str(pkg.homepage))
-
-    # Now output optional information in expected order
-    sections = [
+    # short facts, as aligned "Label:  value" rows
+    args.rows = []
+    if getattr(pkg, "homepage", None):
+        args.rows.append(("Homepage", str(pkg.homepage)))
+    rows: List[Tuple[bool, Callable[[PackageBase, Namespace], None]]] = [
+        (True, print_licenses),
         (args.all or args.maintainers, print_maintainers),
         (args.all or args.namespace, print_namespace),
-        (args.all or args.detectable, print_detectable),
         (args.all or args.tags, print_tags),
-        (args.all or not args.no_versions, print_versions),
-        (args.all or not args.no_variants, print_variants),
+        (args.all or args.detectable, print_detectable),
         (args.all or args.phases, print_phases),
-        (args.all or not args.no_dependencies, print_dependencies),
         (args.all or args.virtuals, print_virtuals),
-        (args.all or args.tests, print_tests),
-        (True, print_licenses),
     ]
-    for print_it, func in sections:
-        if print_it:
+    for wanted, func in rows:
+        if wanted:
             func(pkg, args)
+    print()
+    print_labeled(args.rows)
 
-    print_dependency_suggestion(pkg)
+    # the long sections
+    if args.all or not args.no_versions:
+        print_versions(pkg, args)
+    if args.all or not args.no_variants:
+        print_variants(pkg, args)
+    dependencies: List[Entry] = []
+    if args.all or not args.no_dependencies:
+        dependencies = dependency_entries(pkg)
+        print_section("Dependencies", dependencies, args.layout, args.by_name)
+    if args.all or args.tests:
+        print_tests(pkg, args)
 
-    color.cprint("")
+    print_dependency_suggestion(pkg, dependencies)
+    print()

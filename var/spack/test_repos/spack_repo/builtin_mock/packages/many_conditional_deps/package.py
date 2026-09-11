@@ -20,3 +20,7 @@ class ManyConditionalDeps(Package):
 
     for i in range(30):
         depends_on(f"gpu-dep +rocm amdgpu_target={i}", when=f"+rocm amdgpu_target={i}")
+
+    # unlike the forwarded values above, these cannot be collapsed into a single line
+    for i in range(30):
+        depends_on(f"gpu-dep@{i}", when=f"@1.0 +cuda cuda_arch={i}")
