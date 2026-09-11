@@ -8,7 +8,9 @@ import sys
 import pytest
 
 import spack
+import spack.paths
 from spack.main import SpackCommand
+from spack.util.executable import Executable
 
 python = SpackCommand("python")
 
@@ -35,6 +37,30 @@ def test_python_with_module():
     # 2 and 3, which indicates we successfully ran runpy.run_module.
     with pytest.raises(ImportError, match="No code object"):
         python("-m", "sys")
+
+
+def test_python_finalizes_objects_at_exit(tmp_path):
+    """Objects of spack python -c are freed before bin/spack skips garbage collection at exit."""
+    scope = tmp_path / "scope"
+    scope.mkdir()
+    repos = f"repos::\n  builtin_mock: {spack.paths.mock_packages_path}\n"
+    (scope / "repos.yaml").write_text(repos)
+    out = tmp_path / "out.txt"
+    # the buffered write only reaches the file when the file object is finalized
+    Executable(sys.executable)(
+        spack.paths.spack_script,
+        "-C",
+        str(scope),
+        "python",
+        "-c",
+        f"f = open({str(out)!r}, 'w'); f.write('data')",
+        extra_env={
+            "SPACK_DISABLE_LOCAL_CONFIG": "1",
+            "SPACK_USER_CONFIG_PATH": str(tmp_path / "user_config"),
+            "SPACK_USER_CACHE_PATH": str(tmp_path / "user_cache"),
+        },
+    )
+    assert out.read_text() == "data"
 
 
 def test_python_raises():

@@ -163,9 +163,11 @@ def propagate_exceptions_from(console):
         console (code.InteractiveConsole): the console that needs a change in sys.excepthook
     """
     console.push("import sys")
-    console.push("_wrapped_hook = sys.excepthook")
-    console.push("def _hook(exc_type, exc_value, exc_tb):")
-    console.push("    _wrapped_hook(exc_type, exc_value, exc_tb)")
-    console.push("    sys.exit(1)")
-    console.push("")
-    console.push("sys.excepthook = _hook")
+    wrapped_hook = sys.excepthook
+
+    # Defined here, not in the console: sys.excepthook would keep its namespace alive until exit
+    def hook(exc_type, exc_value, exc_tb):
+        wrapped_hook(exc_type, exc_value, exc_tb)
+        sys.exit(1)
+
+    sys.excepthook = hook
