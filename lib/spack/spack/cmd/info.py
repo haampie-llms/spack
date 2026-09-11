@@ -18,6 +18,7 @@ Both layouts show the same information in the same order.
 
 import argparse
 import collections
+import json
 import re
 import shutil
 import sys
@@ -26,6 +27,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Text
 
 import spack.builder
 import spack.cmd
+import spack.config
 import spack.dependency
 import spack.deptypes as dt
 import spack.fetch_strategy as fs
@@ -33,6 +35,7 @@ import spack.install_test
 import spack.package_base
 import spack.repo
 import spack.spec
+import spack.store
 import spack.variant
 import spack.version
 from spack.cmd.common import arguments
@@ -812,6 +815,48 @@ def print_licenses(pkg: PackageBase, args: Namespace) -> None:
         args.rows.append(("Licenses", "None"))
 
 
+#: Show at most this many installed specs in the label block
+MAX_INSTALLED_SHOWN = 8
+
+
+def print_installed(pkg: PackageBase, args: Namespace) -> None:
+    """output installations of the package matching the spec"""
+    installed = sorted(
+        spack.store.STORE.db.query(pkg.spec), key=lambda s: (s.version, s.dag_hash()), reverse=True
+    )
+    if not installed:
+        args.rows.append(("Installed", "none"))
+        return
+    shown = [s.cformat("{name}{@version}{/hash:7}") for s in installed[:MAX_INSTALLED_SHOWN]]
+    more = len(installed) - len(shown)
+    text = ", ".join(shown) + (f" and {more} more" if more else "")
+    args.rows.append(("Installed", f"{text}  (see: spack find -lv {pkg.name})"))
+
+
+def print_configured(pkg: PackageBase, args: Namespace) -> None:
+    """output externals and preferences configured for the package in packages.yaml"""
+    configured = spack.config.CONFIG.get(f"packages:{pkg.name}", {}) or {}
+
+    externals = []
+    for external in configured.get("externals", []):
+        spec = spack.spec.Spec(external["spec"])
+        if not spec.intersects(pkg.spec):
+            continue
+        where = external.get("prefix") or ", ".join(external.get("modules", [])) or "?"
+        via = "at" if external.get("prefix") else "via modules"
+        externals.append(f"{spec.cformat()} {via} {where}")
+    if externals:
+        args.rows.append(("Externals", "\n".join(externals)))
+
+    preferences = []
+    for key in ("buildable", "require", "prefer", "conflict", "version", "variants"):
+        if key in configured and configured[key] not in (True, None):
+            value = configured[key]
+            preferences.append(f"{key}: {value if isinstance(value, str) else json.dumps(value)}")
+    if preferences:
+        args.rows.append(("Preferences", "\n".join(preferences)))
+
+
 def print_tests(pkg: PackageBase, args: Namespace) -> None:
     """output relevant build-time and stand-alone tests"""
     # Some built-in base packages (e.g., Autotools) define callback (e.g., check) inherited by
@@ -868,6 +913,8 @@ def info(parser: argparse.ArgumentParser, args: Namespace) -> None:
         (args.all or args.detectable, print_detectable),
         (args.all or args.phases, print_phases),
         (args.all or args.virtuals, print_virtuals),
+        (True, print_installed),
+        (True, print_configured),
     ]
     for wanted, func in rows:
         if wanted:

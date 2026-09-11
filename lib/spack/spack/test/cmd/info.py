@@ -310,3 +310,24 @@ def test_merge_conditions(pipe):
     assert re.search(
         r"^    mpi\s+build, link\s+when \^pkg-g\n    mpi\s+build, link\s+when \+mpi", output, re.M
     )
+
+
+def test_installed_row(pipe, database):
+    output = info("mpich")
+    assert re.search(
+        r"^Installed:\s+mpich@3\.0\.4/\w{7}  \(see: spack find -lv mpich\)$", output, re.M
+    )
+    assert re.search(r"^Installed:\s+none$", info("mpich@1.0"), re.M)
+
+
+def test_externals_and_preferences_rows(pipe, config):
+    output = info("externaltool")
+    assert re.search(
+        r"^Externals:\s+externaltool@1\.0 at /path/to/external_tool\n\s+externaltool@0\.9 at /usr\n",
+        output,
+        re.M,
+    )
+    assert re.search(r"^Preferences:\s+buildable: false$", output, re.M)
+    # only externals matching the spec
+    assert "externaltool@1.0" not in info("externaltool@0.9")
+    assert "Externals:" not in info("mpich")
