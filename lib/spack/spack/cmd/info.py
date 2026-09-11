@@ -347,6 +347,7 @@ def print_section(title: str, entries: List[Entry], layout: Layout, by_name: boo
         print(" " * INDENT + "None")
         return
 
+    entries = merge_conditions(entries)
     printer = EntryPrinter(entries, layout)
     if by_name:
         printer.print(entries, show_when=True)
@@ -409,11 +410,118 @@ def _forwarded_variants(when: spack.spec.Spec, dep: spack.spec.Spec) -> List[str
     return result
 
 
-def _replace_variant(text: str, needle: str, replacement: str) -> str:
-    """Replace a rendered ``name=value`` variant in (possibly colorized) spec text."""
-    # the value may be followed by a blank, a color code, or the end of the text, not by more
-    # characters of a longer value (cuda_arch=10 must not match inside cuda_arch=100)
-    return re.sub(re.escape(needle) + r"(?![^\s\x1b])", replacement.replace("\\", r"\\"), text)
+#: characters that make up one component of a spec string (a version range, a `name=value`
+#: variant, a `%dep@version` ...): a component ends where one of these does not follow
+_COMPONENT_CHARS = r"A-Za-z0-9_.:,'\-"
+
+
+def _replace_component(text: str, needle: str, replacement: str) -> str:
+    """Replace one rendered component of a spec (``cuda_arch=10``, ``@1.8``, ``%c``, ...) in
+    possibly colorized spec text, where it is preceded by a blank, a color code or the start of
+    the text and not followed by more of the same component (so that ``cuda_arch=10`` does not
+    match inside ``cuda_arch=100``)."""
+    pattern = rf"(^|\s|\x1b\[[0-9;]*m){re.escape(needle)}(?![{_COMPONENT_CHARS}])"
+    return re.sub(pattern, lambda m: m.group(1) + replacement, text)
+
+
+def _condition_parts(when: spack.spec.Spec) -> Dict[str, str]:
+    """Split a condition into its components, keyed by what they constrain, each rendered as it
+    appears in the plain string of the spec."""
+    parts: Dict[str, str] = {}
+    if when.versions != spack.version.any_version:
+        parts["version"] = when.format("{@versions}")
+    for name in sorted(when.variants):
+        parts[f"variant:{name}"] = str(when.variants[name])
+    if when.architecture is not None:
+        for attr in ("platform", "os", "target"):
+            value = getattr(when.architecture, attr)
+            if value is not None:
+                parts[attr] = f"{attr}={value}"
+    if when.compiler_flags:
+        parts["flags"] = when.format("{compiler_flags}").strip()
+    deps = when._format_dependencies(color=False)
+    if deps:
+        parts["deps"] = deps
+    return parts
+
+
+def _braces(values: List[str]) -> str:
+    """Write alternatives compactly, e.g. ``cuda_arch=80`` and ``cuda_arch=90`` as
+    ``cuda_arch={80,90}``, ``%c`` and ``%cxx`` as ``%{c,cxx}``, ``@1.8`` and ``@1.9`` as
+    ``@{1.8,1.9}``."""
+    prefix = values[0]
+    for value in values[1:]:
+        while not value.startswith(prefix):
+            prefix = prefix[:-1]
+    # cut the shared prefix back to a separator so that gfx1010/gfx1011 don't become gfx101{0,1}
+    cut = max(prefix.rfind(c) for c in "=@%^")
+    prefix = prefix[: cut + 1] if cut >= 0 else ""
+    return prefix + "{" + ",".join(v[len(prefix) :] for v in values) + "}"
+
+
+class _MergedCondition:
+    """Entries whose conditions differ in exactly one component, being merged into one."""
+
+    __slots__ = ("entry", "parts", "varying", "values")
+
+    def __init__(self, entry: Entry, parts: Dict[str, str]) -> None:
+        self.entry = entry
+        self.parts = parts
+        self.varying: Optional[str] = None
+        self.values = [parts]
+
+    def absorb(self, parts: Dict[str, str]) -> bool:
+        if parts.keys() != self.parts.keys():
+            return False
+        differing = [k for k in parts if parts[k] != self.parts[k]]
+        if len(differing) != 1 or (self.varying is not None and differing[0] != self.varying):
+            return False
+        key = differing[0]
+        if key.startswith("variant:") and parts[key][0] in "+~":  # keep +x and ~x apart
+            return False
+        self.varying = key
+        self.values.append(parts)
+        return True
+
+    def merged_entry(self) -> Entry:
+        entry = self.entry
+        if self.varying is None:
+            return entry
+        needle = self.parts[self.varying]
+        alternatives = _braces([parts[self.varying] for parts in self.values])
+        entry.when_text = _replace_component(entry.when_text, needle, alternatives)
+        return entry
+
+
+def merge_conditions(entries: List[Entry]) -> List[Entry]:
+    """Merge entries that say the same thing under conditions that differ in one component only,
+    e.g. ``cuda@12.9: when cuda_arch=103`` and ``cuda@12.9: when cuda_arch=103a`` into
+    ``cuda@12.9: when cuda_arch={103,103a}``. Order is that of the first entry of each merge."""
+    merges: Dict[Tuple, List[_MergedCondition]] = {}
+    result: List[Entry] = []
+    merged_entries: List[Tuple[Entry, _MergedCondition]] = []
+    for entry in entries:
+        if entry.when is None or PLACEHOLDER in entry.when_key:
+            result.append(entry)
+            continue
+        key = (
+            color.csub(entry.name),
+            color.csub(entry.attr),
+            entry.description,
+            tuple(entry.extra),
+        )
+        parts = _condition_parts(entry.when)
+        for merge in merges.get(key, []):
+            if merge.absorb(parts):
+                break
+        else:
+            merge = _MergedCondition(entry, parts)
+            merges.setdefault(key, []).append(merge)
+            result.append(entry)
+            merged_entries.append((entry, merge))
+    for entry, merge in merged_entries:
+        merge.merged_entry()
+    return result
 
 
 def _placeholder_legend(pkg: PackageBase, variant: str, values: List[str]) -> str:
@@ -433,27 +541,39 @@ def _placeholder_legend(pkg: PackageBase, variant: str, values: List[str]) -> st
     return color.colorize(f"({PLACEHOLDER} = {color.cescape(which)})")
 
 
+def _natural(text: str) -> Tuple:
+    """Sort key that orders embedded numbers numerically: cuda_arch=90 before cuda_arch=100."""
+    return tuple(int(part) if part.isdigit() else part for part in re.split(r"(\d+)", text))
+
+
 def dependency_entries(pkg: PackageBase) -> List[Entry]:
     """Entries for the dependencies of ``pkg`` that are possible for its spec.
 
     Runs of dependencies that only forward a variant value, e.g. ``kokkos cuda_arch=X`` when
     ``cuda_arch=X`` for every ``X``, are collapsed into a single entry with a placeholder.
     """
+    # unlike variants, dependency declarations never override each other: every one applies
+    # whenever its condition holds, so all of them are shown
+    by_name: Dict[str, List[Tuple[spack.spec.Spec, spack.dependency.Dependency]]] = {}
+    for when, deps in pkg.dependencies.items():
+        if not pkg.intersects(when):
+            continue
+        for name, dep in deps.items():
+            by_name.setdefault(name, []).append((when, dep))
+
     entries: List[Entry] = []
-    for name in spack.package_base._subkeys(pkg.dependencies):
+    for name in sorted(by_name):
         # group (when, dependency) pairs by what they look like with forwarded values replaced
         Group = List[Tuple[spack.spec.Spec, spack.dependency.Dependency]]
         groups: Dict[Tuple[str, str, int], Group] = collections.OrderedDict()
         forwarded_by_group: Dict[Tuple[str, str, int], List[str]] = {}
-        for when, dep in spack.package_base._definitions(pkg.dependencies, name):
-            if not pkg.intersects(when):
-                continue
+        for when, dep in by_name[name]:
             forwarded = _forwarded_variants(when, dep.spec)
             dep_key, when_key = dep.spec.long_spec, when.long_spec
             for variant in forwarded:
                 needle = when.format(f"{{variants.{variant}}}")
-                dep_key = _replace_variant(dep_key, needle, f"{variant}={PLACEHOLDER}")
-                when_key = _replace_variant(when_key, needle, f"{variant}={PLACEHOLDER}")
+                dep_key = _replace_component(dep_key, needle, f"{variant}={PLACEHOLDER}")
+                when_key = _replace_component(when_key, needle, f"{variant}={PLACEHOLDER}")
             key = (dep_key, when_key, dep.depflag)
             groups.setdefault(key, []).append((when, dep))
             forwarded_by_group[key] = forwarded
@@ -467,7 +587,7 @@ def dependency_entries(pkg: PackageBase) -> List[Entry]:
                 when != spack.spec.Spec(),
                 sorted(when.variants),
                 dep.spec.versions,
-                dep.spec.long_spec,
+                _natural(dep.spec.long_spec),
             )
 
         for key, group in groups.items():
@@ -481,7 +601,7 @@ def dependency_entries(pkg: PackageBase) -> List[Entry]:
                             head=name,
                             attr=_deptypes(dep.depflag),
                             when=when,
-                            sort_key=sort_key(when, dep) + (when.long_spec,),
+                            sort_key=sort_key(when, dep) + (_natural(when.long_spec),),
                         )
                     )
                 continue
@@ -491,8 +611,8 @@ def dependency_entries(pkg: PackageBase) -> List[Entry]:
             for variant in forwarded:
                 needle = when.format(f"{{variants.{variant}}}")
                 replacement = f"{variant}={PLACEHOLDER}"
-                dep_text = _replace_variant(dep_text, needle, replacement)
-                when_text = _replace_variant(when_text, needle, replacement)
+                dep_text = _replace_component(dep_text, needle, replacement)
+                when_text = _replace_component(when_text, needle, replacement)
                 values = [str(w.variants[variant].values[0]) for w, _ in group]
                 legend.append(_placeholder_legend(pkg, variant, values))
             entries.append(
@@ -503,7 +623,7 @@ def dependency_entries(pkg: PackageBase) -> List[Entry]:
                     when=when,
                     when_text=when_text,
                     extra=legend,
-                    sort_key=sort_key(when, dep) + (key[1],),
+                    sort_key=sort_key(when, dep) + (_natural(key[1]),),
                 )
             )
 

@@ -271,7 +271,42 @@ def test_all_shows_urls(pipe):
             "\x1b[0;94m+cuda cuda_arch=*\x1b[0m",
         ),
         ("@1.0 cuda_arch=10 +mpi", "cuda_arch=10", "@1.0 cuda_arch=* +mpi"),
+        # not inside a dependency name
+        ("^py-cuda_arch=10 cuda_arch=10", "cuda_arch=10", "^py-cuda_arch=10 cuda_arch=*"),
     ],
 )
-def test_replace_variant(text, needle, expected):
-    assert spack.cmd.info._replace_variant(text, needle, "cuda_arch=*") == expected
+def test_replace_component(text, needle, expected):
+    assert spack.cmd.info._replace_component(text, needle, "cuda_arch=*") == expected
+
+
+@pytest.mark.parametrize(
+    "values,expected",
+    [
+        (["cuda_arch=80", "cuda_arch=90", "cuda_arch=90a"], "cuda_arch={80,90,90a}"),
+        (["cuda_arch=100", "cuda_arch=101"], "cuda_arch={100,101}"),
+        (["%c", "%cxx", "%fortran"], "%{c,cxx,fortran}"),
+        (["%clang@11.0.1", "%clang@12.0.1"], "%clang@{11.0.1,12.0.1}"),
+        (["@:16", "@18:"], "@{:16,18:}"),
+        (["target=aarch64:", "target=ppc64le:"], "target={aarch64:,ppc64le:}"),
+        (["^pkg-f", "^pkg-g"], "^{pkg-f,pkg-g}"),
+    ],
+)
+def test_braces(values, expected):
+    assert spack.cmd.info._braces(values) == expected
+
+
+def test_merge_conditions(pipe):
+    output = info("many-conditional-deps")
+    # the same dependency under conditions differing in one value is listed once
+    assert re.search(
+        r"^    gpu-dep@:1\s+build, link\s+when @1\.0:\+cuda cuda_arch=\{0,1,2,3,4,5,6,7,8,9,"
+        r"10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29\}$",
+        output,
+        re.M,
+    )
+    assert output.count("gpu-dep@:1") == 1
+    # ... but not when the conditions differ in more than one component
+    output = info("optional-dep-test")
+    assert re.search(
+        r"^    mpi\s+build, link\s+when \^pkg-g\n    mpi\s+build, link\s+when \+mpi", output, re.M
+    )
