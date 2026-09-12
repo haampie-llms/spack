@@ -23,7 +23,7 @@ import re
 import shutil
 import sys
 from argparse import Namespace
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, TextIO, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, TextIO, Tuple, Union
 
 import spack.builder
 import spack.cmd
@@ -94,12 +94,14 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     )
 
     options = [
+        ("--conflicts", print_conflicts.__doc__),
         ("--detectable", print_detectable.__doc__),
         ("--maintainers", print_maintainers.__doc__),
         ("--namespace", print_namespace.__doc__),
         ("--no-dependencies", f"do not {print_dependencies.__doc__}"),
         ("--no-variants", f"do not {print_variants.__doc__}"),
         ("--no-versions", f"do not {print_versions.__doc__}"),
+        ("--patches", print_patches.__doc__),
         ("--phases", print_phases.__doc__),
         ("--tags", print_tags.__doc__),
         ("--tests", print_tests.__doc__),
@@ -159,9 +161,21 @@ class Entry:
         when_text: how the condition is displayed (colorized; may contain placeholders)
         extra: further lines of detail, e.g. the allowed values of a variant (colorized)
         sort_key: entries of a section are listed in this order
+        spec: the spec behind ``name``, if it is one (a dependency, a conflict), so that entries
+            differing in one part of it can be merged
     """
 
-    __slots__ = ("name", "head", "attr", "description", "when", "when_text", "extra", "sort_key")
+    __slots__ = (
+        "name",
+        "head",
+        "attr",
+        "description",
+        "when",
+        "when_text",
+        "extra",
+        "sort_key",
+        "spec",
+    )
 
     def __init__(
         self,
@@ -174,8 +188,10 @@ class Entry:
         when_text: Optional[str] = None,
         extra: Sequence[str] = (),
         sort_key: Any = None,
+        spec: Optional[spack.spec.Spec] = None,
     ) -> None:
         self.name = name
+        self.spec = spec
         self.head = head
         self.attr = attr
         self.description = description
@@ -423,18 +439,28 @@ def _replace_component(text: str, needle: str, replacement: str) -> str:
     possibly colorized spec text, where it is preceded by a blank, a color code or the start of
     the text and not followed by more of the same component (so that ``cuda_arch=10`` does not
     match inside ``cuda_arch=100``)."""
-    pattern = rf"(^|\s|\x1b\[[0-9;]*m){re.escape(needle)}(?![{_COMPONENT_CHARS}])"
+    # a boolean variant (+x, ~x) may also directly follow a version range
+    pattern = rf"(^|\s|\x1b\[[0-9;]*m|(?=[+~])){re.escape(needle)}(?![{_COMPONENT_CHARS}])"
     return re.sub(pattern, lambda m: m.group(1) + replacement, text)
 
 
 def _condition_parts(when: spack.spec.Spec) -> Dict[str, str]:
-    """Split a condition into its components, keyed by what they constrain, each rendered as it
-    appears in the plain string of the spec."""
+    """Split a spec into its components, keyed by what they constrain, each rendered as it
+    appears in the plain string of the spec. Boolean variants form one component (``+a~b``)."""
     parts: Dict[str, str] = {}
+    if when.name:
+        parts["package"] = when.name
     if when.versions != spack.version.any_version:
         parts["version"] = when.format("{@versions}")
+    bools = []
     for name in sorted(when.variants):
-        parts[f"variant:{name}"] = str(when.variants[name])
+        value = when.variants[name]
+        if value.type == spack.variant.VariantType.BOOL:
+            bools.append(str(value))
+        else:
+            parts[f"variant:{name}"] = str(value)
+    if bools:
+        parts["bools"] = "".join(bools)
     if when.architecture is not None:
         for attr in ("platform", "os", "target"):
             value = getattr(when.architecture, attr)
@@ -457,74 +483,110 @@ def _braces(values: List[str]) -> str:
         while not value.startswith(prefix):
             prefix = prefix[:-1]
     # cut the shared prefix back to a separator so that gfx1010/gfx1011 don't become gfx101{0,1}
-    cut = max(prefix.rfind(c) for c in "=@%^")
+    cut = max(prefix.rfind(c) for c in "=@%^+~")
     prefix = prefix[: cut + 1] if cut >= 0 else ""
     return prefix + "{" + ",".join(v[len(prefix) :] for v in values) + "}"
 
 
-class _MergedCondition:
-    """Entries whose conditions differ in exactly one component, being merged into one."""
+def _entry_parts(entry: Entry) -> Dict[str, str]:
+    """Components of an entry's name (if it is a spec) and of its condition."""
+    parts: Dict[str, str] = {}
+    if entry.spec is not None:
+        parts.update((f"name:{k}", v) for k, v in _condition_parts(entry.spec).items())
+    else:
+        parts["name"] = color.csub(entry.name)
+    if entry.when is not None:
+        parts.update((f"when:{k}", v) for k, v in _condition_parts(entry.when).items())
+    return parts
 
-    __slots__ = ("entry", "parts", "varying", "values")
+
+def _bool_names(bools: str) -> List[str]:
+    return re.split(r"[+~]", bools)[1:]
+
+
+#: A dependency alternative that is simple enough to be listed in braces: one `%name@version`
+#: or `^name@version`, nothing more
+_SIMPLE_DEP = re.compile(r"^[%^][A-Za-z0-9_.-]+(@[A-Za-z0-9_.:,=-]+)?$")
+
+
+class _MergedCondition:
+    """Entries whose name or condition differ in exactly one component, being merged into one."""
+
+    __slots__ = ("entries", "parts", "varying", "values")
 
     def __init__(self, entry: Entry, parts: Dict[str, str]) -> None:
-        self.entry = entry
+        self.entries = [entry]
         self.parts = parts
         self.varying: Optional[str] = None
         self.values = [parts]
 
-    def absorb(self, parts: Dict[str, str]) -> bool:
+    def absorb(self, entry: Entry, parts: Dict[str, str]) -> bool:
         if parts.keys() != self.parts.keys():
             return False
         differing = [k for k in parts if parts[k] != self.parts[k]]
         if len(differing) != 1 or (self.varying is not None and differing[0] != self.varying):
             return False
         key = differing[0]
-        if key.startswith("variant:") and parts[key][0] in "+~":  # keep +x and ~x apart
+        # the dependency name is what a reader looks up: never fold two packages into one row
+        if key in ("name", "name:package"):
+            return False
+        # +x and ~x of the same variants are not alternatives of one condition, but its absence
+        if key.endswith("bools") and _bool_names(parts[key]) == _bool_names(self.parts[key]):
+            return False
+        # %cuda@:11.0.2~foo target=ppc64le: and %cuda@:11.0.3~foo target=x86_64: in braces would
+        # be unreadable; only merge simple alternatives like %clang@11 and %clang@12
+        if key.endswith("deps") and not all(
+            _SIMPLE_DEP.match(v) for v in (parts[key], self.parts[key])
+        ):
             return False
         self.varying = key
         self.values.append(parts)
+        self.entries.append(entry)
         return True
 
-    def merged_entry(self) -> Entry:
-        entry = self.entry
+    def result(self) -> List[Entry]:
+        """The merged entry, or the original entries if the merge cannot be rendered."""
+        first = self.entries[0]
         if self.varying is None:
-            return entry
+            return [first]
         needle = self.parts[self.varying]
         alternatives = _braces([parts[self.varying] for parts in self.values])
-        entry.when_text = _replace_component(entry.when_text, needle, alternatives)
-        return entry
+        text = first.name if self.varying.startswith("name:") else first.when_text
+        replaced = _replace_component(text, needle, alternatives)
+        if replaced == text:  # the component was not found as rendered: don't hide anything
+            return self.entries
+        if self.varying.startswith("name:"):
+            first.name = replaced
+        else:
+            first.when_text = replaced
+        return [first]
 
 
 def merge_conditions(entries: List[Entry]) -> List[Entry]:
-    """Merge entries that say the same thing under conditions that differ in one component only,
-    e.g. ``cuda@12.9: when cuda_arch=103`` and ``cuda@12.9: when cuda_arch=103a`` into
-    ``cuda@12.9: when cuda_arch={103,103a}``. Order is that of the first entry of each merge."""
+    """Merge entries that differ in one component of their name or condition only, e.g.
+    ``cuda@12.9: when cuda_arch=103`` and ``cuda@12.9: when cuda_arch=103a`` into
+    ``cuda@12.9: when cuda_arch={103,103a}``, or the conflicts ``+amesos when ~epetra`` and
+    ``+aztec when ~epetra`` into ``+{amesos,aztec} when ~epetra``. Order is that of the first
+    entry of each merge."""
     merges: Dict[Tuple, List[_MergedCondition]] = {}
-    result: List[Entry] = []
-    merged_entries: List[Tuple[Entry, _MergedCondition]] = []
+    result: List[Union[Entry, _MergedCondition]] = []
     for entry in entries:
-        if entry.when is None or PLACEHOLDER in entry.when_key:
+        if PLACEHOLDER in entry.when_key or (entry.when is None and entry.spec is None):
             result.append(entry)
             continue
-        key = (
-            color.csub(entry.name),
-            color.csub(entry.attr),
-            entry.description,
-            tuple(entry.extra),
-        )
-        parts = _condition_parts(entry.when)
+        key = (color.csub(entry.attr), entry.description, tuple(entry.extra))
+        parts = _entry_parts(entry)
         for merge in merges.get(key, []):
-            if merge.absorb(parts):
+            if merge.absorb(entry, parts):
                 break
         else:
             merge = _MergedCondition(entry, parts)
             merges.setdefault(key, []).append(merge)
-            result.append(entry)
-            merged_entries.append((entry, merge))
-    for entry, merge in merged_entries:
-        merge.merged_entry()
-    return result
+            result.append(merge)
+    flat: List[Entry] = []
+    for item in result:
+        flat.extend(item.result() if isinstance(item, _MergedCondition) else [item])
+    return flat
 
 
 def _placeholder_legend(pkg: PackageBase, variant: str, values: List[str]) -> str:
@@ -604,6 +666,7 @@ def dependency_entries(pkg: PackageBase) -> List[Entry]:
                             head=name,
                             attr=_deptypes(dep.depflag),
                             when=when,
+                            spec=dep.spec,
                             sort_key=sort_key(when, dep) + (_natural(when.long_spec),),
                         )
                     )
@@ -664,6 +727,97 @@ def print_dependency_suggestion(pkg: PackageBase, entries: List[Entry]) -> None:
             f"spack info {spec.format(color=color.get_color_when())}",
             format="y",
         )
+
+
+# --- Conflicts, requirements and patches --------------------------------------------------------
+
+
+def _message(pkg: PackageBase, msg: Optional[str]) -> str:
+    """Directive messages are stored prefixed with the package name; drop it."""
+    if not msg:
+        return ""
+    prefix = f"{pkg.name}: "
+    return msg[len(prefix) :] if msg.startswith(prefix) else msg
+
+
+def conflict_entries(pkg: PackageBase) -> List[Entry]:
+    entries = []
+    for when, conflicts in pkg.conflicts.items():
+        if not pkg.intersects(when):
+            continue
+        for spec, msg in conflicts:
+            entries.append(
+                Entry(_spec_text(spec), spec=spec, when=when, description=_message(pkg, msg))
+            )
+    entries.sort(key=lambda e: (_natural(color.csub(e.name)), _natural(e.when_key)))
+    return entries
+
+
+def requirement_entries(pkg: PackageBase) -> List[Entry]:
+    entries = []
+    for when, requirements in pkg.requirements.items():
+        if not pkg.intersects(when):
+            continue
+        for specs, policy, msg in requirements:
+            if len(specs) == 1:
+                name, spec = _spec_text(specs[0]), specs[0]
+            else:
+                kind = "one of" if policy == "one_of" else "any of"
+                name, spec = f"{kind}: " + ", ".join(_spec_text(s) for s in specs), None
+            entries.append(Entry(name, spec=spec, when=when, description=_message(pkg, msg)))
+    entries.sort(key=lambda e: (_natural(color.csub(e.name)), _natural(e.when_key)))
+    return entries
+
+
+def patch_entries(pkg: PackageBase) -> List[Entry]:
+    """Patches in the order they are declared, which is the order they are applied in."""
+    applicable = [
+        (patch, when)
+        for when, patches in pkg.patches.items()
+        if pkg.intersects(when)
+        for patch in patches
+    ]
+    applicable.sort(key=lambda pw: pw[0].ordering_key)
+    entries = []
+    for patch, when in applicable:
+        name = str(getattr(patch, "relative_path", None) or getattr(patch, "url", ""))
+        extra = []
+        if patch.level != 1:
+            extra.append(f"-p{patch.level}")
+        if patch.working_dir and patch.working_dir != ".":
+            extra.append(f"in {patch.working_dir}")
+        entries.append(Entry(color.cescape(name), when=when, extra=extra))
+    return entries
+
+
+def print_conflicts(pkg: PackageBase, args: Namespace) -> None:
+    """output conflicts and requirements"""
+    print_section("Conflicts", conflict_entries(pkg), args.layout, args.by_name)
+    requirements = requirement_entries(pkg)
+    if requirements:
+        print_section("Requirements", requirements, args.layout, args.by_name)
+
+
+def print_patches(pkg: PackageBase, args: Namespace) -> None:
+    """output patches"""
+    print_section("Patches", patch_entries(pkg), args.layout, args.by_name)
+
+
+def print_counts(pkg: PackageBase, args: Namespace) -> None:
+    """Mention how many conflicts, requirements and patches there are when they are not listed."""
+    if not (args.all or args.conflicts):
+        counts = []
+        if pkg.conflicts:
+            n = len(conflict_entries(pkg))
+            counts.append(f"{n} conflict{'s' if n != 1 else ''}")
+        if pkg.requirements:
+            n = len(requirement_entries(pkg))
+            counts.append(f"{n} requirement{'s' if n != 1 else ''}")
+        if counts:
+            args.rows.append(("Constraints", ", ".join(counts) + "  (list with --conflicts)"))
+    if not (args.all or args.patches) and pkg.patches:
+        n = len(patch_entries(pkg))
+        args.rows.append(("Patches", f"{n}  (list with --patches)"))
 
 
 # --- Variants -----------------------------------------------------------------------------------
@@ -913,6 +1067,7 @@ def info(parser: argparse.ArgumentParser, args: Namespace) -> None:
         (args.all or args.detectable, print_detectable),
         (args.all or args.phases, print_phases),
         (args.all or args.virtuals, print_virtuals),
+        (True, print_counts),
         (True, print_installed),
         (True, print_configured),
     ]
@@ -931,6 +1086,10 @@ def info(parser: argparse.ArgumentParser, args: Namespace) -> None:
     if args.all or not args.no_dependencies:
         dependencies = dependency_entries(pkg)
         print_section("Dependencies", dependencies, args.layout, args.by_name)
+    if args.all or args.conflicts:
+        print_conflicts(pkg, args)
+    if args.all or args.patches:
+        print_patches(pkg, args)
     if args.all or args.tests:
         print_tests(pkg, args)
 

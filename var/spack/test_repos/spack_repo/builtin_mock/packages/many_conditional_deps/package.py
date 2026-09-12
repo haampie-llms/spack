@@ -28,3 +28,8 @@ class ManyConditionalDeps(Package):
     # the same constraint under conditions that differ in one value only: merged into one line
     for i in range(30):
         depends_on("gpu-dep@:1", when=f"@1.0: +cuda cuda_arch={i}")
+
+    # conflicts sharing a condition are merged into one line too
+    conflicts("+cuda", when="@:0.9")
+    conflicts("+rocm", when="@:0.9")
+    conflicts("+cuda", when="+rocm", msg="pick one GPU backend")

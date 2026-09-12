@@ -331,3 +331,42 @@ def test_externals_and_preferences_rows(pipe, config):
     # only externals matching the spec
     assert "externaltool@1.0" not in info("externaltool@0.9")
     assert "Externals:" not in info("mpich")
+
+
+def test_conflicts_requirements_patches(pipe):
+    output = info("bowtie")
+    assert re.search(r"^Constraints:\s+3 conflicts  \(list with --conflicts\)$", output, re.M)
+    assert "Conflicts:" not in output
+
+    output = info("--conflicts", "bowtie")
+    assert re.search(
+        r"^Conflicts:\n"
+        r"    %gcc\s+when @1\.3\n"
+        r"    %gcc@:4\.5\.0\s+when @1\.2\.2\n"
+        r"    %gcc@:10\.2\.1\s+when @:1\.2\.9\n",
+        output,
+        re.M,
+    )
+    # conflicts are filtered by the spec like everything else
+    assert "%gcc@:4.5.0" not in info("--conflicts", "bowtie@1.4")
+
+    output = info("--conflicts", "requires-clang")
+    assert re.search(
+        r"^Requirements:\n    %clang\s+can only be compiled with Clang$", output, re.M
+    )
+
+    output = info("patch")
+    assert re.search(r"^Patches:\s+4  \(list with --patches\)$", output, re.M)
+    output = info("--patches", "patch")
+    assert re.search(
+        r"^Patches:\n    foo\.patch\n    bar\.patch\s+when @2:\n    baz\.patch\n"
+        r"    biz\.patch\s+when @1\.0\.1:1\.0\.2\n",
+        output,
+        re.M,
+    )
+
+
+def test_merge_conflicts_sharing_a_condition(pipe):
+    output = info("--conflicts", "many-conditional-deps")
+    assert re.search(r"^    \+\{cuda,rocm\}\s+when @:0\.9$", output, re.M)
+    assert re.search(r"^    \+cuda\s+pick one GPU backend\s+when \+rocm$", output, re.M)
