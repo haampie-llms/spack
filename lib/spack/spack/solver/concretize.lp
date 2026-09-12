@@ -1043,6 +1043,66 @@ error(100, "{0} and {1} must depend on the same {2}", ExtensionParent, Extension
 
 
 %-----------------------------------------------------------------------------
+% Conditions inherited from base classes
+%-----------------------------------------------------------------------------
+% A base class with directives has its conditions emitted once, as mixin_fact/2 and as
+% mixin_condition_requirement / mixin_imposed_constraint, in which the constant mixin_self
+% stands for the inheriting package. A package P with pkg_fact(P, mixin(M)) gets the facts it
+% would get if it declared the directives itself, with ids m(ID, P) so that every id still
+% belongs to exactly one package.
+
+mixin_condition(P, M, C) :- pkg_fact(P, mixin(M)), mixin_fact(M, condition(C)).
+mixin_trigger(P, T)      :- pkg_fact(P, mixin(M)), mixin_fact(M, trigger_id(T)).
+mixin_effect(P, E)       :- pkg_fact(P, mixin(M)), mixin_fact(M, effect_id(E, _)).
+
+pkg_fact(P, condition(m(C, P))) :- mixin_condition(P, _, C).
+condition_reason(m(C, P), Msg) :- mixin_condition(P, _, C), condition_reason(C, Msg).
+pkg_fact(P, condition_trigger(m(C, P), m(T, P))) :- mixin_condition(P, M, C), mixin_fact(M, condition_trigger(C, T)).
+pkg_fact(P, condition_effect(m(C, P), m(E, P))) :- mixin_condition(P, M, C), mixin_fact(M, condition_effect(C, E)).
+pkg_fact(P, trigger_id(m(T, P))) :- mixin_trigger(P, T).
+pkg_fact(Owner, effect_id(m(E, P))) :- pkg_fact(P, mixin(M)), mixin_fact(M, effect_id(E, Owner)).
+
+condition_requirement(m(T, P), Name, P)             :- mixin_trigger(P, T), mixin_condition_requirement(T, Name, mixin_self).
+condition_requirement(m(T, P), Name, A1)            :- mixin_trigger(P, T), mixin_condition_requirement(T, Name, A1), A1 != mixin_self.
+condition_requirement(m(T, P), Name, P, A2)         :- mixin_trigger(P, T), mixin_condition_requirement(T, Name, mixin_self, A2).
+condition_requirement(m(T, P), Name, A1, A2)        :- mixin_trigger(P, T), mixin_condition_requirement(T, Name, A1, A2), A1 != mixin_self.
+condition_requirement(m(T, P), Name, P, A2, A3)     :- mixin_trigger(P, T), mixin_condition_requirement(T, Name, mixin_self, A2, A3).
+condition_requirement(m(T, P), Name, A1, A2, A3)    :- mixin_trigger(P, T), mixin_condition_requirement(T, Name, A1, A2, A3), A1 != mixin_self.
+condition_requirement(m(T, P), Name, P, A2, A3, A4) :- mixin_trigger(P, T), mixin_condition_requirement(T, Name, mixin_self, A2, A3, A4).
+condition_requirement(m(T, P), Name, A1, A2, A3, A4):- mixin_trigger(P, T), mixin_condition_requirement(T, Name, A1, A2, A3, A4), A1 != mixin_self.
+
+imposed_constraint(m(E, P), Name, P)             :- mixin_effect(P, E), mixin_imposed_constraint(E, Name, mixin_self).
+imposed_constraint(m(E, P), Name, A1)            :- mixin_effect(P, E), mixin_imposed_constraint(E, Name, A1), A1 != mixin_self.
+imposed_constraint(m(E, P), Name, P, A2)         :- mixin_effect(P, E), mixin_imposed_constraint(E, Name, mixin_self, A2).
+imposed_constraint(m(E, P), Name, A1, A2)        :- mixin_effect(P, E), mixin_imposed_constraint(E, Name, A1, A2), A1 != mixin_self.
+imposed_constraint(m(E, P), Name, P, A2, A3)     :- mixin_effect(P, E), mixin_imposed_constraint(E, Name, mixin_self, A2, A3).
+imposed_constraint(m(E, P), Name, A1, A2, A3)    :- mixin_effect(P, E), mixin_imposed_constraint(E, Name, A1, A2, A3), A1 != mixin_self.
+imposed_constraint(m(E, P), Name, P, A2, A3, A4) :- mixin_effect(P, E), mixin_imposed_constraint(E, Name, mixin_self, A2, A3, A4).
+imposed_constraint(m(E, P), Name, A1, A2, A3, A4):- mixin_effect(P, E), mixin_imposed_constraint(E, Name, A1, A2, A3, A4), A1 != mixin_self.
+
+% conflict(C1, C2, Msg): C1 is the condition on the conflicting spec, which belongs to another
+% package unless it is anonymous (conflict_own), C2 the condition that triggers the conflict.
+pkg_fact(P, conflict(C1, m(C2, P), Msg)) :- pkg_fact(P, mixin(M)), mixin_fact(M, conflict(C1, C2, Msg)).
+pkg_fact(P, conflict(m(C1, P), m(C2, P), Msg)) :- pkg_fact(P, mixin(M)), mixin_fact(M, conflict_own(C1, C2, Msg)).
+pkg_fact(P, provider_condition(m(C, P), Virtual)) :- pkg_fact(P, mixin(M)), mixin_fact(M, provider_condition(C, Virtual)).
+pkg_fact(P, provided_together(m(C, P), SetID, Virtual)) :- pkg_fact(P, mixin(M)), mixin_fact(M, provided_together(C, SetID, Virtual)).
+
+% A package extends a dependency if it says so, whichever class declared the dependency
+attr("extends", node(X, P), Dependency)
+  :- attr("dependency_holds", node(X, P), Dependency, _),
+     pkg_fact(P, extends(Dependency)).
+
+#defined mixin_fact/2.
+#defined mixin_condition_requirement/3.
+#defined mixin_condition_requirement/4.
+#defined mixin_condition_requirement/5.
+#defined mixin_condition_requirement/6.
+#defined mixin_imposed_constraint/3.
+#defined mixin_imposed_constraint/4.
+#defined mixin_imposed_constraint/5.
+#defined mixin_imposed_constraint/6.
+
+%-----------------------------------------------------------------------------
 % Conflicts
 %-----------------------------------------------------------------------------
 

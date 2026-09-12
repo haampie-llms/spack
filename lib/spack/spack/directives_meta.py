@@ -8,12 +8,51 @@ from typing import Any, Callable, Dict, Iterator, List, Set, Tuple, Type, TypeVa
 
 from spack.vendor.typing_extensions import ParamSpec
 
+import spack.dependency
 import spack.error
 import spack.repo
 import spack.spec
 
 P = ParamSpec("P")
 R = TypeVar("R")
+
+
+def _merge_dependencies(merged: dict, own: dict) -> None:
+    for when, own_deps in own.items():
+        deps = merged.setdefault(when, {})
+        for name, dep in own_deps.items():
+            existing = deps.get(name)
+            if existing is None:
+                deps[name] = dep
+            else:
+                combined = spack.dependency.merge_dependencies(existing, dep)
+                if combined.patches is None:
+                    combined = spack.dependency.intern_dependency(combined)
+                deps[name] = combined
+
+
+def _merge_lists(merged: dict, own: dict) -> None:
+    for when, items in own.items():
+        merged.setdefault(when, []).extend(items)
+
+
+def _merge_sets(merged: dict, own: dict) -> None:
+    for when, items in own.items():
+        merged.setdefault(when, set()).update(items)
+
+
+#: The directive dictionaries the solver reads per class: each class in the MRO holds what its own
+#: body declared (its "own" dictionary, populated once, see :func:`own_dict`), instead of every
+#: subclass re-running the directives of all its base classes. The dictionary of a subclass is
+#: the merge of those, built on access; the function for each dictionary is how a repeated entry
+#: combines with an earlier one, and must do what re-running the directives would.
+SHARDED_DICTS: Dict[str, Callable[[dict, dict], None]] = {
+    "dependencies": _merge_dependencies,
+    "extendees": dict.update,
+    "conflicts": _merge_lists,
+    "provided": _merge_sets,
+    "provided_together": _merge_lists,
+}
 
 #: Names of possible directives. This list is mostly populated using the @directive decorator.
 #: Some directives leverage others and in that case are not automatically added.
@@ -71,6 +110,9 @@ class DirectiveMeta(type):
             attr_dict[f"_{dict_name}"] = None
             # Descriptor to lazily initialize and populate the dictionary
             attr_dict[dict_name] = DirectiveMeta._get_descriptor(dict_name)
+            if dict_name in SHARDED_DICTS:
+                # Where the entries declared in this class's own body will be stored
+                attr_dict[f"_own_{dict_name}"] = None
 
         return super(DirectiveMeta, cls).__new__(cls, name, bases, attr_dict)
 
@@ -91,13 +133,18 @@ class DirectiveMeta(type):
             DirectiveMeta._dict_to_directives[d].append(name)
 
     @staticmethod
+    def directive_classes(cls: type) -> Iterator[type]:
+        """The classes in the MRO of ``cls`` that declare directives, base classes first."""
+        for klass in reversed(cls.__mro__):
+            if isinstance(klass, DirectiveMeta) and klass.__dict__["_directives_to_be_executed"]:
+                yield klass
+
+    @staticmethod
     def _queued_directives(cls: type, name: str) -> Iterator[Callable]:
         """Directives of the given name queued for cls: base classes first, each class in the
         MRO once."""
-        for klass in reversed(cls.__mro__):
-            own = klass.__dict__.get("_directives_to_be_executed")
-            if own:
-                yield from own.get(name, ())
+        for klass in DirectiveMeta.directive_classes(cls):
+            yield from klass.__dict__["_directives_to_be_executed"].get(name, ())
 
     @staticmethod
     def _get_descriptor(name: str) -> "DirectiveDictDescriptor":
@@ -175,12 +222,17 @@ class DirectiveDictDescriptor:
     def __init__(self, name: str):
         self.name = name
         self.private_name = f"_{name}"
+        self.own_name = f"_own_{name}"
         self.dicts_to_init, self.directives_to_run = DirectiveMeta._get_execution_plan(name)
 
     def __get__(self, obj, objtype=None):
         val = getattr(objtype, self.private_name)
         if val is not None:
+            # populated; or, for a sharded dictionary, being populated by _populate_own()
             return val
+
+        if self.name in SHARDED_DICTS:
+            return self.merged(objtype)
 
         # The None value is a sentinel for "not yet initialized".
         for dictionary in self.dicts_to_init:
@@ -193,6 +245,69 @@ class DirectiveDictDescriptor:
                 directive(objtype)
 
         return getattr(objtype, self.private_name)
+
+    def merged(self, objtype: type) -> dict:
+        """The dictionary of a sharded group for ``objtype``: the own dictionaries of the classes
+        in its MRO merged, base classes first, as running their directives in that order would.
+        Built on every access and never stored, so that the own dictionaries are the only state;
+        the solver reads those directly."""
+        merged: dict = {}
+        merge = SHARDED_DICTS[self.name]
+        for klass in DirectiveMeta.directive_classes(objtype):
+            merge(merged, self.own_dict(klass))
+        return merged
+
+    def own_dict(self, cls: type) -> dict:
+        """The dictionary holding only what ``cls``'s own body declared. Populated on first use,
+        together with the other dictionaries of its group, by running the directives queued for
+        ``cls`` alone, so that a base class runs them once for all its subclasses."""
+        own = cls.__dict__.get(self.own_name)
+        return own if own is not None else self._populate_own(cls)[self.name]
+
+    def own_dicts(self, cls: type) -> Dict[str, dict]:
+        """The own dictionaries of the whole group, by name; see :meth:`own_dict`."""
+        if cls.__dict__.get(self.own_name) is None:
+            return self._populate_own(cls)
+        return {d: cls.__dict__[f"_own_{d}"] for d in self.dicts_to_init}
+
+    def _populate_own(self, cls: type) -> Dict[str, dict]:
+        # Run the class's own directives with the group's dictionaries pointing at fresh ones, so
+        # that directives writing to e.g. ``pkg.dependencies`` fill those in.
+        own: Dict[str, dict] = {dictionary: {} for dictionary in self.dicts_to_init}
+        for dictionary, value in own.items():
+            setattr(cls, f"_{dictionary}", value)
+        try:
+            queued = cls.__dict__["_directives_to_be_executed"]
+            for directive_name in self.directives_to_run:
+                for directive in queued.get(directive_name, ()):
+                    directive(cls)
+        finally:
+            for dictionary in own:
+                setattr(cls, f"_{dictionary}", None)
+        for dictionary, value in own.items():
+            setattr(cls, f"_own_{dictionary}", value)
+        return own
+
+
+def own_dict(cls: type, name: str) -> dict:
+    """Directive dictionary ``name`` holding only what ``cls``'s own body declared, see
+    :meth:`DirectiveDictDescriptor.own_dict`."""
+    return DirectiveMeta._get_descriptor(name).own_dict(cls)
+
+
+def own_dicts(cls: type, name: str) -> Dict[str, dict]:
+    """The own dictionaries of the group containing directive dictionary ``name`` for ``cls``,
+    by name; see :meth:`DirectiveDictDescriptor.own_dict`."""
+    return DirectiveMeta._get_descriptor(name).own_dicts(cls)
+
+
+def own_items(cls: type, name: str) -> Iterator[Tuple[Any, Any]]:
+    """The entries of directive dictionary ``name`` declared by ``cls`` and its base classes,
+    base classes first, as ``(when, value)`` pairs. Unlike the merged dictionary this builds
+    nothing, but the same ``when`` can come up once per class."""
+    descriptor = DirectiveMeta._get_descriptor(name)
+    for klass in DirectiveMeta.directive_classes(cls):
+        yield from descriptor.own_dict(klass).items()
 
 
 class directive:
