@@ -21,6 +21,7 @@ import spack.version as vn
 from spack.enums import PropagationPolicy
 from spack.error import SpecError, UnsatisfiableSpecError
 from spack.spec import ArchSpec, DependencySpec, Spec, SpecFormatSigilError, SpecFormatStringError
+from spack.util.tty import color
 from spack.util.tty.color import colorize
 from spack.variant import (
     InvalidVariantValueError,
@@ -3419,3 +3420,13 @@ def test_git_ref_spec_operations_are_pure(monkeypatch):
         assert str(spec) == spec_str
         assert spec.copy() == spec == Spec.from_dict(spec.to_dict())
         assert hash(spec) == hash(Spec(spec_str))
+
+
+def test_colored_anonymous_spec_has_no_leading_blank():
+    """Key-value variants are rendered with a blank in front; for an anonymous spec that blank
+    must not end up inside the color codes, or stripping the result does nothing."""
+    spec = Spec("build_system=cmake target=x86_64:")
+    colored = spec.format(color=True)
+    assert colored.startswith("\x1b[")
+    assert color.csub(colored) == str(spec) == "build_system=cmake target=x86_64:"
+    assert color.csub(spec.clong_spec) == spec.long_spec

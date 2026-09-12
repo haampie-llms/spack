@@ -4376,7 +4376,11 @@ class Spec:
             # escape and add the sigil here to avoid multiple concatenations
             if sigil == "@":
                 sigil = "@@"
-            return clr.colorize(f"{color_fmt}{sigil}{clr.cescape(string)}@.", color=color)
+            # keep leading blanks (as in " build_system=cmake") outside of the color codes, so
+            # that the result of an anonymous spec can be stripped like the plain one
+            stripped = string.lstrip()
+            lead = string[: len(string) - len(stripped)]
+            return lead + clr.colorize(f"{color_fmt}{sigil}{clr.cescape(stripped)}@.", color=color)
 
         def format_attribute(match_object: Match) -> str:
             esc, sig, dep, hash, hash_len, attribute, close_brace, unmatched_close_brace = (

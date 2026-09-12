@@ -233,9 +233,7 @@ def _spec_text(spec: Optional[spack.spec.Spec]) -> str:
     """Colorized (if enabled) string for a spec, empty for no spec or an empty spec."""
     if spec is None or spec == spack.spec.Spec():
         return ""
-    # an anonymous spec with only key=value variants renders with a leading blank inside the
-    # color codes, e.g. "\x1b[0;94m build_system=cmake\x1b[0m"
-    return re.sub(r"^((?:\x1b\[[0-9;]*m)*)\s+", r"\1", spec.clong_spec)
+    return spec.clong_spec
 
 
 def _faint(text: str) -> str:
