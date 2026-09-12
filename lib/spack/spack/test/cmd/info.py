@@ -134,14 +134,13 @@ def test_header_and_labels(pipe):
             ],
             [r"cuda_arch=7\s+build"],
         ),
-        # many dependencies conditional on the same variant: suggest turning it off
-        (
-            ["many-conditional-deps"],
-            ["for a simpler view, try:\n  spack info many-conditional-deps~cuda"],
-            [],
-        ),
-        (["many-conditional-deps ~rocm"], ["spack info many-conditional-deps~cuda~rocm"], []),
-        (["many-conditional-deps ~cuda"], [], ["for a simpler view"]),
+        # languages are not listed as dependencies but in the label block
+        (["bowtie"], [r"\nLanguages:\s+c\n", r"Dependencies:\n    None"], [r"\n    c\s+build"]),
+        (["gcc"], [r"\nLanguages:\s+c, cxx\n"], []),
+        (["many-conditional-deps"], [r"\nLanguages:\s+c, fortran \(when \+fortran\)\n"], []),
+        (["many-conditional-deps~fortran"], [r"\nLanguages:\s+c\n"], []),
+        # virtual dependencies are marked
+        (["optional-dep-test"], [r"\n    mpi \(virtual\)\s+build, link"], []),
         # Ensure spack info knows that build_system is a single value variant
         (
             ["dual-cmake-autotools"],
@@ -308,7 +307,10 @@ def test_merge_conditions(pipe):
     # ... but not when the conditions differ in more than one component
     output = info("optional-dep-test")
     assert re.search(
-        r"^    mpi\s+build, link\s+when \^pkg-g\n    mpi\s+build, link\s+when \+mpi", output, re.M
+        r"^    mpi \(virtual\)\s+build, link\s+when \^pkg-g\n"
+        r"    mpi \(virtual\)\s+build, link\s+when \+mpi",
+        output,
+        re.M,
     )
 
 
@@ -370,3 +372,11 @@ def test_merge_conflicts_sharing_a_condition(pipe):
     output = info("--conflicts", "many-conditional-deps")
     assert re.search(r"^    \+\{cuda,rocm\}\s+when @:0\.9$", output, re.M)
     assert re.search(r"^    \+cuda\s+pick one GPU backend\s+when \+rocm$", output, re.M)
+
+
+def test_terminal_layout_keeps_when_with_its_condition(terminal):
+    """An unbreakable condition longer than the remaining width stays on the `when` line."""
+    output = info("many-conditional-deps")
+    # the brace group is too long for the line and wraps as a whole, `when` stays put
+    assert re.search(r"when @1\.0:\+cuda\n\s+cuda_arch=\{0,1,2,", output)
+    assert not re.search(r"when\n", output)

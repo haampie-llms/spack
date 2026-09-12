@@ -14,6 +14,10 @@ class ManyConditionalDeps(Package):
 
     variant("cuda", description="enable foo dependencies", default=True)
     variant("rocm", description="enable bar dependencies", default=True)
+    variant("fortran", description="enable fortran bindings", default=False)
+
+    depends_on("c", type="build")
+    depends_on("fortran", type="build", when="+fortran")
 
     for i in range(30):
         depends_on(f"gpu-dep +cuda cuda_arch={i}", when=f"+cuda cuda_arch={i}")

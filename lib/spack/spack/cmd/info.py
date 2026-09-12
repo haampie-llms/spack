@@ -40,7 +40,6 @@ import spack.variant
 import spack.version
 from spack.cmd.common import arguments
 from spack.package_base import PackageBase
-from spack.util import tty
 from spack.util.tty import color
 from spack.util.tty.colify import colify
 
@@ -64,8 +63,8 @@ MAX_NAME_WIDTH_IN_PIPE = 48
 #: Placeholder for a variant value that is forwarded from the package to a dependency, e.g. in
 #: ``kokkos cuda_arch=* when cuda_arch=*``
 PLACEHOLDER = "*"
-#: Suggest disabling a boolean variant when at least this many dependencies are conditional on it
-SUGGESTION_THRESHOLD = 20
+#: Language virtuals, listed in the label block rather than among the dependencies
+LANGUAGES = ("c", "cxx", "fortran")
 
 
 def setup_parser(subparser: argparse.ArgumentParser) -> None:
@@ -175,6 +174,7 @@ class Entry:
         "extra",
         "sort_key",
         "spec",
+        "merged",
     )
 
     def __init__(
@@ -192,6 +192,7 @@ class Entry:
     ) -> None:
         self.name = name
         self.spec = spec
+        self.merged = False
         self.head = head
         self.attr = attr
         self.description = description
@@ -205,14 +206,15 @@ class Entry:
         """Plain text of the condition, for grouping and sorting."""
         return color.csub(self.when_text)
 
-    def fields(self, show_when: bool) -> List[str]:
-        """The text fields after the name and attribute columns, in display order."""
+    def fields(self, show_when: bool) -> List[Tuple[str, str]]:
+        """The text fields after the name and attribute columns, in display order, as (lead,
+        text) pairs: the lead (``when``) is never separated from the text by wrapping."""
         result = []
         if self.description:
-            result.append(self.description)
+            result.append(("", self.description))
         if show_when and self.when_text:
-            result.append(color.colorize(f"{WHEN_COLOR}{{when}} ") + self.when_text)
-        result.extend(self.extra)
+            result.append((color.colorize(f"{WHEN_COLOR}{{when}} "), self.when_text))
+        result.extend(("", extra) for extra in self.extra)
         return result
 
 
@@ -310,7 +312,7 @@ class EntryPrinter:
             else:
                 self._print_line(name, entry.attr, entry.fields(show_when))
 
-    def _print_line(self, name: str, attr: str, fields: List[str]) -> None:
+    def _print_line(self, name: str, attr: str, fields: List[Tuple[str, str]]) -> None:
         """One line per entry. Only a description with explicit line breaks (detailed help for a
         variant, say) continues on further lines, indented; the first line still carries the
         condition and the values."""
@@ -318,13 +320,13 @@ class EntryPrinter:
         if self.attr_width:
             columns.append(_ljust(attr, self.attr_width))
         continuation: List[str] = []
-        for i, field in enumerate(fields):
+        for i, (lead, field) in enumerate(fields):
             lines = [" ".join(line.split()) for line in field.split("\n")]
-            columns.append(lines[0])
+            columns.append(lead + lines[0])
             if i == 0:
                 continuation = lines[1:]
             else:
-                columns[-1] = " ".join(lines)
+                columns[-1] = lead + " ".join(lines)
         text_column = self.indent + self.name_width + GUTTER
         if self.attr_width:
             text_column += self.attr_width + GUTTER
@@ -332,7 +334,7 @@ class EntryPrinter:
         for line in continuation:
             self.out.write(" " * text_column + line + "\n")
 
-    def _print_tty(self, name: str, attr: str, fields: List[str]) -> None:
+    def _print_tty(self, name: str, attr: str, fields: List[Tuple[str, str]]) -> None:
         """Name and attribute in their columns, then the fields one below the other, wrapped."""
         text_column = self.indent + self.name_width + GUTTER
         if self.attr_width:
@@ -351,8 +353,8 @@ class EntryPrinter:
             return
 
         indent = " " * text_column
-        for i, field in enumerate(fields):
-            first_indent = prefix if i == 0 else indent
+        for i, (lead, field) in enumerate(fields):
+            first_indent = (prefix if i == 0 else indent) + lead
             for line in _wrap(field, first_indent, indent, self.layout.width):
                 self.out.write(line.rstrip() + "\n")
 
@@ -571,7 +573,11 @@ def merge_conditions(entries: List[Entry]) -> List[Entry]:
     merges: Dict[Tuple, List[_MergedCondition]] = {}
     result: List[Union[Entry, _MergedCondition]] = []
     for entry in entries:
-        if PLACEHOLDER in entry.when_key or (entry.when is None and entry.spec is None):
+        if (
+            entry.merged
+            or PLACEHOLDER in entry.when_key
+            or (entry.when is None and entry.spec is None)
+        ):
             result.append(entry)
             continue
         key = (color.csub(entry.attr), entry.description, tuple(entry.extra))
@@ -586,6 +592,8 @@ def merge_conditions(entries: List[Entry]) -> List[Entry]:
     flat: List[Entry] = []
     for item in result:
         flat.extend(item.result() if isinstance(item, _MergedCondition) else [item])
+    for entry in flat:
+        entry.merged = True
     return flat
 
 
@@ -611,12 +619,10 @@ def _natural(text: str) -> Tuple:
     return tuple(int(part) if part.isdigit() else part for part in re.split(r"(\d+)", text))
 
 
-def dependency_entries(pkg: PackageBase) -> List[Entry]:
-    """Entries for the dependencies of ``pkg`` that are possible for its spec.
-
-    Runs of dependencies that only forward a variant value, e.g. ``kokkos cuda_arch=X`` when
-    ``cuda_arch=X`` for every ``X``, are collapsed into a single entry with a placeholder.
-    """
+def _dependencies_by_name(
+    pkg: PackageBase,
+) -> Dict[str, List[Tuple[spack.spec.Spec, spack.dependency.Dependency]]]:
+    """The dependencies possible for the package's spec, grouped by dependency name."""
     # unlike variants, dependency declarations never override each other: every one applies
     # whenever its condition holds, so all of them are shown
     by_name: Dict[str, List[Tuple[spack.spec.Spec, spack.dependency.Dependency]]] = {}
@@ -625,7 +631,41 @@ def dependency_entries(pkg: PackageBase) -> List[Entry]:
             continue
         for name, dep in deps.items():
             by_name.setdefault(name, []).append((when, dep))
+    return by_name
 
+
+def _dependency_text(spec: spack.spec.Spec) -> str:
+    """The dependency spec, marked if it is a virtual package (provided by others)."""
+    text = _spec_text(spec)
+    if spack.repo.PATH.is_virtual(spec.name):
+        text += " (virtual)"
+    return text
+
+
+def print_languages(pkg: PackageBase, args: Namespace) -> None:
+    """output the languages the package is written in, with conditions"""
+    languages = []
+    for name, deps in _dependencies_by_name(pkg).items():
+        if name not in LANGUAGES:
+            continue
+        conditions = [_spec_text(when) for when, _ in deps if when != spack.spec.Spec()]
+        if conditions and len(conditions) == len(deps):
+            languages.append(f"{name} (when {' or '.join(conditions)})")
+        else:
+            languages.append(name)
+    if languages:
+        args.rows.append(("Languages", ", ".join(languages)))
+
+
+def dependency_entries(pkg: PackageBase) -> List[Entry]:
+    """Entries for the dependencies of ``pkg`` that are possible for its spec, languages aside.
+
+    Runs of dependencies that only forward a variant value, e.g. ``kokkos cuda_arch=X`` when
+    ``cuda_arch=X`` for every ``X``, are collapsed into a single entry with a placeholder.
+    """
+    by_name = {
+        name: deps for name, deps in _dependencies_by_name(pkg).items() if name not in LANGUAGES
+    }
     entries: List[Entry] = []
     for name in sorted(by_name):
         # group (when, dependency) pairs by what they look like with forwarded values replaced
@@ -662,7 +702,7 @@ def dependency_entries(pkg: PackageBase) -> List[Entry]:
                 for when, dep in group:
                     entries.append(
                         Entry(
-                            _spec_text(dep.spec),
+                            _dependency_text(dep.spec),
                             head=name,
                             attr=_deptypes(dep.depflag),
                             when=when,
@@ -672,7 +712,7 @@ def dependency_entries(pkg: PackageBase) -> List[Entry]:
                     )
                 continue
 
-            dep_text, when_text = _spec_text(dep.spec), _spec_text(when)
+            dep_text, when_text = _dependency_text(dep.spec), _spec_text(when)
             legend = []
             for variant in forwarded:
                 needle = when.format(f"{{variants.{variant}}}")
@@ -700,33 +740,6 @@ def dependency_entries(pkg: PackageBase) -> List[Entry]:
 def print_dependencies(pkg: PackageBase, args: Namespace) -> None:
     """output build, link, and run package dependencies"""
     print_section("Dependencies", dependency_entries(pkg), args.layout, args.by_name)
-
-
-def print_dependency_suggestion(pkg: PackageBase, entries: List[Entry]) -> None:
-    """Suggest disabling boolean variants that many dependencies are conditional on."""
-    counts: Dict[Tuple[str, bool], int] = collections.defaultdict(int)
-    for entry in entries:
-        if entry.when is None:
-            continue
-        for variant in entry.when.variants.values():
-            if variant.type == spack.variant.VariantType.BOOL:
-                counts[(variant.name, variant.value)] += 1
-
-    spec = spack.spec.Spec(pkg.name)
-    for (name, value), count in sorted(counts.items(), key=lambda kv: -kv[1]):
-        # skip variants the user already set, and variants that appear with both values
-        if count < SUGGESTION_THRESHOLD or name in pkg.spec.variants or name in spec.variants:
-            continue
-        spec.variants.set(spack.variant.BoolValuedVariant(name, not value))
-
-    if spec.variants:
-        spec.constrain(pkg.spec)  # include already specified constraints
-        print()
-        tty.info(
-            f"{pkg.name} has many conditional dependencies; for a simpler view, try:",
-            f"spack info {spec.format(color=color.get_color_when())}",
-            format="y",
-        )
 
 
 # --- Conflicts, requirements and patches --------------------------------------------------------
@@ -1061,6 +1074,7 @@ def info(parser: argparse.ArgumentParser, args: Namespace) -> None:
         args.rows.append(("Homepage", str(pkg.homepage)))
     rows: List[Tuple[bool, Callable[[PackageBase, Namespace], None]]] = [
         (True, print_licenses),
+        (True, print_languages),
         (args.all or args.maintainers, print_maintainers),
         (args.all or args.namespace, print_namespace),
         (args.all or args.tags, print_tags),
@@ -1082,16 +1096,12 @@ def info(parser: argparse.ArgumentParser, args: Namespace) -> None:
         print_versions(pkg, args)
     if args.all or not args.no_variants:
         print_variants(pkg, args)
-    dependencies: List[Entry] = []
     if args.all or not args.no_dependencies:
-        dependencies = dependency_entries(pkg)
-        print_section("Dependencies", dependencies, args.layout, args.by_name)
+        print_section("Dependencies", dependency_entries(pkg), args.layout, args.by_name)
     if args.all or args.conflicts:
         print_conflicts(pkg, args)
     if args.all or args.patches:
         print_patches(pkg, args)
     if args.all or args.tests:
         print_tests(pkg, args)
-
-    print_dependency_suggestion(pkg, dependencies)
     print()
