@@ -1542,7 +1542,11 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
     def provided_virtual_names(cls):
         """Return sorted list of names of virtuals that can be provided by this package."""
         return sorted(
-            {vpkg.name for virtuals in cls.provided.values() for vpkg in sorted(virtuals)}
+            {
+                vpkg.name
+                for _, virtuals in spack.directives_meta.own_items(cls, "provided")
+                for vpkg in virtuals
+            }
         )
 
     @property

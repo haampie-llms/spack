@@ -6,11 +6,13 @@ from collections import namedtuple
 import pytest
 
 import spack.concretize
+import spack.deptypes as dt
 import spack.directives
 import spack.spec
 import spack.version
-from spack.directives import _make_when_spec, conflicts, depends_on, extends, patch
-from spack.directives_meta import DirectiveDictDescriptor, DirectiveMeta
+from spack.dependency import Dependency, intern_dependency, merge_dependencies
+from spack.directives import _make_when_spec, conflicts, depends_on, extends, patch, provides
+from spack.directives_meta import DirectiveDictDescriptor, DirectiveMeta, own_dict, own_items
 from spack.repo import RepoPath
 from spack.spec import Spec
 
@@ -268,15 +270,15 @@ def test_directive_laziness():
         extends("bar", when="+bar")
 
     # Initially, no directive dicts are initialized
-    assert ExamplePackage._dependencies is None  # type: ignore
-    assert ExamplePackage._extendees is None  # type: ignore
+    assert ExamplePackage._own_dependencies is None  # type: ignore
+    assert ExamplePackage._own_extendees is None  # type: ignore
     assert ExamplePackage._variants is None  # type: ignore
 
     # Only when we access the dependencies descriptor, the relevant dicts (dependencies, extendees)
     # are initialized, while others remain None
     dependencies = ExamplePackage.dependencies  # type: ignore
-    assert type(ExamplePackage._dependencies) is dict  # type: ignore
-    assert type(ExamplePackage._extendees) is dict  # type: ignore
+    assert type(ExamplePackage._own_dependencies) is dict  # type: ignore
+    assert type(ExamplePackage._own_extendees) is dict  # type: ignore
     assert ExamplePackage._variants is None  # type: ignore
 
     # The dependencies dict is populated with the expected entries
@@ -327,3 +329,79 @@ def test_diamond_inheritance_runs_shared_directives_once():
     assert conflict_specs(Left) == ["%gcc", "%clang"]
     assert conflict_specs(Right) == ["%gcc", "%intel"]
     assert conflict_specs(Diamond) == ["%gcc", "%intel", "%clang", "%nvhpc"]
+
+
+def test_own_dictionaries_and_merged_view():
+    """Dependencies, conflicts and provided virtuals are stored per class in the order they are
+    declared, and a subclass sees them merged, base classes first, as if it had run the
+    directives of its whole MRO itself."""
+
+    class Base(metaclass=DirectiveMeta):
+        name = "base"
+        depends_on("foo")
+        depends_on("bar", when="+bar")
+        conflicts("%gcc")
+        provides("virt")
+
+    class Derived(Base):
+        depends_on("foo@2:")
+        depends_on("baz", when="+bar")
+
+    own_base = own_dict(Base, "dependencies")
+    own_derived = own_dict(Derived, "dependencies")
+    assert {when: set(deps) for when, deps in own_base.items()} == {
+        Spec(): {"foo"},
+        Spec("+bar"): {"bar"},
+    }
+    assert {when: set(deps) for when, deps in own_derived.items()} == {
+        Spec(): {"foo"},
+        Spec("+bar"): {"baz"},
+    }
+    assert own_dict(Derived, "conflicts") == {}
+    assert own_dict(Derived, "provided") == {}
+
+    # base classes first, and a class does not see what its subclasses declare
+    merged = Derived.dependencies  # type: ignore[attr-defined]
+    assert list(merged) == [Spec(), Spec("+bar")]
+    assert [when for when, _ in own_items(Derived, "dependencies")] == [
+        Spec(),
+        Spec("+bar"),
+        Spec(),
+        Spec("+bar"),
+    ]
+    assert str(Base.dependencies[Spec()]["foo"].spec) == "foo"  # type: ignore[attr-defined]
+
+    # a redeclared dependency is constrained into a new object, an inherited one is shared
+    assert str(merged[Spec()]["foo"].spec) == "foo@2:"
+    assert merged[Spec()]["foo"] is not own_base[Spec()]["foo"]
+    assert merged[Spec("+bar")]["bar"] is own_base[Spec("+bar")]["bar"]
+    assert set(merged[Spec("+bar")]) == {"bar", "baz"}
+
+    assert Derived.conflicts == {Spec(): [(Spec("%gcc"), None)]}  # type: ignore[attr-defined]
+    assert Derived.provided == {Spec(): {Spec("virt")}}  # type: ignore[attr-defined]
+
+    # the merged view is not stored: the own dictionaries are the only state
+    assert Derived._dependencies is None  # type: ignore[attr-defined]
+
+
+def test_merge_dependencies_copies_patches():
+    """Merging two declarations of a dependency does not touch either, since both may be shared
+    with other packages: the patches of both end up in a new dict."""
+    existing = Dependency(Spec("foo"), depflag=dt.BUILD)
+    existing.patches = {Spec(): ["p1"]}
+    new = Dependency(Spec("foo@2:"), depflag=dt.LINK)
+    new.patches = {Spec(): ["p2"], Spec("+x"): ["p3"]}
+
+    merged = merge_dependencies(existing, new)
+    assert str(merged.spec) == "foo@2:"
+    assert merged.depflag == dt.BUILD | dt.LINK
+    assert merged.patches == {Spec(): ["p1", "p2"], Spec("+x"): ["p3"]}
+    assert merged.patches is not existing.patches
+    assert existing.patches == {Spec(): ["p1"]}
+    assert new.patches == {Spec(): ["p2"], Spec("+x"): ["p3"]}
+
+    # an unpatched result is a new object too, not the shared one
+    shared = intern_dependency(Dependency(Spec("foo")))
+    unpatched = merge_dependencies(shared, Dependency(Spec("foo")))
+    assert unpatched.patches is None
+    assert unpatched is not shared
