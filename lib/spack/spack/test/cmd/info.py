@@ -444,3 +444,34 @@ def test_json(database, config):
         mpi and all(d["virtual"] for d in mpi) and {d["when"] for d in mpi} == {"^pkg-g", "+mpi"}
     )
     assert data["externals"] == [] and data["conflicts"] == []
+
+
+def test_virtual_package(pipe, database):
+    # a virtual with a stub package.py of its own
+    output = info("mpi")
+    assert output.startswith("mpi (virtual package)\n")
+    assert re.search(
+        r"^Installed:\s+mpich@3\.0\.4/\w{7}, mpich2@1\.5/\w{7}, zmpi@1\.0/\w{7}", output, re.M
+    )
+    assert re.search(r"^Providers:\n(    .*\n)*    mpich@3:\s+mpi@:3\n", output, re.M)
+    # providers differing in version only are merged
+    assert re.search(
+        r"^    multi-provider-mpi@\{1\.8\.8,1\.10\.0,1\.10\.1,1\.10\.2,1\.10\.3\}\s+mpi@3\.0$",
+        output,
+        re.M,
+    )
+    assert re.search(r"^    zmpi\s+mpi@:10\.0\n", output, re.M)
+    assert "Variants:" not in output and "Dependencies:" not in output
+
+    # constrained: only providers of that version
+    output = info("mpi@10")
+    assert "zmpi" in output and "mpich@3:" not in output
+
+    # a virtual without a package.py at all
+    output = info("blas")
+    assert output.startswith("blas (virtual package)\n")
+    assert re.search(r"^    openblas\s+blas\n", output, re.M)
+    assert re.search(r"^Installed:\s+none$", output, re.M)
+
+    data = json.loads(info("--json", "blas"))
+    assert data["virtual"] and {"provider": "openblas", "provides": "blas"} in data["providers"]

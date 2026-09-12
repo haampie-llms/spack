@@ -486,13 +486,17 @@ def _forwarded_variants(when: spack.spec.Spec, dep: spack.spec.Spec) -> List[str
 _COMPONENT_CHARS = r"A-Za-z0-9_.:,'\-"
 
 
-def _replace_component(text: str, needle: str, replacement: str) -> str:
+def _replace_component(text: str, needle: str, replacement: str, after_name: bool = False) -> str:
     """Replace one rendered component of a spec (``cuda_arch=10``, ``@1.8``, ``%c``, ...) in
     possibly colorized spec text, where it is preceded by a blank, a color code or the start of
     the text and not followed by more of the same component (so that ``cuda_arch=10`` does not
-    match inside ``cuda_arch=100``)."""
+    match inside ``cuda_arch=100``). With ``after_name``, the component may also directly follow
+    a package name, as the version range in ``mpich@3:`` does."""
     # a boolean variant (+x, ~x) may also directly follow a version range
-    pattern = rf"(^|\s|\x1b\[[0-9;]*m|(?=[+~])){re.escape(needle)}(?![{_COMPONENT_CHARS}])"
+    prefixes = [r"^", r"\s", r"\x1b\[[0-9;]*m", r"(?=[+~])"]
+    if after_name:
+        prefixes.append(r"(?<=[A-Za-z0-9_.-])(?=@)")
+    pattern = rf"({'|'.join(prefixes)}){re.escape(needle)}(?![{_COMPONENT_CHARS}])"
     return re.sub(pattern, lambda m: m.group(1) + replacement, text)
 
 
@@ -604,7 +608,9 @@ class _MergedCondition:
         needle = self.parts[self.varying]
         alternatives = _braces([parts[self.varying] for parts in self.values])
         text = first.name if self.varying.startswith("name:") else first.when_text
-        replaced = _replace_component(text, needle, alternatives)
+        replaced = _replace_component(
+            text, needle, alternatives, after_name=self.varying == "name:version"
+        )
         if replaced == text:  # the component was not found as rendered: don't hide anything
             return self.entries
         if self.varying.startswith("name:"):
@@ -1086,9 +1092,12 @@ MAX_INSTALLED_SHOWN = 8
 
 def print_installed(pkg: PackageBase, args: Namespace) -> None:
     """output installations of the package matching the spec"""
-    installed = sorted(
-        spack.store.STORE.db.query(pkg.spec), key=lambda s: (s.version, s.dag_hash()), reverse=True
-    )
+    if args.virtual:
+        installed = installed_providers(pkg.spec)
+    else:
+        installed = spack.store.STORE.db.query(pkg.spec)
+    installed.sort(key=lambda s: (s.version, s.dag_hash()), reverse=True)
+    installed.sort(key=lambda s: s.name)
     if not installed:
         args.rows.append(("Installed", "none"))
         return
@@ -1147,6 +1156,41 @@ def print_tests(pkg: PackageBase, args: Namespace) -> None:
     print_labeled(rows)
 
 
+# --- Virtual packages ---------------------------------------------------------------------------
+
+
+def provider_entries(spec: spack.spec.Spec) -> List[Entry]:
+    """Who provides the virtual package ``spec``, and which version of it: one entry per provider
+    constraint, e.g. ``mpich@:3.2`` provides ``mpi@:3.1``."""
+    entries = []
+    by_provided = spack.repo.PATH.provider_index.providers.get(spec.name, {})
+    for provided, providers in by_provided.items():
+        if not provided.intersects(spec):
+            continue
+        for provider in providers:
+            plain = spack.spec.Spec(provider.format("{name}{@versions}{variants}"))  # no namespace
+            entries.append(
+                Entry(
+                    _spec_text(plain),
+                    head=plain.name,
+                    attr=_spec_text(provided),
+                    spec=plain,
+                    sort_key=(plain.name, plain.versions, _natural(str(plain)), str(provided)),
+                )
+            )
+    entries.sort(key=lambda e: e.sort_key)
+    return entries
+
+
+def installed_providers(spec: spack.spec.Spec) -> List[spack.spec.Spec]:
+    """Installed specs that provide the virtual package ``spec``."""
+    return [s for s in spack.store.STORE.db.query() if s.satisfies(spec)]
+
+
+def print_providers(spec: spack.spec.Spec, args: Namespace) -> None:
+    print_section("Providers", provider_entries(spec), args)
+
+
 def _when_str(when: spack.spec.Spec) -> Optional[str]:
     return str(when) if when != spack.spec.Spec() else None
 
@@ -1155,7 +1199,8 @@ def info_json(pkg: PackageBase) -> Dict[str, Any]:
     """Everything `spack info` knows about the package, as plain data. Entries are filtered by
     the package's spec like the text output, but nothing is collapsed or merged."""
     resolved = resolved_version(pkg)
-    builder = spack.builder.create(pkg)
+    virtual = spack.repo.PATH.is_virtual(pkg.name)
+    phases = [] if virtual else list(getattr(spack.builder.create(pkg), "phases", None) or [])
     variants = []
     for name in spack.package_base._subkeys(pkg.variants):
         for when, variant in spack.package_base._definitions(pkg.variants, name):
@@ -1193,8 +1238,14 @@ def info_json(pkg: PackageBase) -> Dict[str, Any]:
         for when, dep in deps
     ]
     configured = spack.config.CONFIG.get(f"packages:{pkg.name}", {}) or {}
+    installed = installed_providers(pkg.spec) if virtual else spack.store.STORE.db.query(pkg.spec)
     return {
         "name": pkg.name,
+        "virtual": virtual,
+        "providers": [
+            {"provider": str(e.spec), "provides": color.csub(e.attr)}
+            for e in provider_entries(pkg.spec)
+        ],
         "namespace": pkg.namespace,
         "build_system_class": pkg.build_system_class,
         "description": " ".join((pkg.__doc__ or "").split()),
@@ -1206,7 +1257,7 @@ def info_json(pkg: PackageBase) -> Dict[str, Any]:
             for when, spdx in pkg.licenses.items()
             if pkg.intersects(when)
         ],
-        "phases": list(getattr(builder, "phases", None) or []),
+        "phases": phases,
         "provides": [
             {
                 "provides": sorted(str(s) for s in specs),
@@ -1255,8 +1306,7 @@ def info_json(pkg: PackageBase) -> Dict[str, Any]:
             for patch in sorted(patches, key=lambda p: p.ordering_key)
         ],
         "installed": [
-            {"spec": str(s), "hash": s.dag_hash(), "prefix": str(s.prefix)}
-            for s in spack.store.STORE.db.query(pkg.spec)
+            {"spec": str(s), "hash": s.dag_hash(), "prefix": str(s.prefix)} for s in installed
         ],
         "externals": [
             e
@@ -1267,6 +1317,29 @@ def info_json(pkg: PackageBase) -> Dict[str, Any]:
     }
 
 
+class _VirtualPackage(PackageBase):
+    # Stand-in for a virtual package that has no package.py of its own (no docstring on purpose:
+    # `spack info` prints it as the description)
+
+    has_code = False
+
+    def __init__(self, spec: spack.spec.Spec) -> None:
+        # PackageBase.__init__ looks the package up in the repository; a virtual is not there
+        self.spec = spec
+
+    @property
+    def name(self) -> str:  # type: ignore[override]
+        return self.spec.name
+
+    @property
+    def namespace(self) -> Optional[str]:  # type: ignore[override]
+        return None
+
+    @property
+    def homepage(self) -> Optional[str]:  # type: ignore[override]
+        return None
+
+
 def info(parser: argparse.ArgumentParser, args: Namespace) -> None:
     specs = spack.cmd.parse_specs(args.spec)
     if len(specs) > 1:
@@ -1275,7 +1348,14 @@ def info(parser: argparse.ArgumentParser, args: Namespace) -> None:
         args.subparser.error("requires a spec")
 
     spec = specs[0]
-    pkg_cls = spack.repo.PATH.get_pkg_class(spec.fullname)
+    args.virtual = spack.repo.PATH.is_virtual(spec.name)
+    try:
+        pkg_cls = spack.repo.PATH.get_pkg_class(spec.fullname)
+    except spack.repo.UnknownPackageError:
+        if not args.virtual:
+            raise
+        # a virtual without a package.py of its own: providers are all there is to show
+        pkg_cls = _VirtualPackage
     pkg_cls.validate_variant_names(spec)
     pkg = pkg_cls(spec)
 
@@ -1287,7 +1367,8 @@ def info(parser: argparse.ArgumentParser, args: Namespace) -> None:
     args.resolved_version = resolved_version(pkg)
 
     # name, build system and description
-    print(color.colorize(f"@*{{{color.cescape(pkg.name)}}} ({pkg.build_system_class})"))
+    kind = "virtual package" if args.virtual else pkg.build_system_class
+    print(color.colorize(f"@*{{{color.cescape(pkg.name)}}} ({kind})"))
     doc = pkg.format_doc(indent=INDENT)
     print(doc.rstrip("\n") if doc else " " * INDENT + "No description")
 
@@ -1316,11 +1397,14 @@ def info(parser: argparse.ArgumentParser, args: Namespace) -> None:
     print_labeled(args.rows)
 
     # the long sections
-    if args.all or not args.no_versions:
+    if args.virtual:
+        print_providers(spec, args)
+    if (args.all or not args.no_versions) and (pkg.versions or not args.virtual):
         print_versions(pkg, args)
-    if args.all or not args.no_variants:
+    # a virtual's own package.py, if any, is a stub: its variants and dependencies mean nothing
+    if (args.all or not args.no_variants) and not args.virtual:
         print_variants(pkg, args)
-    if args.all or not args.no_dependencies:
+    if (args.all or not args.no_dependencies) and not args.virtual:
         print_section("Dependencies", dependency_entries(pkg), args)
     if args.all or args.conflicts:
         print_conflicts(pkg, args)
