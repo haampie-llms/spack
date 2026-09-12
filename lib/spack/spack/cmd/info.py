@@ -885,14 +885,26 @@ def _variant_value(v: Any) -> str:
 
 
 def _variant_values(variant: spack.variant.Variant) -> str:
-    """The allowed values of a non-boolean variant, empty for boolean variants and for variants
-    whose values are checked by a validator function."""
-    values = variant.possible_values()
-    if values is None or len(values) < 2 or all(isinstance(v, bool) for v in values):
+    """The allowed values of a non-boolean variant, each with its condition if it has one, e.g.
+    ``one of: 98, 11, 14, 17 (when @1.63.0:)``. Empty for boolean variants and for variants whose
+    values are checked by a validator function."""
+    if variant.values is None:
         return ""
-    rendered = ", ".join(color.cescape(_variant_value(v)) for v in values)
+    rendered = []
+    for value in variant.values:
+        condition = None
+        if isinstance(value, spack.variant.ConditionalValue):
+            if value.when is None:  # statically disabled
+                continue
+            value, condition = value.value, value.when
+        text = color.colorize(f"@c{{{color.cescape(_variant_value(value))}}}")
+        if condition is not None and condition != spack.spec.Spec():
+            text += f" (when {_spec_text(condition)})"
+        rendered.append(text)
+    if len(rendered) < 2 or all(isinstance(v, bool) for v in variant.values):
+        return ""
     kind = "any of" if variant.multi else "one of"
-    return color.colorize(f"{kind}: @c{{{rendered}}}")
+    return f"{kind}: " + ", ".join(rendered)
 
 
 def variant_entries(pkg: PackageBase) -> List[Entry]:
@@ -902,13 +914,18 @@ def variant_entries(pkg: PackageBase) -> List[Entry]:
             if not pkg.intersects(when):
                 continue
             default = color.cescape(_variant_value(variant.default))
+            extra = []
+            if variant.sticky:
+                extra.append("sticky (only changes when set explicitly)")
             values = _variant_values(variant)
+            if values:
+                extra.append(values)
             entries.append(
                 Entry(
                     color.colorize(f"@c{{{color.cescape(name)}}} @C{{[{default}]}}"),
                     description=variant.description,
                     when=when,
-                    extra=[values] if values else [],
+                    extra=extra,
                 )
             )
     return entries

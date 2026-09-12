@@ -326,7 +326,8 @@ def test_installed_row(pipe, database):
 def test_externals_and_preferences_rows(pipe, config):
     output = info("externaltool")
     assert re.search(
-        r"^Externals:\s+externaltool@1\.0 at /path/to/external_tool\n\s+externaltool@0\.9 at /usr\n",
+        r"^Externals:\s+externaltool@1\.0 at /path/to/external_tool\n"
+        r"\s+externaltool@0\.9 at /usr\n",
         output,
         re.M,
     )
@@ -401,3 +402,21 @@ def test_entries_for_other_versions(pipe, terminal, monkeypatch):
         output = info("dual-cmake-autotools")
     faint = [line for line in output.splitlines() if line.startswith("\x1b[2m")]
     assert len(faint) == 1 and "@3.14.0:" in faint[0] and "(not for" not in output
+
+
+def test_conditional_values_and_sticky_variants(pipe):
+    output = info("conditional-values-in-variant")
+    assert re.search(
+        r"^    cxxstd \[98\]\s+Use the specified C\+\+ standard when building\.\s+when @1\.60\.0:"
+        r"\s+one of: 98, 11, 14, 17 \(when @1\.63\.0:\), 2a \(when @1\.73\.0:\)$",
+        output,
+        re.M,
+    )
+    # a statically disabled value is not a value
+    assert re.search(r"^    foo \[foo\]\s+Variant with default condition false$", output, re.M)
+    assert "bar" not in output
+
+    output = info("sticky-variant")
+    assert re.search(
+        r"^    allow-gcc \[false\]\s+sticky \(only changes when set explicitly\)$", output, re.M
+    )
