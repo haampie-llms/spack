@@ -983,7 +983,6 @@ def _url_for(pkg: PackageBase, version: spack.version.StandardVersion) -> str:
 def print_versions(pkg: PackageBase, args: Namespace) -> None:
     """output versions"""
     versions = _versions(pkg)
-    preferred = args.resolved_version
     safe = [v for v in versions if not pkg.versions[v].get("deprecated", False)]
     deprecated = [v for v in versions if pkg.versions[v].get("deprecated", False)]
 
@@ -1005,7 +1004,6 @@ def print_versions(pkg: PackageBase, args: Namespace) -> None:
         else:
             print(" " * INDENT + "  ".join(_version_text(v) for v in items))
 
-    print_list("Preferred version", [preferred] if preferred is not None else [])
     print_list("Safe versions", safe)
     if deprecated:
         print_list("Deprecated versions", deprecated)
@@ -1020,10 +1018,17 @@ def print_maintainers(pkg: PackageBase, args: Namespace) -> None:
         args.rows.append(("Maintainers", " ".join(f"@{m}" for m in pkg.maintainers)))
 
 
+def print_preferred(pkg: PackageBase, args: Namespace) -> None:
+    """output the version the spec resolves to according to the recipe"""
+    if args.resolved_version is not None:
+        args.rows.append(("Preferred", _version_text(args.resolved_version)))
+
+
 def print_namespace(pkg: PackageBase, args: Namespace) -> None:
-    """output package namespace"""
+    """output package namespace and the path of the recipe"""
     repo = spack.repo.PATH.get_repo(pkg.namespace)
     args.rows.append(("Namespace", f"{color.colorize(f'@c{{{repo.namespace}}}')} at {repo.root}"))
+    args.rows.append(("Recipe", repo.filename_for_package_name(pkg.name)))
 
 
 def print_detectable(pkg: PackageBase, args: Namespace) -> None:
@@ -1291,6 +1296,7 @@ def info(parser: argparse.ArgumentParser, args: Namespace) -> None:
     if getattr(pkg, "homepage", None):
         args.rows.append(("Homepage", str(pkg.homepage)))
     rows: List[Tuple[bool, Callable[[PackageBase, Namespace], None]]] = [
+        (args.all or not args.no_versions, print_preferred),
         (True, print_licenses),
         (True, print_languages),
         (args.all or args.maintainers, print_maintainers),

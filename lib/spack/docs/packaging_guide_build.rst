@@ -46,18 +46,20 @@ The predefined steps for each build system are called "phases".
 In general, the name and order in which the phases will be executed can be obtained by either reading the API docs at :py:mod:`~.spack_repo.builtin.build_systems`, or using the ``spack info`` command:
 
 .. code-block:: console
-    :emphasize-lines: 7
+    :emphasize-lines: 9
 
     $ spack info --phases m4
     m4 (AutotoolsPackage)
         GNU M4 is an implementation of the traditional Unix macro processor.
 
-    Homepage:  https://www.gnu.org/software/m4/m4.html
-    Licenses:  GPL-3.0-or-later
-    Phases:    autoreconf, configure, build, install
-
-    Preferred version:
-        1.4.21
+    Homepage:     https://www.gnu.org/software/m4/m4.html
+    Preferred:    1.4.21
+    Licenses:     GPL-3.0-or-later
+    Languages:    c, cxx
+    Phases:       autoreconf, configure, build, install
+    Constraints:  3 conflicts  (list with --conflicts)
+    Patches:      14  (list with --patches)
+    Installed:    none
 
     ...
 

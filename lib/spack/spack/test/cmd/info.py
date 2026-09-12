@@ -52,7 +52,7 @@ def test_info_noversion():
     """Check that a mock package with no versions outputs None."""
     output = info("noversion")
 
-    assert "Preferred version:\n    None" in output
+    assert "Preferred:" not in output
     assert "Safe versions:\n    None" in output
     assert "Deprecated versions" not in output
 
@@ -94,6 +94,7 @@ def test_header_and_labels(pipe):
     assert re.search(r"^Homepage:\s+http://www.mpich.org\n", output, re.M)
     assert re.search(r"^Tags:\s+detectable, tag1, tag2\n", output, re.M)
     assert re.search(r"^Provides:\s+mpi@[\d.:]+ when @[\d.:]+\n", output, re.M)
+    assert re.search(r"^Recipe:\s+\S+/mpich/package\.py$", output, re.M)
 
 
 @pytest.mark.parametrize(
@@ -119,7 +120,8 @@ def test_header_and_labels(pipe):
         (["bowtie"], ["1.4.0", "1.3.0", "1.2.2", "1.2.0"], []),
         (["bowtie@1.2:"], ["1.4.0", "1.3.0", "1.2.2", "1.2.0"], []),
         (["bowtie@1.3:"], ["1.4.0", "1.3.0"], ["1.2.2", "1.2.0"]),
-        (["bowtie@1.2"], [r"Preferred version:\n    1\.2\.2"], ["1.3.0", "1.4.0"]),
+        (["bowtie@1.2"], [r"\nPreferred:\s+1\.2\.2\n"], ["1.3.0", "1.4.0"]),
+        (["bowtie"], [r"\nPreferred:\s+1\.4\.0\n"], ["Preferred version"]),
         # forwarded variant values are collapsed into one line with a placeholder (on a terminal
         # the repeated `gpu-dep` is elided, and --by-when puts the condition in a header)
         (
