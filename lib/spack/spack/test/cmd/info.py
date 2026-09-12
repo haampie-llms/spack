@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
+import json
 import re
 
 import pytest
@@ -420,3 +421,24 @@ def test_conditional_values_and_sticky_variants(pipe):
     assert re.search(
         r"^    allow-gcc \[false\]\s+sticky \(only changes when set explicitly\)$", output, re.M
     )
+
+
+def test_json(database, config):
+    data = json.loads(info("--json", "conditional-values-in-variant"))
+    assert data["name"] == "conditional-values-in-variant"
+    cxxstd = next(v for v in data["variants"] if v["name"] == "cxxstd")
+    assert cxxstd["when"] == "@1.60.0:" and cxxstd["default"] == "98"
+    assert {"value": "17", "when": "@1.63.0:"} in cxxstd["values"]
+    assert not any(v["value"] == "bar" for v in cxxstd["values"])
+
+    data = json.loads(info("--json", "mpich"))
+    assert data["installed"] and data["installed"][0]["spec"].startswith("mpich@3.0.4")
+    assert [v["version"] for v in data["versions"] if v["preferred"]] == [data["resolved_version"]]
+    assert {"provides": ["mpi@:3"], "when": "@3:"} in data["provides"]
+
+    data = json.loads(info("--json", "optional-dep-test"))
+    mpi = [d for d in data["dependencies"] if d["spec"] == "mpi"]
+    assert (
+        mpi and all(d["virtual"] for d in mpi) and {d["when"] for d in mpi} == {"^pkg-g", "+mpi"}
+    )
+    assert data["externals"] == [] and data["conflicts"] == []

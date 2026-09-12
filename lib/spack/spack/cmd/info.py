@@ -93,6 +93,13 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
         help="group variants, dependencies, etc. first by when condition, then by name",
     )
 
+    subparser.add_argument(
+        "--json",
+        action="store_true",
+        help="output everything as JSON (versions, variants, dependencies, conflicts, patches, "
+        "local state); conditions are spec strings, dependencies are not merged",
+    )
+
     options = [
         ("--conflicts", print_conflicts.__doc__),
         ("--detectable", print_detectable.__doc__),
@@ -963,6 +970,16 @@ def resolved_version(pkg: PackageBase) -> Optional[spack.version.StandardVersion
     return max(versions, key=order)
 
 
+def _url_for(pkg: PackageBase, version: spack.version.StandardVersion) -> str:
+    """Where a version is fetched from, as the fetcher describes it."""
+    if not pkg.has_code:
+        return ""
+    try:
+        return str(spack.package_base.for_package_version(pkg, version))
+    except fs.InvalidArgsError:
+        return "No URL"
+
+
 def print_versions(pkg: PackageBase, args: Namespace) -> None:
     """output versions"""
     versions = _versions(pkg)
@@ -970,13 +987,8 @@ def print_versions(pkg: PackageBase, args: Namespace) -> None:
     safe = [v for v in versions if not pkg.versions[v].get("deprecated", False)]
     deprecated = [v for v in versions if pkg.versions[v].get("deprecated", False)]
 
-    def url_for(version: spack.version.VersionType) -> str:
-        if not pkg.has_code:
-            return ""
-        try:
-            return str(spack.package_base.for_package_version(pkg, version))
-        except fs.InvalidArgsError:
-            return "No URL"
+    def url_for(version: spack.version.StandardVersion) -> str:
+        return _url_for(pkg, version)
 
     def print_list(title: str, items: List[Any]) -> None:
         print()
@@ -1130,6 +1142,126 @@ def print_tests(pkg: PackageBase, args: Namespace) -> None:
     print_labeled(rows)
 
 
+def _when_str(when: spack.spec.Spec) -> Optional[str]:
+    return str(when) if when != spack.spec.Spec() else None
+
+
+def info_json(pkg: PackageBase) -> Dict[str, Any]:
+    """Everything `spack info` knows about the package, as plain data. Entries are filtered by
+    the package's spec like the text output, but nothing is collapsed or merged."""
+    resolved = resolved_version(pkg)
+    builder = spack.builder.create(pkg)
+    variants = []
+    for name in spack.package_base._subkeys(pkg.variants):
+        for when, variant in spack.package_base._definitions(pkg.variants, name):
+            if not pkg.intersects(when):
+                continue
+            values: Optional[List[Dict[str, Any]]] = None
+            if variant.values is not None:
+                values = []
+                for value in variant.values:
+                    condition = None
+                    if isinstance(value, spack.variant.ConditionalValue):
+                        if value.when is None:
+                            continue
+                        value, condition = value.value, _when_str(value.when)
+                    values.append({"value": _variant_value(value), "when": condition})
+            variants.append(
+                {
+                    "name": name,
+                    "default": _variant_value(variant.default),
+                    "description": variant.description,
+                    "when": _when_str(when),
+                    "values": values,
+                    "multi": variant.multi,
+                    "sticky": variant.sticky,
+                }
+            )
+    dependencies = [
+        {
+            "spec": str(dep.spec),
+            "types": list(dt.flag_to_tuple(dep.depflag)),
+            "when": _when_str(when),
+            "virtual": spack.repo.PATH.is_virtual(name),
+        }
+        for name, deps in sorted(_dependencies_by_name(pkg).items())
+        for when, dep in deps
+    ]
+    configured = spack.config.CONFIG.get(f"packages:{pkg.name}", {}) or {}
+    return {
+        "name": pkg.name,
+        "namespace": pkg.namespace,
+        "build_system_class": pkg.build_system_class,
+        "description": " ".join((pkg.__doc__ or "").split()),
+        "homepage": getattr(pkg, "homepage", None),
+        "maintainers": list(pkg.maintainers),
+        "tags": sorted(getattr(pkg, "tags", ())),
+        "licenses": [
+            {"license": spdx, "when": _when_str(when)}
+            for when, spdx in pkg.licenses.items()
+            if pkg.intersects(when)
+        ],
+        "phases": list(getattr(builder, "phases", None) or []),
+        "provides": [
+            {
+                "provides": sorted(str(s) for s in specs),
+                "when": None if when == spack.spec.Spec(pkg.name) else _when_str(when),
+            }
+            for when, specs in sorted(pkg.provided.items())
+        ],
+        "resolved_version": str(resolved) if resolved is not None else None,
+        "versions": [
+            {
+                "version": str(v),
+                "preferred": v == resolved,
+                "deprecated": bool(pkg.versions[v].get("deprecated", False)),
+                "url": _url_for(pkg, v),
+            }
+            for v in _versions(pkg)
+        ],
+        "variants": variants,
+        "dependencies": dependencies,
+        "conflicts": [
+            {"spec": str(spec), "when": _when_str(when), "message": _message(pkg, msg) or None}
+            for when, conflicts in pkg.conflicts.items()
+            if pkg.intersects(when)
+            for spec, msg in conflicts
+        ],
+        "requirements": [
+            {
+                "specs": [str(s) for s in specs],
+                "policy": policy,
+                "when": _when_str(when),
+                "message": _message(pkg, msg) or None,
+            }
+            for when, requirements in pkg.requirements.items()
+            if pkg.intersects(when)
+            for specs, policy, msg in requirements
+        ],
+        "patches": [
+            {
+                "patch": str(getattr(patch, "relative_path", None) or getattr(patch, "url", "")),
+                "when": _when_str(when),
+                "level": patch.level,
+                "working_dir": patch.working_dir,
+            }
+            for when, patches in pkg.patches.items()
+            if pkg.intersects(when)
+            for patch in sorted(patches, key=lambda p: p.ordering_key)
+        ],
+        "installed": [
+            {"spec": str(s), "hash": s.dag_hash(), "prefix": str(s.prefix)}
+            for s in spack.store.STORE.db.query(pkg.spec)
+        ],
+        "externals": [
+            e
+            for e in configured.get("externals", [])
+            if spack.spec.Spec(e["spec"]).intersects(pkg.spec)
+        ],
+        "preferences": {k: v for k, v in configured.items() if k != "externals"},
+    }
+
+
 def info(parser: argparse.ArgumentParser, args: Namespace) -> None:
     specs = spack.cmd.parse_specs(args.spec)
     if len(specs) > 1:
@@ -1141,6 +1273,10 @@ def info(parser: argparse.ArgumentParser, args: Namespace) -> None:
     pkg_cls = spack.repo.PATH.get_pkg_class(spec.fullname)
     pkg_cls.validate_variant_names(spec)
     pkg = pkg_cls(spec)
+
+    if args.json:
+        print(json.dumps(info_json(pkg), indent=2))
+        return
 
     args.layout = Layout.detect()
     args.resolved_version = resolved_version(pkg)
