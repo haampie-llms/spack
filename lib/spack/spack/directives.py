@@ -61,7 +61,7 @@ import spack.spec
 import spack.util.crypto
 import spack.util.tty.color
 import spack.variant
-from spack.dependency import Dependency, intern_dependency
+from spack.dependency import Dependency, intern_dependency, merge_dependencies
 from spack.directives_meta import DirectiveError, directive, get_spec
 from spack.resource import Resource
 from spack.spec import EMPTY_SPEC
@@ -312,10 +312,11 @@ class _Conflicts(NamedTuple):
         if not when_spec:
             return
 
-        # Save in a list the conflicts and the associated custom messages
+        # Save in a list the conflicts and the associated custom messages. The message is not
+        # prefixed with the package name here: a base class runs this once for all its
+        # subclasses, so the consumer adds the name of the package it reports on.
         conflict_spec_list = pkg.conflicts.setdefault(when_spec, [])
-        msg_with_name = f"{pkg.name}: {msg}" if msg is not None else msg
-        conflict_spec_list.append((get_spec(conflict_spec), msg_with_name))
+        conflict_spec_list.append((get_spec(conflict_spec), msg))
 
 
 @directive("dependencies", can_patch_dependencies=True)
@@ -405,12 +406,8 @@ class _DependsOn(NamedTuple):
         if not dependency:
             dependency = Dependency(spec, depflag=depflag)
         else:
-            merged_spec = dependency.spec.copy()
-            merged_spec.constrain(spec, deps=False)
             # an existing Dependency may be shared with other packages, so build a new one
-            merged = Dependency(merged_spec, depflag=dependency.depflag | depflag)
-            merged.patches = dependency.patches
-            dependency = merged
+            dependency = merge_dependencies(dependency, Dependency(spec, depflag=depflag))
         deps_by_name[spec.name] = dependency
 
         # apply patches to the dependency
@@ -1037,11 +1034,11 @@ class _Requires(NamedTuple):
         if not when_spec:
             return
 
-        # Save in a list the requirements and the associated custom messages
+        # Save in a list the requirements and the associated custom messages. Like for conflicts,
+        # the consumer prefixes the message with the name of the package it reports on.
         requirement_list = pkg.requirements.setdefault(when_spec, [])
-        msg_with_name = f"{pkg.name}: {msg}" if msg is not None else msg
         requirements = tuple(get_spec(s) for s in requirement_specs)
-        requirement_list.append((requirements, policy, msg_with_name))
+        requirement_list.append((requirements, policy, msg))
 
 
 class DependencyError(DirectiveError):

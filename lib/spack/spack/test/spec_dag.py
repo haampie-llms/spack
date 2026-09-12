@@ -10,6 +10,7 @@ import pytest
 import spack.concretize
 import spack.database
 import spack.deptypes as dt
+import spack.directives_meta
 import spack.error
 import spack.old_installer
 import spack.repo
@@ -60,7 +61,8 @@ def set_dependency(saved_deps, monkeypatch):
 
         cond = Spec(pkg_cls.name)
         dependency = Dependency(spec)
-        monkeypatch.setitem(pkg_cls.dependencies, cond, {spec.name: dependency})
+        own_dependencies = spack.directives_meta.own_dict(pkg_cls, "dependencies")
+        monkeypatch.setitem(own_dependencies, cond, {spec.name: dependency})
 
     return _mock
 

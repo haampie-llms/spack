@@ -12,6 +12,7 @@ import spack.binary_distribution
 import spack.concretize
 import spack.config
 import spack.deptypes as dt
+import spack.directives_meta
 import spack.platforms
 import spack.repo
 import spack.spec
@@ -182,7 +183,10 @@ class NoStaticAnalysis(PossibleDependencyGraph):
                 continue
 
             pkg_cls = self.repo.get_pkg_class(pkg_name=pkg_name)
-            for when_spec, dependencies in pkg_cls.dependencies.items():
+            # the entries declared by the class and its bases, without building a merged dict
+            for when_spec, dependencies in spack.directives_meta.own_items(
+                pkg_cls, "dependencies"
+            ):
                 # Check if we need to process this condition at all. We can skip the unreachable
                 # check if all dependencies in this condition are already accounted for.
                 new_dependencies: List[str] = []

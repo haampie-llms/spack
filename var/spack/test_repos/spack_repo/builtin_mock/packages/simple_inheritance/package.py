@@ -12,6 +12,7 @@ class BaseWithDirectives(Package):
     depends_on("mpi")
     variant("openblas", description="Activates openblas", default=True)
     provides("service1")
+    conflicts("%clang", when="+openblas", msg="openblas cannot be built with clang")
 
     def use_module_variable(self):
         """Must be called in build environment. Allows us to test parent class

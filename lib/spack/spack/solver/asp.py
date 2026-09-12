@@ -45,6 +45,7 @@ import spack.compilers.config
 import spack.compilers.flags
 import spack.concretize
 import spack.config
+import spack.dependency
 import spack.deptypes as dt
 import spack.error
 import spack.externals_config
@@ -68,6 +69,7 @@ import spack.version.git_ref_lookup
 from spack import traverse
 from spack.active_environment import active_environment
 from spack.compilers.libraries import CompilerPropertyDetector, FileCompilerCache
+from spack.directives_meta import DirectiveMeta, own_dict, own_dicts, own_items
 from spack.spec import EMPTY_SPEC
 from spack.util import tty
 from spack.util.lang import elide_list
@@ -197,24 +199,75 @@ def identity_for_facts(
     return facts
 
 
+#: In the clauses of a condition that a base class declares for all its subclasses, stands for
+#: the name of the subclass; the ASP program substitutes it. See ``SpackSolverSetup.mixin_rules``.
+MIXIN_SELF = AspVar("mixin_self")
+
+
 # Caching because the returned function id is used as a cache key
 @functools.lru_cache(maxsize=None)
 def dependency_holds(
-    *, dependency_flags: dt.DepFlag, pkg_cls: Type[spack.package_base.PackageBase]
+    *, dependency_flags: dt.DepFlag, dependent: Union[str, AspVar]
 ) -> TransformFunction:
+    """Transform for the effect of a ``depends_on``: ``dependent`` is the package that declares
+    it, or :data:`MIXIN_SELF` when a base class does."""
+
     def _transform_fn(
         name: str, input_spec: spack.spec.Spec, requirements: List[AspFunction]
     ) -> List[AspFunction]:
-        result = remove_facts("node", "virtual_node")(name, input_spec, requirements) + [
-            fn.attr("dependency_holds", pkg_cls.name, name, dt.flag_to_string(t))
+        return remove_facts("node", "virtual_node")(name, input_spec, requirements) + [
+            fn.attr("dependency_holds", dependent, name, dt.flag_to_string(t))
             for t in dt.ALL_FLAGS
             if t & dependency_flags
         ]
-        if name not in pkg_cls.extendees:
-            return result
-        return result + [fn.attr("extends", pkg_cls.name, name)]
 
     return _transform_fn
+
+
+def _mentions(args: Tuple[Any, ...], name: str) -> bool:
+    """Whether package ``name``, or a flag source derived from it, occurs in ``args``."""
+    for arg in args:
+        if type(arg) is AspFunction:
+            if _mentions(arg.args, name):
+                return True
+        elif type(arg) is str and ConstraintOrigin.strip_type_suffix(arg)[1] == name:
+            return True
+    return False
+
+
+def mixin_clauses(clauses: List[AspFunction], name: str) -> Optional[List[AspFunction]]:
+    """Turn the clauses of a condition generated for package ``name`` into the clauses of the same
+    condition on any package, by replacing the name with :data:`MIXIN_SELF` where it is the
+    subject of a clause. Returns None if the name occurs anywhere else, e.g. inside a flag
+    source, since the clauses cannot be shared then."""
+    result = []
+    for clause in clauses:
+        args = clause.args
+        if len(args) > 1 and args[1] == name:
+            args = (args[0], MIXIN_SELF) + args[2:]
+        if _mentions(args, name):
+            return None
+        result.append(AspFunction(clause.name, args))
+    return result
+
+
+class Mixin:
+    """A base class with directives, as far as one solve is concerned: its conditions are
+    emitted once, under ``ident``, and the ASP program copies them to every package inheriting
+    from it. See ``SpackSolverSetup.mixin_rules``."""
+
+    __slots__ = ("ident", "label", "representative", "replay")
+
+    def __init__(self, klass: type, representative: str) -> None:
+        #: identifies the class in the ASP program
+        self.ident = f"{klass.__module__}.{klass.__qualname__}"
+        #: names the class in messages
+        self.label = klass.__name__
+        #: the subclass the clauses are generated for, before they are made to stand for any
+        self.representative = representative
+        #: specs on the inheriting package whose clauses were generated once, but whose version
+        #: constraint and variant values must still be recorded per package, by their string
+        self.replay: Dict[str, spack.spec.Spec] = {}
 
 
 def dag_closure_by_deptype(
@@ -1009,8 +1062,20 @@ class ConcreteSpecsByHash(collections.abc.Mapping):
 
 # types for condition caching in solver setup
 ConditionSpecKey = Tuple[str, Optional[TransformFunction]]
-ConditionIdFunctionPair = Tuple[int, List[AspFunction]]
+#: The clauses are None only for a condition of a base class that cannot be shared
+ConditionIdFunctionPair = Tuple[int, Optional[List[AspFunction]]]
+#: Keyed by package name, or by ``Mixin.ident`` for the conditions of base classes
 ConditionSpecCache = Dict[str, Dict[ConditionSpecKey, ConditionIdFunctionPair]]
+
+
+def _conflict_message(
+    name: str, when_spec_str: str, conflict_spec_str: str, msg: Optional[str]
+) -> str:
+    if msg is not None:
+        return f"{name}: {msg}"
+    if not when_spec_str:
+        return f"{name}: conflicts with '{conflict_spec_str}'"
+    return f"{name}: '{conflict_spec_str}' conflicts with '{when_spec_str}'"
 
 
 class ConstraintOrigin(enum.Enum):
@@ -1026,11 +1091,7 @@ class ConstraintOrigin(enum.Enum):
 
     @staticmethod
     def _SUFFIXES() -> Dict["ConstraintOrigin", str]:
-        return {
-            ConstraintOrigin.CONDITIONAL_SPEC: "_cond",
-            ConstraintOrigin.DEPENDS_ON: "_dep",
-            ConstraintOrigin.REQUIRE: "_req",
-        }
+        return _ORIGIN_SUFFIXES
 
     @staticmethod
     def append_type_suffix(pkg_id: str, kind: "ConstraintOrigin") -> str:
@@ -1050,6 +1111,13 @@ class ConstraintOrigin(enum.Enum):
             if source.endswith(suffix):
                 return kind.value, source[: -len(suffix)]
         return -1, source
+
+
+_ORIGIN_SUFFIXES = {
+    ConstraintOrigin.CONDITIONAL_SPEC: "_cond",
+    ConstraintOrigin.DEPENDS_ON: "_dep",
+    ConstraintOrigin.REQUIRE: "_req",
+}
 
 
 class ConditionIdContext(SourceContext):
@@ -1146,6 +1214,11 @@ class SpackSolverSetup:
         self._id_counter: Iterator[int] = itertools.count()
         self._trigger_cache: ConditionSpecCache = collections.defaultdict(dict)
         self._effect_cache: ConditionSpecCache = collections.defaultdict(dict)
+        # The same for conditions declared by base classes, keyed by Mixin.ident
+        self._mixin_trigger_cache: ConditionSpecCache = collections.defaultdict(dict)
+        self._mixin_effect_cache: ConditionSpecCache = collections.defaultdict(dict)
+        # Base classes whose conditions the current solve has emitted, None if they have none
+        self._mixins: Dict[type, Optional[Mixin]] = {}
 
         # Caches to optimize the setup phase of the solver
         self.target_specs_cache = None
@@ -1196,35 +1269,64 @@ class SpackSolverSetup:
         for v in sorted(deprecated):
             self.gen.pkg_fact(pkg.name, fn.deprecated_version(v))
 
-    def conflict_rules(self, pkg):
-        for when_spec, conflict_specs in pkg.conflicts.items():
-            when_spec_msg = f"conflict constraint {when_spec}"
-            when_spec_id = self.condition(when_spec, required_name=pkg.name, msg=when_spec_msg)
-            when_spec_str = str(when_spec)
+    def conflict_rules(self, pkg, classes: Sequence[type] = ()) -> None:
+        """Translate the ``conflicts`` directives that ``classes`` (the package itself, if none)
+        declare into ASP logic for the package."""
+        for klass in classes or (pkg,):
+            for when_spec, conflict_specs in own_dict(klass, "conflicts").items():
+                self._conflict_conditions(pkg.name, pkg.name, when_spec, conflict_specs)
 
-            for conflict_spec, conflict_msg in conflict_specs:
-                conflict_spec_str = str(conflict_spec)
-                if conflict_msg is None:
-                    conflict_msg = f"{pkg.name}: "
-                    if not when_spec_str:
-                        conflict_msg += f"conflicts with '{conflict_spec_str}'"
-                    else:
-                        conflict_msg += f"'{conflict_spec_str}' conflicts with '{when_spec_str}'"
+    def _conflict_conditions(
+        self,
+        name: str,
+        label: str,
+        when_spec: spack.spec.Spec,
+        conflict_specs: Sequence[Tuple[spack.spec.Spec, Optional[str]]],
+        mixin: Optional[Mixin] = None,
+    ) -> bool:
+        """The conditions of the conflicts declared under ``when_spec``, for package ``name``
+        (called ``label`` in messages), or for a base class if ``mixin`` is given (see
+        :meth:`mixin_rules`), in which case False is returned if they cannot be shared."""
+        when_spec_str = str(when_spec)
+        when_spec_msg = f"conflict constraint {when_spec}"
+        when_spec_id = self._condition(
+            when_spec, required_name=name, msg=when_spec_msg, mixin=mixin
+        )
+        if when_spec_id is None:
+            return False
 
-                if not conflict_spec_str:
-                    conflict_spec_msg = f"conflict is triggered when {pkg.name}"
-                else:
-                    conflict_spec_msg = f"conflict is triggered when {conflict_spec_str}"
-
+        for conflict_spec, msg in conflict_specs:
+            conflict_spec_str = str(conflict_spec)
+            conflict_msg = _conflict_message(label, when_spec_str, conflict_spec_str, msg)
+            conflict_spec_msg = f"conflict is triggered when {conflict_spec_str or label}"
+            if conflict_spec.name:
+                # the conflict is on another package, whose condition then serves every subclass
+                # of a base class too, unless that package is the one the clauses stand for
+                if mixin and conflict_spec.name == name:
+                    return False
                 conflict_spec_id = self.condition(
-                    conflict_spec,
-                    required_name=conflict_spec.name or pkg.name,
-                    msg=conflict_spec_msg,
+                    conflict_spec, required_name=conflict_spec.name, msg=conflict_spec_msg
                 )
-                self.gen.pkg_fact(
-                    pkg.name, fn.conflict(conflict_spec_id, when_spec_id, conflict_msg)
+                atom = fn.conflict(conflict_spec_id, when_spec_id, conflict_msg)
+            else:
+                own_id = self._condition(
+                    conflict_spec, required_name=name, msg=conflict_spec_msg, mixin=mixin
                 )
-                self.gen.newline()
+                if own_id is None:
+                    return False
+                conflict = fn.conflict_own if mixin else fn.conflict
+                atom = conflict(own_id, when_spec_id, conflict_msg)
+            self._fact(name, atom, mixin)
+        self.gen.newline()
+        return True
+
+    def _fact(self, name: str, atom: AspFunction, mixin: Optional[Mixin]) -> None:
+        """A fact of package ``name``, or of a base class it inherits from if ``mixin`` is given,
+        which the ASP program then copies to every package inheriting from that class."""
+        if mixin:
+            self.gen.mixin_fact(mixin.ident, atom)
+        else:
+            self.gen.pkg_fact(name, atom)
 
     def config_compatible_os(self):
         """Facts about compatible os's specified in configs"""
@@ -1251,14 +1353,23 @@ class SpackSolverSetup:
         # variants
         self.variant_rules(pkg)
 
+        # base classes with directives emit their conditions once for all their subclasses;
+        # the directives of the other classes are emitted here, like the package's own
+        mixins, classes = self.mixins_of(pkg)
+
         # conflicts
-        self.conflict_rules(pkg)
+        self.conflict_rules(pkg, classes)
 
         # virtuals
-        self.package_provider_rules(pkg)
+        self.package_provider_rules(pkg, classes)
 
         # dependencies
-        self.package_dependencies_rules(pkg)
+        self.package_dependencies_rules(pkg, classes)
+        for extendee, _ in own_items(pkg, "extendees"):
+            self.gen.pkg_fact(pkg.name, fn.extends(extendee))
+
+        for mixin in mixins:
+            self.apply_mixin(pkg, mixin)
 
         # splices
         if self.enable_splicing:
@@ -1266,25 +1377,111 @@ class SpackSolverSetup:
 
         self.package_requirement_rules(pkg)
 
+    def mixins_of(
+        self, pkg: Type[spack.package_base.PackageBase]
+    ) -> Tuple[List[Mixin], List[type]]:
+        """The classes in the MRO of ``pkg`` with directives, split into the base classes whose
+        conditions are shared (emitted once per solve, on first use here) and those whose
+        directives are emitted per package, the package itself first."""
+        mixins: List[Mixin] = []
+        classes: List[type] = [pkg]
+        for klass in DirectiveMeta.directive_classes(pkg):
+            if klass is pkg:
+                continue
+            if klass not in self._mixins:
+                self._mixins[klass] = self.mixin_rules(klass, representative=pkg.name)
+            mixin = self._mixins[klass]
+            if mixin is None:
+                classes.append(klass)
+            else:
+                mixins.append(mixin)
+        return mixins, classes
+
+    def mixin_rules(self, klass: type, *, representative: str) -> Optional[Mixin]:
+        """Translate the ``depends_on``, ``conflicts`` and ``provides`` directives that ``klass``
+        declares for all its subclasses into ASP logic, once: the clauses are generated for the
+        ``representative`` subclass, and the ASP program substitutes the name of every other one
+        (see "Conditions inherited from base classes" in concretize.lp). Returns None, and emits
+        nothing, if the class has no such directives or one of them cannot be shared, e.g.
+        because its clauses embed the package name in a flag source; otherwise
+        :meth:`apply_mixin` does the rest per subclass."""
+        dependencies = own_dict(klass, "dependencies")
+        conflicts = own_dict(klass, "conflicts")
+        provided = own_dicts(klass, "provided")
+        if not (
+            dependencies or conflicts or provided["provided"] or provided["provided_together"]
+        ):
+            return None
+
+        mixin = Mixin(klass, representative)
+        name, label = representative, mixin.label
+        start = len(self.gen.asp_problem)
+        self.gen.h2(f"Base class rules: {mixin.ident}")
+
+        def shared() -> bool:
+            for cond, deps_by_name in dependencies.items():
+                cond_str = str(cond)
+                suffix = f" when {cond_str}" if cond_str else ""
+                for dep in deps_by_name.values():
+                    if not self._dependency_condition(name, label, cond, suffix, dep, mixin):
+                        return False
+            for when_spec, conflict_specs in conflicts.items():
+                if not self._conflict_conditions(name, label, when_spec, conflict_specs, mixin):
+                    return False
+            for when, virtuals in provided["provided"].items():
+                for vpkg in sorted(virtuals):
+                    if vpkg.name not in self.possible_virtuals:
+                        continue
+                    if not self._provider_condition(name, label, when, vpkg, mixin):
+                        return False
+            for when, sets_of_virtuals in provided["provided_together"].items():
+                if not self._provided_together_condition(
+                    name, label, when, sets_of_virtuals, mixin
+                ):
+                    return False
+            return True
+
+        if shared():
+            return mixin
+
+        # roll back what was emitted and cached for the class: its directives are emitted per
+        # package instead
+        del self.gen.asp_problem[start:]
+        self._mixin_trigger_cache.pop(mixin.ident, None)
+        self._mixin_effect_cache.pop(mixin.ident, None)
+        return None
+
+    def apply_mixin(self, pkg: Type[spack.package_base.PackageBase], mixin: Mixin) -> None:
+        """Declare that ``pkg`` inherits the conditions of a base class, and record what their
+        clauses imply for the package: the version constraints and variant values that generating
+        them for the package would have recorded."""
+        self.gen.pkg_fact(pkg.name, fn.mixin(mixin.ident))
+        for spec in mixin.replay.values():
+            self.clauses.record_spec(pkg.name, spec)
+
     def trigger_rules(self):
-        """Flushes all the trigger rules collected so far, and clears the cache."""
+        """Flushes all the trigger rules collected so far, and clears the cache. Those of base
+        classes are emitted as they are created."""
         if not self._trigger_cache:
             return
 
         self.gen.h2("Trigger conditions")
         for name, cache in self._trigger_cache.items():
             for (spec_str, _), (trigger_id, requirements) in cache.items():
+                assert requirements is not None
                 self.gen.trigger_facts(name, trigger_id, spec_str, requirements)
         self._trigger_cache.clear()
 
     def effect_rules(self):
-        """Flushes all the effect rules collected so far, and clears the cache."""
+        """Flushes all the effect rules collected so far, and clears the cache. Those of base
+        classes are emitted as they are created."""
         if not self._effect_cache:
             return
 
         self.gen.h2("Imposed requirements")
         for name in sorted(self._effect_cache):
             for (spec_str, _), (effect_id, requirements) in self._effect_cache[name].items():
+                assert requirements is not None
                 self.gen.effect_facts(name, effect_id, spec_str, requirements)
         self._effect_cache.clear()
 
@@ -1419,32 +1616,44 @@ class SpackSolverSetup:
         cache: ConditionSpecCache,
         body: bool,
         context: ConditionIdContext,
-    ) -> int:
+        mixin: Optional[Mixin] = None,
+    ) -> Optional[int]:
         """Get the id for one half of a condition (either a trigger or an imposed constraint).
 
         Construct a key from the condition spec and any associated transformation, and
         cache the ASP functions that they imply. The saved functions will be output
         later in ``trigger_rules()`` and ``effect_rules()``.
 
+        For a condition of a base class (``mixin``), the clauses are generated for its
+        representative subclass, made to stand for any subclass by :func:`mixin_clauses`, and
+        output right away, for the class; if they cannot be, None is returned.
+
         Returns:
             The id of the cached trigger or effect.
 
         """
-        pkg_cache = cache[name]
+        pkg_cache = cache[mixin.ident if mixin else name]
         cond_str = str(cond) if cond.name else f"{name} {cond}"
         named_cond_key = (cond_str, context.transform)
 
         result = pkg_cache.get(named_cond_key)
         if result:
-            return result[0]
+            return result[0] if result[1] is not None else None
 
         cond_id = next(self._id_counter)
         requirements = self.clauses.spec_clauses(cond, name=name, body=body, context=context)
         if context.transform:
             requirements = context.transform(name, cond, requirements)
-        pkg_cache[named_cond_key] = (cond_id, requirements)
+        clauses: Optional[List[AspFunction]] = requirements
+        if mixin:
+            clauses = mixin_clauses(requirements, mixin.representative)
+            if clauses is not None and body:
+                self.gen.trigger_facts(mixin.ident, cond_id, str(cond), clauses, shared=True)
+            elif clauses is not None:
+                self.gen.effect_facts(mixin.ident, cond_id, str(cond), clauses, imposed_on=name)
+        pkg_cache[named_cond_key] = (cond_id, clauses)
 
-        return cond_id
+        return cond_id if clauses is not None else None
 
     def condition(
         self,
@@ -1471,6 +1680,32 @@ class SpackSolverSetup:
         Returns:
             int: id of the condition created by this function
         """
+        condition_id = self._condition(
+            required_spec,
+            imposed_spec,
+            required_name=required_name,
+            imposed_name=imposed_name,
+            msg=msg,
+            context=context,
+        )
+        assert condition_id is not None
+        return condition_id
+
+    def _condition(
+        self,
+        required_spec: spack.spec.Spec,
+        imposed_spec: Optional[spack.spec.Spec] = None,
+        *,
+        required_name: Optional[str] = None,
+        imposed_name: Optional[str] = None,
+        msg: Optional[str] = None,
+        context: Optional[ConditionContext] = None,
+        mixin: Optional[Mixin] = None,
+    ) -> Optional[int]:
+        """:meth:`condition`, which also generates the facts of a condition that a base class
+        (``mixin``) declares for all its subclasses: ``required_name`` is then the subclass the
+        clauses are generated for, and the facts are emitted for the base class. Returns None,
+        instead of the id, if such a condition cannot be shared between the subclasses."""
         required_name = required_spec.name or required_name
         if not required_name:
             raise ValueError(f"Must provide a name for anonymous condition: '{required_spec}'")
@@ -1479,87 +1714,165 @@ class SpackSolverSetup:
             context = ConditionContext()
             context.transform_imposed = remove_facts("node", "virtual_node")
 
+        if mixin:
+            if required_spec.name or any(v.propagate for v in required_spec.variants.values()):
+                # a named trigger is not on the subclass, and propagated variants generate
+                # clauses only for the packages that have the variant
+                return None
+            trigger_cache, effect_cache = self._mixin_trigger_cache, self._mixin_effect_cache
+        else:
+            trigger_cache, effect_cache = self._trigger_cache, self._effect_cache
+
         # Settle the trigger and the effect before emitting anything: if one of them cannot be
         # emitted but the exception is handled in the caller, we won't have emitted partial facts.
         condition_id = next(self._id_counter)
         trigger_id = self._get_condition_id(
             required_name,
             required_spec,
-            cache=self._trigger_cache,
+            cache=trigger_cache,
             body=True,
             context=context.requirement_context(),
+            mixin=mixin,
         )
+        if trigger_id is None:
+            return None
 
         effect_id = None
         if imposed_spec:
             imposed_name = imposed_spec.name or imposed_name
             if not imposed_name:
                 raise ValueError(f"Must provide a name for imposed constraint: '{imposed_spec}'")
+            if mixin and imposed_name == required_name:
+                # imposed on the very package the clauses stand for
+                return None
 
             effect_id = self._get_condition_id(
                 imposed_name,
                 imposed_spec,
-                cache=self._effect_cache,
+                cache=effect_cache,
                 body=False,
                 context=context.impose_context(),
+                mixin=mixin,
             )
+            if effect_id is None:
+                return None
 
-        self.gen.condition_facts(required_name, condition_id, trigger_id, msg, effect_id)
+        if mixin:
+            self.gen.condition_facts(
+                mixin.ident, condition_id, trigger_id, msg, effect_id, shared=True
+            )
+            mixin.replay.setdefault(str(required_spec), required_spec)
+        else:
+            self.gen.condition_facts(required_name, condition_id, trigger_id, msg, effect_id)
         return condition_id
 
-    def package_provider_rules(self, pkg: Type[spack.package_base.PackageBase]) -> None:
+    def package_provider_rules(
+        self, pkg: Type[spack.package_base.PackageBase], classes: Sequence[type] = ()
+    ) -> None:
+        """Translate the ``provides`` directives that ``classes`` (the package itself, if none)
+        declare into ASP logic for the package."""
         for vpkg_name in pkg.provided_virtual_names():
             if vpkg_name not in self.possible_virtuals:
                 continue
             self.gen.pkg_fact(pkg.name, fn.possible_provider(vpkg_name))
 
-        for when, provided in pkg.provided.items():
-            for vpkg in sorted(provided):
-                if vpkg.name not in self.possible_virtuals:
-                    continue
-
-                msg = f"{pkg.name} provides {vpkg}{'' if when == EMPTY_SPEC else f' when {when}'}"
-                condition_id = self.condition(when, vpkg, required_name=pkg.name, msg=msg)
-                self.gen.pkg_fact(pkg.name, fn.provider_condition(condition_id, vpkg.name))
-            self.gen.newline()
-
-        for when, sets_of_virtuals in pkg.provided_together.items():
-            condition_id = self.condition(
-                when, required_name=pkg.name, msg="Virtuals are provided together"
-            )
-            for set_id, virtuals_together in enumerate(sorted(sets_of_virtuals)):
-                for name in sorted(virtuals_together):
-                    self.gen.pkg_fact(pkg.name, fn.provided_together(condition_id, set_id, name))
-            self.gen.newline()
-
-    def package_dependencies_rules(self, pkg):
-        """Translate ``depends_on`` directives into ASP logic."""
-        for cond, deps_by_name in pkg.dependencies.items():
-            cond_str = str(cond)
-            cond_str_suffix = f" when {cond_str}" if cond_str else ""
-            for _, dep in deps_by_name.items():
-                depflag = dep.depflag
-                # Skip test dependencies if they're not requested
-                if not self.tests:
-                    depflag &= ~dt.TEST
-
-                # ... or if they are requested only for certain packages
-                elif not isinstance(self.tests, bool) and pkg.name not in self.tests:
-                    depflag &= ~dt.TEST
-
-                # if there are no dependency types to be considered
-                # anymore, don't generate the dependency
-                if not depflag:
-                    continue
-
-                msg = f"{pkg.name} depends on {dep.spec}{cond_str_suffix}"
-                context = ConditionContext()
-                context.source = ConstraintOrigin.append_type_suffix(
-                    pkg.name, ConstraintOrigin.DEPENDS_ON
-                )
-                context.transform_imposed = dependency_holds(dependency_flags=depflag, pkg_cls=pkg)
-                self.condition(cond, dep.spec, required_name=pkg.name, msg=msg, context=context)
+        for klass in classes or (pkg,):
+            own = own_dicts(klass, "provided")
+            for when, provided in own["provided"].items():
+                for vpkg in sorted(provided):
+                    if vpkg.name in self.possible_virtuals:
+                        self._provider_condition(pkg.name, pkg.name, when, vpkg)
                 self.gen.newline()
+
+            for when, sets_of_virtuals in own["provided_together"].items():
+                self._provided_together_condition(pkg.name, pkg.name, when, sets_of_virtuals)
+
+    def _provider_condition(
+        self,
+        name: str,
+        label: str,
+        when: spack.spec.Spec,
+        vpkg: spack.spec.Spec,
+        mixin: Optional[Mixin] = None,
+    ) -> bool:
+        """The condition under which package ``name`` (``label`` in messages) provides ``vpkg``,
+        or a base class does if ``mixin`` is given, in which case False is returned if it cannot
+        be shared; see :meth:`mixin_rules`."""
+        msg = f"{label} provides {vpkg}{'' if when == EMPTY_SPEC else f' when {when}'}"
+        condition_id = self._condition(when, vpkg, required_name=name, msg=msg, mixin=mixin)
+        if condition_id is None:
+            return False
+        self._fact(name, fn.provider_condition(condition_id, vpkg.name), mixin)
+        return True
+
+    def _provided_together_condition(
+        self,
+        name: str,
+        label: str,
+        when: spack.spec.Spec,
+        sets_of_virtuals: Sequence[Set[str]],
+        mixin: Optional[Mixin] = None,
+    ) -> bool:
+        """Like :meth:`_provider_condition`, for the virtuals provided together."""
+        condition_id = self._condition(
+            when, required_name=name, msg="Virtuals are provided together", mixin=mixin
+        )
+        if condition_id is None:
+            return False
+        for set_id, virtuals_together in enumerate(sorted(sets_of_virtuals)):
+            for virtual in sorted(virtuals_together):
+                self._fact(name, fn.provided_together(condition_id, set_id, virtual), mixin)
+        self.gen.newline()
+        return True
+
+    def package_dependencies_rules(self, pkg, classes: Sequence[type] = ()) -> None:
+        """Translate the ``depends_on`` directives that ``classes`` (the package itself, if none)
+        declare into ASP logic for the package."""
+        for klass in classes or (pkg,):
+            for cond, deps_by_name in own_dict(klass, "dependencies").items():
+                cond_str = str(cond)
+                suffix = f" when {cond_str}" if cond_str else ""
+                for dep in deps_by_name.values():
+                    self._dependency_condition(pkg.name, pkg.name, cond, suffix, dep)
+
+    def _dependency_condition(
+        self,
+        name: str,
+        label: str,
+        cond: spack.spec.Spec,
+        cond_str_suffix: str,
+        dep: spack.dependency.Dependency,
+        mixin: Optional[Mixin] = None,
+    ) -> bool:
+        """The condition for a dependency of package ``name`` (``label`` in messages), or of a
+        base class if ``mixin`` is given, in which case False is returned if it cannot be shared;
+        see :meth:`mixin_rules`."""
+        depflag = dep.depflag
+        if depflag & dt.TEST:
+            if not isinstance(self.tests, bool):
+                # test dependencies are requested for certain packages only
+                if mixin:
+                    return False
+                if name not in self.tests:
+                    depflag &= ~dt.TEST
+            elif not self.tests:
+                depflag &= ~dt.TEST
+
+        # if there are no dependency types to be considered anymore, don't generate the dependency
+        if not depflag:
+            return True
+
+        msg = f"{label} depends on {dep.spec}{cond_str_suffix}"
+        context = ConditionContext()
+        context.source = ConstraintOrigin.append_type_suffix(name, ConstraintOrigin.DEPENDS_ON)
+        context.transform_imposed = dependency_holds(
+            dependency_flags=depflag, dependent=MIXIN_SELF if mixin else name
+        )
+        condition_id = self._condition(
+            cond, dep.spec, required_name=name, msg=msg, context=context, mixin=mixin
+        )
+        self.gen.newline()
+        return condition_id is not None
 
     def _gen_match_variant_splice_constraints(
         self,
@@ -2390,6 +2703,7 @@ class SpackSolverSetup:
                 spack.externals_config.external_config_with_implicit_externals(self.context)
             )
         self._validate_input_specs(specs)
+        self._mixins = {}
         self.gen = ProblemInstanceBuilder()
         self.clauses = SpecClauseGenerator(
             repo=self.context.repo,
@@ -2833,11 +3147,13 @@ class ProblemInstanceBuilder:
 
     def condition_facts(
         self,
-        pkg_name: str,
+        owner: str,
         condition_id: int,
         trigger_id: int,
         msg: Optional[str],
         effect_id: Optional[int] = None,
+        *,
+        shared: bool = False,
     ) -> None:
         """Add the facts of a condition: the package that declares it, the reason for it, what
         triggers it and, if there is one, the effect it has::
@@ -2846,19 +3162,29 @@ class ProblemInstanceBuilder:
             condition_reason(C,M).
             pkg_fact(P,condition_trigger(C,T)).
             pkg_fact(P,condition_effect(C,E)).
+
+        A ``shared`` condition is one a base class ``owner`` declares for all its subclasses: its
+        facts are ``mixin_fact(M,...)`` instead, which the ASP program copies to each of them.
         """
         quoted = self.quoted
-        name = quote(pkg_name, quoted)
+        functor = "mixin_fact" if shared else "pkg_fact"
+        name = quote(owner, quoted)
         reason = quote_once(msg) if type(msg) is str else asp_argument(msg, quoted)
         problem = self.asp_problem
-        problem.append(f"pkg_fact({name},condition({condition_id})).")
+        problem.append(f"{functor}({name},condition({condition_id})).")
         problem.append(f"condition_reason({condition_id},{reason}).")
-        problem.append(f"pkg_fact({name},condition_trigger({condition_id},{trigger_id})).")
+        problem.append(f"{functor}({name},condition_trigger({condition_id},{trigger_id})).")
         if effect_id is not None:
-            problem.append(f"pkg_fact({name},condition_effect({condition_id},{effect_id})).")
+            problem.append(f"{functor}({name},condition_effect({condition_id},{effect_id})).")
 
     def trigger_facts(
-        self, pkg_name: str, trigger_id: int, spec_str: str, requirements: List[AspFunction]
+        self,
+        owner: str,
+        trigger_id: int,
+        spec_str: str,
+        requirements: List[AspFunction],
+        *,
+        shared: bool = False,
     ) -> None:
         """Add the facts of a trigger: its id, the spec it stands for, and the clauses of that
         spec as its requirements, followed by a blank line::
@@ -2866,18 +3192,32 @@ class ProblemInstanceBuilder:
             pkg_fact(P,trigger_id(T)).
             pkg_fact(P,trigger_msg(S)).
             condition_requirement(T,<the arguments of a clause>).
+
+        For a ``shared`` trigger of a base class, see :meth:`condition_facts`, these are
+        ``mixin_fact(M,...)`` and ``mixin_condition_requirement(T,...)``.
         """
         quoted = self.quoted
-        name = quote(pkg_name, quoted)
+        functor, predicate = (
+            ("mixin_fact", "mixin_condition_requirement")
+            if shared
+            else ("pkg_fact", "condition_requirement")
+        )
+        name = quote(owner, quoted)
         problem = self.asp_problem
-        problem.append(f"pkg_fact({name},trigger_id({trigger_id})).")
-        problem.append(f"pkg_fact({name},trigger_msg({quote_once(spec_str)})).")
+        problem.append(f"{functor}({name},trigger_id({trigger_id})).")
+        problem.append(f"{functor}({name},trigger_msg({quote_once(spec_str)})).")
         for clause in requirements:
-            problem.append(f"condition_requirement({trigger_id},{clause.args_str(quoted)}).")
+            problem.append(f"{predicate}({trigger_id},{clause.args_str(quoted)}).")
         problem.append("")
 
     def effect_facts(
-        self, pkg_name: str, effect_id: int, spec_str: str, requirements: List[AspFunction]
+        self,
+        owner: str,
+        effect_id: int,
+        spec_str: str,
+        requirements: List[AspFunction],
+        *,
+        imposed_on: Optional[str] = None,
     ) -> None:
         """Add the facts of an effect: its id, the spec it stands for, and the clauses of that
         spec as the constraints it imposes, followed by a blank line::
@@ -2885,15 +3225,34 @@ class ProblemInstanceBuilder:
             pkg_fact(P,effect_id(E)).
             pkg_fact(P,effect_msg(S)).
             imposed_constraint(E,<the arguments of a clause>).
+
+        For an effect of a base class ``owner``, see :meth:`condition_facts`, ``imposed_on`` is
+        the package it is imposed on, and these are ``mixin_fact(M,effect_id(E,P))``,
+        ``mixin_fact(M,effect_msg(S))`` and ``mixin_imposed_constraint(E,...)``.
         """
         quoted = self.quoted
-        name = quote(pkg_name, quoted)
+        name = quote(owner, quoted)
         problem = self.asp_problem
-        problem.append(f"pkg_fact({name},effect_id({effect_id})).")
-        problem.append(f"pkg_fact({name},effect_msg({quote_once(spec_str)})).")
+        if imposed_on is None:
+            functor, predicate, effect = (
+                "pkg_fact",
+                "imposed_constraint",
+                f"effect_id({effect_id})",
+            )
+        else:
+            functor, predicate = "mixin_fact", "mixin_imposed_constraint"
+            effect = f"effect_id({effect_id},{quote(imposed_on, quoted)})"
+        problem.append(f"{functor}({name},{effect}).")
+        problem.append(f"{functor}({name},effect_msg({quote_once(spec_str)})).")
         for clause in requirements:
-            problem.append(f"imposed_constraint({effect_id},{clause.args_str(quoted)}).")
+            problem.append(f"{predicate}({effect_id},{clause.args_str(quoted)}).")
         problem.append("")
+
+    def mixin_fact(self, mixin: str, atom: AspFunction) -> None:
+        """Fast helper for ``mixin_fact(<mixin>, <atom>)``: a fact of a base class, which the
+        ASP program turns into a ``pkg_fact`` of every package inheriting from it."""
+        quoted = self.quoted
+        self.asp_problem.append(f"mixin_fact({quote(mixin, quoted)},{atom.to_str(quoted)}).")
 
     def append(self, rule: str) -> None:
         self.asp_problem.append(rule)
