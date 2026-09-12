@@ -18,6 +18,7 @@ Both layouts show the same information in the same order.
 
 import argparse
 import collections
+import io
 import json
 import re
 import shutil
@@ -175,6 +176,7 @@ class Entry:
         "sort_key",
         "spec",
         "merged",
+        "relevant",
     )
 
     def __init__(
@@ -193,6 +195,8 @@ class Entry:
         self.name = name
         self.spec = spec
         self.merged = False
+        #: whether the entry can apply to the version the spec resolves to (see `mark_relevance`)
+        self.relevant = True
         self.head = head
         self.attr = attr
         self.description = description
@@ -225,6 +229,13 @@ def _spec_text(spec: Optional[spack.spec.Spec]) -> str:
     # an anonymous spec with only key=value variants renders with a leading blank inside the
     # color codes, e.g. "\x1b[0;94m build_system=cmake\x1b[0m"
     return re.sub(r"^((?:\x1b\[[0-9;]*m)*)\s+", r"\1", spec.clong_spec)
+
+
+def _faint(text: str) -> str:
+    """Render text faint (ANSI SGR 2), dropping any other colors, if color is enabled."""
+    if not color.get_color_when():
+        return text
+    return f"\x1b[2m{color.csub(text)}\x1b[0m"
 
 
 def _title(text: str) -> str:
@@ -275,11 +286,15 @@ class EntryPrinter:
         layout: Layout,
         indent: int = INDENT,
         out: Optional[TextIO] = None,
+        irrelevant_note: str = "",
     ) -> None:
         entries = list(entries)
         self.layout = layout
         self.indent = indent
         self.out = out or sys.stdout
+        #: appended to entries that cannot apply to the version the spec resolves to (in a pipe;
+        #: on a terminal those entries are rendered faint instead)
+        self.irrelevant_note = irrelevant_note
         self.name_width = max((color.clen(e.name) for e in entries), default=0)
         self.attr_width = max((color.clen(e.attr) for e in entries), default=0)
         if layout.width is not None:
@@ -307,10 +322,13 @@ class EntryPrinter:
                 name = " " * len(entry.head) + name[len(entry.head) :]
             previous_head = entry.head
 
+            fields = entry.fields(show_when)
             if self.layout.tty:
-                self._print_tty(name, entry.attr, entry.fields(show_when))
+                self._print_tty(name, entry.attr, fields, faint=not entry.relevant)
             else:
-                self._print_line(name, entry.attr, entry.fields(show_when))
+                if not entry.relevant and self.irrelevant_note:
+                    fields.append(("", self.irrelevant_note))
+                self._print_line(name, entry.attr, fields)
 
     def _print_line(self, name: str, attr: str, fields: List[Tuple[str, str]]) -> None:
         """One line per entry. Only a description with explicit line breaks (detailed help for a
@@ -334,8 +352,13 @@ class EntryPrinter:
         for line in continuation:
             self.out.write(" " * text_column + line + "\n")
 
-    def _print_tty(self, name: str, attr: str, fields: List[Tuple[str, str]]) -> None:
+    def _print_tty(
+        self, name: str, attr: str, fields: List[Tuple[str, str]], faint: bool = False
+    ) -> None:
         """Name and attribute in their columns, then the fields one below the other, wrapped."""
+        out = self.out
+        if faint:
+            out = io.StringIO()
         text_column = self.indent + self.name_width + GUTTER
         if self.attr_width:
             text_column += self.attr_width + GUTTER
@@ -343,33 +366,51 @@ class EntryPrinter:
         prefix = " " * self.indent + _ljust(name, self.name_width) + " " * GUTTER
         if color.clen(name) > self.name_width:
             # overlong name: continue on the next line at the attribute column
-            self.out.write(prefix.rstrip() + "\n")
+            out.write(prefix.rstrip() + "\n")
             prefix = " " * (self.indent + self.name_width + GUTTER)
         if self.attr_width:
             prefix += _ljust(attr, self.attr_width) + " " * GUTTER
 
         if not fields:
-            self.out.write(prefix.rstrip() + "\n")
-            return
+            out.write(prefix.rstrip() + "\n")
+        else:
+            indent = " " * text_column
+            for i, (lead, field) in enumerate(fields):
+                first_indent = (prefix if i == 0 else indent) + lead
+                for line in _wrap(field, first_indent, indent, self.layout.width):
+                    out.write(line.rstrip() + "\n")
 
-        indent = " " * text_column
-        for i, (lead, field) in enumerate(fields):
-            first_indent = (prefix if i == 0 else indent) + lead
-            for line in _wrap(field, first_indent, indent, self.layout.width):
-                self.out.write(line.rstrip() + "\n")
+        if faint:
+            assert isinstance(out, io.StringIO)
+            for line in out.getvalue().splitlines():
+                self.out.write(_faint(line) + "\n")
 
 
-def print_section(title: str, entries: List[Entry], layout: Layout, by_name: bool) -> None:
+def mark_relevance(entries: List[Entry], version: Optional[spack.version.StandardVersion]) -> None:
+    """Flag entries whose condition rules out the version the spec resolves to. They are shown
+    faint on a terminal and tagged in a pipe, so that a reader sees what applies to what they
+    would get without losing the rest."""
+    if version is None:
+        return
+    resolved = spack.spec.Spec(f"@={version}")
+    for entry in entries:
+        entry.relevant = entry.when is None or entry.when.intersects(resolved)
+
+
+def print_section(title: str, entries: List[Entry], args: Namespace) -> None:
     """Print a titled section of entries, either in name order with their conditions inline, or
     grouped by condition (unconditional entries first)."""
+    layout, by_name = args.layout, args.by_name
     print()
     print(_title(f"{title}:"))
     if not entries:
         print(" " * INDENT + "None")
         return
 
+    mark_relevance(entries, args.resolved_version)
     entries = merge_conditions(entries)
-    printer = EntryPrinter(entries, layout)
+    note = f"(not for @{args.resolved_version})" if args.resolved_version else ""
+    printer = EntryPrinter(entries, layout, irrelevant_note=note)
     if by_name:
         printer.print(entries, show_when=True)
         return
@@ -383,6 +424,8 @@ def print_section(title: str, entries: List[Entry], layout: Layout, by_name: boo
             if i > 0:
                 print()
             when = color.colorize(f"{WHEN_COLOR}{{when}} ") + group[0].when_text
+            if layout.tty and not any(e.relevant for e in group):
+                when = _faint(when)
             print(" " * (INDENT - 2) + when)
         printer.print(group, show_when=False)
 
@@ -561,6 +604,7 @@ class _MergedCondition:
             first.name = replaced
         else:
             first.when_text = replaced
+        first.relevant = any(e.relevant for e in self.entries)
         return [first]
 
 
@@ -739,7 +783,7 @@ def dependency_entries(pkg: PackageBase) -> List[Entry]:
 
 def print_dependencies(pkg: PackageBase, args: Namespace) -> None:
     """output build, link, and run package dependencies"""
-    print_section("Dependencies", dependency_entries(pkg), args.layout, args.by_name)
+    print_section("Dependencies", dependency_entries(pkg), args)
 
 
 # --- Conflicts, requirements and patches --------------------------------------------------------
@@ -805,15 +849,15 @@ def patch_entries(pkg: PackageBase) -> List[Entry]:
 
 def print_conflicts(pkg: PackageBase, args: Namespace) -> None:
     """output conflicts and requirements"""
-    print_section("Conflicts", conflict_entries(pkg), args.layout, args.by_name)
+    print_section("Conflicts", conflict_entries(pkg), args)
     requirements = requirement_entries(pkg)
     if requirements:
-        print_section("Requirements", requirements, args.layout, args.by_name)
+        print_section("Requirements", requirements, args)
 
 
 def print_patches(pkg: PackageBase, args: Namespace) -> None:
     """output patches"""
-    print_section("Patches", patch_entries(pkg), args.layout, args.by_name)
+    print_section("Patches", patch_entries(pkg), args)
 
 
 def print_counts(pkg: PackageBase, args: Namespace) -> None:
@@ -872,7 +916,7 @@ def variant_entries(pkg: PackageBase) -> List[Entry]:
 
 def print_variants(pkg: PackageBase, args: Namespace) -> None:
     """output variants"""
-    print_section("Variants", variant_entries(pkg), args.layout, args.by_name)
+    print_section("Variants", variant_entries(pkg), args)
 
 
 # --- Versions -----------------------------------------------------------------------------------
@@ -882,10 +926,30 @@ def _version_text(v: Any) -> str:
     return color.colorize(f"{spack.spec.VERSION_COLOR}{{{color.cescape(str(v))}}}")
 
 
+def _versions(pkg: PackageBase) -> List[spack.version.StandardVersion]:
+    """The package's versions that match its spec, newest first."""
+    return sorted((v for v in pkg.versions if pkg.spec.versions.intersects(v)), reverse=True)
+
+
+def resolved_version(pkg: PackageBase) -> Optional[spack.version.StandardVersion]:
+    """The version that the package's spec would resolve to according to the recipe alone (no
+    preferences from configuration): the preferred one among the versions matching the spec."""
+    versions = _versions(pkg)
+    if not versions:
+        return None
+
+    def order(version: spack.version.StandardVersion) -> Tuple:
+        info = pkg.versions[version]
+        not_deprecated = not info.get("deprecated", False)
+        return (not_deprecated, *spack.package_base.concretization_version_order((version, info)))
+
+    return max(versions, key=order)
+
+
 def print_versions(pkg: PackageBase, args: Namespace) -> None:
     """output versions"""
-    versions = sorted((v for v in pkg.versions if pkg.spec.versions.intersects(v)), reverse=True)
-    preferred = spack.package_base.preferred_version(pkg) if versions else None
+    versions = _versions(pkg)
+    preferred = args.resolved_version
     safe = [v for v in versions if not pkg.versions[v].get("deprecated", False)]
     deprecated = [v for v in versions if pkg.versions[v].get("deprecated", False)]
 
@@ -1062,6 +1126,7 @@ def info(parser: argparse.ArgumentParser, args: Namespace) -> None:
     pkg = pkg_cls(spec)
 
     args.layout = Layout.detect()
+    args.resolved_version = resolved_version(pkg)
 
     # name, build system and description
     print(color.colorize(f"@*{{{color.cescape(pkg.name)}}} ({pkg.build_system_class})"))
@@ -1097,7 +1162,7 @@ def info(parser: argparse.ArgumentParser, args: Namespace) -> None:
     if args.all or not args.no_variants:
         print_variants(pkg, args)
     if args.all or not args.no_dependencies:
-        print_section("Dependencies", dependency_entries(pkg), args.layout, args.by_name)
+        print_section("Dependencies", dependency_entries(pkg), args)
     if args.all or args.conflicts:
         print_conflicts(pkg, args)
     if args.all or args.patches:

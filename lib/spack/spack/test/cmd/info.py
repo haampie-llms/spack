@@ -7,6 +7,7 @@ import re
 import pytest
 
 import spack.cmd.info
+import spack.util.tty.color
 from spack.main import SpackCommand, SpackCommandError
 from spack.repo import UnknownPackageError
 
@@ -117,7 +118,7 @@ def test_header_and_labels(pipe):
         (["bowtie"], ["1.4.0", "1.3.0", "1.2.2", "1.2.0"], []),
         (["bowtie@1.2:"], ["1.4.0", "1.3.0", "1.2.2", "1.2.0"], []),
         (["bowtie@1.3:"], ["1.4.0", "1.3.0"], ["1.2.2", "1.2.0"]),
-        (["bowtie@1.2"], ["1.2.2", "1.2.0"], ["1.3.0"]),  # 1.4.0 still shown as preferred
+        (["bowtie@1.2"], [r"Preferred version:\n    1\.2\.2"], ["1.3.0", "1.4.0"]),
         # forwarded variant values are collapsed into one line with a placeholder (on a terminal
         # the repeated `gpu-dep` is elided, and --by-when puts the condition in a header)
         (
@@ -343,9 +344,9 @@ def test_conflicts_requirements_patches(pipe):
     output = info("--conflicts", "bowtie")
     assert re.search(
         r"^Conflicts:\n"
-        r"    %gcc\s+when @1\.3\n"
-        r"    %gcc@:4\.5\.0\s+when @1\.2\.2\n"
-        r"    %gcc@:10\.2\.1\s+when @:1\.2\.9\n",
+        r"    %gcc\s+when @1\.3  \(not for @1\.4\.0\)\n"
+        r"    %gcc@:4\.5\.0\s+when @1\.2\.2  \(not for @1\.4\.0\)\n"
+        r"    %gcc@:10\.2\.1\s+when @:1\.2\.9  \(not for @1\.4\.0\)\n",
         output,
         re.M,
     )
@@ -362,7 +363,7 @@ def test_conflicts_requirements_patches(pipe):
     output = info("--patches", "patch")
     assert re.search(
         r"^Patches:\n    foo\.patch\n    bar\.patch\s+when @2:\n    baz\.patch\n"
-        r"    biz\.patch\s+when @1\.0\.1:1\.0\.2\n",
+        r"    biz\.patch\s+when @1\.0\.1:1\.0\.2  \(not for @2\.0\)\n",
         output,
         re.M,
     )
@@ -370,7 +371,7 @@ def test_conflicts_requirements_patches(pipe):
 
 def test_merge_conflicts_sharing_a_condition(pipe):
     output = info("--conflicts", "many-conditional-deps")
-    assert re.search(r"^    \+\{cuda,rocm\}\s+when @:0\.9$", output, re.M)
+    assert re.search(r"^    \+\{cuda,rocm\}\s+when @:0\.9  \(not for @1\.0\)$", output, re.M)
     assert re.search(r"^    \+cuda\s+pick one GPU backend\s+when \+rocm$", output, re.M)
 
 
@@ -380,3 +381,23 @@ def test_terminal_layout_keeps_when_with_its_condition(terminal):
     # the brace group is too long for the line and wraps as a whole, `when` stays put
     assert re.search(r"when @1\.0:\+cuda\n\s+cuda_arch=\{0,1,2,", output)
     assert not re.search(r"when\n", output)
+
+
+def test_entries_for_other_versions(pipe, terminal, monkeypatch):
+    """Entries that cannot apply to the version the spec resolves to are tagged in a pipe and
+    rendered faint on a terminal."""
+    monkeypatch.setattr(spack.cmd.info, "_stdout_is_tty", lambda: False)
+    output = info("dual-cmake-autotools")
+    assert re.search(
+        r"^    cmake@3\.14\.0:\s+build\s+when @2\.1\.0: build_system=mock_cmake  "
+        r"\(not for @1\.0\)$",
+        output,
+        re.M,
+    )
+    assert re.search(r"^    cmake@3\.5\.1:\s+build\s+when build_system=mock_cmake$", output, re.M)
+
+    monkeypatch.setattr(spack.cmd.info, "_stdout_is_tty", lambda: True)
+    with spack.util.tty.color.color_when(True):
+        output = info("dual-cmake-autotools")
+    faint = [line for line in output.splitlines() if line.startswith("\x1b[2m")]
+    assert len(faint) == 1 and "@3.14.0:" in faint[0] and "(not for" not in output
