@@ -2182,7 +2182,7 @@ class Spec:
             if name in variants:
                 raise vt.DuplicateVariantError(f'Cannot specify variant "{name}" twice')
             variants[name] = vt.VariantValue.from_string_or_bool(name, value, concrete=concrete)
-            # the value just added can only conflict with its counterpart in the other map
+            # the value just added can only conflict with the same name in the other map
             if name in (self.variants if propagate else self.propagated_variants):
                 reason = _propagated_bool_conflict(self.variants, self.propagated_variants)
                 if reason is not None:
@@ -2881,7 +2881,8 @@ class Spec:
             else:
                 raise ValueError("{0} is not a variant of {1}".format(vname, new_spec.name))
 
-        # propagated variants are conditional, so they need not exist on this package
+        # a propagated variant applies where both the variant and the value exist, so it need
+        # not exist on this package
         new_spec.propagated_variants.update(change_spec.propagated_variants)
 
         if change_spec.compiler_flags:
@@ -3231,7 +3232,8 @@ class Spec:
         pkg_variants = pkg_cls.variant_names()
         # reserved names are variants that may be set on any package
         # but are not necessarily recorded by the package's class
-        # propagated variants are conditional, so they need not exist on this package
+        # a propagated variant applies where both the variant and the value exist, so it need
+        # not exist on this package
         not_existing = set(spec.variants)
         not_existing.difference_update(pkg_variants, vt.RESERVED_NAMES)
 
@@ -3294,8 +3296,8 @@ class Spec:
         other = self._autospec(other)
         if other.concrete:
             # a concrete spec is a singleton, so the intersection is other or empty; it is
-            # compared whole, since the pairwise checks below are blind to its closure, e.g. to
-            # a propagated bool value it contradicts
+            # compared whole, since the checks below look at this node only and would miss a
+            # propagated bool value that one of its dependencies contradicts
             if not other._satisfies(self, resolve_virtuals=resolve_virtuals):
                 raise spack.error.UnsatisfiableSpecError(
                     other, self, "constrain with a concrete spec"
@@ -3709,8 +3711,9 @@ class Spec:
     def _satisfies_variants_when_self_concrete(self, other: "Spec") -> bool:
         if not self.variants.satisfies(other.variants):
             return False
-        # a propagated value constrains every closure node that has the variant and admits the
-        # value, so only a bool can contradict without package knowledge
+        # a propagated value applies to the node and its dependencies where both the variant
+        # and the value exist; whether a value exists is package knowledge, except for a bool,
+        # whose two values always exist, so only a bool can contradict here
         if other.propagated_variants:
             for node in self.traverse():
                 if _propagated_bool_conflict(node.variants, other.propagated_variants) is not None:
@@ -3719,17 +3722,17 @@ class Spec:
 
     def _satisfies_variants_when_self_abstract(self, other: "Spec") -> bool:
         # a variant asserts existence and value on this node, a propagated variant constrains
-        # every closure node that has the variant; neither implies the other, so the two maps
-        # are compared independently, each as a subset test
+        # the node and its dependencies where the variant exists; neither implies the other, so
+        # the two maps are compared independently, each as a subset test
         return self.variants.satisfies(other.variants) and self.propagated_variants.satisfies(
             other.propagated_variants
         )
 
     def _disjoint_variants_reason(self, other: "Spec") -> Optional[spack.error.SpecError]:
-        """The reason the variants of two abstract nodes do not intersect, if any: each map is
-        checked pairwise, plus the bool cross pairs on this node. A propagated bool contradicting
-        a variant of a node elsewhere in the closure is left to the concretizer, as intersects is
-        optimistic."""
+        """The reason the variants of two abstract nodes do not intersect, if any. Each map is
+        checked against the same map of the other side, and the bool variants of one side
+        against the propagated bools of the other. A propagated bool that a dependency
+        contradicts is left to the concretizer, since intersects looks at one node at a time."""
         pair = self.variants.conflict(other.variants)
         if pair is not None:
             return vt.UnsatisfiableVariantSpecError(*pair)
@@ -4489,7 +4492,7 @@ class Spec:
                 color_code = _STYLE_COLOR_MAP.get(style, color_code)
 
             if attribute == "variants":
-                # {variants} is the whole variant part of the node, i.e. both slots
+                # {variants} is the whole variant part of the node, propagated ones included
                 variants = current_node.variants
                 propagated_variants = current_node.propagated_variants
                 if not variant_style_fn:
@@ -5282,7 +5285,7 @@ def _propagated_bool_conflict(
     variants: Mapping[str, vt.VariantValue], propagated: Mapping[str, vt.VariantValue]
 ) -> Optional[spack.error.SpecError]:
     """The error for a bool variant and a propagated bool value of the same name that contradict,
-    if any. Propagation includes the node itself and bool values are always possible, so
+    if any. Propagation includes the node itself and both bool values always exist, so
     +foo ~~foo is empty without package knowledge; any other pair is left to the concretizer."""
     for name, value in propagated.items():
         if value.type != vt.VariantType.BOOL:
@@ -5296,10 +5299,10 @@ def _propagated_bool_conflict(
 def _variant_parts(
     variants: Mapping[str, vt.VariantValue], propagated_variants: Mapping[str, vt.VariantValue]
 ) -> List[Tuple[vt.VariantValue, bool]]:
-    """The (value, propagated) parts of the variants of a node, set and propagated, in an order
-    that parses back into the same two maps: all booleans before all key-value pairs, since an
-    unquoted value would swallow a following sigil or ``==`` (e.g. ``foo=bar~~c`` lexes as a
-    single value)."""
+    """The (value, propagated) parts of the variants and the propagated variants of a node, in
+    an order that parses back into the same two maps: all booleans before all key-value pairs,
+    since an unquoted value would swallow a following sigil or ``==`` (e.g. ``foo=bar~~c``
+    tokenizes as a single value)."""
     bools: List[Tuple[vt.VariantValue, bool]] = []
     key_values: List[Tuple[vt.VariantValue, bool]] = []
     for propagated, mapping in ((False, variants), (True, propagated_variants)):
