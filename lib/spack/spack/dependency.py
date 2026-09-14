@@ -28,6 +28,24 @@ def intern_dependency(dependency: "Dependency") -> "Dependency":
     return dependency
 
 
+def merge_dependencies(existing: "Dependency", new: "Dependency") -> "Dependency":
+    """Combine two declarations of the same dependency under the same condition: constrain the
+    specs, join the dependency types, and concatenate the patches of both.
+
+    Neither argument is modified, since each may be shared with other packages; the result is a
+    new, unshared object."""
+    merged_spec = existing.spec.copy()
+    merged_spec.constrain(new.spec, deps=False)
+    merged = Dependency(merged_spec, depflag=existing.depflag | new.depflag)
+    if existing.patches is not None or new.patches is not None:
+        patches: Dict[spack.spec.Spec, List["spack.patch.Patch"]] = {}
+        for source in (existing.patches, new.patches):
+            for when, patch_list in (source or {}).items():
+                patches.setdefault(when, []).extend(patch_list)
+        merged.patches = patches
+    return merged
+
+
 class Dependency:
     """Class representing metadata for a dependency on a package.
 

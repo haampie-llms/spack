@@ -232,6 +232,19 @@ class SpecClauseGenerator:
                 clauses.append(variant_clause)
         return clauses
 
+    def record_spec(self, name: str, spec: spack.spec.Spec) -> None:
+        """Record what generating the clauses of ``spec`` for package ``name`` records, without
+        generating them: its version constraint and the values of its variants."""
+        if not spec.concrete and spec.versions != vn.any_version:
+            self.version_constraints[name].add(spec.versions)
+        for variant in spec.variants.values():
+            if not variant.values:
+                continue
+            variant_defs = vt.prevalidate_variant_value(self.pkg_class(name), variant, spec)
+            for value in variant.values:
+                for variant_def in variant_defs:
+                    self.record_variant_value(name, variant_def, value)
+
     def _flag_clauses(
         self, spec: spack.spec.Spec, f, *, name: str, context: Optional[SourceContext]
     ) -> List[AspFunction]:

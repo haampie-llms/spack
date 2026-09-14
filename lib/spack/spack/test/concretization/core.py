@@ -27,6 +27,7 @@ import spack.concretize_ui
 import spack.config
 import spack.context
 import spack.deptypes as dt
+import spack.directives_meta
 import spack.environment as ev
 import spack.error
 import spack.externals_config
@@ -204,8 +205,9 @@ def fuzz_dep_order(request, monkeypatch):
     def reverser(pkg_name):
         if request.param:
             pkg_cls = spack.repo.PATH.get_pkg_class(pkg_name)
-            reversed_dict = dict(reversed(list(pkg_cls.dependencies.items())))
-            monkeypatch.setattr(pkg_cls, "dependencies", reversed_dict)
+            # the dependencies the class declares itself, stored on the class
+            own = spack.directives_meta.own_dict(pkg_cls, "dependencies")
+            monkeypatch.setattr(pkg_cls, "_own_dependencies", dict(reversed(list(own.items()))))
 
     return reverser
 
@@ -2431,7 +2433,8 @@ spack:
         """
         # Add a conflict to "mpich" that match an already installed "mpich~debug"
         pkg_cls = mock_packages.get_pkg_class("mpich")
-        monkeypatch.setitem(pkg_cls.conflicts, Spec(), [(Spec("~debug"), None)])
+        own_conflicts = spack.directives_meta.own_dict(pkg_cls, "conflicts")
+        monkeypatch.setitem(own_conflicts, Spec(), [(Spec("~debug"), None)])
 
         # If we concretize with --fresh the conflict is taken into account
         with mutable_config.override("concretizer:reuse", False):

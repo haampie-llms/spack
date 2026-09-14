@@ -9,9 +9,9 @@ from typing import TYPE_CHECKING, Dict, List, NamedTuple, Optional, Set, Tuple, 
 import spack.vendor.archspec.cpu
 
 import spack.binary_distribution
-import spack.concretize
 import spack.config
 import spack.deptypes as dt
+import spack.directives_meta
 import spack.platforms
 import spack.repo
 import spack.spec
@@ -22,6 +22,9 @@ from spack.util import tty
 
 if TYPE_CHECKING:
     import spack.context
+
+if TYPE_CHECKING:
+    import spack.concretize
 
 
 class PossibleGraph(NamedTuple):
@@ -182,7 +185,10 @@ class NoStaticAnalysis(PossibleDependencyGraph):
                 continue
 
             pkg_cls = self.repo.get_pkg_class(pkg_name=pkg_name)
-            for when_spec, dependencies in pkg_cls.dependencies.items():
+            # the entries declared by the class and its bases, without building a merged dict
+            for when_spec, dependencies in spack.directives_meta.own_items(
+                pkg_cls, "dependencies"
+            ):
                 # Check if we need to process this condition at all. We can skip the unreachable
                 # check if all dependencies in this condition are already accounted for.
                 new_dependencies: List[str] = []
@@ -420,7 +426,7 @@ class Counter:
     def __init__(
         self,
         specs: List[spack.spec.Spec],
-        tests: spack.concretize.TestsType,
+        tests: "spack.concretize.TestsType",
         possible_graph: PossibleDependencyGraph,
     ) -> None:
         self.possible_graph = possible_graph
@@ -486,7 +492,7 @@ class MinimalDuplicatesCounter(NoDuplicatesCounter):
     def __init__(
         self,
         specs: List[spack.spec.Spec],
-        tests: spack.concretize.TestsType,
+        tests: "spack.concretize.TestsType",
         possible_graph: PossibleDependencyGraph,
     ) -> None:
         super().__init__(specs, tests, possible_graph)
@@ -583,7 +589,7 @@ class FullDuplicatesCounter(MinimalDuplicatesCounter):
 
 def create_counter(
     specs: List[spack.spec.Spec],
-    tests: spack.concretize.TestsType,
+    tests: "spack.concretize.TestsType",
     possible_graph: PossibleDependencyGraph,
 ) -> Counter:
     strategy = possible_graph.configuration.get("concretizer:duplicates:strategy", "none")

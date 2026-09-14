@@ -221,7 +221,7 @@ class RequirementParser:
                         requirements=requirements,
                         kind=RequirementKind.PACKAGE,
                         condition=when_spec,
-                        message=message,
+                        message=f"{pkg.name}: {message}" if message is not None else None,
                         origin=RequirementOrigin.DIRECTIVE,
                     )
                 )
