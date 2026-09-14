@@ -92,33 +92,28 @@ class OpenFileTracker:
 
     def create_and_track(self, path: str) -> OpenFile:
         """Slow path: Open file, handle directory creation, track it."""
-        # Open the file and create it if it doesn't exist (incl. directories).
+        # Prefer read/write, so a read lock can be upgraded to a write lock later, and create the
+        # lock file if it does not exist yet.
         try:
-            try:
-                fd = os.open(path, os.O_RDWR | os.O_CREAT)
-                mode = "rb+"
-            except OSError as e:
-                # fall back to read only open if there's no write perms to the file (EACCES/EPERM)
-                # or if the filesystem is read only (EROFS)
-                if e.errno not in (
-                    errno.EACCES,
-                    errno.EPERM,
-                    errno.EROFS,
-                    getattr(errno, "ENOTCAPABLE", errno.EACCES),
-                ):
-                    raise
-                fd = os.open(path, os.O_RDONLY)
-                mode = "rb"
-        except OSError as e:
-            if e.errno != errno.ENOENT:
-                raise
-            # Directory missing, create and retry
+            fd = os.open(path, os.O_RDWR | os.O_CREAT)
+            mode = "rb+"
+        except FileNotFoundError as e:
+            # A parent directory is missing: create it and retry.
             try:
                 os.makedirs(os.path.dirname(path), exist_ok=True)
                 fd = os.open(path, os.O_RDWR | os.O_CREAT)
-            except OSError:
-                raise CantCreateLockError(path)
+            except OSError as retry_error:
+                raise CantCreateLockError(path, retry_error) from e
             mode = "rb+"
+        except OSError as e:
+            # The directory exists but the file cannot be opened read/write (permissions, read-only
+            # mount, immutable file, ...): a read-only handle suffices for read locks.
+            try:
+                fd = os.open(path, os.O_RDONLY)
+            except FileNotFoundError:
+                # The lock file does not exist and we are not allowed to create it.
+                raise CantCreateLockError(path, e) from e
+            mode = "rb"
 
         # Get file identifier (device, inode) for tracking.
         stat = os.fstat(fd)
@@ -132,7 +127,11 @@ class OpenFileTracker:
             return existing
 
         # Track the new file.
-        fh = os.fdopen(fd, mode)
+        try:
+            fh = os.fdopen(fd, mode)
+        except OSError:
+            os.close(fd)
+            raise
         obj = OpenFile(fh, key)
         obj.refs += 1
         self._descriptors[key] = obj
@@ -1077,7 +1076,9 @@ class LockROFileError(LockPermissionError):
 class CantCreateLockError(LockPermissionError):
     """Attempt to create a lock in an unwritable location."""
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, cause: Optional[OSError] = None) -> None:
         msg = "cannot create lock '%s': " % path
-        msg += "file does not exist and location is not writable"
+        msg += "file does not exist and cannot be created"
+        if cause is not None and cause.strerror:
+            msg += " (%s)" % cause.strerror
         super().__init__(msg)
