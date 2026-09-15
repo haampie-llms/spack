@@ -88,6 +88,8 @@ class DirectoryLayout:
         hash_length: Optional[int] = None,
     ) -> None:
         self.root = root
+        #: Format of the spec files written into prefixes, set by the database of the store
+        self.spec_format = spack.spec.SPECFILE_FORMAT_VERSION
         projections = projections or default_projections
         self.projections = {key: projection.lower() for key, projection in projections.items()}
 
@@ -134,7 +136,7 @@ class DirectoryLayout:
         with open(path, "w", encoding="utf-8") as f:
             # The hash of the projection is the DAG hash which contains
             # the full provenance, so it's available if we want it later
-            spec.to_json(f)
+            spec.to_json(f, spec_format=self.spec_format)
 
     def write_host_environment(self, spec: "spack.spec.Spec") -> None:
         """The host environment is a json file with os, kernel, and spack

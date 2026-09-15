@@ -171,6 +171,7 @@ def test_bootstrap_db_upgrade_error_points_at_b_flag(mutable_config, monkeypatch
             )
             next_version = spack.version.Version(f"{spack.database._DB_VERSION[0] + 1}")
             monkeypatch.setattr(spack.database, "_DB_VERSION", next_version)
+            monkeypatch.setattr(spack.database, "_WRITABLE_VERSIONS", (next_version,))
             spack.database.Database(spack.store.STORE.root)._read()
 
     long_message = exc_info.value.long_message
