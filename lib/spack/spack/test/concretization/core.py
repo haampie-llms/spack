@@ -5153,6 +5153,9 @@ packages:
     mpileaks = spack.concretize.concretize_one("mpileaks %c=gcc@12")
 
     assert mpileaks.satisfies("%c=gcc@12")
+    if not spack.platforms.using_libc_compatibility():
+        return
+
     # Every node built with gcc uses the very libc node of that gcc
     for node in mpileaks.traverse():
         if node.name in ("glibc", "gcc") or "gcc" not in node:
@@ -5164,6 +5167,9 @@ packages:
 def test_libc_of_the_compiler_is_injected(monkeypatch, mutable_config, mock_packages):
     """Packages built with a compiler depend on the libc node that compiler depends on, not on
     any libc of the same version."""
+    if not spack.platforms.using_libc_compatibility():
+        pytest.skip("This test requires libc nodes")
+
     packages_yaml = syaml.load_config(
         """
 packages:
