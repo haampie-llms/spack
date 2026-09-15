@@ -667,7 +667,7 @@ spack:
     ],
 )
 def test_removing_spec_from_manifest_with_exact_duplicates(
-    duplicate_specs, expected_number, tmp_path: pathlib.Path
+    duplicate_specs, expected_number, tmp_path: pathlib.Path, config, temporary_store
 ):
     """Tests that we can remove exact duplicates from a manifest file.
 
