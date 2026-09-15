@@ -600,6 +600,9 @@ Version 8 does not change the lockfile itself, but uses spec format v6, in which
 records the virtuals it provides, as specs such as ``mpi@3:``, under ``provided_virtuals``. This
 data is part of the DAG hash, since ``provides`` directives are no longer part of the package hash.
 
+An existing lockfile of version 6 or 7 is written back in its own version, so that older Spack
+keeps reading it. ``spack env update`` upgrades it to the current version.
+
 .. code-block:: json
 
     {
@@ -653,6 +656,7 @@ from .environment import (
     installed_specs,
     is_env_dir,
     is_latest_format,
+    is_latest_lockfile_format,
     lockfile_include_key,
     lockfile_name,
     manifest_file,
@@ -693,6 +697,7 @@ __all__ = [
     "installed_specs",
     "is_env_dir",
     "is_latest_format",
+    "is_latest_lockfile_format",
     "lockfile_include_key",
     "lockfile_name",
     "manifest_file",

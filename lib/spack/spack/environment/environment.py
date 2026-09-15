@@ -170,6 +170,9 @@ valid_environment_name_re = rf"^\w[{sep_re}\w-]*$"
 #: version of the lockfile format. Must increase monotonically.
 CURRENT_LOCKFILE_VERSION = 8
 
+#: Versions an existing lockfile can stay at. `spack env update` upgrades.
+WRITABLE_LOCKFILE_VERSIONS = (6, 7, 8)
+
 
 READER_CLS = {
     1: spack.spec.SpecfileV1,
@@ -1153,6 +1156,7 @@ class Environment:
         #: Previously active environment
         self._previous_active = None
         self._dev_specs = None
+        self.lockfile_version = CURRENT_LOCKFILE_VERSION  # an existing lockfile keeps its own
 
         # Load the manifest file contents into memory
         self._load_manifest_file()
@@ -1411,6 +1415,7 @@ class Environment:
         self._dev_specs = {}
         self.concretized_roots = []
         self.specs_by_hash = {}  # concretized specs by hash
+        self.lockfile_version = CURRENT_LOCKFILE_VERSION  # an existing lockfile keeps its own
 
         self.included_concrete_spec_data = {}  # concretized specs from lockfile of included envs
         self.included_concretized_roots = {}  # root specs of the included envs, keyed by env path
@@ -1494,8 +1499,9 @@ class Environment:
                     self.included_concrete_spec_data[env_path]["roots"].append(root_dict)
                     root_hash_seen.add(root_dict["hash"])
 
-            # Copy unique concrete specs from env
-            for dag_hash, spec_details in env._concrete_specs_dict().items():
+            # Copy unique concrete specs from env, in the format of this lockfile
+            spec_format = READER_CLS[self.lockfile_version].SPEC_VERSION
+            for dag_hash, spec_details in env._concrete_specs_dict(spec_format).items():
                 if dag_hash not in concrete_hash_seen:
                     self.included_concrete_spec_data[env_path]["concrete_specs"].update(
                         {dag_hash: spec_details}
@@ -2340,14 +2346,15 @@ class Environment:
                 if d not in needed:
                     yield d
 
-    def _concrete_specs_dict(self):
+    def _concrete_specs_dict(self, spec_format: int = spack.spec.SPECFILE_FORMAT_VERSION):
         concrete_specs = {}
-        for s in traverse.traverse_nodes(self.specs_by_hash.values(), key=traverse.by_dag_hash):
-            concrete_specs[s.dag_hash()] = s.node_dict_with_hashes()
+        specs = list(self.specs_by_hash.values())
+        for s in traverse.traverse_nodes(specs, key=traverse.by_dag_hash):
+            concrete_specs[s.dag_hash()] = s.node_dict_with_hashes(spec_format=spec_format)
 
             if s.build_spec is not s:
                 for d in s.build_spec.traverse():
-                    concrete_specs[d.dag_hash()] = d.node_dict_with_hashes()
+                    concrete_specs[d.dag_hash()] = d.node_dict_with_hashes(spec_format=spec_format)
 
         return concrete_specs
 
@@ -2366,7 +2373,11 @@ class Environment:
 
     def _to_lockfile_dict(self):
         """Create a dictionary to store a lockfile for this environment."""
-        concrete_specs = self._concrete_specs_dict()
+        lockfile_version = self.lockfile_version
+        if lockfile_version < 7 and self.has_groups():
+            lockfile_version = 7  # groups are recorded from v7 on
+        spec_format = READER_CLS[lockfile_version].SPEC_VERSION
+        concrete_specs = self._concrete_specs_dict(spec_format)
         root_specs = self._concrete_roots_dict()
 
         spack_dict = {"version": spack.spack_version}
@@ -2382,8 +2393,8 @@ class Environment:
             # metadata about the format
             "_meta": {
                 "file-type": "spack-lockfile",
-                "lockfile-version": CURRENT_LOCKFILE_VERSION,
-                "specfile-version": spack.spec.SPECFILE_FORMAT_VERSION,
+                "lockfile-version": lockfile_version,
+                "specfile-version": spec_format,
             },
             # spack version information
             "spack": spack_dict,
@@ -2470,6 +2481,9 @@ class Environment:
             if CURRENT_LOCKFILE_VERSION < current_lockfile_format:
                 msg += " You need to use a newer Spack version."
             raise SpackEnvironmentError(msg)
+
+        if current_lockfile_format in WRITABLE_LOCKFILE_VERSIONS:
+            self.lockfile_version = current_lockfile_format
 
         concretized_order = [x.hash for x in self.concretized_roots]
         first_seen, concretized_order = self._filter_specs(
@@ -2585,6 +2599,11 @@ class Environment:
     def update_lockfile(self) -> None:
         with fs.write_tmp_and_move(self.lock_path, encoding="utf-8") as f:
             sjson.dump(self._to_lockfile_dict(), stream=f)
+
+    def upgrade_lockfile(self) -> None:
+        """Rewrite the lockfile in the current format"""
+        self.lockfile_version = CURRENT_LOCKFILE_VERSION
+        self.update_lockfile()
 
     def ensure_env_directory_exists(self, dot_env: bool = False) -> None:
         """Ensure that the root directory of the environment exists
@@ -3131,6 +3150,16 @@ def is_latest_format(manifest):
     top_level_key = _top_level_key(data)
     changed = spack.schema.env.update(data[top_level_key])
     return not changed
+
+
+def is_latest_lockfile_format(lockfile) -> bool:
+    """Return False if the lockfile exists and is not in the latest format."""
+    try:
+        with open(lockfile, encoding="utf-8") as f:
+            version = sjson.load(f)["_meta"]["lockfile-version"]
+    except OSError:
+        return True
+    return version >= CURRENT_LOCKFILE_VERSION
 
 
 @contextlib.contextmanager
