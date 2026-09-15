@@ -655,7 +655,7 @@ _spack_buildcache_check_index() {
 _spack_buildcache_update_index() {
     if $list_options
     then
-        SPACK_COMPREPLY="-h --help --name -n --append -a --force -f -k --keys -y --yes-to-all"
+        SPACK_COMPREPLY="-h --help --upgrade --name -n --append -a --force -f -k --keys -y --yes-to-all"
     else
         _mirrors
     fi
@@ -664,7 +664,7 @@ _spack_buildcache_update_index() {
 _spack_buildcache_rebuild_index() {
     if $list_options
     then
-        SPACK_COMPREPLY="-h --help --name -n --append -a --force -f -k --keys -y --yes-to-all"
+        SPACK_COMPREPLY="-h --help --upgrade --name -n --append -a --force -f -k --keys -y --yes-to-all"
     else
         _mirrors
     fi

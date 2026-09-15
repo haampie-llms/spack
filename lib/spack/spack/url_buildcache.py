@@ -28,6 +28,7 @@ import spack.util.filesystem as fsys
 import spack.util.gpg
 import spack.util.url as url_util
 import spack.util.web as web_util
+import spack.version as vn
 from spack import config
 from spack.mirrors.mirror import BINARY_MEDIA_TYPE_VERSION
 from spack.schema.url_buildcache_manifest import schema as buildcache_manifest_schema
@@ -270,6 +271,29 @@ class URLBuildcacheEntry:
         if not rematch:
             raise BuildcacheEntryError(f"Unable to parse spec url: {manifest_url}")
         return rematch.group(1)
+
+    @classmethod
+    def spec_media_type(cls, spec_format: int) -> str:
+        return f"application/vnd.spack.spec.v{spec_format}+json"
+
+    @classmethod
+    def index_media_type(cls, db_version: vn.StandardVersion) -> str:
+        return f"application/vnd.spack.db.v{db_version}+json"
+
+    @classmethod
+    def index_db_version(cls, mirror_url: str) -> Optional[vn.StandardVersion]:
+        """Database version of the mirror's index, None without an index"""
+        try:
+            manifest = cls(mirror_url, allow_unsigned=True).read_manifest(
+                cls.get_index_url(mirror_url)
+            )
+        except BuildcacheEntryError:
+            return None
+        for record in manifest.data:
+            found = _SPACK_MEDIA_TYPE.fullmatch(record.media_type)
+            if found and found["family"] == "db":
+                return vn.StandardVersion.from_string(found["version"])
+        return None
 
     @classmethod
     def get_index_url(cls, mirror_url: str, view: Optional[str] = None):
@@ -622,11 +646,12 @@ class URLBuildcacheEntry:
         manifest_name: str,
         component_type: BuildcacheComponent,
         compression: str = "none",
+        media_type: Optional[str] = None,
     ) -> None:
         """Convenience method to push a local file to a mirror as a blob.  Both manifest
         and blob are pushed as a component of the given component_type.  If ``compression``
         is ``"gzip"`` the blob will be compressed before pushing, otherwise it will be pushed
-        uncompressed."""
+        uncompressed. The ``media_type`` defaults to the current one of the component."""
         cache_class = get_url_buildcache_class()
         checksum_algo = "sha256"
         blob_to_push = local_file_path
@@ -642,7 +667,7 @@ class URLBuildcacheEntry:
 
             record = BlobRecord(
                 checker.length,
-                cache_class.component_to_media_type(component_type),
+                media_type or cache_class.component_to_media_type(component_type),
                 compression,
                 checksum_algo,
                 checker.hexdigest(),
@@ -663,6 +688,7 @@ class URLBuildcacheEntry:
         tarball_checksum: str,
         tmpdir: str,
         signing_key: Optional[str],
+        spec_format: int = spack.spec.SPECFILE_FORMAT_VERSION,
     ) -> None:
         """Convenience method to push tarball, specfile, and manifest to the remote mirror
 
@@ -671,7 +697,7 @@ class URLBuildcacheEntry:
         found.  Thus, any pre-existing files are first removed.
         """
 
-        spec_dict = spec.to_dict()
+        spec_dict = spec.to_dict(spec_format=spec_format)
         # TODO: Remove this key once oci buildcache no longer uses it
         spec_dict["buildcache_layout_version"] = 2
         tarball_content_length = os.stat(tarball_path).st_size
@@ -728,7 +754,7 @@ class URLBuildcacheEntry:
         blobs.append(
             BlobRecord(
                 metadata_size,
-                self.SPEC_MEDIATYPE,
+                self.spec_media_type(spec_format),
                 compression,
                 checksum_algorithm,
                 metadata_checksum,
@@ -1058,6 +1084,7 @@ class URLBuildcacheEntryV2(URLBuildcacheEntry):
         manifest_name: str,
         component_type: BuildcacheComponent,
         compression: str = "none",
+        media_type: Optional[str] = None,
     ) -> None:
         raise BuildcacheEntryError("v2 buildcache layout is unaware of manifests and blobs")
 
@@ -1069,6 +1096,7 @@ class URLBuildcacheEntryV2(URLBuildcacheEntry):
         tarball_checksum: str,
         tmpdir: str,
         signing_key: Optional[str],
+        spec_format: int = spack.spec.SPECFILE_FORMAT_VERSION,
     ) -> None:
         raise BuildcacheEntryError("Spack can no longer push v2 buildcache entries")
 

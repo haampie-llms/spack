@@ -69,6 +69,7 @@ import spack.util.spack_json as sjson
 import spack.util.spack_yaml as syaml
 import spack.util.url as url_util
 import spack.util.web as web_util
+import spack.version
 from spack import relocate, traverse
 from spack.oci.image import (
     Digest,
@@ -676,8 +677,19 @@ def _push_index(db: BuildCacheDatabase, temp_dir: str, cache_prefix: str, name: 
         url_util.join(name, "index") if name else "index",
         BuildcacheComponent.INDEX,
         compression="none",
+        media_type=cache_class.index_media_type(db._write_version()),
     )
     cache_class.maybe_push_layout_json(cache_prefix)
+
+
+def _mirror_formats(url: str) -> Tuple[spack.version.StandardVersion, int]:
+    """Database and spec file format of a mirror: the ones of its index, when this Spack can
+    still write them, otherwise the current ones"""
+    cache_class = get_url_buildcache_class(layout_version=CURRENT_BUILD_CACHE_LAYOUT_VERSION)
+    version = cache_class.index_db_version(url)
+    if version not in spack.database._WRITABLE_VERSIONS:
+        version = spack.database._DB_VERSION
+    return version, spack.database.reader(version).SPEC_VERSION
 
 
 def _read_specs_and_push_index(
@@ -739,6 +751,7 @@ def _url_generate_package_index(
     filter_fn: Callable[[str], bool] = lambda x: True,
     *,
     timer=timer.NULL_TIMER,
+    upgrade: bool = False,
 ):
     """Create or replace the build cache index on the given mirror.  The
     buildcache index contains an entry for each binary package under the
@@ -746,6 +759,7 @@ def _url_generate_package_index(
 
     Args:
         url: Base url of binary mirror.
+        upgrade: write the current index format instead of the one of the previous index
 
     Return:
         None
@@ -764,6 +778,9 @@ def _url_generate_package_index(
     if not db:
         db = BuildCacheDatabase(tmpdir)
         db._write()
+
+    # The index keeps its format, so that older Spack keeps using the mirror
+    db.db_version = spack.database._DB_VERSION if upgrade else _mirror_formats(url)[0]
 
     try:
         _read_specs_and_push_index(
@@ -978,12 +995,18 @@ def prefixes_to_relocate(spec):
 
 
 def _url_upload_tarball_and_specfile(
-    spec: spack.spec.Spec, tmpdir: str, cache_entry: URLBuildcacheEntry, signing_key: Optional[str]
+    spec: spack.spec.Spec,
+    tmpdir: str,
+    cache_entry: URLBuildcacheEntry,
+    signing_key: Optional[str],
+    spec_format: int,
 ):
     tarball = os.path.join(tmpdir, f"{spec.dag_hash()}.tar.gz")
     checksum, _ = create_tarball(spec, tarball)
 
-    cache_entry.push_binary_package(spec, tarball, "sha256", checksum, tmpdir, signing_key)
+    cache_entry.push_binary_package(
+        spec, tarball, "sha256", checksum, tmpdir, signing_key, spec_format=spec_format
+    )
 
 
 class Uploader:
@@ -1215,6 +1238,8 @@ def _url_push(
     if total != len(specs):
         tty.info(f"{total} specs need to be pushed to {out_url}")
 
+    # Spec files are written in the format of the mirror, see _url_generate_package_index
+    _, spec_format = _mirror_formats(out_url)
     upload_futures = [
         executor.submit(
             _url_upload_tarball_and_specfile,
@@ -1222,6 +1247,7 @@ def _url_push(
             tmpdir,
             cache_entries[spec.dag_hash()],
             signing_key,
+            spec_format,
         )
         for spec in specs_to_upload
     ]

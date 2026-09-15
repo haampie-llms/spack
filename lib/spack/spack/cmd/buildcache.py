@@ -342,6 +342,11 @@ def setup_parser(subparser: argparse.ArgumentParser):
     update_index.add_argument(
         "mirror", type=arguments.mirror_name_or_url, help="destination mirror name, path, or URL"
     )
+    update_index.add_argument(
+        "--upgrade",
+        action="store_true",
+        help="write the index in the current format, which older Spack versions cannot read",
+    )
     update_index_view_args = update_index.add_argument_group("view arguments")
     update_index_view_args.add_argument(
         "sources", nargs="*", help="List of environments names or paths"
@@ -902,7 +907,10 @@ def manifest_copy(
 
 
 def update_index(
-    mirror: spack.mirrors.mirror.Mirror, update_keys=False, timer=timer_mod.NULL_TIMER
+    mirror: spack.mirrors.mirror.Mirror,
+    update_keys=False,
+    timer=timer_mod.NULL_TIMER,
+    upgrade: bool = False,
 ):
     timer.start()
     # Special case OCI images for now.
@@ -922,7 +930,9 @@ def update_index(
     url = mirror.push_url
 
     with tempfile.TemporaryDirectory(dir=spack.stage.get_stage_root()) as tmpdir:
-        spack.binary_distribution._url_generate_package_index(url, tmpdir, timer=timer)
+        spack.binary_distribution._url_generate_package_index(
+            url, tmpdir, timer=timer, upgrade=upgrade
+        )
 
     if update_keys:
         mirror_update_keys(mirror)
@@ -1188,7 +1198,7 @@ def update_index_fn(args):
             parser=args.subparser,
         )
     else:
-        update_index(args.mirror, update_keys=args.keys, timer=t)
+        update_index(args.mirror, update_keys=args.keys, timer=t, upgrade=args.upgrade)
 
     if tty.is_verbose():
         tty.msg("Timing summary:")

@@ -91,6 +91,10 @@ You need to index this new build cache as follows:
 
     $ spack buildcache update-index ./spack-cache
 
+An existing index keeps its format version, and so do the spec files pushed to the mirror, so
+that older versions of Spack keep using it. Pass ``--upgrade`` to write the current version,
+which older versions of Spack cannot read.
+
 Now you can use ``list``:
 
 .. code-block:: console
