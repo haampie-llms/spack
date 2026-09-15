@@ -324,6 +324,48 @@ def test_generate_index_missing(
 
 
 @pytest.mark.usefixtures("install_mockery", "mock_packages", "mock_fetch")
+def test_mirror_keeps_its_format(tmp_path: pathlib.Path, mutable_config: Configuration):
+    """Pushed spec files and the index follow the format of the mirror's index, until upgraded."""
+    mirror_dir = tmp_path / "mirror"
+    mirror_url = url_util.path_to_file_url(str(mirror_dir))
+    assert URLBuildcacheEntry.index_db_version(mirror_url) is None
+
+    index_manifest = mirror_dir / "v3" / "manifests" / "index" / INDEX_MANIFEST_FILE
+    index_manifest.parent.mkdir(parents=True)
+    record = BlobRecord(1, "application/vnd.spack.db.v8+json", "none", "sha256", "a")
+    manifest = BuildcacheManifest(layout_version=3, data=[record])
+    index_manifest.write_text(json.dumps(manifest.to_dict()))
+    assert str(URLBuildcacheEntry.index_db_version(mirror_url)) == "8"
+
+    def blob(record: BlobRecord) -> pathlib.Path:
+        return mirror_dir / "blobs" / record.checksum_alg / record.checksum[:2] / record.checksum
+
+    def spec_format():
+        entry = URLBuildcacheEntry(mirror_url, s, allow_unsigned=True)
+        record = entry.read_manifest().get_blob_records(URLBuildcacheEntry.SPEC_MEDIATYPE)[0]
+        with gzip.open(blob(record), "rt", encoding="utf-8") as f:
+            return record.media_type, json.load(f)["spec"]["_meta"]["version"]
+
+    def index_format():
+        entry = URLBuildcacheEntry(mirror_url, allow_unsigned=True)
+        manifest = entry.read_manifest(URLBuildcacheEntry.get_index_url(mirror_url))
+        record = manifest.get_blob_records(URLBuildcacheEntry.BUILDCACHE_INDEX_MEDIATYPE)[0]
+        db = json.loads(blob(record).read_text())["database"]
+        virtuals = any("provided_virtuals" in r["spec"] for r in db["installs"].values())
+        return record.media_type, db["version"], virtuals
+
+    s = spack.concretize.concretize_one("libdwarf")
+    install_cmd("--fake", "--no-cache", s.name)
+    buildcache_cmd("push", "-u", "--update-index", str(mirror_dir), s.name)
+    assert spec_format() == ("application/vnd.spack.spec.v5+json", 5)
+    assert index_format() == ("application/vnd.spack.db.v8+json", "8", False)
+
+    buildcache_cmd("update-index", "--upgrade", str(mirror_dir))
+    assert index_format()[:2] == (URLBuildcacheEntry.BUILDCACHE_INDEX_MEDIATYPE, "9")
+    buildcache_cmd("push", "-u", "-f", str(mirror_dir), s.name)
+    assert spec_format() == (URLBuildcacheEntry.SPEC_MEDIATYPE, 6)
+
+
 def test_use_bin_index(monkeypatch, tmp_path: pathlib.Path, mutable_config: Configuration):
     """Check use of binary cache index: perform an operation that
     instantiates it, and a second operation that reconstructs it.

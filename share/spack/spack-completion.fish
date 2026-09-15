@@ -872,10 +872,12 @@ complete -c spack -n '__fish_spack_using_command buildcache check-index' -l outp
 complete -c spack -n '__fish_spack_using_command buildcache check-index' -l output -s o -r -d 'File to write check details to'
 
 # spack buildcache update-index
-set -g __fish_spack_optspecs_spack_buildcache_update_index h/help n/name= a/append f/force k/keys y/yes-to-all
+set -g __fish_spack_optspecs_spack_buildcache_update_index h/help upgrade n/name= a/append f/force k/keys y/yes-to-all
 
 complete -c spack -n '__fish_spack_using_command buildcache update-index' -s h -l help -f -a help
 complete -c spack -n '__fish_spack_using_command buildcache update-index' -s h -l help -d 'show this help message and exit'
+complete -c spack -n '__fish_spack_using_command buildcache update-index' -l upgrade -f -a upgrade
+complete -c spack -n '__fish_spack_using_command buildcache update-index' -l upgrade -d 'write the index in the current format, which older Spack versions cannot read'
 complete -c spack -n '__fish_spack_using_command buildcache update-index' -l name -s n -r -f -a name
 complete -c spack -n '__fish_spack_using_command buildcache update-index' -l name -s n -r -d 'Name of the view index to update'
 complete -c spack -n '__fish_spack_using_command buildcache update-index' -l append -s a -f -a append
@@ -888,10 +890,12 @@ complete -c spack -n '__fish_spack_using_command buildcache update-index' -s y -
 complete -c spack -n '__fish_spack_using_command buildcache update-index' -s y -l yes-to-all -d 'assume "yes" is the answer to every confirmation request'
 
 # spack buildcache rebuild-index
-set -g __fish_spack_optspecs_spack_buildcache_rebuild_index h/help n/name= a/append f/force k/keys y/yes-to-all
+set -g __fish_spack_optspecs_spack_buildcache_rebuild_index h/help upgrade n/name= a/append f/force k/keys y/yes-to-all
 
 complete -c spack -n '__fish_spack_using_command buildcache rebuild-index' -s h -l help -f -a help
 complete -c spack -n '__fish_spack_using_command buildcache rebuild-index' -s h -l help -d 'show this help message and exit'
+complete -c spack -n '__fish_spack_using_command buildcache rebuild-index' -l upgrade -f -a upgrade
+complete -c spack -n '__fish_spack_using_command buildcache rebuild-index' -l upgrade -d 'write the index in the current format, which older Spack versions cannot read'
 complete -c spack -n '__fish_spack_using_command buildcache rebuild-index' -l name -s n -r -f -a name
 complete -c spack -n '__fish_spack_using_command buildcache rebuild-index' -l name -s n -r -d 'Name of the view index to update'
 complete -c spack -n '__fish_spack_using_command buildcache rebuild-index' -l append -s a -f -a append
