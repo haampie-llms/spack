@@ -779,6 +779,14 @@ class TestSpecSemantics:
         assert reread["mpich"].provided_virtuals == concrete["mpich"].provided_virtuals
         assert reread.dag_hash() == concrete.dag_hash()
 
+
+    def test_dag_hash_ignores_spec_format_annotation(self):
+        """The format a spec was written in is metadata, not content."""
+        concrete = spack.concretize.concretize_one("mpileaks ^mpich")
+        expected = concrete.dag_hash()
+        concrete.annotations.with_spec_format(4).with_compiler(Spec("gcc@1"))
+        assert concrete.spec_hash() == expected
+
     def test_abstract_root_with_concrete_deps_is_reconstructed_per_node(self):
         """An abstract root with a resolved ``^/hash`` dependency writes both kinds of node;
         reconstruction covers the concrete ones only."""
