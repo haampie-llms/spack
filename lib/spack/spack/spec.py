@@ -182,6 +182,9 @@ DISPLAY_FORMAT = (
 #: specfile format version. Must increase monotonically
 SPECFILE_FORMAT_VERSION = 6
 
+#: Formats that can still be written, for files and stores created by older Spack
+WRITABLE_SPECFILE_VERSIONS = (5, 6)
+
 #: Keys under which old spec files may store a dependency hash, dag hash first
 _LEGACY_DEP_HASH_KEYS = ("hash", "full_hash", "build_hash")
 
@@ -2576,11 +2579,12 @@ class Spec:
         """Get the first <bits> bits of the DAG hash as an integer type."""
         return spack.util.hash.base32_prefix_bits(self.dag_hash(), bits)
 
-    def to_node_dict(self) -> Dict[str, Any]:
+    def to_node_dict(self, *, spec_format: int = SPECFILE_FORMAT_VERSION) -> Dict[str, Any]:
         """Create a dictionary representing the state of this Spec.
 
         This method creates the content that is eventually hashed by Spack to create identifiers
-        like the DAG hash (see :meth:`dag_hash()`). Example result of this function for the
+        like the DAG hash (see :meth:`dag_hash()`). The ``spec_format`` selects the file format
+        of the result: v5 omits the provided virtuals. Example result of this function for the
         ``sqlite`` package::
 
             {
@@ -2626,6 +2630,9 @@ class Spec:
         See :meth:`to_dict()` for a "complete" spec hash, with hashes for each node and nodes for
         each dependency (instead of just their hashes).
         """
+        if spec_format not in WRITABLE_SPECFILE_VERSIONS:
+            raise ValueError(f"cannot write spec format v{spec_format}")
+
         d: Dict[str, Any] = {"name": self.name}
 
         if self.versions:
@@ -2693,7 +2700,7 @@ class Spec:
             d["package_hash"] = self._package_hash
 
         # Since v6, an absent key on a concrete node means it provides nothing
-        if self._concrete and self.provided_virtuals:
+        if spec_format >= 6 and self._concrete and self.provided_virtuals:
             d["provided_virtuals"] = [
                 name if versions == vn.any_version else f"{name}@{versions}"
                 for name, versions in sorted(self.provided_virtuals.items())
@@ -2728,18 +2735,20 @@ class Spec:
         if self._build_spec:
             d["build_spec"] = {"name": self.build_spec.name, "hash": self.build_spec.dag_hash()}
 
-        # Annotations
-        d["annotations"] = {"original_specfile_version": self.annotations.original_spec_format}
+        # Annotations: a node written in an older format claims no newer origin
+        original = min(self.annotations.original_spec_format, spec_format)
+        d["annotations"] = {"original_specfile_version": original}
         if self.annotations.original_spec_format < 5:
             d["annotations"]["compiler"] = str(self.annotations.compiler_node_attribute)
 
         return d
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self, *, spec_format: int = SPECFILE_FORMAT_VERSION) -> Dict[str, Any]:
         """Create a dictionary suitable for writing this spec to YAML or JSON.
 
         This dictionary is like the one that is ultimately written to a ``spec.json`` file in each
-        Spack installation directory.  For example, for sqlite::
+        Spack installation directory. The ``spec_format`` selects the file format, see
+        :meth:`to_node_dict`. For example, for sqlite::
 
             {
                 "spec": {
@@ -2802,22 +2811,24 @@ class Spec:
             spec_hash = s.dag_hash()
 
             if spec_hash not in hash_set:
-                node_list.append(s.node_dict_with_hashes())
+                node_list.append(s.node_dict_with_hashes(spec_format=spec_format))
                 hash_set.add(spec_hash)
 
             if s.build_spec is not s:
-                build_spec_list = s.build_spec.to_dict()["spec"]["nodes"]
+                build_spec_list = s.build_spec.to_dict(spec_format=spec_format)["spec"]["nodes"]
                 for node in build_spec_list:
                     node_hash = node["hash"]
                     if node_hash not in hash_set:
                         node_list.append(node)
                         hash_set.add(node_hash)
 
-        return {"spec": {"_meta": {"version": SPECFILE_FORMAT_VERSION}, "nodes": node_list}}
+        return {"spec": {"_meta": {"version": spec_format}, "nodes": node_list}}
 
-    def node_dict_with_hashes(self) -> Dict[str, Any]:
+    def node_dict_with_hashes(
+        self, *, spec_format: int = SPECFILE_FORMAT_VERSION
+    ) -> Dict[str, Any]:
         """Returns the node dict of this spec with its dag hash."""
-        node = self.to_node_dict()
+        node = self.to_node_dict(spec_format=spec_format)
         # All specs have at least a DAG hash
         node["hash"] = self.dag_hash()
 
@@ -2826,13 +2837,15 @@ class Spec:
 
         return node
 
-    def to_yaml(self, stream=None):
-        return syaml.dump(self.to_dict(), stream=stream, default_flow_style=False)
+    def to_yaml(self, stream=None, *, spec_format: int = SPECFILE_FORMAT_VERSION):
+        d = self.to_dict(spec_format=spec_format)
+        return syaml.dump(d, stream=stream, default_flow_style=False)
 
-    def to_json(self, stream=None, *, pretty=False):
+    def to_json(self, stream=None, *, pretty=False, spec_format: int = SPECFILE_FORMAT_VERSION):
+        d = self.to_dict(spec_format=spec_format)
         if stream is None:
-            return sjson.dumps(self.to_dict(), pretty=pretty)
-        sjson.dump(self.to_dict(), stream, pretty=pretty)
+            return sjson.dumps(d, pretty=pretty)
+        sjson.dump(d, stream, pretty=pretty)
         return None
 
     @staticmethod

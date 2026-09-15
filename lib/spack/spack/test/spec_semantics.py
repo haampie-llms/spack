@@ -779,6 +779,22 @@ class TestSpecSemantics:
         assert reread["mpich"].provided_virtuals == concrete["mpich"].provided_virtuals
         assert reread.dag_hash() == concrete.dag_hash()
 
+    def test_write_v5_specfile(self):
+        """A v5 file omits the provided virtuals, which the reader reconstructs."""
+        concrete = spack.concretize.concretize_one("mpileaks ^mpich")
+        as_dict = concrete.to_dict(spec_format=5)
+        nodes = as_dict["spec"]["nodes"]
+        assert as_dict["spec"]["_meta"]["version"] == 5
+        assert all("provided_virtuals" not in n for n in nodes)
+        assert all(n["annotations"]["original_specfile_version"] <= 5 for n in nodes)
+
+        reread = Spec.from_dict(as_dict)
+        assert reread.dag_hash() == concrete.dag_hash()
+        assert reread["mpich"].provided_virtuals == concrete["mpich"].provided_virtuals
+
+        with pytest.raises(ValueError, match="cannot write spec format v4"):
+            concrete.to_dict(spec_format=4)
+
     def test_abstract_root_with_concrete_deps_is_reconstructed_per_node(self):
         """An abstract root with a resolved ``^/hash`` dependency writes both kinds of node;
         reconstruction covers the concrete ones only."""
