@@ -1901,6 +1901,35 @@ spack:
             assert lockfile_data["_meta"]["lockfile-version"] == CURRENT_LOCKFILE_VERSION
             assert all("group" not in x for x in lockfile_data["roots"])
 
+    def test_existing_lockfile_keeps_its_version(self, create_temporary_manifest):
+        """A v7 lockfile is written back as v7 with v5 nodes, until it is upgraded."""
+        manifest = create_temporary_manifest("spack:\n  specs:\n  - mpileaks\n")
+        with ev.Environment(manifest.manifest_dir) as e:
+            e.concretize()
+            e.write()
+            lock_path = pathlib.Path(e.lock_path)
+        data = json.loads(lock_path.read_text())
+        assert data["_meta"]["lockfile-version"] == CURRENT_LOCKFILE_VERSION
+        data["_meta"] = {
+            "file-type": "spack-lockfile",
+            "lockfile-version": 7,
+            "specfile-version": 5,
+        }
+        lock_path.write_text(json.dumps(data))
+
+        with ev.Environment(manifest.manifest_dir) as e:
+            e.write()
+        data = json.loads(lock_path.read_text())
+        assert data["_meta"]["lockfile-version"] == 7
+        assert data["_meta"]["specfile-version"] == 5
+        assert all("provided_virtuals" not in n for n in data["concrete_specs"].values())
+
+        with ev.Environment(manifest.manifest_dir) as e:
+            e.upgrade_lockfile()
+        data = json.loads(lock_path.read_text())
+        assert data["_meta"]["lockfile-version"] == CURRENT_LOCKFILE_VERSION
+        assert data["_meta"]["specfile-version"] == spack.spec.SPECFILE_FORMAT_VERSION
+
     def test_independent_groups_concretization(self, create_temporary_manifest):
         """Tests that groups of specs without dependencies among them can be concretized
         correctly

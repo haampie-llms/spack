@@ -879,13 +879,13 @@ def env_loads(args):
 
 def env_update_setup_parser(subparser):
     """\
-    update the environment manifest to the latest schema format
+    update the environment manifest and lockfile to the latest format
 
-    update the environment to the latest schema format, which may not be
+    update the environment to the latest format, which may not be
     readable by older versions of spack
 
-    a backup copy of the manifest is retained in case there is a need to revert
-    this operation
+    backup copies of the manifest and lockfile are retained in case there is a
+    need to revert this operation
     """
     subparser.add_argument(
         metavar="env", dest="update_env", help="name or directory of the environment"
@@ -894,12 +894,15 @@ def env_update_setup_parser(subparser):
 
 
 def env_update(args):
-    """update the manifest to the latest format"""
+    """update the manifest and lockfile to the latest format"""
     manifest_file = ev.manifest_file(args.update_env)
     backup_file = manifest_file + ".bkp"
+    lockfile = os.path.join(os.path.dirname(manifest_file), ev.lockfile_name)
+    lockfile_backup = lockfile + ".bkp"
 
-    needs_update = not ev.is_latest_format(manifest_file)
-    if not needs_update:
+    update_manifest = not ev.is_latest_format(manifest_file)
+    update_lockfile = not ev.is_latest_lockfile_format(lockfile)
+    if not update_manifest and not update_lockfile:
         tty.msg('No update needed for the environment "{0}"'.format(args.update_env))
         return
 
@@ -907,7 +910,7 @@ def env_update(args):
     if not args.yes_to_all:
         msg = (
             'The environment "{0}" is going to be updated to the latest '
-            "schema format.\nIf the environment is updated, versions of "
+            "format.\nIf the environment is updated, versions of "
             "Spack that are older than this version may not be able to "
             "read it. Spack stores backups of the updated environment "
             'which can be retrieved with "spack env revert"'
@@ -918,20 +921,27 @@ def env_update(args):
     if not proceed:
         tty.die("Operation aborted.")
 
-    ev.update_yaml(manifest_file, backup_file=backup_file)
-    msg = 'Environment "{0}" has been updated [backup={1}]'
-    tty.msg(msg.format(args.update_env, backup_file))
+    if update_manifest:
+        ev.update_yaml(manifest_file, backup_file=backup_file)
+        msg = 'Environment "{0}" has been updated [backup={1}]'
+        tty.msg(msg.format(args.update_env, backup_file))
+
+    if update_lockfile:
+        shutil.copy(lockfile, lockfile_backup)
+        ev.Environment(os.path.dirname(manifest_file)).upgrade_lockfile()
+        msg = 'Lockfile of the environment "{0}" has been updated [backup={1}]'
+        tty.msg(msg.format(args.update_env, lockfile_backup))
 
 
 def env_revert_setup_parser(subparser):
     """\
-    restore the environment manifest to its previous format
+    restore the environment manifest and lockfile to their previous format
 
-    revert the environment's manifest to the schema format from its last
+    revert the environment's manifest and lockfile to the format from its last
     'spack env update'
 
-    the current manifest will be overwritten by the backup copy and the backup
-    copy will be removed
+    the current files will be overwritten by the backup copies and the backup
+    copies will be removed
     """
     subparser.add_argument(
         metavar="env", dest="revert_env", help="name or directory of the environment"
@@ -940,33 +950,33 @@ def env_revert_setup_parser(subparser):
 
 
 def env_revert(args):
-    """restore the environment manifest to its previous format"""
+    """restore the environment manifest and lockfile to their previous format"""
     manifest_file = ev.manifest_file(args.revert_env)
-    backup_file = manifest_file + ".bkp"
+    lockfile = os.path.join(os.path.dirname(manifest_file), ev.lockfile_name)
 
-    # Check that both the spack.yaml and the backup exist, the inform user
+    # Check that the spack.yaml and at least one backup exist, then inform user
     # on what is going to happen and ask for confirmation
     if not os.path.exists(manifest_file):
         msg = "cannot find the manifest file of the environment [file={0}]"
         tty.die(msg.format(manifest_file))
-    if not os.path.exists(backup_file):
-        msg = "cannot find the old manifest file to be restored [file={0}]"
-        tty.die(msg.format(backup_file))
+    backups = [(f + ".bkp", f) for f in (manifest_file, lockfile) if os.path.exists(f + ".bkp")]
+    if not backups:
+        msg = "cannot find the old manifest or lockfile to be restored [file={0}]"
+        tty.die(msg.format(manifest_file + ".bkp"))
 
     proceed = True
     if not args.yes_to_all:
-        msg = (
-            "Spack is going to overwrite the current manifest file"
-            " with a backup copy [manifest={0}, backup={1}]"
-        )
-        tty.msg(msg.format(manifest_file, backup_file))
+        for backup_file, current in backups:
+            msg = "Spack is going to overwrite {0} with the backup copy {1}"
+            tty.msg(msg.format(current, backup_file))
         proceed = tty.get_yes_or_no("Do you want to proceed?", default=False)
 
     if not proceed:
         tty.die("Operation aborted.")
 
-    shutil.copy(backup_file, manifest_file)
-    os.remove(backup_file)
+    for backup_file, current in backups:
+        shutil.copy(backup_file, current)
+        os.remove(backup_file)
     msg = 'Environment "{0}" reverted to old state'
     tty.msg(msg.format(manifest_file))
 

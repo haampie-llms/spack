@@ -5,6 +5,7 @@ import contextlib
 import filecmp
 import glob
 import io
+import json
 import os
 import pathlib
 import shutil
@@ -37,6 +38,7 @@ from spack.cmd.env import _env_create
 from spack.concretize_ui import SolveKind
 from spack.config import Configuration, substitute_path_variables
 from spack.environment import depfile
+from spack.environment.environment import CURRENT_LOCKFILE_VERSION
 from spack.main import SpackCommand, SpackCommandError
 from spack.old_installer import PackageInstaller
 from spack.repo import RepoPath
@@ -3488,6 +3490,26 @@ spack:
 
     # Check that an update does not raise
     env("update", "-y", str(tmp_path))
+
+
+def test_env_update_and_revert_lockfile(tmp_path: pathlib.Path):
+    """`spack env update` upgrades an older lockfile, `spack env revert` restores the backup."""
+    (tmp_path / "spack.yaml").write_text("spack:\n  specs:\n  - mpileaks\n")
+    with ev.Environment(tmp_path) as e:
+        e.concretize()
+        e.write()
+    lock, backup = tmp_path / "spack.lock", tmp_path / "spack.lock.bkp"
+    data = json.loads(lock.read_text())
+    data["_meta"]["lockfile-version"], data["_meta"]["specfile-version"] = 7, 5
+    lock.write_text(json.dumps(data))
+
+    env("update", "-y", str(tmp_path))
+    assert json.loads(lock.read_text())["_meta"]["lockfile-version"] == CURRENT_LOCKFILE_VERSION
+    assert backup.exists()
+
+    env("revert", "-y", str(tmp_path))
+    assert json.loads(lock.read_text())["_meta"]["lockfile-version"] == 7
+    assert not backup.exists()
 
 
 @pytest.mark.regression("18338")
