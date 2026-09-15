@@ -81,7 +81,10 @@ _DB_DIRNAME = ".spack-db"
 #: DB version.  This is stuck in the DB file to track changes in format.
 #: Increment by one when the database format changes.
 #: Versions before 5 were not integers.
-_DB_VERSION = vn.Version("9")
+_DB_VERSION = vn.StandardVersion.from_string("9")
+
+#: Versions a store can stay at: read in place and written back. `spack reindex` upgrades.
+_WRITABLE_VERSIONS = (vn.StandardVersion.from_string("8"), _DB_VERSION)
 
 #: For any version combinations here, skip reindex when upgrading.
 #: Reindexing can take considerable time and is not always necessary.
@@ -238,12 +241,17 @@ class InstallRecord:
             return InstallRecordStatus.DEPRECATED in installed
         return InstallRecordStatus.MISSING in installed
 
-    def to_dict(self, include_fields=DEFAULT_INSTALL_RECORD_FIELDS):
-        rec_dict = {}
+    def to_dict(
+        self,
+        include_fields=DEFAULT_INSTALL_RECORD_FIELDS,
+        *,
+        spec_format: int = spack.spec.SPECFILE_FORMAT_VERSION,
+    ):
+        rec_dict: Dict[str, Any] = {}
 
         for field_name in include_fields:
             if field_name == "spec":
-                rec_dict.update({"spec": self.spec.node_dict_with_hashes()})
+                rec_dict["spec"] = self.spec.node_dict_with_hashes(spec_format=spec_format)
             elif field_name == "deprecated_for" and self.deprecated_for:
                 rec_dict.update({"deprecated_for": self.deprecated_for})
             else:
@@ -646,6 +654,20 @@ class Database:
     @db_version.setter
     def db_version(self, value: vn.ConcreteVersion):
         self._db_version = value
+        if self.layout:
+            self.layout.spec_format = self.spec_format
+
+    @property
+    def spec_format(self) -> int:
+        """Spec file format of this store, the one of the database version it is written in"""
+        return reader(self._write_version()).SPEC_VERSION
+
+    def _write_version(self) -> vn.StandardVersion:
+        """Version the database is written in: the one read, if this Spack can still write it"""
+        for version in _WRITABLE_VERSIONS:
+            if version == self._db_version:
+                return version
+        return _DB_VERSION
 
     def _ensure_parent_directories(self):
         """Create the parent directory for the DB, if necessary."""
@@ -682,7 +704,11 @@ class Database:
         self._ensure_parent_directories()
 
         # map from per-spec hash code to installation record.
-        installs = {k: v.to_dict(include_fields=self.record_fields) for k, v in self._data.items()}
+        version, spec_format = self._write_version(), self.spec_format
+        installs = {
+            k: v.to_dict(include_fields=self.record_fields, spec_format=spec_format)
+            for k, v in self._data.items()
+        }
 
         # database includes installation list and version.
 
@@ -692,7 +718,7 @@ class Database:
         # TODO: fix this before we support multiple install locations.
         database = {
             "database": {
-                "version": str(_DB_VERSION),
+                "version": str(version),
                 # dictionary of installation records, keyed by DAG hash
                 "installs": installs,
             }
@@ -863,7 +889,7 @@ class Database:
         self.db_version = vn.StandardVersion.from_string(db["version"])
         if self.db_version > _DB_VERSION:
             raise InvalidDatabaseVersionError(self, _DB_VERSION, self.db_version)
-        elif self.db_version < _DB_VERSION:
+        elif self.db_version not in _WRITABLE_VERSIONS:
             installs = self._handle_old_db_versions_read(check, db, reindex=reindex)
         else:
             installs = self._handle_current_version_read(check, db)
@@ -979,6 +1005,7 @@ class Database:
                 self._installed_prefixes = set()
 
         with lk.WriteTransaction(self.lock, acquire=_read_suppress_error, release=self._write):
+            self.db_version = _DB_VERSION  # reindexing upgrades the store
             old_installed_prefixes, self._installed_prefixes = self._installed_prefixes, set()
             old_data, self._data = self._data, {}
             try:

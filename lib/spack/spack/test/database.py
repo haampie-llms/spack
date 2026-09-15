@@ -34,6 +34,7 @@ import spack.vendor.jsonschema
 import spack.concretize
 import spack.database
 import spack.deptypes as dt
+import spack.directory_layout
 import spack.package_base
 import spack.paths
 import spack.repo
@@ -1206,8 +1207,9 @@ def test_explicit_upgrade_error_when_using_too_old_db(database: Database, monkey
     requested, reading it should raise ExplicitDatabaseUpgradeError telling the user to
     run `spack reindex`.
     """
-    next_version = vn.Version(f"{spack.database._DB_VERSION[0] + 1}")
+    next_version = vn.StandardVersion.from_string(f"{spack.database._DB_VERSION[0] + 1}")
     monkeypatch.setattr(spack.database, "_DB_VERSION", next_version)
+    monkeypatch.setattr(spack.database, "_WRITABLE_VERSIONS", (next_version,))
     with pytest.raises(spack.database.ExplicitDatabaseUpgradeError) as exc_info:
         Database(database.root)._read()
 
@@ -1353,9 +1355,22 @@ def test_querying_reindexed_database_specfilev5(tmp_path: pathlib.Path, mock_pac
     index_json.parent.mkdir(parents=True)
     index_json.write_text(json.dumps(data))
 
-    # A v8 index is read in place as an upstream, a local store must be reindexed explicitly
-    with pytest.raises(spack.database.ExplicitDatabaseUpgradeError):
-        Database(str(tmp_path)).query("%gcc")
+    # A v8 store is read in place and stays at v8 until reindexed, also for its spec files
+    layout = spack.directory_layout.DirectoryLayout(str(tmp_path))
+    local = Database(str(tmp_path), layout=layout)
+    assert len(local.query("%gcc")) == 8
+    assert layout.spec_format == 5
+    with local.write_transaction():
+        pass
+    written = json.loads(index_json.read_text())
+    assert written["database"]["version"] == "8"
+    assert all(
+        "provided_virtuals" not in r["spec"] for r in written["database"]["installs"].values()
+    )
+    local.reindex()
+    assert json.loads(index_json.read_text())["database"]["version"] == "9"
+    assert layout.spec_format == 6
+    index_json.write_text(json.dumps(data))
 
     upstream = Database(str(tmp_path), is_upstream=True)
     upstream._read()
