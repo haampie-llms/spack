@@ -135,7 +135,7 @@ PygmentsBridge.html_formatter = NoWhitespaceHtmlFormatter
 
 
 from spack.util.lang import classproperty
-from spack.spec_parser import SPEC_TOKENS
+from spack.spec_parser import SPEC_TOKENS, VIRTUAL_ASSIGNMENT
 
 # replace classproperty.__get__ to return `self` so Sphinx can document it correctly. Otherwise
 # it evaluates the callback, and it documents the result, which is not what we want.
@@ -179,14 +179,16 @@ class SpecLexer(RegexLexer):
         "spec": [
             # New line terminates the spec string
             (r"\s*?$", Text, "#pop"),
-            # Dependency, with optional virtual assignment specifier
-            (r"(?:(?:\^|\%\%|\%)\[)", Name.Variable, "edge_properties"),
+            # Dependency, and the edge properties that may follow it
             (SPEC_TOKENS["DEPENDENCY"], Name.Variable),
+            (SPEC_TOKENS["START_EDGE_PROPERTIES"], Name.Variable, "edge_properties"),
             # versions
             (SPEC_TOKENS["VERSION"], Keyword.Pseudo),
             # variants
             (SPEC_TOKENS["BOOL_VARIANT"], Name.Function),
             (SPEC_TOKENS["KEY_VALUE_PAIR"], Name.Function),
+            # virtual assignment, e.g. ``%c,cxx=gcc``, which is not a key-value pair
+            (VIRTUAL_ASSIGNMENT, Name.Function),
             # filename
             (SPEC_TOKENS["FILENAME"], Text),
             # Package name

@@ -345,6 +345,7 @@ def quote_if_needed(value: str) -> str:
 
 # Token kinds: names of the top-level capture groups in FAST_SPEC_REGEX, compared against
 # match.lastgroup in the parser.
+_START_EDGE_PROPERTIES = "START_EDGE_PROPERTIES"
 _END_EDGE_PROPERTIES = "END_EDGE_PROPERTIES"
 _DEPENDENCY = "DEPENDENCY"
 _VERSION = "VERSION"
@@ -359,12 +360,6 @@ _UNEXPECTED = "UNEXPECTED"
 
 # Subgroup names within the token regexes below, read with match.group(...). All group names
 # must be unique across FAST_SPEC_REGEX; re.compile enforces this.
-_EDGE_BRACKET = "edge_bracket"
-_EDGE_VIRTUALS = "edge_virtuals"
-_EDGE_SUBSTITUTE = "edge_substitute"
-_END_EDGE_VIRTUALS = "end_edge_virtuals"
-_END_EDGE_SUBSTITUTE = "end_edge_substitute"
-_EDGE_REOPEN = "edge_reopen"
 _VERSION_LIST = "version_list"
 _BV_PREFIX = "bv_prefix"
 _BV_NAME = "bv_name"
@@ -372,41 +367,51 @@ _KV_NAME = "kv_name"
 _KV_SEP = "kv_sep"
 _KV_VALUE = "kv_value"
 
-# The virtual assignment ``c,cxx=gcc`` substitutes a package for one or more virtuals. Both
-# END_EDGE_PROPERTIES and DEPENDENCY embed it, each with its own group names; only that context
-# distinguishes it from KEY_VALUE_PAIR. It applies only if the whole value is a package name,
-# i.e. the substitute is followed by whitespace, a variant, version or hash of the node, a sigil,
-# a closing bracket, or the end of the input. Otherwise the pair is a variant of an anonymous
-# node, e.g. ``^foo=bar:baz``, and the sigil is a token of its own.
+# A virtual assignment is not matched by FAST_SPEC_REGEX, so this kind is not a group of it:
+# it is the kind ``tokens()`` reports for what the parser matches by hand.
+_VIRTUAL_ASSIGNMENT = "VIRTUAL_ASSIGNMENT"
+_VA_VIRTUALS = "va_virtuals"
+_VA_SUBSTITUTE = "va_substitute"
+
+# The virtual assignment ``c,cxx=gcc`` substitutes a package for one or more virtuals. It applies
+# only if the whole value is a package name, i.e. the substitute is followed by whitespace, a
+# variant, version or hash of the node, a sigil, a closing bracket, or the end of the input.
+# Otherwise the pair is a variant of an anonymous node, e.g. ``^foo=bar:baz``.
 _VIRTUALS_LIST = rf"{IDENTIFIER}(?:,{IDENTIFIER})*"  # comma-separated virtuals
 _SUBSTITUTE_END = r"(?=\s|[+~]{1,2}\s*[a-zA-Z_0-9]|[@/^%\]]|$)"
 _SUBSTITUTE = rf"{PACKAGE_NAME}{_SUBSTITUTE_END}"  # package to substitute for them
 
-#: A virtual assignment outside a dependency, ``zlib c,cxx=gcc``, fails to tokenize at the comma:
-#: matched on that error path only, so that it costs nothing in the token regex
+#: A virtual assignment is not a token of FAST_SPEC_REGEX: nothing tells it apart from a
+#: KEY_VALUE_PAIR but its position, directly after a dependency sigil or after the ``]`` closing
+#: edge properties. The parser matches it there, as a context-sensitive mode. Exported for the
+#: docs lexer in ``lib/spack/docs/conf.py``; its outer group is named after the token kind, like
+#: the groups ``fast_regex`` wraps SPEC_TOKENS in, so that a match can be read the same way.
+VIRTUAL_ASSIGNMENT = (
+    rf"(?P<{_VIRTUAL_ASSIGNMENT}>"
+    rf"(?P<{_VA_VIRTUALS}>{_VIRTUALS_LIST})=(?P<{_VA_SUBSTITUTE}>{_SUBSTITUTE})"
+    r")"
+)
+_VIRTUAL_ASSIGNMENT_REGEX = re.compile(rf"\s*{VIRTUAL_ASSIGNMENT}")
+
+#: The same, without capture groups, so that a parsing error underlines the whole assignment:
+#: used only on the error path of ``zlib c,cxx=gcc``, where the comma fails to tokenize
 _MISPLACED_VIRTUAL_ASSIGNMENT = re.compile(rf"{_VIRTUALS_LIST}={_SUBSTITUTE}")
 
 #: Token kind -> regex. FAST_SPEC_REGEX is the ``|``-alternation of these in order: tokens are
 #: tried top to bottom, so more specific tokens come first (e.g. FILENAME before package names).
 SPEC_TOKENS: Dict[str, str] = {
-    # ``]`` closing edge properties, optionally fused with a ``[`` opening another group of
-    # edge properties, e.g. ``^[when=+mpi][virtuals=mpi]``, or with a virtual assignment, e.g.
-    # ``^[deptypes=link] mpi=openmpi``
-    _END_EDGE_PROPERTIES: (
-        r"\]"
-        r"(?:"
-        rf"(?P<{_EDGE_REOPEN}>\s*\[)"
-        rf"|(?:\s*(?P<{_END_EDGE_VIRTUALS}>{_VIRTUALS_LIST})=(?P<{_END_EDGE_SUBSTITUTE}>{_SUBSTITUTE}))?"
-        r")"
-    ),
+    # ``[`` opening a group of edge properties and ``]`` closing it, e.g. ``^[virtuals=mpi]``.
+    # Consecutive groups combine: ``^[when=+mpi][virtuals=mpi]``. The brackets are asymmetric by
+    # design: a ``]`` always closes edge properties and is never part of a value, while a ``[``
+    # opens them only after a sigil, a closing bracket, or whitespace, and is an ordinary
+    # character of a value anywhere else. So ``cflags=-DFOO=[1]`` does not tokenize, which is
+    # what makes ``spack.cmd.quote_kvp`` quote it, while ``cflags=-DX=']'`` has to be quoted by
+    # hand. The lookbehind only covers a ``[`` glued to the value; one behind whitespace is
+    # caught by quote_kvp, since a spec with whitespace never rejoins to a single argument.
+    _START_EDGE_PROPERTIES: r"(?<=[\^%\]\s])\[",
+    _END_EDGE_PROPERTIES: r"\]",
     # ``^`` (transitive), ``%`` (direct) or ``%%`` (direct, propagated) dependency
-    _DEPENDENCY: (
-        r"(?:\^|\%\%|\%)"
-        r"(?:"
-        rf"(?P<{_EDGE_BRACKET}>\[)"  # start of edge properties, e.g. ``^[virtuals=mpi]``
-        rf"|(?:\s*(?P<{_EDGE_VIRTUALS}>{_VIRTUALS_LIST})=(?P<{_EDGE_SUBSTITUTE}>{_SUBSTITUTE}))?"
-        r")"
-    ),
+    _DEPENDENCY: r"(?:\^|\%\%|\%)",
     # ``@`` followed by a version list, whose items may be git versions
     _VERSION: rf"@\s*(?P<{_VERSION_LIST}>{VERSION_LIST})",
     # boolean variant, e.g. ``+debug``, ``~qt_4``, or propagated, e.g. ``++debug``
@@ -439,6 +444,9 @@ SPEC_TOKENS: Dict[str, str] = {
 #: Single regex matching any spec token (and its subgroups) after optional whitespace
 FAST_SPEC_REGEX = fast_regex(SPEC_TOKENS)
 
+#: The token kinds a virtual assignment may directly follow, the only places it is one
+_VIRTUAL_ASSIGNMENT_FOLLOWS = frozenset({_DEPENDENCY, _END_EDGE_PROPERTIES})
+
 
 class SpecParser:
     """Fast spec parser using a single compiled regex.
@@ -448,7 +456,8 @@ class SpecParser:
     not yet consumed token and ``self.next`` the one after it; both are ``None`` at the end
     of input. For a match, ``match.lastgroup`` is the token kind (a key of
     :data:`SPEC_TOKENS`), and subgroups of that token are accessed by name, e.g.
-    ``match.group(_KV_NAME)``.
+    ``match.group(_KV_NAME)``. A virtual assignment is the one construct the scanner cannot
+    produce: see :meth:`_accept_virtual_assignment`.
 
     Instead of ``accept``/``expect`` methods, the parser uses two idioms:
 
@@ -469,7 +478,11 @@ class SpecParser:
         self.next = self.scanner.match()
 
     def tokens(self, with_subgroups: bool = False) -> List[Tuple[str, str, Dict[str, str]]]:
-        """Tokenize the spec string into a list of (kind, match, subgroups) tuples."""
+        """Tokenize the spec string into a list of (kind, match, subgroups) tuples.
+
+        The kinds are the keys of :data:`SPEC_TOKENS`, plus ``VIRTUAL_ASSIGNMENT``, which is
+        not matched by FAST_SPEC_REGEX but by position, as the parser does.
+        """
         tokens: List[Tuple[str, str, Dict[str, str]]] = []
         scanner = FAST_SPEC_REGEX.scanner(self.literal_str)  # type: ignore[attr-defined]
         match = scanner.match()
@@ -485,6 +498,19 @@ class SpecParser:
             else:
                 subgroups = {}
             tokens.append((kind, full_match, subgroups))
+
+            # A virtual assignment is a token only where the parser looks for one: directly
+            # after a dependency sigil, or after the ] that closes edge properties. It is not
+            # part of FAST_SPEC_REGEX, so match it by hand and restart the scanner past it.
+            if kind in _VIRTUAL_ASSIGNMENT_FOLLOWS:
+                assignment = _VIRTUAL_ASSIGNMENT_REGEX.match(self.literal_str, match.end())
+                if assignment is not None:
+                    scanner = FAST_SPEC_REGEX.scanner(  # type: ignore[attr-defined]
+                        self.literal_str, assignment.end()
+                    )
+                    match = assignment
+                    continue
+
             match = scanner.match()
         return tokens
 
@@ -535,23 +561,25 @@ class SpecParser:
         while self.curr:
             if self.curr.lastgroup == _DEPENDENCY:
                 # ^ (transitive) or % / %% (direct) edge, followed by a dependency node
-                token = self.curr.group()
-                # Strip leading whitespace for checking startswith
-                token = token.lstrip()
-                is_direct = token.startswith("%")
-                propagation = PropagationPolicy.NONE
-                if is_direct and token.startswith("%%"):
-                    propagation = PropagationPolicy.PREFERENCE
+                sigil = self.curr.group(_DEPENDENCY)
+                is_direct = sigil[0] == "%"
+                propagation = (
+                    PropagationPolicy.PREFERENCE if sigil == "%%" else PropagationPolicy.NONE
+                )
+                # An edge property group or a virtual assignment starts right after the sigil
+                prev_end = self.curr.end()
 
-                if self.curr.group(_EDGE_BRACKET):
-                    # Bracketed form with edge properties: ^[key=value ...] node.
-                    # Accept the opening ^[ / %[ token
+                # Accept the ^ / % / %% token
+                self.curr, self.next = self.next, self.scanner.match()
+
+                attributes: Dict[str, List[str]] = {}
+                conditions: Optional["spack.spec.Spec"] = None
+
+                # Edge properties, in one or more bracket groups: ^[key=value ...][...] node
+                while self.curr is not None and self.curr.lastgroup == _START_EDGE_PROPERTIES:
+                    # Accept the [ opening this group of edge properties
                     self.curr, self.next = self.next, self.scanner.match()
 
-                    # Collect edge attributes (key=value pairs) up to the closing bracket
-                    attributes: Dict[str, List[str]] = {}
-                    conditions: Optional["spack.spec.Spec"] = None
-                    substitute = None
                     while True:
                         if not self.curr:
                             self._raise_parsing_error("expected `]` to close the edge attributes")
@@ -606,81 +634,40 @@ class SpecParser:
                                 conditions.constrain(condition)
 
                         elif kind == _END_EDGE_PROPERTIES:
-                            # ][ opens another group of edge properties, as in
-                            # ^[when=+mpi][virtuals=mpi]: keep collecting attributes
-                            if self.curr.group(_EDGE_REOPEN):
-                                self.curr, self.next = self.next, self.scanner.match()
-                                continue
-
-                            # Closing ], optionally fused with a virtual assignment, as in
-                            # ^[deptypes=link] mpi=openmpi
-                            virtuals_str = self.curr.group(_END_EDGE_VIRTUALS)
-                            substitute = self.curr.group(_END_EDGE_SUBSTITUTE)
-
-                            if virtuals_str:
-                                virtuals = attributes.get("virtuals", [])
-                                virtuals.extend(virtuals_str.split(","))
-                                attributes["virtuals"] = virtuals
-
-                            # Accept the ] token and stop collecting edge attributes
+                            # Accept the closing ]. Another [ opens a second group, as in
+                            # ^[when=+mpi][virtuals=mpi], and re-enters the outer loop.
+                            prev_end = self.curr.end()
                             self.curr, self.next = self.next, self.scanner.match()
-
                             break
+
                         else:
                             # Only key=value pairs can occur between brackets
                             self._raise_parsing_error("expected an edge attribute or `]`")
 
-                    depflag = 0
-                    if "deptypes" in attributes:
-                        depflag = spack.deptypes.canonicalize(attributes["deptypes"])
+                # A virtual assignment follows the sigil, ``%c,cxx=gcc``, or the last group of
+                # edge properties, ``^[deptypes=link] mpi=openmpi``
+                substitute = self._accept_virtual_assignment(prev_end, attributes)
 
-                    virtuals_tuple = tuple(attributes.get("virtuals", ()))
+                deptypes = attributes.get("deptypes")
+                depflag = spack.deptypes.canonicalize(deptypes) if deptypes else 0
 
-                    dep_spec = self._parse_node(initial_name=substitute)
+                dep_spec = self._parse_node(initial_name=substitute)
 
-                    edge_kwargs = {
-                        "direct": is_direct,
-                        "depflag": depflag,
-                        "virtuals": virtuals_tuple,
-                        "propagation": propagation,
-                        "when": conditions,
-                    }
-                    if is_direct:
-                        if dep_spec.name in LEGACY_COMPILER_TO_BUILTIN:
-                            dep_spec.name = LEGACY_COMPILER_TO_BUILTIN[dep_spec.name]
-                        self._attach_dependency(current_spec, dep_spec, self.curr, edge_kwargs)
-                    else:
-                        self._attach_pending(root_spec, pending)
-                        current_spec = dep_spec
-                        pending = (dep_spec, self.curr, edge_kwargs)
-
+                edge_kwargs = {
+                    "direct": is_direct,
+                    "depflag": depflag,
+                    "virtuals": tuple(attributes.get("virtuals", ())),
+                    "propagation": propagation,
+                    "when": conditions,
+                }
+                if is_direct:
+                    if dep_spec.name in LEGACY_COMPILER_TO_BUILTIN:
+                        dep_spec.name = LEGACY_COMPILER_TO_BUILTIN[dep_spec.name]
+                    self._attach_dependency(current_spec, dep_spec, self.curr, edge_kwargs)
                 else:
-                    # Plain form without brackets: ^node / %node, where the edge token may
-                    # carry a virtual assignment, as in %c,cxx=gcc
-                    virtuals_str = self.curr.group(_EDGE_VIRTUALS)
-                    substitute = self.curr.group(_EDGE_SUBSTITUTE)
-
-                    virtuals_tuple = tuple(virtuals_str.split(",")) if virtuals_str else ()
-
-                    # Accept the ^ / % / %% token
-                    self.curr, self.next = self.next, self.scanner.match()
-
-                    dep_spec = self._parse_node(initial_name=substitute)
-
-                    edge_kwargs = {
-                        "direct": is_direct,
-                        "depflag": 0,
-                        "virtuals": virtuals_tuple,
-                        "propagation": propagation,
-                    }
-                    if is_direct:
-                        if dep_spec.name in LEGACY_COMPILER_TO_BUILTIN:
-                            dep_spec.name = LEGACY_COMPILER_TO_BUILTIN[dep_spec.name]
-                        self._attach_dependency(current_spec, dep_spec, self.curr, edge_kwargs)
-                    else:
-                        self._attach_pending(root_spec, pending)
-                        current_spec = dep_spec
-                        pending = (dep_spec, self.curr, edge_kwargs)
+                    self._attach_pending(root_spec, pending)
+                    current_spec = dep_spec
+                    pending = (dep_spec, self.curr, edge_kwargs)
 
             elif self.curr.lastgroup == _UNEXPECTED:
                 self._raise_tokenization_error()
@@ -699,10 +686,44 @@ class SpecParser:
         return root_spec
 
     def _rescan(self, pos: int) -> None:
-        """Restart the scanner at ``pos`` in the input, the value of an unquoted when= condition"""
+        """Restart the scanner at ``pos`` in the input, after the parser has consumed a part of
+        it outside of FAST_SPEC_REGEX: an unquoted when= condition or a virtual assignment"""
         self.scanner = FAST_SPEC_REGEX.scanner(self.literal_str, pos)  # type: ignore[attr-defined]
         self.curr = self.scanner.match()
         self.next = self.scanner.match()
+
+    def _accept_virtual_assignment(
+        self, pos: int, attributes: Dict[str, List[str]]
+    ) -> Optional[str]:
+        """Parse the virtual assignment at ``pos``, if there is one, and return the package
+        substituted for the virtuals, which are added to ``attributes``.
+
+        This is the context-sensitive mode for ``%c,cxx=gcc``: the tokenizer cannot tell a
+        virtual assignment from a variant of an anonymous node, ``%* c=gcc``, so it is matched
+        by hand in the only two positions where it is one, with ``pos`` the end of the
+        dependency sigil or of the ``]`` that closes the edge properties.
+        """
+        # Where an assignment starts, the scanner has produced either the KEY_VALUE_PAIR of
+        # ``c=gcc``, or, for ``c,cxx=gcc``, the package name ``c`` and the comma that fails to
+        # tokenize. No other token can start one, and checking saves the match attempt on the
+        # hot path of every plain ``^dep``.
+        curr = self.curr
+        if curr is None:
+            return None
+        kind = curr.lastgroup
+        if kind != _KEY_VALUE_PAIR and not (
+            kind == _UNQUALIFIED_PACKAGE_NAME
+            and self.next is not None
+            and self.next.lastgroup == _UNEXPECTED
+        ):
+            return None
+
+        match = _VIRTUAL_ASSIGNMENT_REGEX.match(self.literal_str, pos)
+        if match is None:
+            return None
+        attributes.setdefault("virtuals", []).extend(match.group(_VA_VIRTUALS).split(","))
+        self._rescan(match.end())
+        return match.group(_VA_SUBSTITUTE)
 
     def _attach_pending(self, root_spec: "spack.spec.Spec", pending: Optional[tuple]) -> None:
         """Attach the pending ^ dependency, whose sub-dag is complete now."""

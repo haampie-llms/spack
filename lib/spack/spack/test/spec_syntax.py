@@ -619,7 +619,8 @@ def specfile_for(config, mock_packages):
         (
             "^[virtuals=mpi] openmpi",
             [
-                Token("DEPENDENCY", value="^["),
+                Token("DEPENDENCY", value="^"),
+                Token("START_EDGE_PROPERTIES", value="["),
                 Token("KEY_VALUE_PAIR", value="virtuals=mpi"),
                 Token("END_EDGE_PROPERTIES", value="]"),
                 Token("UNQUALIFIED_PACKAGE_NAME", value="openmpi"),
@@ -629,12 +630,13 @@ def specfile_for(config, mock_packages):
         (
             "^mpi=openmpi",
             [
+                Token("DEPENDENCY", value="^"),
                 Token(
-                    "DEPENDENCY",
-                    value="^mpi=openmpi",
-                    edge_virtuals="mpi",
-                    edge_substitute="openmpi",
-                )
+                    "VIRTUAL_ASSIGNMENT",
+                    value="mpi=openmpi",
+                    va_virtuals="mpi",
+                    va_substitute="openmpi",
+                ),
             ],
             "^mpi=openmpi",
         ),
@@ -643,12 +645,14 @@ def specfile_for(config, mock_packages):
         (
             "^[virtuals=mpi] openmpi+foo ^[virtuals=lapack] openmpi+bar",
             [
-                Token("DEPENDENCY", value="^["),
+                Token("DEPENDENCY", value="^"),
+                Token("START_EDGE_PROPERTIES", value="["),
                 Token("KEY_VALUE_PAIR", value="virtuals=mpi"),
                 Token("END_EDGE_PROPERTIES", value="]"),
                 Token("UNQUALIFIED_PACKAGE_NAME", value="openmpi"),
                 Token("BOOL_VARIANT", value="+foo"),
-                Token("DEPENDENCY", value="^["),
+                Token("DEPENDENCY", value="^"),
+                Token("START_EDGE_PROPERTIES", value="["),
                 Token("KEY_VALUE_PAIR", value="virtuals=lapack"),
                 Token("END_EDGE_PROPERTIES", value="]"),
                 Token("UNQUALIFIED_PACKAGE_NAME", value="openmpi"),
@@ -659,11 +663,12 @@ def specfile_for(config, mock_packages):
         (
             "^lapack,mpi=openmpi+foo+bar",
             [
+                Token("DEPENDENCY", value="^"),
                 Token(
-                    "DEPENDENCY",
-                    value="^lapack,mpi=openmpi",
-                    edge_virtuals="lapack,mpi",
-                    edge_substitute="openmpi",
+                    "VIRTUAL_ASSIGNMENT",
+                    value="lapack,mpi=openmpi",
+                    va_virtuals="lapack,mpi",
+                    va_substitute="openmpi",
                 ),
                 Token("BOOL_VARIANT", value="+foo", bv_prefix="+", bv_name="foo"),
                 Token("BOOL_VARIANT", value="+bar", bv_prefix="+", bv_name="bar"),
@@ -673,7 +678,8 @@ def specfile_for(config, mock_packages):
         (
             "^[deptypes=link,build] zlib",
             [
-                Token("DEPENDENCY", value="^["),
+                Token("DEPENDENCY", value="^"),
+                Token("START_EDGE_PROPERTIES", value="["),
                 Token("KEY_VALUE_PAIR", value="deptypes=link,build"),
                 Token("END_EDGE_PROPERTIES", value="]"),
                 Token("UNQUALIFIED_PACKAGE_NAME", value="zlib"),
@@ -686,11 +692,13 @@ def specfile_for(config, mock_packages):
         (
             "^[deptypes=link] zlib ^[deptypes=build] zlib",
             [
-                Token("DEPENDENCY", value="^["),
+                Token("DEPENDENCY", value="^"),
+                Token("START_EDGE_PROPERTIES", value="["),
                 Token("KEY_VALUE_PAIR", value="deptypes=link"),
                 Token("END_EDGE_PROPERTIES", value="]"),
                 Token("UNQUALIFIED_PACKAGE_NAME", value="zlib"),
-                Token("DEPENDENCY", value="^["),
+                Token("DEPENDENCY", value="^"),
+                Token("START_EDGE_PROPERTIES", value="["),
                 Token("KEY_VALUE_PAIR", value="deptypes=build"),
                 Token("END_EDGE_PROPERTIES", value="]"),
                 Token("UNQUALIFIED_PACKAGE_NAME", value="zlib"),
@@ -701,11 +709,13 @@ def specfile_for(config, mock_packages):
         (
             "^[deptypes=build,link] zlib ^[deptypes=link] zlib",
             [
-                Token("DEPENDENCY", value="^["),
+                Token("DEPENDENCY", value="^"),
+                Token("START_EDGE_PROPERTIES", value="["),
                 Token("KEY_VALUE_PAIR", value="deptypes=build,link"),
                 Token("END_EDGE_PROPERTIES", value="]"),
                 Token("UNQUALIFIED_PACKAGE_NAME", value="zlib"),
-                Token("DEPENDENCY", value="^["),
+                Token("DEPENDENCY", value="^"),
+                Token("START_EDGE_PROPERTIES", value="["),
                 Token("KEY_VALUE_PAIR", value="deptypes=link"),
                 Token("END_EDGE_PROPERTIES", value="]"),
                 Token("UNQUALIFIED_PACKAGE_NAME", value="zlib"),
@@ -843,7 +853,8 @@ def specfile_for(config, mock_packages):
             "zlib %[virtuals=c] gcc",
             [
                 Token("UNQUALIFIED_PACKAGE_NAME", "zlib"),
-                Token("DEPENDENCY", value="%["),
+                Token("DEPENDENCY", value="%"),
+                Token("START_EDGE_PROPERTIES", value="["),
                 Token("KEY_VALUE_PAIR", value="virtuals=c"),
                 Token("END_EDGE_PROPERTIES", value="]"),
                 Token("UNQUALIFIED_PACKAGE_NAME", value="gcc"),
@@ -854,7 +865,8 @@ def specfile_for(config, mock_packages):
             "zlib %c=gcc",
             [
                 Token("UNQUALIFIED_PACKAGE_NAME", "zlib"),
-                Token("DEPENDENCY", value="%c=gcc", edge_virtuals="c", edge_substitute="gcc"),
+                Token("DEPENDENCY", value="%"),
+                Token("VIRTUAL_ASSIGNMENT", value="c=gcc", va_virtuals="c", va_substitute="gcc"),
             ],
             "zlib %c=gcc",
         ),
@@ -862,7 +874,8 @@ def specfile_for(config, mock_packages):
             "zlib %[virtuals=c,cxx] gcc",
             [
                 Token("UNQUALIFIED_PACKAGE_NAME", "zlib"),
-                Token("DEPENDENCY", value="%["),
+                Token("DEPENDENCY", value="%"),
+                Token("START_EDGE_PROPERTIES", value="["),
                 Token("KEY_VALUE_PAIR", value="virtuals=c,cxx"),
                 Token("END_EDGE_PROPERTIES", value="]"),
                 Token("UNQUALIFIED_PACKAGE_NAME", value="gcc"),
@@ -873,8 +886,12 @@ def specfile_for(config, mock_packages):
             "zlib %c,cxx=gcc",
             [
                 Token("UNQUALIFIED_PACKAGE_NAME", "zlib"),
+                Token("DEPENDENCY", value="%"),
                 Token(
-                    "DEPENDENCY", value="%c,cxx=gcc", edge_virtuals="c,cxx", edge_substitute="gcc"
+                    "VIRTUAL_ASSIGNMENT",
+                    value="c,cxx=gcc",
+                    va_virtuals="c,cxx",
+                    va_substitute="gcc",
                 ),
             ],
             "zlib %c,cxx=gcc",
@@ -883,7 +900,8 @@ def specfile_for(config, mock_packages):
             "zlib %[virtuals=c,cxx] gcc@14.1",
             [
                 Token("UNQUALIFIED_PACKAGE_NAME", "zlib"),
-                Token("DEPENDENCY", value="%[", edge_bracket="["),
+                Token("DEPENDENCY", value="%"),
+                Token("START_EDGE_PROPERTIES", value="["),
                 Token(
                     "KEY_VALUE_PAIR",
                     value="virtuals=c,cxx",
@@ -901,8 +919,12 @@ def specfile_for(config, mock_packages):
             "zlib %c,cxx=gcc@14.1",
             [
                 Token("UNQUALIFIED_PACKAGE_NAME", "zlib"),
+                Token("DEPENDENCY", value="%"),
                 Token(
-                    "DEPENDENCY", value="%c,cxx=gcc", edge_virtuals="c,cxx", edge_substitute="gcc"
+                    "VIRTUAL_ASSIGNMENT",
+                    value="c,cxx=gcc",
+                    va_virtuals="c,cxx",
+                    va_substitute="gcc",
                 ),
                 Token("VERSION", value="@14.1", version_list="14.1"),
             ],
@@ -912,7 +934,8 @@ def specfile_for(config, mock_packages):
             "zlib %[virtuals=fortran] gcc@14.1 %[virtuals=c,cxx] clang",
             [
                 Token("UNQUALIFIED_PACKAGE_NAME", "zlib"),
-                Token("DEPENDENCY", value="%[", edge_bracket="["),
+                Token("DEPENDENCY", value="%"),
+                Token("START_EDGE_PROPERTIES", value="["),
                 Token(
                     "KEY_VALUE_PAIR",
                     value="virtuals=fortran",
@@ -923,7 +946,8 @@ def specfile_for(config, mock_packages):
                 Token("END_EDGE_PROPERTIES", value="]"),
                 Token("UNQUALIFIED_PACKAGE_NAME", value="gcc"),
                 Token("VERSION", value="@14.1", version_list="14.1"),
-                Token("DEPENDENCY", value="%[", edge_bracket="["),
+                Token("DEPENDENCY", value="%"),
+                Token("START_EDGE_PROPERTIES", value="["),
                 Token(
                     "KEY_VALUE_PAIR",
                     value="virtuals=c,cxx",
@@ -940,18 +964,20 @@ def specfile_for(config, mock_packages):
             "zlib %fortran=gcc@14.1 %c,cxx=clang",
             [
                 Token("UNQUALIFIED_PACKAGE_NAME", "zlib"),
+                Token("DEPENDENCY", value="%"),
                 Token(
-                    "DEPENDENCY",
-                    value="%fortran=gcc",
-                    edge_virtuals="fortran",
-                    edge_substitute="gcc",
+                    "VIRTUAL_ASSIGNMENT",
+                    value="fortran=gcc",
+                    va_virtuals="fortran",
+                    va_substitute="gcc",
                 ),
                 Token("VERSION", value="@14.1", version_list="14.1"),
+                Token("DEPENDENCY", value="%"),
                 Token(
-                    "DEPENDENCY",
-                    value="%c,cxx=clang",
-                    edge_virtuals="c,cxx",
-                    edge_substitute="clang",
+                    "VIRTUAL_ASSIGNMENT",
+                    value="c,cxx=clang",
+                    va_virtuals="c,cxx",
+                    va_substitute="clang",
                 ),
             ],
             "zlib %fortran=gcc@14.1 %c,cxx=clang",
@@ -996,7 +1022,8 @@ def specfile_for(config, mock_packages):
             "foo ^[when='%c' virtuals=c] gcc",
             [
                 Token("UNQUALIFIED_PACKAGE_NAME", "foo"),
-                Token("DEPENDENCY", "^["),
+                Token("DEPENDENCY", "^"),
+                Token("START_EDGE_PROPERTIES", "["),
                 Token("KEY_VALUE_PAIR", "when='%c'"),
                 Token("KEY_VALUE_PAIR", "virtuals=c"),
                 Token("END_EDGE_PROPERTIES", "]"),
@@ -1008,7 +1035,8 @@ def specfile_for(config, mock_packages):
             "foo ^[when='%c' virtuals=c]gcc",
             [
                 Token("UNQUALIFIED_PACKAGE_NAME", "foo"),
-                Token("DEPENDENCY", "^["),
+                Token("DEPENDENCY", "^"),
+                Token("START_EDGE_PROPERTIES", "["),
                 Token("KEY_VALUE_PAIR", "when='%c'"),
                 Token("KEY_VALUE_PAIR", "virtuals=c"),
                 Token("END_EDGE_PROPERTIES", "]"),
@@ -1020,14 +1048,11 @@ def specfile_for(config, mock_packages):
             "foo ^[when=%c] c=gcc",
             [
                 Token("UNQUALIFIED_PACKAGE_NAME", "foo"),
-                Token("DEPENDENCY", "^[", edge_bracket="["),
+                Token("DEPENDENCY", "^"),
+                Token("START_EDGE_PROPERTIES", "["),
                 Token("KEY_VALUE_PAIR", "when=%c", kv_name="when", kv_sep="=", kv_value="%c"),
-                Token(
-                    "END_EDGE_PROPERTIES",
-                    "] c=gcc",
-                    end_edge_virtuals="c",
-                    end_edge_substitute="gcc",
-                ),
+                Token("END_EDGE_PROPERTIES", "]"),
+                Token("VIRTUAL_ASSIGNMENT", "c=gcc", va_virtuals="c", va_substitute="gcc"),
             ],
             "foo ^[when=%c] c=gcc",
         ),
@@ -1045,7 +1070,8 @@ def specfile_for(config, mock_packages):
             "foo %%c,cxx=gcc",
             [
                 Token("UNQUALIFIED_PACKAGE_NAME", "foo"),
-                Token("DEPENDENCY", "%%c,cxx=gcc", edge_virtuals="c,cxx", edge_substitute="gcc"),
+                Token("DEPENDENCY", "%%"),
+                Token("VIRTUAL_ASSIGNMENT", "c,cxx=gcc", va_virtuals="c,cxx", va_substitute="gcc"),
             ],
             "foo %%c,cxx=gcc",
         ),
@@ -1053,14 +1079,11 @@ def specfile_for(config, mock_packages):
             "foo %%[when=%c] c=gcc",
             [
                 Token("UNQUALIFIED_PACKAGE_NAME", "foo"),
-                Token("DEPENDENCY", "%%[", edge_bracket="["),
+                Token("DEPENDENCY", "%%"),
+                Token("START_EDGE_PROPERTIES", "["),
                 Token("KEY_VALUE_PAIR", "when=%c", kv_name="when", kv_sep="=", kv_value="%c"),
-                Token(
-                    "END_EDGE_PROPERTIES",
-                    "] c=gcc",
-                    end_edge_virtuals="c",
-                    end_edge_substitute="gcc",
-                ),
+                Token("END_EDGE_PROPERTIES", "]"),
+                Token("VIRTUAL_ASSIGNMENT", "c=gcc", va_virtuals="c", va_substitute="gcc"),
             ],
             "foo %%[when=%c] c=gcc",
         ),
@@ -1068,7 +1091,8 @@ def specfile_for(config, mock_packages):
             "foo %%[when='%c' virtuals=c] gcc",
             [
                 Token("UNQUALIFIED_PACKAGE_NAME", "foo"),
-                Token("DEPENDENCY", "%%["),
+                Token("DEPENDENCY", "%%"),
+                Token("START_EDGE_PROPERTIES", "["),
                 Token("KEY_VALUE_PAIR", "when='%c'"),
                 Token("KEY_VALUE_PAIR", "virtuals=c"),
                 Token("END_EDGE_PROPERTIES", "]"),
@@ -1081,13 +1105,15 @@ def specfile_for(config, mock_packages):
             "foo ^[when=%c]   c,cxx=builtin.gcc@14+bar",
             [
                 Token("UNQUALIFIED_PACKAGE_NAME", value="foo"),
-                Token("DEPENDENCY", value="^[", edge_bracket="["),
+                Token("DEPENDENCY", value="^"),
+                Token("START_EDGE_PROPERTIES", value="["),
                 Token("KEY_VALUE_PAIR", "when=%c", kv_name="when", kv_sep="=", kv_value="%c"),
+                Token("END_EDGE_PROPERTIES", "]"),
                 Token(
-                    "END_EDGE_PROPERTIES",
-                    "]   c,cxx=builtin.gcc",
-                    end_edge_virtuals="c,cxx",
-                    end_edge_substitute="builtin.gcc",
+                    "VIRTUAL_ASSIGNMENT",
+                    "c,cxx=builtin.gcc",
+                    va_virtuals="c,cxx",
+                    va_substitute="builtin.gcc",
                 ),
                 Token("VERSION", value="@14", version_list="14"),
                 Token("BOOL_VARIANT", value="+bar", bv_prefix="+", bv_name="bar"),
@@ -1100,9 +1126,11 @@ def specfile_for(config, mock_packages):
             "foo %[when=+a][virtuals=c]gcc",
             [
                 Token("UNQUALIFIED_PACKAGE_NAME", "foo"),
-                Token("DEPENDENCY", "%[", edge_bracket="["),
+                Token("DEPENDENCY", "%"),
+                Token("START_EDGE_PROPERTIES", "["),
                 Token("KEY_VALUE_PAIR", "when=+a", kv_name="when", kv_sep="=", kv_value="+a"),
-                Token("END_EDGE_PROPERTIES", "][", edge_reopen="["),
+                Token("END_EDGE_PROPERTIES", "]"),
+                Token("START_EDGE_PROPERTIES", "["),
                 Token(
                     "KEY_VALUE_PAIR", "virtuals=c", kv_name="virtuals", kv_sep="=", kv_value="c"
                 ),
@@ -1115,10 +1143,12 @@ def specfile_for(config, mock_packages):
             "foo %[when=%baz target=x86_64][virtuals=c]gcc",
             [
                 Token("UNQUALIFIED_PACKAGE_NAME", "foo"),
-                Token("DEPENDENCY", "%["),
+                Token("DEPENDENCY", "%"),
+                Token("START_EDGE_PROPERTIES", "["),
                 Token("KEY_VALUE_PAIR", "when=%baz"),
                 Token("KEY_VALUE_PAIR", "target=x86_64"),
-                Token("END_EDGE_PROPERTIES", "]["),
+                Token("END_EDGE_PROPERTIES", "]"),
+                Token("START_EDGE_PROPERTIES", "["),
                 Token("KEY_VALUE_PAIR", "virtuals=c"),
                 Token("END_EDGE_PROPERTIES", "]"),
                 Token("UNQUALIFIED_PACKAGE_NAME", "gcc"),
@@ -1130,9 +1160,11 @@ def specfile_for(config, mock_packages):
             "foo %[virtuals=c][when=%baz target=x86_64]gcc",
             [
                 Token("UNQUALIFIED_PACKAGE_NAME", "foo"),
-                Token("DEPENDENCY", "%["),
+                Token("DEPENDENCY", "%"),
+                Token("START_EDGE_PROPERTIES", "["),
                 Token("KEY_VALUE_PAIR", "virtuals=c"),
-                Token("END_EDGE_PROPERTIES", "]["),
+                Token("END_EDGE_PROPERTIES", "]"),
+                Token("START_EDGE_PROPERTIES", "["),
                 Token("KEY_VALUE_PAIR", "when=%baz"),
                 Token("KEY_VALUE_PAIR", "target=x86_64"),
                 Token("END_EDGE_PROPERTIES", "]"),
@@ -1145,25 +1177,44 @@ def specfile_for(config, mock_packages):
             "foo ^[deptypes=link] [when=+mpi] mpich",
             [
                 Token("UNQUALIFIED_PACKAGE_NAME", "foo"),
-                Token("DEPENDENCY", "^["),
+                Token("DEPENDENCY", "^"),
+                Token("START_EDGE_PROPERTIES", "["),
                 Token("KEY_VALUE_PAIR", "deptypes=link"),
-                Token("END_EDGE_PROPERTIES", "] ["),
+                Token("END_EDGE_PROPERTIES", "]"),
+                Token("START_EDGE_PROPERTIES", "["),
                 Token("KEY_VALUE_PAIR", "when=+mpi"),
                 Token("END_EDGE_PROPERTIES", "]"),
                 Token("UNQUALIFIED_PACKAGE_NAME", "mpich"),
             ],
             "foo ^[deptypes=link when=+mpi] mpich",
         ),
-        # a second group of edge properties closed by a fused virtual assignment
+        # whitespace is allowed before a [ that opens edge properties, so that arguments split
+        # by the shell still parse, as in `spack install foo ^ [virtuals=mpi] openmpi`
+        (
+            "foo ^ [virtuals=mpi] openmpi",
+            [
+                Token("UNQUALIFIED_PACKAGE_NAME", "foo"),
+                Token("DEPENDENCY", "^"),
+                Token("START_EDGE_PROPERTIES", "["),
+                Token("KEY_VALUE_PAIR", "virtuals=mpi"),
+                Token("END_EDGE_PROPERTIES", "]"),
+                Token("UNQUALIFIED_PACKAGE_NAME", "openmpi"),
+            ],
+            "foo ^mpi=openmpi",
+        ),
+        # a second group of edge properties, followed by a virtual assignment
         (
             "foo %[when=+a][deptypes=link] c=gcc",
             [
                 Token("UNQUALIFIED_PACKAGE_NAME", "foo"),
-                Token("DEPENDENCY", "%["),
+                Token("DEPENDENCY", "%"),
+                Token("START_EDGE_PROPERTIES", "["),
                 Token("KEY_VALUE_PAIR", "when=+a"),
-                Token("END_EDGE_PROPERTIES", "]["),
+                Token("END_EDGE_PROPERTIES", "]"),
+                Token("START_EDGE_PROPERTIES", "["),
                 Token("KEY_VALUE_PAIR", "deptypes=link"),
-                Token("END_EDGE_PROPERTIES", "] c=gcc"),
+                Token("END_EDGE_PROPERTIES", "]"),
+                Token("VIRTUAL_ASSIGNMENT", "c=gcc"),
             ],
             "foo %[deptypes=link when=+a] c=gcc",
         ),
@@ -1250,7 +1301,8 @@ def test_parse_single_spec(spec_str, tokens, expected_roundtrip, mock_git_test_p
             "zlib %c=gcc gcc",
             [
                 Token("UNQUALIFIED_PACKAGE_NAME", value="zlib"),
-                Token("DEPENDENCY", value="%c=gcc"),
+                Token("DEPENDENCY", value="%"),
+                Token("VIRTUAL_ASSIGNMENT", value="c=gcc"),
                 Token("UNQUALIFIED_PACKAGE_NAME", value="gcc"),
             ],
             ["zlib %c=gcc", "gcc"],
@@ -1472,6 +1524,9 @@ def test_parse_toolchain(spec_str, toolchain, expected_roundtrip, mutable_config
         ("x@1:=2", r"x@1:=2\n    ^"),
         ("x@git.foo==1.2", r"x@git.foo==1.2\n         ^^"),
         ("x@git.foo=1:=2", r"x@git.foo=1:=2\n            ^"),
+        # a [ only opens edge properties after a sigil, a ] or whitespace: anywhere else it is
+        # an unexpected character, which is what makes spack quote a value that contains one
+        ("zlib cflags=-DFOO=[1]", r"zlib cflags=-DFOO=[1]\n                  ^"),
     ],
 )
 def test_error_reporting(text, expected_in_error):
