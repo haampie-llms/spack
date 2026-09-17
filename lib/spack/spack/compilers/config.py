@@ -5,9 +5,12 @@
 and configuring Spack to use multiple compilers.
 """
 
+import copy
+import hashlib
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 
+import spack.compilers.libraries
 import spack.detection
 import spack.error
 import spack.platforms
@@ -15,8 +18,15 @@ import spack.repo
 import spack.spec
 import spack.util.filesystem as fs
 import spack.util.lang
+import spack.util.path
 from spack.config import Configuration
-from spack.externals import ExternalSpecsParser, external_spec, extract_dicts_from_configuration
+from spack.externals import (
+    ExternalDict,
+    ExternalSpecsParser,
+    external_spec,
+    extract_dicts_from_configuration,
+    move_inline_dependencies,
+)
 from spack.operating_systems import windows_os
 from spack.util import tty
 from spack.util.environment import get_path
@@ -87,14 +97,91 @@ def find_compilers(
         detected_packages, config=config, buildable=True, scope=scope
     )
     if new_compilers and spack.platforms.using_libc_compatibility():
-        # Local import to break circular dependencies
-        from spack.externals_config import attach_libc_dependencies
-
         scope = scope or config.default_modify_scope()
         packages_yaml = config.get("packages", scope=scope)
         attach_libc_dependencies(packages_yaml, repo=repo)
         config.set("packages", packages_yaml, scope=scope)
     return new_compilers
+
+
+def _has_libc_dependency(entry: ExternalDict, libc_providers: List[str]) -> bool:
+    for dep in entry.get("dependencies", []):
+        if "libc" in dep.get("virtuals", "").split(","):
+            return True
+        if "spec" in dep and spack.spec.Spec(dep["spec"]).name in libc_providers:
+            return True
+    return any(
+        e.spec.name in libc_providers or "libc" in e.virtuals
+        for e in spack.spec.Spec(entry["spec"]).traverse_edges(root=False)
+    )
+
+
+def _find_or_add_libc(packages_yaml: Dict[str, Any], libc: spack.spec.Spec) -> str:
+    """Return the id of the external entry for ``libc``, adding one if needed."""
+    externals = packages_yaml.setdefault(libc.name, {}).setdefault("externals", [])
+    for entry in externals:
+        try:
+            version = spack.spec.parse_with_version_concrete(entry["spec"]).version
+        except spack.error.SpackError:
+            continue
+        prefix = spack.util.path.path_to_os_path(entry.get("prefix"))[0]
+        if version == libc.version and prefix == libc.external_path:
+            return entry.setdefault("id", _libc_id(libc))
+    externals.append({"spec": str(libc), "prefix": libc.external_path, "id": _libc_id(libc)})
+    return externals[-1]["id"]
+
+
+def _libc_id(libc: spack.spec.Spec) -> str:
+    digest = hashlib.sha1(libc.external_path.encode("utf-8")).hexdigest()[:8]
+    return f"{libc.name}-{libc.version}-{digest}"
+
+
+def attach_libc_dependencies(
+    packages_yaml: Dict[str, Any],
+    *,
+    repo: spack.repo.RepoPath,
+    cache: Optional["spack.compilers.libraries.CompilerCache"] = None,
+) -> None:
+    """Give every external compiler in ``packages_yaml`` a dependency on the libc it targets.
+
+    Compilers that already declare a libc dependency are left alone. For the others the libc is
+    detected from the compiler's dynamic linker, and an external entry for it is added unless
+    one with the same version and prefix exists."""
+    try:
+        libc_providers = [x.name for x in repo.providers_for("libc")]
+    except spack.repo.UnknownPackageError:
+        return
+
+    for name in supported_compilers(repo=repo):
+        for entry in packages_yaml.get(name, {}).get("externals", []):
+            if "extra_attributes" not in entry or _has_libc_dependency(entry, libc_providers):
+                continue
+
+            # Detect on the node alone: its dependencies don't matter here
+            alone = copy.deepcopy(entry)
+            alone.pop("dependencies", None)
+            alone["spec"] = str(spack.spec.Spec(alone["spec"]).copy(deps=False))
+            parser = ExternalSpecsParser([alone], repo=repo)
+            if not parser.nodes:
+                continue
+            libc = spack.compilers.libraries.CompilerPropertyDetector(
+                parser.nodes[0], repo=repo, cache=cache
+            ).default_libc()
+            if libc is None:
+                tty.debug(f"[{__name__}] cannot detect the libc of {entry['spec']}")
+                continue
+
+            node = spack.spec.Spec(entry["spec"])
+            if node.dependencies():
+                move_inline_dependencies(node, entry)
+                entry["spec"] = str(node)
+            entry.setdefault("dependencies", []).append(
+                {
+                    "id": _find_or_add_libc(packages_yaml, libc),
+                    "deptypes": "link",
+                    "virtuals": "libc",
+                }
+            )
 
 
 def select_new_compilers(
