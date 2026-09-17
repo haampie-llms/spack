@@ -2702,11 +2702,13 @@ class Spec:
         if self._package_hash:
             d["package_hash"] = self._package_hash
 
-        # Since v6, an absent key on a concrete node means it provides nothing
-        if self._concrete and self.provided_virtuals:
+        # Since v6 an absent key means the node provides nothing; older nodes keep the exact
+        # content they were hashed from, and readers reconstruct the data for them.
+        provided = self.provided_virtuals if self._concrete else {}
+        if provided and self.annotations.original_spec_format >= 6:
             d["provided_virtuals"] = [
                 name if versions == vn.any_version else f"{name}@{versions}"
-                for name, versions in sorted(self.provided_virtuals.items())
+                for name, versions in sorted(provided.items())
             ]
 
         # Note: Relies on sorting dict by keys later in algorithm.
@@ -5734,7 +5736,12 @@ class SpecfileV6(SpecfileV5):
     SPEC_VERSION = 6
 
     @classmethod
-    def provided_virtuals_from_node_dict(cls, node) -> Dict[str, vn.VersionList]:
+    def provided_virtuals_from_node_dict(cls, node) -> Optional[Dict[str, vn.VersionList]]:
+        # A node annotated with an older format was written without the key, whatever the format
+        # of the file holding it, so it is reconstructed rather than read as providing nothing.
+        annotations = node.get("annotations", {})
+        if annotations.get("original_specfile_version", cls.SPEC_VERSION) < 6:
+            return None
         provided = (Spec(entry) for entry in node.get("provided_virtuals", ()))
         return {s.name: s.versions for s in provided}
 

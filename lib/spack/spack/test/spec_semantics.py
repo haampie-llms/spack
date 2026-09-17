@@ -953,6 +953,35 @@ class TestSpecSemantics:
 
         assert reread.provided_virtuals == {}
 
+    def test_contradictory_provides_clauses_yield_no_virtual(self):
+        """Clauses that intersect to nothing leave the virtual out: the solver can never pick the
+        node as its provider, and a spec may not hold an empty version list."""
+        clauses = [
+            (Spec("@1:"), "vrt", vn.VersionList([":1.0"])),
+            (Spec("@2:"), "vrt", vn.VersionList(["3.0:"])),
+            (Spec("@2:"), "other", vn.VersionList([":"])),
+        ]
+        assert spack.repo._provided_versions(Spec("@2.5"), clauses) == {
+            "other": vn.VersionList([":"])
+        }
+
+        # a later matching clause does not resurrect it
+        clauses.append((Spec("@2:"), "vrt", vn.VersionList([":1.0"])))
+        assert "vrt" not in spack.repo._provided_versions(Spec("@2.5"), clauses)
+
+    def test_old_node_in_v6_file_round_trips_unchanged(self):
+        """A v5 node inside a v6 file keeps the exact content it was hashed from, and its virtuals
+        are reconstructed rather than read as 'provides nothing' from the absent key."""
+        concrete = spack.concretize.concretize_one("mpileaks ^mpich")
+        as_dict = self._old_spec_dict(concrete)
+        as_dict["spec"]["_meta"]["version"] = 6
+        for node in as_dict["spec"]["nodes"]:
+            node["annotations"]["original_specfile_version"] = 5
+
+        reread = Spec.from_dict(as_dict)
+        assert reread["mpich"].provided_virtuals == concrete["mpich"].provided_virtuals
+        assert reread.to_dict() == as_dict
+
     def test_provided_virtuals_recomputed_on_rehash(self):
         """Un-marking dependents on rehash clears their provided virtuals; finalization recomputes
         them while other nodes of the DAG are still concrete."""

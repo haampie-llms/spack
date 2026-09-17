@@ -2167,13 +2167,23 @@ def _provided_versions(
     spec: "spack.spec.Spec", clauses: Iterable[ProvidesClause]
 ) -> Dict[str, "spack.version.VersionList"]:
     """Virtual name -> versions ``spec`` provides. When several clauses for one virtual match,
-    the result is their intersection, as the solver enforces on the virtual node."""
+    the result is their intersection, as the solver enforces on the virtual node. A virtual whose
+    matching clauses contradict each other is left out entirely: the solver can never pick this
+    node as its provider, and an empty version list is not a value a spec may hold."""
     provided: Dict[str, spack.version.VersionList] = {}
+    contradictory: Set[str] = set()
     for when_spec, vname, versions in clauses:
-        if not spec.satisfies(when_spec):
+        if vname in contradictory or not spec.satisfies(when_spec):
             continue
         current = provided.get(vname)
-        provided[vname] = versions.copy() if current is None else current.intersection(versions)
+        if current is None:
+            provided[vname] = versions.copy()
+            continue
+        current.intersect(versions)
+        # An intersection never grows back, so one empty result rules the virtual out for good.
+        if not current:
+            del provided[vname]
+            contradictory.add(vname)
     return provided
 
 
