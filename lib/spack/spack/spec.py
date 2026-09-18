@@ -644,7 +644,7 @@ class ArchSpec:
 
     @os.setter
     def os(self, value):
-        # default_os is kept as is: spack.spec_parser.resolve_host_aliases resolves it
+        # default_os is kept as is: resolve_host_aliases() resolves it
         self._os = str(value) if value is not None else None
 
     @property
@@ -654,7 +654,7 @@ class ArchSpec:
 
     @target.setter
     def target(self, value):
-        # default_target is kept as is: spack.spec_parser.resolve_host_aliases resolves it
+        # default_target is kept as is: resolve_host_aliases() resolves it
         if isinstance(value, spack.vendor.archspec.cpu.Microarchitecture):
             self._target = value
         elif value and value != "None":
