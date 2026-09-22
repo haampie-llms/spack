@@ -716,6 +716,7 @@ While an example spec manifest (i.e., a manifest for a binary package) is shown 
 Some things to note about this manifest are that it points to a blob that is not compressed (``compression: "none"``) and that the ``mediaType`` is one we have not seen yet, ``application/vnd.spack.db.v8+json``.
 The decision not to compress build cache indices stems from the fact that Spack does not yet sign build cache index manifests.
 Once that changes, you may start to see these indices stored as compressed blobs.
+An index manifest can hold one record per index format version: when Spack pushes an index, it replaces only the record of the format it writes and keeps the others, so other Spack releases keep reading their own (possibly stale) snapshot of the build cache.
 
 For completeness, here are examples of manifests for the other two types of entities you might find in a Spack build cache.
 First, a public key manifest:
