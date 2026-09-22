@@ -8,6 +8,7 @@ commands, and flushes finished builds to the database. See :mod:`spack.installer
 overall design."""
 
 import json
+import mimetypes
 import os
 import selectors
 import signal
@@ -20,6 +21,7 @@ import spack.binary_distribution
 import spack.config
 import spack.deprecation
 import spack.error
+import spack.hooks
 import spack.mirrors.mirror
 import spack.report
 import spack.spec
@@ -154,6 +156,17 @@ class NullReportData(ReportData):
         self, reports: Dict[str, spack.report.RequestRecord], build_graph: "BuildGraph"
     ) -> None:
         pass
+
+
+def _load_before_fork() -> None:
+    """Load once what every build process needs, so that forked build processes inherit it
+    instead of loading it themselves."""
+    spack.hooks.pre_install.preload()
+    spack.hooks.post_install.preload()
+    # Read by the module file generation hook
+    spack.config.CONFIG.get("modules")
+    # Read by urllib to open file:// URLs, such as build caches on a local filesystem
+    mimetypes.init()
 
 
 def _signal_children(running_builds: Dict[str, ChildInfo], sig: signal.Signals) -> None:
@@ -318,6 +331,7 @@ class PackageInstaller:
             for s in self.build_graph.nodes.values()
         }
 
+        _load_before_fork()
         self._run_event_loop()
 
     def _run_event_loop(self) -> None:

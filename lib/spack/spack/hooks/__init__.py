@@ -51,9 +51,14 @@ class _HookRunner:
 
     @property
     def hooks(self) -> List[types.ModuleType]:
+        self.preload()
+        assert self._hooks is not None
+        return self._hooks
+
+    def preload(self) -> None:
+        """Import the hook modules, for instance so that forked processes inherit them."""
         if not self._hooks:
             self._hooks = [importlib.import_module(module_name) for module_name in self.HOOK_ORDER]
-        return self._hooks
 
     def __call__(self, *args, **kwargs):
         for module in self.hooks:
