@@ -7,18 +7,21 @@ import concurrent.futures
 import contextlib
 import copy
 import datetime
+import gzip
 import hashlib
 import io
 import itertools
 import json
 import os
 import pathlib
+import queue
 import re
 import shutil
 import sys
 import tarfile
 import tempfile
 import textwrap
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -31,6 +34,7 @@ from typing import (
     Any,
     Callable,
     Dict,
+    Generator,
     Iterable,
     List,
     Mapping,
@@ -2021,6 +2025,126 @@ def relocate_package(spec: spack.spec.Spec) -> None:
 _TARBALL_COPY_SIZE = 1024 * 1024
 
 
+class _ReadAhead(io.RawIOBase):
+    """Reads a stream in a background thread, so that decompression, which releases the GIL,
+    overlaps with parsing and writing in the reading thread. Only seeks forward, which is all
+    ``tarfile`` needs to read members in order."""
+
+    def __init__(
+        self, open_stream: Callable[[], io.BufferedIOBase], chunk_size: int = 1024 * 1024
+    ):
+        self._queue: "queue.Queue[Union[bytes, BaseException, None]]" = queue.Queue(maxsize=4)
+        self._stop = False
+        self._done = False
+        self._chunk = b""
+        self._offset = 0
+        self._position = 0
+        self._thread = threading.Thread(
+            target=self._produce, args=(open_stream, chunk_size), daemon=True
+        )
+        self._thread.start()
+
+    def _produce(self, open_stream: Callable[[], io.BufferedIOBase], chunk_size: int) -> None:
+        item: Union[BaseException, None] = None
+        try:
+            with open_stream() as stream:
+                while not self._stop:
+                    chunk = stream.read(chunk_size)
+                    if not chunk:
+                        break
+                    self._queue.put(chunk)
+        except BaseException as e:
+            item = e
+        self._queue.put(item)
+
+    def _next_chunk(self) -> bytes:
+        if self._done:
+            return b""
+        item = self._queue.get()
+        if isinstance(item, bytes):
+            return item
+        self._done = True
+        if item is not None:
+            raise item
+        return b""
+
+    def readable(self) -> bool:
+        return True
+
+    def read(self, size: Optional[int] = -1) -> bytes:
+        if size is None or size < 0:
+            parts = [self._chunk[self._offset :]]
+            parts.extend(iter(self._next_chunk, b""))
+            self._chunk, self._offset = b"", 0
+        else:
+            start, end = self._offset, self._offset + size
+            if end <= len(self._chunk):
+                self._offset = end
+                self._position += size
+                return self._chunk[start:end]
+            parts = [self._chunk[self._offset :]]
+            needed = end - len(self._chunk)
+            self._chunk, self._offset = b"", 0
+            while needed > 0:
+                chunk = self._next_chunk()
+                if not chunk:
+                    break
+                if len(chunk) > needed:
+                    self._chunk, self._offset = chunk, needed
+                    chunk = chunk[:needed]
+                parts.append(chunk)
+                needed -= len(chunk)
+        data = b"".join(parts)
+        self._position += len(data)
+        return data
+
+    def readinto(self, b) -> int:
+        data = self.read(len(b))
+        b[: len(data)] = data
+        return len(data)
+
+    def tell(self) -> int:
+        return self._position
+
+    def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
+        if whence == io.SEEK_CUR:
+            offset += self._position
+        elif whence != io.SEEK_SET or offset < self._position:
+            raise io.UnsupportedOperation("can only seek forward")
+        while self._position < offset:
+            if not self.read(min(offset - self._position, _TARBALL_COPY_SIZE)):
+                break
+        return self._position
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        self._stop = True
+        # Unblock the producer, which puts a final item once it sees the stop flag.
+        while not self._done:
+            try:
+                self._next_chunk()
+            except BaseException:
+                pass
+        self._thread.join()
+        super().close()
+
+
+@contextlib.contextmanager
+def _open_tarball(path: str) -> Generator[tarfile.TarFile, None, None]:
+    """Open a tarball for reading front to back, decompressing gzip in a background thread."""
+    with open(path, "rb") as f:
+        is_gzip = f.read(2) == b"\x1f\x8b"
+    if not is_gzip:
+        # Seekable mode is buffered efficiently; nothing seeks back, so decompression runs once.
+        with closing(tarfile.open(path, "r:*")) as tar:
+            yield tar
+        return
+    with closing(_ReadAhead(lambda: gzip.open(path, "rb"))) as stream:
+        with closing(tarfile.open(fileobj=cast(IO[bytes], stream), mode="r:")) as tar:
+            yield tar
+
+
 def _sanitize_member(member: tarfile.TarInfo) -> None:
     """Reject members that could escape the extraction directory, and normalize modes.
     Symlink targets are not restricted: absolute targets are legitimate, relocation fixes
@@ -2087,8 +2211,7 @@ def extract_buildcache_tarball(tarfile_path: str, destination: str) -> None:
 
         verified: Set[str] = set()
 
-        # Seekable mode is buffered efficiently; nothing seeks back, so gzip runs once.
-        with closing(tarfile.open(tarfile_path, "r:*")) as tar:
+        with _open_tarball(tarfile_path) as tar:
             for member in tar:
                 _sanitize_member(member)
                 _verify_parent_dir(tmpdir, member.name.rpartition("/")[0], verified)
