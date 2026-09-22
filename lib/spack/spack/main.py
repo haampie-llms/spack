@@ -1124,14 +1124,15 @@ def main(argv=None):
             the executable name. If None, parses from sys.argv.
 
     """
-    if (
-        sys.platform == "darwin"
-        and multiprocessing.get_start_method(allow_none=True) is None
-        and spack.config.CONFIG.get("config:installer") == "new"
-    ):
-        # Forkserver is significantly faster than spawn. This has to be configured once and early
-        # in the process.
-        multiprocessing.set_start_method("forkserver")
+    if multiprocessing.get_start_method(allow_none=True) is None:
+        # This has to be configured once and early in the process.
+        if sys.platform == "darwin" and spack.config.CONFIG.get("config:installer") == "new":
+            # Forkserver is significantly faster than spawn.
+            multiprocessing.set_start_method("forkserver")
+        elif sys.platform == "linux":
+            # Python 3.14 defaults to forkserver. Fork is faster: build processes inherit loaded
+            # modules and caches instead of rebuilding them.
+            multiprocessing.set_start_method("fork")
     # When using the forkserver start method, preload the following modules to improve startup
     # time of child processes.
     multiprocessing.set_forkserver_preload(["spack.main", "spack.package", "spack.installer"])
