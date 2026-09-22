@@ -16,7 +16,11 @@ import spack.concretize
 import spack.paths
 import spack.repo
 import spack.util.file_cache
-from spack.directory_layout import DirectoryLayout, InvalidDirectoryLayoutParametersError
+from spack.directory_layout import (
+    DirectoryLayout,
+    InconsistentInstallDirectoryError,
+    InvalidDirectoryLayoutParametersError,
+)
 from spack.repo import RepoPath
 from spack.spec import Spec
 from spack.store import Store
@@ -220,3 +224,20 @@ def test_yaml_directory_layout_build_path(tmp_path: pathlib.Path, config, mock_p
     layout = DirectoryLayout(str(tmp_path))
     rel_path = os.path.join(layout.metadata_dir, layout.packages_dir)
     assert layout.build_packages_path(spec) == os.path.join(spec.prefix, rel_path)
+
+
+def test_ensure_installed_checks_spec_file_hash(temporary_store, mock_packages):
+    """The prefix must hold a spec file of the very same spec."""
+    layout = temporary_store.layout
+    spec = spack.concretize.concretize_one("libelf")
+    other = spack.concretize.concretize_one("libdwarf")
+    layout.create_install_directory(spec)
+    layout.ensure_installed(spec)
+
+    layout.write_spec(other, layout.spec_file_path(spec))
+    with pytest.raises(InconsistentInstallDirectoryError, match="does not match hash"):
+        layout.ensure_installed(spec)
+
+    os.unlink(layout.spec_file_path(spec))
+    with pytest.raises(InconsistentInstallDirectoryError, match="no spec.json"):
+        layout.ensure_installed(spec)

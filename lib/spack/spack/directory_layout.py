@@ -260,6 +260,14 @@ class DirectoryLayout:
                 "Install prefix exists but contains no spec.json:", "  " + path
             )
 
+        # The hash stored in the root node is what reading the spec would return.
+        try:
+            with open(spec_file_path, encoding="utf-8") as f:
+                if sjson.load(f)["spec"]["nodes"][0]["hash"] == spec.dag_hash():
+                    return
+        except Exception:
+            pass
+
         installed_spec = self.read_spec(spec_file_path)
         if installed_spec.dag_hash() != spec.dag_hash():
             raise InconsistentInstallDirectoryError(
