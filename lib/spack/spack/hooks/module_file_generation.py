@@ -5,7 +5,6 @@
 from typing import Optional, Set
 
 import spack.config
-import spack.modules
 import spack.spec
 from spack.util import tty
 
@@ -21,8 +20,11 @@ def _for_each_enabled(
             tty.debug("NO MODULE WRITTEN: list of enabled module files is empty")
             continue
 
+        # Module files are disabled by default: spare build processes the import
+        from spack.modules import module_types
+
         for module_type in enabled:
-            generator = spack.modules.module_types[module_type].from_spec(spec, name, explicit)
+            generator = module_types[module_type].from_spec(spec, name, explicit)
             try:
                 getattr(generator, method_name)()
             except RuntimeError as e:
