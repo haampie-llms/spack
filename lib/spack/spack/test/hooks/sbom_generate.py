@@ -425,3 +425,35 @@ def test_sbom_dependency_entry_uses_dependency_version_and_checksum(
     assert dep_entry["versionInfo"] == str(dep.version)
     assert dep_entry["downloadLocation"] == "https://example.com/callpath.tar.gz"
     assert dep_entry["checksum"] == [{"algorithm": "SHA256", "checksumValue": "b" * 64}]
+
+
+def test_sbom_shipped_with_binary_is_kept(mock_packages, install_mockery):
+    """An SBOM for the same spec, as extracted from a binary, is not regenerated."""
+    spec = spack.concretize.concretize_one("trivial-install-test-package")
+    generate_spdx_2_3(spec)
+    path = sbom_path(spec, "spdx-2.3")
+    with open(path, encoding="utf-8") as f:
+        sbom = json.load(f)
+    sbom["creationInfo"]["created"] = "build time"
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(sbom, f)
+
+    post_install(spec)
+
+    with open(path, encoding="utf-8") as f:
+        assert json.load(f)["creationInfo"]["created"] == "build time"
+
+
+@pytest.mark.parametrize("content", ["", "[]", '{"name": "trivial-install-test-package-1.0-x"}'])
+def test_sbom_of_other_spec_is_regenerated(content, mock_packages, install_mockery):
+    """A missing, broken, or foreign SBOM (e.g. of a spliced spec's build spec) is replaced."""
+    spec = spack.concretize.concretize_one("trivial-install-test-package")
+    path = sbom_path(spec, "spdx-2.3")
+    os.makedirs(os.path.dirname(path))
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+    post_install(spec)
+
+    with open(path, encoding="utf-8") as f:
+        assert json.load(f)["name"].endswith(spec.dag_hash())

@@ -134,6 +134,19 @@ def sbom_path(spec, sbom_type="spdx-2.3"):
     return os.path.join(sbom_dir, f"{sbom_type}.json")
 
 
+def _document_name(spec):
+    return f"{spec.name}-{spec.version}-{spec.dag_hash()}"
+
+
+def _has_sbom(spec):
+    """Whether the prefix has an SBOM for this very spec, like binaries ship."""
+    try:
+        with open(sbom_path(spec, "spdx-2.3"), encoding="utf-8") as f:
+            return sjson.load(f).get("name") == _document_name(spec)
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
 # SPDX 2.3 Generation
 def generate_spdx_2_3(spec):
 
@@ -148,7 +161,7 @@ def generate_spdx_2_3(spec):
     path = sbom_path(spec, "spdx-2.3")
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
-    unique_str = f"{spec.name}-{spec.version}-{spec.dag_hash()}"
+    unique_str = _document_name(spec)
     document_namespace = f"https://spack.io/sbom/{spec.dag_hash()}"
 
     # Package entry for each installation.
@@ -201,4 +214,5 @@ def generate_spdx_2_3(spec):
 
 # Call SBOM generation in post-install hook
 def post_install(spec, explicit=None):
-    generate_spdx_2_3(spec)
+    if not _has_sbom(spec):
+        generate_spdx_2_3(spec)
