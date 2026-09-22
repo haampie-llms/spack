@@ -15,6 +15,7 @@ import urllib.error
 import urllib.request
 import urllib.response
 import warnings
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path, PurePath
 from typing import Any, Callable, Dict, NamedTuple, Optional
@@ -1000,7 +1001,8 @@ def test_tarball_normalized_permissions(tmp_path: pathlib.Path):
     assert path_to_member[f"{expected_prefix}/share/file"].mode == 0o644
 
 
-def test_tarball_common_prefix(dummy_prefix, tmp_path: pathlib.Path):
+@pytest.mark.parametrize("mode", ["w", "w:gz"])
+def test_tarball_common_prefix(mode, dummy_prefix, tmp_path: pathlib.Path):
     """Tests whether Spack can figure out the package directory from the tarball contents, and
     strip them when extracting. This test creates a CURRENT_BUILD_CACHE_LAYOUT_VERSION=1 type
     tarball where the parent directories of the package prefix are missing. Spack should be able
@@ -1013,7 +1015,7 @@ def test_tarball_common_prefix(dummy_prefix, tmp_path: pathlib.Path):
 
     with working_dir(str(tmp_path)):
         # Create a tarball (using absolute path for prefix dir)
-        with tarfile.open("example.tar", mode="w") as tar:
+        with tarfile.open("example.tar", mode=mode) as tar:
             tar.add(name=dummy_prefix)
 
         # Verify common prefix, then extract into prefix2.
@@ -1038,6 +1040,56 @@ def test_tarball_common_prefix(dummy_prefix, tmp_path: pathlib.Path):
         assert readlink(os.path.join("prefix2", "bin", "absolute_app_link")) == os.path.join(
             dummy_prefix, "bin", "app"
         )
+
+
+class _Chunks:
+    def __init__(self, chunks, error=None):
+        self.chunks, self.error, self.closed = list(chunks), error, False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.closed = True
+
+    def read(self, size):
+        if self.chunks:
+            return self.chunks.pop(0)
+        if self.error:
+            raise self.error
+        return b""
+
+
+def test_read_ahead_reads_and_seeks_forward():
+    stream = _Chunks([b"abc", b"defg", b"h", b"ijklmnop"])
+    with closing(spack.binary_distribution._ReadAhead(lambda: stream)) as reader:
+        assert reader.read(2) == b"ab"
+        assert reader.read(4) == b"cdef"
+        assert reader.tell() == 6
+        assert reader.seek(9) == 9
+        assert reader.read(1) == b"j"
+        with pytest.raises(io.UnsupportedOperation):
+            reader.seek(0)
+        assert reader.read() == b"klmnop"
+        assert reader.read(1) == b""
+    assert stream.closed
+
+
+def test_read_ahead_raises_producer_errors():
+    stream = _Chunks([b"abc"], error=EOFError("truncated"))
+    with closing(spack.binary_distribution._ReadAhead(lambda: stream)) as reader:
+        assert reader.read(3) == b"abc"
+        with pytest.raises(EOFError, match="truncated"):
+            reader.read(1)
+
+
+def test_read_ahead_close_before_end():
+    """Closing early stops the producer, even when it is blocked on a full queue."""
+    stream = _Chunks([b"x"] * 100)
+    reader = spack.binary_distribution._ReadAhead(lambda: stream)
+    assert reader.read(1) == b"x"
+    reader.close()
+    assert stream.closed and stream.chunks
 
 
 def test_tarfile_missing_binary_distribution_file(tmp_path: pathlib.Path):
