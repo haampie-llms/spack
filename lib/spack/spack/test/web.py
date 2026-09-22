@@ -962,3 +962,30 @@ def test_url_exists_no_raise(monkeypatch, exception):
 
     monkeypatch.setattr(spack.util.web, "_url_exists_urllib", _raising)
     assert not spack.util.web.url_exists("https://not.real.io")
+
+
+def test_ssl_context_is_created_for_https_only(tmp_path: pathlib.Path, monkeypatch):
+    """Loading certificates is slow, so the opener does not create an SSL context until it
+    opens an https URL."""
+    contexts = []
+
+    def make_context():
+        contexts.append(ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT))
+        return contexts[-1]
+
+    handler = spack.util.web.SpackHTTPSHandler(make_context)
+    opener = urllib.request.build_opener(handler)
+    (tmp_path / "file.txt").write_text("hello")
+    with opener.open(url_util.path_to_file_url(str(tmp_path / "file.txt"))) as response:
+        assert response.read() == b"hello"
+    assert not contexts
+
+    def refuse(self, http_class, req, **kwargs):
+        assert kwargs["context"] is contexts[0]
+        raise urllib.error.URLError("no network")
+
+    monkeypatch.setattr(urllib.request.AbstractHTTPHandler, "do_open", refuse)
+    for _ in range(2):
+        with pytest.raises(spack.util.web.DetailedURLError):
+            opener.open("https://example.com")
+    assert len(contexts) == 1

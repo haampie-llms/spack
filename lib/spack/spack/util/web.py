@@ -25,7 +25,13 @@ from http.client import IncompleteRead
 from pathlib import Path, PurePosixPath
 from typing import IO, Callable, Dict, Iterable, List, Optional, Set, Tuple, TypeVar, Union
 from urllib.error import HTTPError, URLError
-from urllib.request import HTTPDefaultErrorHandler, HTTPSHandler, Request, build_opener
+from urllib.request import (
+    AbstractHTTPHandler,
+    HTTPDefaultErrorHandler,
+    HTTPSHandler,
+    Request,
+    build_opener,
+)
 
 from spack.vendor.typing_extensions import ParamSpec
 
@@ -194,9 +200,20 @@ class SpackHTTPDefaultErrorHandler(HTTPDefaultErrorHandler):
 
 
 class SpackHTTPSHandler(HTTPSHandler):
-    """A custom HTTPS handler that shows more detailed error messages on connection failure."""
+    """A custom HTTPS handler that shows more detailed error messages on connection failure, and
+    creates its SSL context on first use: loading certificates is slow, and not needed for other
+    URL schemes."""
+
+    def __init__(self, make_context: Callable[[], ssl.SSLContext]) -> None:
+        # Not HTTPSHandler.__init__, which creates a default context if given none.
+        AbstractHTTPHandler.__init__(self)
+        self._make_context = make_context
+        self._context: Optional[ssl.SSLContext] = None
+        self._check_hostname = None  # Python < 3.12
 
     def https_open(self, req):
+        if self._context is None:
+            self._context = self._make_context()
         try:
             return super().https_open(req)
         except HTTPError:
@@ -263,13 +280,11 @@ def _urlopen():
     error_handler = SpackHTTPDefaultErrorHandler()
 
     # One opener with HTTPS ssl enabled
-    with_ssl = build_opener(
-        s3, gcs, SpackHTTPSHandler(context=ssl_create_default_context()), error_handler
-    )
+    with_ssl = build_opener(s3, gcs, SpackHTTPSHandler(ssl_create_default_context), error_handler)
 
     # One opener with HTTPS ssl disabled
     without_ssl = build_opener(
-        s3, gcs, SpackHTTPSHandler(context=ssl._create_unverified_context()), error_handler
+        s3, gcs, SpackHTTPSHandler(ssl._create_unverified_context), error_handler
     )
 
     # And dynamically dispatch based on the config:verify_ssl.
