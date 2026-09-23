@@ -9,7 +9,7 @@ from spack.vendor.archspec.cpu import TARGETS
 
 import spack.archspec
 import spack.concretize
-import spack.context
+import spack.test.harness
 import spack.traverse
 from spack.compilers.config import all_compilers_from
 from spack.config import Configuration
@@ -480,7 +480,7 @@ def test_external_with_unavailable_default_value_is_usable(mutable_config: Confi
     }
     with mutable_config.override("packages", packages_config):
         s = spack.concretize.concretize_one(
-            "conditional-build-system@1.0", spack.context.current()
+            "conditional-build-system@1.0", spack.test.harness.current()
         )
 
     assert s.external
@@ -502,7 +502,7 @@ def test_external_with_value_conditional_on_another_version(mutable_config: Conf
     }
     with mutable_config.override("packages", packages_config):
         s = spack.concretize.concretize_one(
-            "conditional-build-system@1.0", spack.context.current()
+            "conditional-build-system@1.0", spack.test.harness.current()
         )
 
     assert s.external

@@ -11,9 +11,8 @@ import stat
 
 import pytest
 
-import spack.config
 import spack.spec
-import spack.store
+import spack.test.harness
 import spack.util.filesystem as fs
 import spack.util.spack_json as sjson
 import spack.verify
@@ -156,7 +155,7 @@ def test_check_prefix_manifest(tmp_path: pathlib.Path):
     link = os.path.join(bin_dir, "run")
     symlink(file, link)
 
-    spack.verify.write_manifest(spec, spack.config.CONFIG)
+    spack.verify.write_manifest(spec, spack.test.harness.current().config)
     results = spack.verify.check_spec_manifest(spec)
     assert not results.has_errors()
 
@@ -175,8 +174,8 @@ def test_check_prefix_manifest(tmp_path: pathlib.Path):
 
     manifest_file = os.path.join(
         spec.prefix,
-        spack.store.STORE.layout.metadata_dir,
-        spack.store.STORE.layout.manifest_file_name,
+        spack.test.harness.current().store.layout.metadata_dir,
+        spack.test.harness.current().store.layout.manifest_file_name,
     )
     with open(manifest_file, "w", encoding="utf-8") as f:
         f.write("{This) string is not proper json")
@@ -191,7 +190,7 @@ def test_single_file_verification(tmp_path: pathlib.Path):
     # to which it belongs
     filedir = tmp_path / "a" / "b" / "c" / "d"
     filepath = filedir / "file"
-    metadir = tmp_path / spack.store.STORE.layout.metadata_dir
+    metadir = tmp_path / spack.test.harness.current().store.layout.metadata_dir
 
     fs.mkdirp(str(filedir))
     fs.mkdirp(str(metadir))
@@ -201,7 +200,9 @@ def test_single_file_verification(tmp_path: pathlib.Path):
 
     data = spack.verify.create_manifest_entry(str(filepath))
 
-    manifest_file = os.path.join(metadir, spack.store.STORE.layout.manifest_file_name)
+    manifest_file = os.path.join(
+        metadir, spack.test.harness.current().store.layout.manifest_file_name
+    )
 
     with open(manifest_file, "w", encoding="utf-8") as f:
         sjson.dump({str(filepath): data}, f)

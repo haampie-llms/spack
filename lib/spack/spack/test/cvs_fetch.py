@@ -8,7 +8,7 @@ import pathlib
 import pytest
 
 import spack.concretize
-import spack.context
+import spack.test.harness
 from spack.fetch_strategy import CvsFetchStrategy
 from spack.stage import stage_from_config
 from spack.util.executable import which
@@ -39,7 +39,7 @@ def test_fetch(type_of_test, mock_cvs_repository, config, mutable_mock_repo):
     get_date = mock_cvs_repository.get_date
 
     # Construct the package under test
-    spec = spack.concretize.concretize_one("cvs-test", spack.context.current())
+    spec = spack.concretize.concretize_one("cvs-test", spack.test.harness.current())
     spec.package.versions[Version("cvs")] = test.args
 
     # Enter the stage directory and check some properties

@@ -7,8 +7,8 @@ import sys
 
 import pytest
 
-import spack.config
 import spack.store
+import spack.test.harness
 import spack.util.path as sup
 from spack.config import Configuration
 from spack.util import tty
@@ -147,5 +147,7 @@ def test_path_debug_padded_filter(debug, monkeypatch):
     )
 
     monkeypatch.setattr(tty, "_debug", debug)
-    with spack.config.CONFIG.override("config:install_tree", {"padded_length": 128}):
+    with spack.test.harness.current().config.override(
+        "config:install_tree", {"padded_length": 128}
+    ):
         assert expected == sup.debug_padded_filter(string)

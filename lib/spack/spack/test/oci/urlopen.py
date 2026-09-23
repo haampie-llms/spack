@@ -14,8 +14,8 @@ from urllib.request import Request
 
 import pytest
 
-import spack.context
 import spack.mirrors.mirror
+import spack.test.harness
 import spack.util.web
 from spack.oci.image import Digest, ImageReference, default_config, default_manifest
 from spack.oci.oci import (
@@ -714,7 +714,7 @@ def test_manifest_index(tmp_path: pathlib.Path):
     upload_manifest(img, index, tag=True, urlopen=urlopen)
 
     # Check that we fetcht the correct manifest and config for each architecture
-    ctx = spack.context.current()
+    ctx = spack.test.harness.current()
     for arch in ("amd64", "arm64"):
         assert (
             get_manifest_and_config(

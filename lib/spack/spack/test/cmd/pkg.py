@@ -12,12 +12,13 @@ import spack.cmd.pkg
 import spack.main
 import spack.paths
 import spack.repo
+import spack.test.harness
 import spack.util.executable
 import spack.util.file_cache
 from spack.repo import RepoPath
 from spack.util.filesystem import mkdirp, working_dir
 
-pkg = spack.main.SpackCommand("pkg")
+pkg = spack.test.harness.SpackCommand("pkg")
 
 #: new fake package template
 pkg_template = """\
@@ -93,7 +94,7 @@ def _builtin_mock_copy(
 @pytest.fixture
 def builtin_mock_copy(_builtin_mock_copy: spack.repo.Repo):
     """Fixture that enables a copy of the builtin_mock repo."""
-    with spack.repo.use_repositories(_builtin_mock_copy):
+    with spack.test.harness.use_repositories(_builtin_mock_copy):
         yield _builtin_mock_copy
 
 
@@ -111,8 +112,9 @@ def test_pkg_add(git, builtin_mock_copy: spack.repo.Repo):
         finally:
             shutil.rmtree("mockpkg_e")
             # Removing a package mid-run disrupts Spack's caching
-            if spack.repo.PATH.repos[0]._fast_package_checker:
-                spack.repo.PATH.repos[0]._fast_package_checker.invalidate()
+            checker = spack.test.harness.current().repo.repos[0]._fast_package_checker
+            if checker:
+                checker.invalidate()
 
     with pytest.raises(spack.main.SpackCommandError):
         pkg("add", "does-not-exist")

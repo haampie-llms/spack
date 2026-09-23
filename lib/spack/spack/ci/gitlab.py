@@ -273,6 +273,7 @@ def generate_gitlab_yaml(pipeline: PipelineDag, spack_ci: SpackCIConfig, options
                 binary_index=ctx.binary_index,
                 config=ctx.config,
                 client=ctx.network,
+                gpg=None,
             )
             job_vars["SPACK_SPEC_NEEDS_REBUILD"] = "False" if already_built else "True"
 

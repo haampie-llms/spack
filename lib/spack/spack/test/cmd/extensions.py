@@ -6,9 +6,10 @@
 import pytest
 
 import spack.concretize
-import spack.context
+import spack.test.harness
 from spack.installer import PackageInstaller
-from spack.main import SpackCommand, SpackCommandError
+from spack.main import SpackCommandError
+from spack.test.harness import SpackCommand
 
 extensions = SpackCommand("extensions")
 
@@ -16,7 +17,7 @@ extensions = SpackCommand("extensions")
 @pytest.fixture
 def python_database(mock_packages, mutable_database):
     specs = [
-        spack.concretize.concretize_one(s, spack.context.current())
+        spack.concretize.concretize_one(s, spack.test.harness.current())
         for s in ["python", "py-extension1", "py-extension2"]
     ]
     PackageInstaller([s.package for s in specs], explicit=True, fake=True).install()
@@ -26,7 +27,7 @@ def python_database(mock_packages, mutable_database):
 @pytest.mark.not_on_windows("All Fetchers Failed")
 @pytest.mark.db
 def test_extensions(mock_packages, python_database):
-    ext2 = spack.concretize.concretize_one("py-extension2", spack.context.current())
+    ext2 = spack.concretize.concretize_one("py-extension2", spack.test.harness.current())
 
     def check_output(ni):
         output = extensions("python")

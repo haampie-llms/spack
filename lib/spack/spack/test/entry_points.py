@@ -9,8 +9,8 @@ import sys
 import pytest
 
 import spack.config
-import spack.context
 import spack.extensions
+import spack.test.harness
 import spack.util.lang
 
 
@@ -87,7 +87,7 @@ def test_spack_entry_point_config(tmp_path: pathlib.Path, mock_get_entry_points)
 def test_spack_entry_point_extension(tmp_path: pathlib.Path, mock_get_entry_points):
     """Test config scope entry point"""
     my_ext = tmp_path / "spack/spack-myext"
-    config = spack.context.current().config
+    config = spack.test.harness.current().config
     extensions = spack.extensions.get_extension_paths(config)
     found = bool([ext for ext in extensions if os.path.samefile(ext, my_ext)])
     if not found:

@@ -9,8 +9,8 @@ import pytest
 
 import spack.compilers.config
 import spack.compilers.libraries
-import spack.context
 import spack.repo
+import spack.test.harness
 import spack.util.executable
 import spack.util.file_cache
 import spack.util.filesystem as fs
@@ -31,7 +31,7 @@ def call_compiler(exe, *args, **kwargs):
 @pytest.fixture()
 def mock_gcc(config):
     compilers = spack.compilers.config.all_compilers_from(
-        configuration=config, repo=spack.repo.PATH
+        configuration=config, repo=spack.test.harness.current().repo
     )
     assert compilers, "No compilers available"
 
@@ -61,7 +61,9 @@ class TestCompilerPropertyDetector:
             mock_gcc.extra_attributes["compilers"].pop(key)
 
         detector = spack.compilers.libraries.CompilerPropertyDetector(
-            mock_gcc, repo=spack.repo.PATH, cache=spack.compilers.libraries.CompilerCache()
+            mock_gcc,
+            repo=spack.test.harness.current().repo,
+            cache=spack.compilers.libraries.CompilerCache(),
         )
 
         # Test without flags
@@ -76,14 +78,20 @@ class TestCompilerPropertyDetector:
     def test_compile_dummy_c_source_no_path(self, mock_gcc):
         mock_gcc.extra_attributes["compilers"] = {}
         detector = spack.compilers.libraries.CompilerPropertyDetector(
-            mock_gcc, repo=spack.repo.PATH, cache=spack.compilers.libraries.CompilerCache()
+            mock_gcc,
+            repo=spack.test.harness.current().repo,
+            cache=spack.compilers.libraries.CompilerCache(),
         )
         assert detector._compile_dummy_c_source() is None
 
     def test_compile_dummy_c_source_no_verbose_flags(self, mock_gcc, monkeypatch):
-        monkeypatch.setattr(spack.repo.PATH.get_pkg_class(mock_gcc.name), "verbose_flags", "")
+        monkeypatch.setattr(
+            spack.test.harness.current().repo.get_pkg_class(mock_gcc.name), "verbose_flags", ""
+        )
         detector = spack.compilers.libraries.CompilerPropertyDetector(
-            mock_gcc, repo=spack.repo.PATH, cache=spack.compilers.libraries.CompilerCache()
+            mock_gcc,
+            repo=spack.test.harness.current().repo,
+            cache=spack.compilers.libraries.CompilerCache(),
         )
         assert detector._compile_dummy_c_source() is None
 
@@ -114,7 +122,9 @@ class TestCompilerPropertyDetector:
         mock_gcc.external_modules = ["turn_on"]
 
         detector = spack.compilers.libraries.CompilerPropertyDetector(
-            mock_gcc, repo=spack.repo.PATH, cache=spack.compilers.libraries.CompilerCache()
+            mock_gcc,
+            repo=spack.test.harness.current().repo,
+            cache=spack.compilers.libraries.CompilerCache(),
         )
         assert detector._compile_dummy_c_source() == without_flag_output
 
@@ -123,7 +133,9 @@ class TestCompilerPropertyDetector:
         lib_to_dirs, all_dirs = dirs_with_libfiles
 
         detector = spack.compilers.libraries.CompilerPropertyDetector(
-            mock_gcc, repo=spack.repo.PATH, cache=spack.compilers.libraries.CompilerCache()
+            mock_gcc,
+            repo=spack.test.harness.current().repo,
+            cache=spack.compilers.libraries.CompilerCache(),
         )
         monkeypatch.setattr(
             spack.compilers.libraries.CompilerPropertyDetector,
@@ -139,7 +151,9 @@ class TestCompilerPropertyDetector:
         monkeypatch.delenv("TEST", raising=False)
         mock_gcc.extra_attributes["environment"] = {"set": {"TEST": "yes"}}
         detector = spack.compilers.libraries.CompilerPropertyDetector(
-            mock_gcc, repo=spack.repo.PATH, cache=spack.compilers.libraries.CompilerCache()
+            mock_gcc,
+            repo=spack.test.harness.current().repo,
+            cache=spack.compilers.libraries.CompilerCache(),
         )
         with detector.compiler_environment():
             assert os.environ["TEST"] == "yes"
@@ -156,7 +170,9 @@ class TestCompilerPropertyDetector:
 
         mock_gcc.external_modules = ["non_existent"]
         detector = spack.compilers.libraries.CompilerPropertyDetector(
-            mock_gcc, repo=spack.repo.PATH, cache=spack.compilers.libraries.CompilerCache()
+            mock_gcc,
+            repo=spack.test.harness.current().repo,
+            cache=spack.compilers.libraries.CompilerCache(),
         )
 
         with pytest.raises(spack.util.module_cmd.ModuleLoadError):
@@ -172,7 +188,7 @@ def test_detector_uses_the_cache_it_is_given(mock_packages, mock_gcc, tmp_path):
     )
 
     spack.compilers.libraries.CompilerPropertyDetector(
-        mock_gcc, repo=spack.repo.PATH, cache=cache
+        mock_gcc, repo=spack.test.harness.current().repo, cache=cache
     ).compiler_verbose_output()
 
     assert (tmp_path / entries).exists()
@@ -185,7 +201,7 @@ def test_detector_reads_the_recipe_from_the_repo_it_is_given(
     repositories without the compiler package cannot inspect the compiler.
     """
     without_gcc = spack.repo.RepoPath(
-        spack.repo.from_path(repo_builder.root, cache=spack.context.current().misc_cache)
+        spack.repo.from_path(repo_builder.root, cache=spack.test.harness.current().misc_cache)
     )
     detector = spack.compilers.libraries.CompilerPropertyDetector(
         mock_gcc, repo=without_gcc, cache=spack.compilers.libraries.CompilerCache()

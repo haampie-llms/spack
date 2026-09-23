@@ -5,7 +5,7 @@
 
 import pytest
 
-from spack.main import SpackCommand
+from spack.test.harness import SpackCommand
 
 pytestmark = [pytest.mark.usefixtures("mock_packages")]
 

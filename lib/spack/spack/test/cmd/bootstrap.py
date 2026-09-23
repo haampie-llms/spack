@@ -10,14 +10,12 @@ import spack.bootstrap
 import spack.bootstrap.core
 import spack.cmd.mirror
 import spack.concretize
-import spack.config
-import spack.context
 import spack.environment as ev
-import spack.main
 import spack.spec
+import spack.test.harness
 from spack.config import Configuration
 
-_bootstrap = spack.main.SpackCommand("bootstrap")
+_bootstrap = spack.test.harness.SpackCommand("bootstrap")
 
 
 @pytest.mark.parametrize("scope", [None, "site", "system", "user"])
@@ -61,9 +59,9 @@ def test_reset_in_file_scopes(mutable_config, scopes):
 
 
 def test_reset_in_environment(mutable_mock_env_path, mutable_config: Configuration):
-    env = spack.main.SpackCommand("env")
+    env = spack.test.harness.SpackCommand("env")
     env("create", "bootstrap-test")
-    current_environment = ev.read("bootstrap-test", ctx=spack.context.current())
+    current_environment = ev.read("bootstrap-test", ctx=spack.test.harness.current())
 
     with current_environment:
         _bootstrap("disable")
@@ -159,17 +157,17 @@ def test_remove_failure_for_non_existing_names(mutable_config):
 
 def test_remove_and_add_a_source(mutable_config):
     # Check we start with a single bootstrapping source
-    sources = spack.bootstrap.core.bootstrapping_sources(spack.config.CONFIG)
+    sources = spack.bootstrap.core.bootstrapping_sources(spack.test.harness.current().config)
     assert len(sources) == 1
 
     # Remove it and check the result
     _bootstrap("remove", "github-actions")
-    sources = spack.bootstrap.core.bootstrapping_sources(spack.config.CONFIG)
+    sources = spack.bootstrap.core.bootstrapping_sources(spack.test.harness.current().config)
     assert not sources
 
     # Add it back and check we restored the initial state
     _bootstrap("add", "github-actions", "$spack/share/spack/bootstrap/github-actions-v2")
-    sources = spack.bootstrap.core.bootstrapping_sources(spack.config.CONFIG)
+    sources = spack.bootstrap.core.bootstrapping_sources(spack.test.harness.current().config)
     assert len(sources) == 1
 
 
@@ -196,5 +194,5 @@ def test_bootstrap_mirror_metadata(
     assert _bootstrap.returncode == 0
     assert any(
         m["name"] == "test-mirror"
-        for m in spack.bootstrap.core.bootstrapping_sources(spack.config.CONFIG)
+        for m in spack.bootstrap.core.bootstrapping_sources(spack.test.harness.current().config)
     )

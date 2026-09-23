@@ -74,7 +74,7 @@ def tutorial(parser, args, ctx):
     ctx.config.set("mirrors", mirror_config, scope="user")
 
     tty.msg("Ensuring that we trust tutorial binaries", f"spack gpg trust {tutorial_key}")
-    spack.util.gpg.trust(tutorial_key)
+    spack.util.gpg.trust(ctx.gpg, tutorial_key)
 
     # Note that checkout MUST be last. It changes Spack under our feet.
     # If you don't put this last, you'll get import errors for the code

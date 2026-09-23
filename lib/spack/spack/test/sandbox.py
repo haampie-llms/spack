@@ -16,10 +16,9 @@ import tempfile
 from typing import List, Tuple
 
 import spack.concretize
-import spack.config
-import spack.context
 import spack.sandbox
 import spack.store
+import spack.test.harness
 from spack.installer.build import _enable_sandbox
 
 
@@ -145,7 +144,7 @@ def test_enable_sandbox_paths(
     mock_sandbox = MockSandbox()
     monkeypatch.setattr(spack.sandbox, "get_sandbox", lambda: mock_sandbox)
 
-    spec = spack.concretize.concretize_one("dependent-install", spack.context.current())
+    spec = spack.concretize.concretize_one("dependent-install", spack.test.harness.current())
 
     # Create prefix directories so resolved.exists() passes
     pathlib.Path(spec.prefix).mkdir(parents=True, exist_ok=True)
@@ -165,7 +164,7 @@ def test_enable_sandbox_paths(
     custom_read_link.symlink_to(custom_read_target)
 
     # Ensure the sbang exists
-    temporary_store.install_sbang(spack.config.CONFIG)
+    temporary_store.install_sbang(spack.test.harness.current().config)
     sbang_file = pathlib.Path(temporary_store.unpadded_root) / "bin" / "sbang"
 
     config = {

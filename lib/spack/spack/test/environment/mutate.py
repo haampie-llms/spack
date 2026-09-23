@@ -6,12 +6,11 @@ import platform
 import pytest
 
 import spack.concretize
-import spack.context
 import spack.environment as ev
-import spack.repo
 import spack.spec
+import spack.test.harness
 from spack.config import Configuration
-from spack.main import SpackCommand
+from spack.test.harness import SpackCommand
 
 pytestmark = [
     pytest.mark.usefixtures("mutable_config", "mutable_mock_env_path", "mutable_mock_repo"),
@@ -45,8 +44,8 @@ def test_mutate_internals(dep, orig_constraint, mutated_constraint, mutable_conf
 
     Includes check that environment.mutate rehashing gets the same answer as spec.mutate rehashing.
     """
-    ev.create("test", ctx=spack.context.current())
-    env = ev.read("test", ctx=spack.context.current())
+    ev.create("test", ctx=spack.test.harness.current())
+    env = ev.read("test", ctx=spack.test.harness.current())
 
     mutable_config.set("packages:cmake", {"require": orig_constraint})
 
@@ -67,7 +66,7 @@ def test_mutate_internals(dep, orig_constraint, mutated_constraint, mutable_conf
     mutator = spack.spec.Spec(mutated_constraint)
     env.mutate(selectors=[selector], mutators=[mutator])
     cmake_spec.mutate(mutator)
-    spack.spec.rehash_mutated([cmake_spec], repo=spack.repo.PATH)
+    spack.spec.rehash_mutated([cmake_spec], repo=spack.test.harness.current().repo)
 
     for spec in env.all_specs_generator():
         if spec.name == "cmake":
@@ -88,8 +87,8 @@ def test_mutate_internals_multiple_mutations():
     """
     Check that Environment.mutate correctly applies multiple mutations to different selected Specs.
     """
-    ev.create("test", ctx=spack.context.current())
-    env = ev.read("test", ctx=spack.context.current())
+    ev.create("test", ctx=spack.test.harness.current())
+    env = ev.read("test", ctx=spack.test.harness.current())
 
     root = "cmake-client+truthy os=debian6 %cmake@3.23.1 os=debian6"
     env.add(root)
@@ -133,8 +132,8 @@ def test_mutate_namespace(repo_builder):
     """
     repo_builder.add_package("cmake")
 
-    ev.create("test", ctx=spack.context.current())
-    env = ev.read("test", ctx=spack.context.current())
+    ev.create("test", ctx=spack.test.harness.current())
+    env = ev.read("test", ctx=spack.test.harness.current())
 
     env.add("cmake-client")
     env.concretize()
@@ -146,7 +145,7 @@ def test_mutate_namespace(repo_builder):
     selector = spack.spec.Spec("cmake")
     mutator = spack.spec.Spec(f"{repo_builder.namespace}.cmake")
 
-    with spack.repo.use_repositories(repo_builder.root, override=False):
+    with spack.test.harness.use_repositories(repo_builder.root, override=False):
         env.mutate(selectors=[selector], mutators=[mutator])
         cmake_spec.mutate(mutator)
 
@@ -158,16 +157,16 @@ def test_mutate_namespace(repo_builder):
 
 @pytest.mark.parametrize("constraint", ["foo", "foo.bar", "foo%cmake@1.0", "foo@1.1:", "foo/abc"])
 def test_mutate_spec_invalid(constraint):
-    spec = spack.concretize.concretize_one("cmake-client", spack.context.current())
+    spec = spack.concretize.concretize_one("cmake-client", spack.test.harness.current())
     with pytest.raises(spack.spec.SpecMutationError):
         spec.mutate(spack.spec.Spec(constraint))
 
 
 def _test_mutate_from_cli(args, create=True):
     if create:
-        ev.create("test", ctx=spack.context.current())
+        ev.create("test", ctx=spack.test.harness.current())
 
-    env = ev.read("test", ctx=spack.context.current())
+    env = ev.read("test", ctx=spack.test.harness.current())
 
     if create:
         env.add("cmake-client%cmake@3.4.3")

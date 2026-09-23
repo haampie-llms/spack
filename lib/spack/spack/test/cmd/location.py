@@ -8,13 +8,12 @@ import shutil
 import pytest
 
 import spack.concretize
-import spack.context
 import spack.environment as ev
 import spack.main
 import spack.paths
-import spack.repo
 import spack.stage
-from spack.main import SpackCommand
+import spack.test.harness
+from spack.test.harness import SpackCommand
 from spack.util.filesystem import mkdirp
 
 # Everything here uses (or can use) the mock config and database.
@@ -28,7 +27,7 @@ env = SpackCommand("env")
 @pytest.fixture
 def mock_spec():
     # Make it look like the source was actually expanded.
-    s = spack.concretize.concretize_one("externaltest", spack.context.current())
+    s = spack.concretize.concretize_one("externaltest", spack.test.harness.current())
     source_path = s.package.stage.source_path
     mkdirp(source_path)
     yield s, s.package
@@ -89,14 +88,14 @@ def test_location_cmd_error(options, expected_code):
 
 def test_location_env_exists(mutable_mock_env_path):
     """Tests spack location --env <name> for an existing environment."""
-    e = ev.create("example", ctx=spack.context.current())
+    e = ev.create("example", ctx=spack.test.harness.current())
     e.write()
     assert location("--env", "example").strip() == e.path
 
 
 def test_location_with_active_env(mutable_mock_env_path):
     """Tests spack location --env with active env"""
-    e = ev.create("example", ctx=spack.context.current())
+    e = ev.create("example", ctx=spack.test.harness.current())
     e.write()
     with e:
         assert location("--env").strip() == e.path
@@ -125,7 +124,7 @@ def test_location_active_view(mutable_mock_env_path, monkeypatch):
         unify: True
     """
     )
-    e = ev.Environment(mutable_mock_env_path, ctx=spack.context.current())
+    e = ev.Environment(mutable_mock_env_path, ctx=spack.test.harness.current())
     monkeypatch.setenv(ev.spack_env_view_var, "viewname")
     with e:
         assert location("--view").strip() == view_path
@@ -146,7 +145,7 @@ def test_location_no_active_view(mutable_mock_env_path):
         unify: True
     """
     )
-    e = ev.Environment(mutable_mock_env_path, ctx=spack.context.current())
+    e = ev.Environment(mutable_mock_env_path, ctx=spack.test.harness.current())
     error = "==> Error: no active view in the current environment"
     with e:
         out = location("--view", fail_on_error=False).strip()
@@ -168,14 +167,14 @@ def test_location_view_exists(mutable_mock_env_path):
         unify: True
     """
     )
-    e = ev.Environment(mutable_mock_env_path, ctx=spack.context.current())
+    e = ev.Environment(mutable_mock_env_path, ctx=spack.test.harness.current())
     with e:
         assert location("--view", "viewname").strip() == view_path
 
 
 def test_location_view_missing(mutable_mock_env_path):
     """Tests spack location --env <view> with missing view."""
-    e = ev.create("example", with_view=True, ctx=spack.context.current())
+    e = ev.create("example", with_view=True, ctx=spack.test.harness.current())
     e.write()
     missing_view_name = "missing-view"
     error = "==> Error: no such view in the current environment: '%s'" % missing_view_name
@@ -239,18 +238,21 @@ def test_location_stages(mock_spec, mutable_config):
 
 def test_location_specified_repo():
     """Tests spack location --repo <repo>."""
-    with spack.repo.use_repositories(
+    with spack.test.harness.use_repositories(
         os.path.join(spack.paths.test_repos_path, "spack_repo", "builtin_mock"),
         os.path.join(spack.paths.test_repos_path, "spack_repo", "builder_test"),
     ):
-        assert location("--repo").strip() == spack.repo.PATH.get_repo("builtin_mock").root
+        assert (
+            location("--repo").strip()
+            == spack.test.harness.current().repo.get_repo("builtin_mock").root
+        )
         assert (
             location("--repo", "builtin_mock").strip()
-            == spack.repo.PATH.get_repo("builtin_mock").root
+            == spack.test.harness.current().repo.get_repo("builtin_mock").root
         )
         assert (
             location("--packages", "builder_test").strip()
-            == spack.repo.PATH.get_repo("builder_test").root
+            == spack.test.harness.current().repo.get_repo("builder_test").root
         )
         assert (
             location("--repo", "nonexistent", fail_on_error=False).strip()

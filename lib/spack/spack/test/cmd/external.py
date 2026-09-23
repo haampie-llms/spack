@@ -8,14 +8,13 @@ import sys
 import pytest
 
 import spack.cmd.external
-import spack.config
 import spack.cray_manifest
 import spack.detection
 import spack.detection.path
-import spack.repo
+import spack.test.harness
 from spack.config import Configuration
-from spack.main import SpackCommand
 from spack.spec import Spec
+from spack.test.harness import SpackCommand
 from spack.util.filesystem import getuid, touch
 
 pytestmark = [pytest.mark.usefixtures("mock_packages")]
@@ -145,7 +144,7 @@ def test_package_selection(names, tags, exclude, expected):
     """Tests various cases of selecting packages"""
     # In the mock repo we only have 'find-externals1' that is detectable
     result = spack.cmd.external.packages_to_search_for(
-        spack.repo.PATH, names=names, tags=tags, exclude=exclude
+        spack.test.harness.current().repo, names=names, tags=tags, exclude=exclude
     )
     assert set(result) == set(expected)
 
@@ -270,7 +269,7 @@ def test_overriding_prefix(mock_executable, mutable_config, monkeypatch, mock_pa
         pkg_name="gcc",
         initial_guess=[str(search_dir)],
         repository=mock_packages,
-        config=spack.config.CONFIG,
+        config=spack.test.harness.current().config,
         additional_search_paths=[],
     )
 

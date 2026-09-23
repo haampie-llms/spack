@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-import spack.config
+import spack.test.harness
 import spack.util.remote_file_cache as rfc_util
 from spack.util import tty
 from spack.util.filesystem import join_path
@@ -25,18 +25,20 @@ gitlab_url = "https://gitlab.fake.io/user/repo/-/blob/config/defaults"
 )
 def test_rfc_local_path_bad_scheme(path, err):
     with pytest.raises(ValueError, match=err):
-        _ = rfc_util.local_path(path, "", config=spack.config.CONFIG)
+        _ = rfc_util.local_path(path, "", config=spack.test.harness.current().config)
 
 
 @pytest.mark.not_on_windows("Unix path")
 def test_rfc_local_file_unix():
     assert (
-        rfc_util.local_path("/a/b/c/d/e/config.py", "", config=spack.config.CONFIG)
+        rfc_util.local_path("/a/b/c/d/e/config.py", "", config=spack.test.harness.current().config)
         == "/a/b/c/d/e/config.py"
     )
     assert (
         rfc_util.local_path(
-            "file:///this/is/a/file/url/include.yaml", "", config=spack.config.CONFIG
+            "file:///this/is/a/file/url/include.yaml",
+            "",
+            config=spack.test.harness.current().config,
         )
         == "/this/is/a/file/url/include.yaml"
     )
@@ -45,18 +47,21 @@ def test_rfc_local_file_unix():
 @pytest.mark.only_windows("Windows path")
 def test_rfc_local_file_windows():
     assert (
-        rfc_util.local_path(r"C:\Files (x86)\Windows\10", "", config=spack.config.CONFIG)
+        rfc_util.local_path(
+            r"C:\Files (x86)\Windows\10", "", config=spack.test.harness.current().config
+        )
         == r"C:\Files (x86)\Windows\10"
     )
     assert (
-        rfc_util.local_path(r"D:/spack stage", "", config=spack.config.CONFIG) == r"D:\spack stage"
+        rfc_util.local_path(r"D:/spack stage", "", config=spack.test.harness.current().config)
+        == r"D:\spack stage"
     )
 
 
 def test_rfc_remote_local_path_no_dest():
     path = f"{gitlab_url}/packages.yaml"
     with pytest.raises(ValueError, match="Requires the destination argument"):
-        _ = rfc_util.local_path(path, "", config=spack.config.CONFIG)
+        _ = rfc_util.local_path(path, "", config=spack.test.harness.current().config)
 
 
 packages_yaml_sha256 = (
@@ -103,10 +108,14 @@ def test_rfc_remote_local_path(
     if err is not None:
         with mutable_empty_config.override("config:url_fetch_method", "curl"):
             with pytest.raises(err, match=msg):
-                rfc_util.local_path(url, sha256, dest_dir, config=spack.config.CONFIG)
+                rfc_util.local_path(
+                    url, sha256, dest_dir, config=spack.test.harness.current().config
+                )
     else:
         with mutable_empty_config.override("config:url_fetch_method", "curl"):
-            path = rfc_util.local_path(url, sha256, dest_dir, config=spack.config.CONFIG)
+            path = rfc_util.local_path(
+                url, sha256, dest_dir, config=spack.test.harness.current().config
+            )
             assert os.path.exists(path)
             # Ensure correct file is "fetched"
             assert os.path.basename(path) == os.path.basename(url)

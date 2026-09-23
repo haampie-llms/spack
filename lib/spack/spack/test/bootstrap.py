@@ -24,10 +24,9 @@ import spack.error
 import spack.installer_dispatch
 import spack.paths
 import spack.spec
-import spack.store
+import spack.test.harness
 import spack.util.executable
 import spack.version
-from spack.active_environment import active_environment
 
 CLINGO_METADATA = sorted(pathlib.Path(spack.paths.share_path).glob("bootstrap/*/clingo.json"))
 if not CLINGO_METADATA:
@@ -42,7 +41,7 @@ if not PROTOTYPES:
 @pytest.fixture(autouse=True)
 def isolated_bootstrap_root(monkeypatch, tmp_path: pathlib.Path):
     """Point the bootstrap root at a temporary directory, so that tests entering
-    ``ensure_bootstrap_configuration`` do not mount the user's real bootstrap config.
+    the bootstrap context do not mount the user's real bootstrap config.
 
     Two settings resolve the root: the default scope has ``root: $user_cache_path/bootstrap``,
     and ``root_path()`` falls back to ``default_user_bootstrap_path`` when no config defines
@@ -57,7 +56,7 @@ def isolated_bootstrap_root(monkeypatch, tmp_path: pathlib.Path):
 
 @pytest.fixture
 def active_mock_environment(mutable_config, mutable_mock_env_path):
-    with spack.environment.create("bootstrap-test", ctx=spack.context.current()) as env:
+    with spack.environment.create("bootstrap-test", ctx=spack.test.harness.current()) as env:
         yield env
 
 
@@ -73,8 +72,8 @@ def _assert_is_bootstrap_store(ctx: spack.context.SpackContext, user_config) -> 
 def test_bootstrap_context_does_not_change_the_user_store(mutable_config, tmp_path: pathlib.Path):
     """Tests that the bootstrap context has its own store, and leaves the user's unchanged."""
     user_path = str(tmp_path / "store")
-    with spack.store.use_store(user_path):
-        ctx = spack.context.current()
+    with spack.test.harness.use_store(user_path):
+        ctx = spack.test.harness.current()
         _assert_is_bootstrap_store(ctx.bootstrap, ctx.config)
         assert ctx.store.root == user_path
         assert ctx.config.get("config:install_tree:root") == user_path
@@ -86,8 +85,8 @@ def test_store_padding_length_is_zero_during_bootstrapping(mutable_config, tmp_p
     a padded length of zero.
     """
     user_path = str(tmp_path / "store")
-    with spack.store.use_store(user_path, extra_data={"padded_length": 512}):
-        ctx = spack.context.current()
+    with spack.test.harness.use_store(user_path, extra_data={"padded_length": 512}):
+        ctx = spack.test.harness.current()
         _assert_is_bootstrap_store(ctx.bootstrap, ctx.config)
         assert ctx.config.get("config:install_tree:padded_length") == 512
 
@@ -132,14 +131,16 @@ def test_raising_exception_if_bootstrap_disabled(mutable_config):
 def test_raising_exception_module_importable(mutable_config):
     mutable_config.set("bootstrap:trusted", {"github-actions": True})
     with pytest.raises(ImportError, match='cannot bootstrap the "asdf" Python module'):
-        spack.bootstrap.core.ensure_module_importable_or_raise("asdf", spack.context.current())
+        spack.bootstrap.core.ensure_module_importable_or_raise(
+            "asdf", spack.test.harness.current()
+        )
 
 
 def test_raising_exception_executables_in_path(mutable_config):
     mutable_config.set("bootstrap:trusted", {"github-actions": True})
     with pytest.raises(RuntimeError, match="cannot bootstrap any of the asdf, fdsa executables"):
         spack.bootstrap.core.ensure_executables_in_path_or_raise(
-            ["asdf", "fdsa"], "python", spack.context.current()
+            ["asdf", "fdsa"], "python", spack.test.harness.current()
         )
 
 
@@ -194,7 +195,7 @@ def test_bootstrap_search_for_compilers_with_no_environment(no_packages_yaml, mo
     assert not spack.compilers.config.all_compilers(
         no_packages_yaml, repo=mock_packages, init_config=False
     )
-    bootstrap = spack.context.current().bootstrap
+    bootstrap = spack.test.harness.current().bootstrap
     spack.bootstrap.clingo._add_compilers_if_missing(bootstrap.config, repo=mock_packages)
     assert spack.compilers.config.all_compilers(
         bootstrap.config, repo=mock_packages, init_config=False
@@ -248,8 +249,8 @@ spack:
       root: {0}
 """.format(install_root)
     )
-    with spack.environment.Environment(str(tmp_path), ctx=spack.context.current()) as env:
-        assert active_environment()
+    with spack.environment.Environment(str(tmp_path), ctx=spack.test.harness.current()) as env:
+        assert spack.test.harness.current().environment
         assert env.ctx.config.get("config:install_tree:root") == str(install_root)
         # Don't trigger evaluation here
         _ = env.ctx.bootstrap
@@ -278,7 +279,7 @@ def test_status_function_find_files(
     )
     monkeypatch.setenv("PATH", str(tmp_path / "bin"))
 
-    _, missing = spack.bootstrap.status_message("optional", spack.context.current())
+    _, missing = spack.bootstrap.status_message("optional", spack.test.harness.current())
     assert missing is expected_missing
 
 
@@ -313,7 +314,7 @@ def test_gpg_status_check(
 
     monkeypatch.setattr(spack.bootstrap.status, "_executables_in_store", _only_gnupg_in_store)
 
-    msg, _ = spack.bootstrap.status_message("buildcache", spack.context.current())
+    msg, _ = spack.bootstrap.status_message("buildcache", spack.test.harness.current())
     assert ('MISSING "gpg2"' in msg) is expected_missing
 
 
@@ -352,7 +353,9 @@ def test_no_bootstrapping_sources_enabled(mutable_config):
     sources = spack.bootstrap.core.bootstrapping_sources(bootstrap.config)
     mutable_config.set("bootstrap:trusted", {x["name"]: False for x in sources})
     with pytest.raises(ImportError, match="no bootstrapping sources are enabled"):
-        spack.bootstrap.core.ensure_module_importable_or_raise("asdf", spack.context.current())
+        spack.bootstrap.core.ensure_module_importable_or_raise(
+            "asdf", spack.test.harness.current()
+        )
 
 
 @pytest.mark.not_on_windows("The mock executable quotes its output on Windows")
@@ -453,7 +456,11 @@ def test_the_store_is_probed_once_for_all_the_sources(fake_bootstrap_type):
 
     with pytest.raises(RuntimeError, match="cannot bootstrap zlib"):
         spack.bootstrap.core._bootstrap_or_raise(
-            _fake_request(probes), "zlib", RuntimeError, spack.context.current(), sources=sources
+            _fake_request(probes),
+            "zlib",
+            RuntimeError,
+            spack.test.harness.current(),
+            sources=sources,
         )
 
     assert len(probes) == 1
@@ -470,7 +477,7 @@ def test_software_in_the_store_skips_every_source(fake_bootstrap_type):
         _fake_request(probes, result="from the store"),
         "zlib",
         RuntimeError,
-        spack.context.current(),
+        spack.test.harness.current(),
         sources=sources,
     )
 
@@ -484,7 +491,7 @@ def test_the_first_successful_source_wins(fake_bootstrap_type):
     sources = _fake_sources(tried, RuntimeError("no"), "from src1", "from src2")
 
     result = spack.bootstrap.core._bootstrap_or_raise(
-        _fake_request(probes), "zlib", RuntimeError, spack.context.current(), sources=sources
+        _fake_request(probes), "zlib", RuntimeError, spack.test.harness.current(), sources=sources
     )
 
     assert result == "from src1"
@@ -499,7 +506,11 @@ def test_every_source_failure_is_reported(fake_bootstrap_type):
 
     with pytest.raises(RuntimeError) as exc_info:
         spack.bootstrap.core._bootstrap_or_raise(
-            _fake_request(probes), "zlib", RuntimeError, spack.context.current(), sources=sources
+            _fake_request(probes),
+            "zlib",
+            RuntimeError,
+            spack.test.harness.current(),
+            sources=sources,
         )
 
     message = str(exc_info.value)
@@ -515,7 +526,11 @@ def test_sources_that_provide_nothing_are_reported_as_such(fake_bootstrap_type):
 
     with pytest.raises(RuntimeError, match="no bootstrapping source could provide it"):
         spack.bootstrap.core._bootstrap_or_raise(
-            _fake_request(probes), "zlib", RuntimeError, spack.context.current(), sources=sources
+            _fake_request(probes),
+            "zlib",
+            RuntimeError,
+            spack.test.harness.current(),
+            sources=sources,
         )
 
     assert tried == ["src0", "src1"]
@@ -527,7 +542,7 @@ def test_no_sources_to_try_is_reported_as_such(fake_bootstrap_type):
 
     with pytest.raises(RuntimeError, match='from spec "zlib": no bootstrapping sources'):
         spack.bootstrap.core._bootstrap_or_raise(
-            _fake_request(probes), "zlib", RuntimeError, spack.context.current(), sources=[]
+            _fake_request(probes), "zlib", RuntimeError, spack.test.harness.current(), sources=[]
         )
 
 
@@ -552,7 +567,7 @@ class _RecordingInstaller:
         return self
 
     def install(self) -> None:
-        self.mirrors_when_installing = spack.config.CONFIG.get("mirrors")
+        self.mirrors_when_installing = spack.test.harness.current().config.get("mirrors")
 
 
 class _FakeConcreteSpec:
@@ -583,7 +598,7 @@ def test_the_install_type_maps_to_the_source_bootstrapper(mutable_config):
     conf = spack.bootstrap.core.bootstrapping_sources(mutable_config)[0]
     assert conf["type"] == "install"
     assert isinstance(
-        spack.bootstrap.core.create_bootstrapper(conf, spack.context.current()),
+        spack.bootstrap.core.create_bootstrapper(conf, spack.test.harness.current()),
         spack.bootstrap.core.SourceBootstrapper,
     )
 
@@ -617,7 +632,7 @@ def test_the_source_bootstrapper_installs_from_its_own_mirror(
     """
     mutable_config.set("bootstrap:sources", [SPACK_INSTALL_SOURCE])
     conf = spack.bootstrap.core.bootstrapping_sources(mutable_config)[0]
-    bootstrapper = spack.bootstrap.core.create_bootstrapper(conf, spack.context.current())
+    bootstrapper = spack.bootstrap.core.create_bootstrapper(conf, spack.test.harness.current())
 
     request = make_request()
     request.probe = lambda concrete_spec, ctx: f"probed {concrete_spec.package}"
@@ -642,7 +657,7 @@ def test_the_source_bootstrapper_concretizes_with_the_request(
     monkeypatch.setattr(spack.concretize, "concretize_one", _regular_concretizer)
     mutable_config.set("bootstrap:sources", [SPACK_INSTALL_SOURCE])
     bootstrapper = spack.bootstrap.core.create_bootstrapper(
-        spack.bootstrap.core.bootstrapping_sources(mutable_config)[0], spack.context.current()
+        spack.bootstrap.core.bootstrapping_sources(mutable_config)[0], spack.test.harness.current()
     )
 
     request = spack.bootstrap.core.BootstrapRequest.for_module(
@@ -663,7 +678,7 @@ def test_clingo_is_not_concretized_by_the_regular_concretizer(mutable_config, mo
         lambda request, **kwargs: requests.append(request),
     )
 
-    spack.bootstrap.core.ensure_clingo_importable_or_raise(spack.context.current())
+    spack.bootstrap.core.ensure_clingo_importable_or_raise(spack.test.harness.current())
 
     assert requests[0].concretize is spack.bootstrap.core._concretize_clingo
 
@@ -689,7 +704,7 @@ def test_source_failures_point_at_the_backtrace_flag(fake_bootstrap_type, backtr
 
     with pytest.raises(RuntimeError) as exc_info:
         spack.bootstrap.core._bootstrap_or_raise(
-            _fake_request([]), "zlib", RuntimeError, spack.context.current(), sources=sources
+            _fake_request([]), "zlib", RuntimeError, spack.test.harness.current(), sources=sources
         )
 
     message = str(exc_info.value)
@@ -709,7 +724,7 @@ def test_source_failures_include_their_traceback_when_the_flag_is_set(
 
     with pytest.raises(RuntimeError) as exc_info:
         spack.bootstrap.core._bootstrap_or_raise(
-            _fake_request([]), "zlib", RuntimeError, spack.context.current(), sources=sources
+            _fake_request([]), "zlib", RuntimeError, spack.test.harness.current(), sources=sources
         )
 
     message = str(exc_info.value)

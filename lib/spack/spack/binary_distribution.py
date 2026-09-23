@@ -41,12 +41,10 @@ from typing import (
     Set,
     Tuple,
     Union,
-    cast,
 )
 
 import spack.caches
 import spack.config
-import spack.context
 import spack.database
 import spack.deptypes as dt
 import spack.error
@@ -566,18 +564,6 @@ def binary_index_location(*, config: spack.config.Configuration):
     return spack.config.canonicalize_path(cache_root, config=config)
 
 
-def _binary_index() -> BinaryIndexCache:
-    """Build the default binary cache index from the global configuration."""
-    ctx = spack.context.current()
-    return BinaryIndexCache(
-        config=spack.config.CONFIG, client=ctx.network, repo_provider=ctx.repo_provider
-    )
-
-
-#: Default binary cache index instance
-BINARY_INDEX = cast(BinaryIndexCache, spack.util.lang.Singleton(_binary_index))
-
-
 def compute_hash(data):
     if isinstance(data, str):
         data = data.encode("utf-8")
@@ -679,8 +665,8 @@ def warn_v2_layout(mirror_url: str, action: str) -> bool:
     return True
 
 
-def select_signing_key() -> str:
-    keys = spack.util.gpg.signing_keys()
+def select_signing_key(gpg: spack.util.gpg.Gpg) -> str:
+    keys = spack.util.gpg.signing_keys(gpg)
     num = len(keys)
     if num > 1:
         raise PickKeyException(keys)
@@ -1052,11 +1038,12 @@ def _exists_in_buildcache(
     *,
     config: spack.config.Configuration,
     client: web_util.NetworkClient,
+    gpg: Optional[spack.util.gpg.Gpg] = None,
 ) -> URLBuildcacheEntry:
     """creates and returns (after checking existence) a URLBuildcacheEntry"""
     cache_type = get_url_buildcache_class(CURRENT_BUILD_CACHE_LAYOUT_VERSION)
     cache_entry = cache_type(
-        out_url, spec, allow_unsigned=allow_unsigned, config=config, client=client
+        out_url, spec, allow_unsigned=allow_unsigned, config=config, client=client, gpg=gpg
     )
     return cache_entry
 
@@ -1240,6 +1227,7 @@ class URLUploader(Uploader):
             client=self.client,
             store=self.store,
             repo_provider=self.ctx.repo_provider,
+            gpg=self.ctx.gpg if self.signing_key else None,
         )
 
 
@@ -1317,6 +1305,7 @@ def _url_push(
     client: web_util.NetworkClient,
     store: spack.store.Store,
     repo_provider: Optional["spack.repo.RepoProvider"] = None,
+    gpg: Optional[spack.util.gpg.Gpg] = None,
 ) -> Tuple[List[spack.spec.Spec], List[Tuple[spack.spec.Spec, BaseException]]]:
     """Pushes to the provided build cache, and returns a list of skipped specs that were already
     present (when force=False), and a list of errors. Does not raise on error."""
@@ -1331,6 +1320,7 @@ def _url_push(
             allow_unsigned=False if signing_key else True,
             config=config,
             client=client,
+            gpg=gpg,
         )
         for spec in specs
     ]
@@ -1397,6 +1387,7 @@ def _url_push(
     if signing_key:
         keys_tmpdir = os.path.join(tmpdir, "keys")
         os.mkdir(keys_tmpdir)
+        assert gpg is not None, "signing requires GnuPG"
         _url_push_keys(
             out_url,
             keys=[signing_key],
@@ -1404,6 +1395,7 @@ def _url_push(
             tmpdir=keys_tmpdir,
             config=config,
             client=client,
+            gpg=gpg,
         )
 
     if update_index:
@@ -1915,6 +1907,7 @@ def download_tarball(
     *,
     config: spack.config.Configuration,
     client: web_util.NetworkClient,
+    gpg: Optional[spack.util.gpg.Gpg],
 ) -> Optional[spack.stage.Stage]:
     """Download binary tarball for given package
 
@@ -1925,6 +1918,7 @@ def download_tarball(
             in order first before looking in other configured mirrors.
         config: configuration listing the mirrors, and for the stage of the tarball
         client: network client used to download
+        gpg: GnuPG to verify signatures with; required unless ``unsigned``
 
     Returns:
         ``None`` if the tarball could not be downloaded, the signature verified
@@ -2053,7 +2047,12 @@ def download_tarball(
         else:
             cache_type = get_url_buildcache_class(layout_version=layout_version)
             cache_entry = cache_type(
-                fetch_url, spec, allow_unsigned=currently_unsigned, config=config, client=client
+                fetch_url,
+                spec,
+                allow_unsigned=currently_unsigned,
+                config=config,
+                client=client,
+                gpg=gpg,
             )
 
             try:
@@ -2384,6 +2383,7 @@ def install_root_node(
     client: web_util.NetworkClient,
     store: spack.store.Store,
     patchelf: relocate.PatchelfFinder,
+    gpg: Optional[spack.util.gpg.Gpg],
 ) -> None:
     """Install the root node of a concrete spec from a buildcache.
 
@@ -2401,6 +2401,7 @@ def install_root_node(
         client: network client used to download
         store: store to install into
         patchelf: finds patchelf for relocation
+        gpg: GnuPG to verify signatures with; required unless ``unsigned``
     """
     # Early termination
     if spec.external or not spec.concrete:
@@ -2410,7 +2411,9 @@ def install_root_node(
         warnings.warn("Package for spec {0} already installed.".format(spec.format()))
         return
 
-    tarball_stage = download_tarball(spec.build_spec, unsigned, config=config, client=client)
+    tarball_stage = download_tarball(
+        spec.build_spec, unsigned, config=config, client=client, gpg=gpg
+    )
     if not tarball_stage:
         msg = 'download of binary cache file for spec "{0}" failed'
         raise RuntimeError(msg.format(spec.build_spec.format()))
@@ -2433,6 +2436,7 @@ def install_single_spec(
     client: web_util.NetworkClient,
     store: spack.store.Store,
     patchelf: relocate.PatchelfFinder,
+    gpg: Optional[spack.util.gpg.Gpg],
 ):
     """Install a single concrete spec from a buildcache.
 
@@ -2445,6 +2449,7 @@ def install_single_spec(
         client: network client used to download
         store: store to install into
         patchelf: finds patchelf for relocation
+        gpg: GnuPG to verify signatures with; required unless ``unsigned``
     """
     for node in spec.traverse(root=True, order="post", deptype=("link", "run")):
         install_root_node(
@@ -2455,13 +2460,19 @@ def install_single_spec(
             client=client,
             store=store,
             patchelf=patchelf,
+            gpg=gpg,
         )
 
 
 def try_direct_fetch(
-    spec: spack.spec.Spec, *, config: spack.config.Configuration, client: web_util.NetworkClient
+    spec: spack.spec.Spec,
+    *,
+    config: spack.config.Configuration,
+    client: web_util.NetworkClient,
+    gpg: Optional[spack.util.gpg.Gpg],
 ) -> List[MirrorMetadata]:
-    """Try to find the spec directly on the configured mirrors"""
+    """Try to find the spec directly on the configured mirrors, verifying signatures with
+    ``gpg``"""
     found_specs: List[MirrorMetadata] = []
     binary_mirrors = spack.mirrors.mirror.MirrorCollection.from_config(
         config, binary=True
@@ -2475,7 +2486,9 @@ def try_direct_fetch(
         for layout_version in mirror.supported_layout_versions:
             # layout_version could eventually come from the mirror config
             cache_class = get_url_buildcache_class(layout_version=layout_version)
-            cache_entry = cache_class(mirror.fetch_url, spec, config=config, client=client)
+            cache_entry = cache_class(
+                mirror.fetch_url, spec, config=config, client=client, gpg=gpg
+            )
 
             try:
                 spec_dict = cache_entry.fetch_metadata()
@@ -2501,6 +2514,7 @@ def get_mirrors_for_spec(
     binary_index: BinaryIndexCache,
     config: spack.config.Configuration,
     client: web_util.NetworkClient,
+    gpg: Optional[spack.util.gpg.Gpg],
 ) -> List[MirrorMetadata]:
     """
     Check if concrete spec exists on mirrors and return a list indicating the mirrors on which it
@@ -2513,6 +2527,7 @@ def get_mirrors_for_spec(
         binary_index: buildcache index to query first
         config: configuration listing the mirrors
         client: network client used for direct fetches
+        gpg: GnuPG to verify signed metadata of direct fetches with
     """
     if not spack.mirrors.mirror.MirrorCollection.from_config(config, binary=True):
         tty.debug("No Spack mirrors are currently configured")
@@ -2523,7 +2538,7 @@ def get_mirrors_for_spec(
     # The index may be out-of-date. If we aren't only considering indices, try
     # to fetch directly since we know where the file should be.
     if not results and not index_only:
-        results = try_direct_fetch(spec, config=config, client=client)
+        results = try_direct_fetch(spec, config=config, client=client, gpg=gpg)
         # We found a spec by the direct fetch approach, we might as well
         # add it to our mapping.
         if results:
@@ -2568,6 +2583,7 @@ def trust_keys(
     *,
     config: spack.config.Configuration,
     client: web_util.NetworkClient,
+    gpg: spack.util.gpg.Gpg,
 ) -> None:
     """Get pgp public keys available on mirror with suffix .pub"""
     mirror_collection = mirrors or spack.mirrors.mirror.MirrorCollection.from_config(
@@ -2585,7 +2601,14 @@ def trust_keys(
             fetch_url = mirror.fetch_url
             if layout_version == 2:
                 _trust_keys_v2(
-                    fetch_url, yes_to_all, install, trust, force, config=config, client=client
+                    fetch_url,
+                    yes_to_all,
+                    install,
+                    trust,
+                    force,
+                    config=config,
+                    client=client,
+                    gpg=gpg,
                 )
             else:
                 _trust_keys(
@@ -2597,6 +2620,7 @@ def trust_keys(
                     force,
                     config=config,
                     client=client,
+                    gpg=gpg,
                 )
 
 
@@ -2610,6 +2634,7 @@ def _trust_keys(
     *,
     config: spack.config.Configuration,
     client: web_util.NetworkClient,
+    gpg: spack.util.gpg.Gpg,
 ) -> None:
     cache_class = get_url_buildcache_class(layout_version=layout_version)
 
@@ -2647,7 +2672,7 @@ def _trust_keys(
         tty.debug("Found key {0}".format(fingerprint))
         if install:
             if trust:
-                spack.util.gpg.trust(key_blob_path, yes_to_all=yes_to_all)
+                spack.util.gpg.trust(gpg, key_blob_path, yes_to_all=yes_to_all)
                 tty.debug(f"Added {fingerprint} to trusted keys.")
             else:
                 tty.debug(
@@ -2666,6 +2691,7 @@ def _trust_keys_v2(
     *,
     config: spack.config.Configuration,
     client: web_util.NetworkClient,
+    gpg: spack.util.gpg.Gpg,
 ) -> None:
     cache_class = get_url_buildcache_class(layout_version=2)
 
@@ -2705,7 +2731,7 @@ def _trust_keys_v2(
         tty.debug("Found key {0}".format(fingerprint))
         if install:
             if trust:
-                spack.util.gpg.trust(stage.save_filename, yes_to_all=yes_to_all)
+                spack.util.gpg.trust(gpg, stage.save_filename, yes_to_all=yes_to_all)
                 tty.debug("Added this key to trusted keys.")
             else:
                 tty.debug(
@@ -2720,13 +2746,14 @@ def _url_push_keys(
     update_index: bool = False,
     config: spack.config.Configuration,
     client: web_util.NetworkClient,
+    gpg: spack.util.gpg.Gpg,
 ):
     """Upload pgp public keys to the given mirrors"""
-    keys = spack.util.gpg.public_keys(*(keys or ()))
+    keys = spack.util.gpg.public_keys(gpg, *(keys or ()))
     files = [os.path.join(tmpdir, f"{key}.pub") for key in keys]
 
     for key, file in zip(keys, files):
-        spack.util.gpg.export_keys(file, [key])
+        spack.util.gpg.export_keys(gpg, file, [key])
 
     cache_class = get_url_buildcache_class()
 

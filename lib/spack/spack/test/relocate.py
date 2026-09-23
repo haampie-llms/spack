@@ -12,7 +12,7 @@ import pytest
 
 import spack.platforms
 import spack.relocate
-import spack.store
+import spack.test.harness
 import spack.util.executable
 from spack import relocate_text
 
@@ -208,7 +208,7 @@ def test_fixup_macos_rpaths(make_dylib, make_object_file):
     # For each of these tests except for the "correct" case, the first fixup
     # should make changes, and the second fixup should be a null-op.
     fixup_rpath = functools.partial(
-        spack.relocate.fixup_macos_rpath, store_root=spack.store.STORE.layout.root
+        spack.relocate.fixup_macos_rpath, store_root=spack.test.harness.current().store.layout.root
     )
 
     no_rpath = []

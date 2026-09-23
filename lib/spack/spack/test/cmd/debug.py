@@ -6,12 +6,12 @@ import platform
 
 import spack
 import spack.cmd.debug
-import spack.config
 import spack.platforms
 import spack.repo
 import spack.spec
-from spack.main import SpackCommand
+import spack.test.harness
 from spack.test.conftest import _return_none
+from spack.test.harness import SpackCommand
 
 debug = SpackCommand("debug")
 
@@ -37,7 +37,7 @@ def test_get_builtin_repo_info_local_repo(mock_git_version_info, monkeypatch):
         return {"builtin": spack.repo.LocalRepoDescriptor("builtin", path)}
 
     monkeypatch.setattr(spack.repo.RepoDescriptors, "from_config", _from_config)
-    assert path in spack.cmd.debug._get_builtin_repo_info(spack.config.CONFIG)
+    assert path in spack.cmd.debug._get_builtin_repo_info(spack.test.harness.current().config)
 
 
 def test_get_builtin_repo_info_unsupported_type(mock_git_version_info, monkeypatch):
@@ -48,7 +48,7 @@ def test_get_builtin_repo_info_unsupported_type(mock_git_version_info, monkeypat
         return {"builtin": path}
 
     monkeypatch.setattr(spack.repo.RepoDescriptors, "from_config", _from_config)
-    assert spack.cmd.debug._get_builtin_repo_info(spack.config.CONFIG) is None
+    assert spack.cmd.debug._get_builtin_repo_info(spack.test.harness.current().config) is None
 
 
 def test_get_builtin_repo_info_no_builtin(monkeypatch):
@@ -58,7 +58,7 @@ def test_get_builtin_repo_info_no_builtin(monkeypatch):
         return {"local": "/assumes/no/descriptor/needed"}
 
     monkeypatch.setattr(spack.repo.RepoDescriptors, "from_config", _from_config)
-    assert spack.cmd.debug._get_builtin_repo_info(spack.config.CONFIG) is None
+    assert spack.cmd.debug._get_builtin_repo_info(spack.test.harness.current().config) is None
 
 
 def test_get_builtin_repo_info_bad_destination(mock_git_version_info, monkeypatch):
@@ -69,7 +69,7 @@ def test_get_builtin_repo_info_bad_destination(mock_git_version_info, monkeypatc
         return {"builtin": spack.repo.LocalRepoDescriptor("builtin", f"{path}/missing")}
 
     monkeypatch.setattr(spack.repo.RepoDescriptors, "from_config", _from_config)
-    assert spack.cmd.debug._get_builtin_repo_info(spack.config.CONFIG) is None
+    assert spack.cmd.debug._get_builtin_repo_info(spack.test.harness.current().config) is None
 
 
 def test_get_spack_repo_info_no_commit(monkeypatch):

@@ -5,19 +5,19 @@ import re
 
 import pytest
 
-import spack.config
+import spack.test.harness
 from spack.container import writers
 
 
 def test_manifest(minimal_configuration):
-    writer = writers.create(minimal_configuration, spack.config.CONFIG)
+    writer = writers.create(minimal_configuration, spack.test.harness.current().config)
     manifest_str = writer.manifest
     for line in manifest_str.split("\n"):
         assert "echo" in line
 
 
 def test_build_and_run_images(minimal_configuration):
-    writer = writers.create(minimal_configuration, spack.config.CONFIG)
+    writer = writers.create(minimal_configuration, spack.test.harness.current().config)
 
     # Test the output of run property
     run = writer.run
@@ -30,14 +30,14 @@ def test_build_and_run_images(minimal_configuration):
 
 def test_packages(minimal_configuration):
     # In this minimal configuration we don't have packages
-    writer = writers.create(minimal_configuration, spack.config.CONFIG)
+    writer = writers.create(minimal_configuration, spack.test.harness.current().config)
     assert writer.os_packages_build is None
     assert writer.os_packages_final is None
 
     # If we add them a list should be returned
     pkgs = ["libgomp1"]
     minimal_configuration["spack"]["container"]["os_packages"] = {"final": pkgs}
-    writer = writers.create(minimal_configuration, spack.config.CONFIG)
+    writer = writers.create(minimal_configuration, spack.test.harness.current().config)
     p = writer.os_packages_final
     assert p.update
     assert p.install
@@ -47,7 +47,7 @@ def test_packages(minimal_configuration):
 
 def test_container_os_packages_command(minimal_configuration):
     # In this minimal configuration we don't have packages
-    writer = writers.create(minimal_configuration, spack.config.CONFIG)
+    writer = writers.create(minimal_configuration, spack.test.harness.current().config)
     assert writer.os_packages_build is None
     assert writer.os_packages_final is None
 
@@ -60,7 +60,7 @@ def test_container_os_packages_command(minimal_configuration):
         "command": "zypper",
         "final": ["libgomp1"],
     }
-    writer = writers.create(minimal_configuration, spack.config.CONFIG)
+    writer = writers.create(minimal_configuration, spack.test.harness.current().config)
     p = writer.os_packages_final
     assert "zypper update -y" in p.update
     assert "zypper install -y" in p.install
@@ -69,16 +69,16 @@ def test_container_os_packages_command(minimal_configuration):
 
 def test_ensure_render_works(minimal_configuration, default_config):
     # Here we just want to ensure that nothing is raised
-    writer = writers.create(minimal_configuration, spack.config.CONFIG)
+    writer = writers.create(minimal_configuration, spack.test.harness.current().config)
     writer()
 
 
 def test_strip_is_set_from_config(minimal_configuration):
-    writer = writers.create(minimal_configuration, spack.config.CONFIG)
+    writer = writers.create(minimal_configuration, spack.test.harness.current().config)
     assert writer.strip is True
 
     minimal_configuration["spack"]["container"]["strip"] = False
-    writer = writers.create(minimal_configuration, spack.config.CONFIG)
+    writer = writers.create(minimal_configuration, spack.test.harness.current().config)
     assert writer.strip is False
 
 
@@ -88,7 +88,7 @@ def test_custom_base_images(minimal_configuration):
         "build": "custom-build:latest",
         "final": "custom-final:latest",
     }
-    writer = writers.create(minimal_configuration, spack.config.CONFIG)
+    writer = writers.create(minimal_configuration, spack.test.harness.current().config)
 
     assert writer.bootstrap.image is None
     assert writer.build.image == "custom-build:latest"
@@ -113,7 +113,7 @@ def test_base_images_with_bootstrap(minimal_configuration, images_cfg, expected)
     bootstrap phase is present
     """
     minimal_configuration["spack"]["container"]["images"] = images_cfg
-    writer = writers.create(minimal_configuration, spack.config.CONFIG)
+    writer = writers.create(minimal_configuration, spack.test.harness.current().config)
 
     for property_name, value in expected.items():
         assert getattr(writer, property_name) == value
@@ -122,7 +122,7 @@ def test_base_images_with_bootstrap(minimal_configuration, images_cfg, expected)
 def test_error_message_invalid_os(minimal_configuration):
     minimal_configuration["spack"]["container"]["images"]["os"] = "invalid:1"
     with pytest.raises(ValueError, match="invalid operating system"):
-        writers.create(minimal_configuration, spack.config.CONFIG)
+        writers.create(minimal_configuration, spack.test.harness.current().config)
 
 
 @pytest.mark.regression("34629,18030")
@@ -131,7 +131,7 @@ def test_not_stripping_all_symbols(minimal_configuration):
     used for linking.
     """
     minimal_configuration["spack"]["container"]["strip"] = True
-    content = writers.create(minimal_configuration, spack.config.CONFIG)()
+    content = writers.create(minimal_configuration, spack.test.harness.current().config)()
     assert "xargs strip" in content
     assert "xargs strip -s" not in content
 
@@ -142,6 +142,8 @@ def test_using_single_quotes_in_dockerfiles(minimal_configuration):
     with shell substitution. This may happen e.g. when users have "definitions:" they want to
     expand in dockerfiles.
     """
-    manifest_in_docker = writers.create(minimal_configuration, spack.config.CONFIG).manifest
+    manifest_in_docker = writers.create(
+        minimal_configuration, spack.test.harness.current().config
+    ).manifest
     assert not re.search(r"echo\s*\"", manifest_in_docker, flags=re.MULTILINE)
     assert re.search(r"echo\s*'", manifest_in_docker)

@@ -9,11 +9,11 @@ import sys
 import pytest
 
 import spack.concretize
-import spack.context
 import spack.main
+import spack.test.harness
 import spack.util.spack_yaml as s_yaml
 from spack.installer import PackageInstaller
-from spack.main import SpackCommand
+from spack.test.harness import SpackCommand
 from spack.util.filesystem import _windows_can_symlink
 
 extensions = SpackCommand("extensions")
@@ -217,7 +217,7 @@ def test_view_files_not_ignored(
     cmd,
     with_projection,
 ):
-    spec = spack.concretize.concretize_one("view-not-ignored", spack.context.current())
+    spec = spack.concretize.concretize_one("view-not-ignored", spack.test.harness.current())
     pkg = spec.package
     PackageInstaller([pkg], explicit=True).install()
     pkg.assert_installed(spec.prefix)

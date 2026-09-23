@@ -6,8 +6,8 @@ import pathlib
 
 import pytest
 
-import spack.context
 import spack.reporters.extract
+import spack.test.harness
 import spack.util.filesystem as fs
 import spack.util.web
 from spack.install_test import TestStatus
@@ -178,7 +178,7 @@ def test_reporters_report_for_package_no_stdout(tmp_path: pathlib.Path, monkeypa
     reporter = MockCDash(
         configuration=configuration,
         urlopen=_client().urlopen,
-        config=spack.context.current().config,
+        config=spack.test.harness.current().config,
     )
     pkg_data = {"name": "fake-package"}
     reporter.test_report_for_package(str(tmp_path), pkg_data, 0)
@@ -202,7 +202,7 @@ def test_cdash_reporter_truncates_build_name_if_too_long():
     reporter = CDash(
         configuration=configuration,
         urlopen=_client().urlopen,
-        config=spack.context.current().config,
+        config=spack.test.harness.current().config,
     )
     new_build_name = reporter.report_build_name("fake-package")
 

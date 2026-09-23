@@ -10,13 +10,11 @@ import pytest
 import spack.vendor.archspec.cpu
 
 import spack.concretize
-import spack.config
-import spack.context
 import spack.database
 import spack.paths
-import spack.repo
 import spack.solver.asp
 import spack.spec
+import spack.test.harness
 from spack.config import Configuration
 from spack.environment.environment import ViewDescriptor
 from spack.solver.reuse import reusable_external_specs
@@ -24,9 +22,9 @@ from spack.version import Version
 
 
 def _concretize_with_reuse(*, root_str, reused_str):
-    reused_spec = spack.concretize.concretize_one(reused_str, spack.context.current())
-    external_specs = reusable_external_specs(spack.context.current())
-    setup = spack.solver.asp.SpackSolverSetup(tests=False, context=spack.context.current())
+    reused_spec = spack.concretize.concretize_one(reused_str, spack.test.harness.current())
+    external_specs = reusable_external_specs(spack.test.harness.current())
+    setup = spack.solver.asp.SpackSolverSetup(tests=False, context=spack.test.harness.current())
     driver = spack.solver.asp.PyclingoDriver()
     result, _, _ = driver.solve(
         setup, [spack.spec.Spec(f"{root_str}")], reuse=[reused_spec] + external_specs
@@ -38,13 +36,13 @@ def _concretize_with_reuse(*, root_str, reused_str):
 @pytest.fixture
 def runtime_repo(mutable_config):
     repo = os.path.join(spack.paths.test_repos_path, "spack_repo", "compiler_runtime_test")
-    with spack.repo.use_repositories(repo) as mock_repo:
+    with spack.test.harness.use_repositories(repo) as mock_repo:
         yield mock_repo
 
 
 def test_correct_gcc_runtime_is_injected_as_dependency(runtime_repo):
     s = spack.concretize.concretize_one(
-        "pkg-a%gcc@10.2.1 ^pkg-b%gcc@9.4.0", spack.context.current()
+        "pkg-a%gcc@10.2.1 ^pkg-b%gcc@9.4.0", spack.test.harness.current()
     )
     a, b = s["pkg-a"], s["pkg-b"]
 
@@ -64,7 +62,7 @@ def test_external_nodes_do_not_have_runtimes(
     packages_yaml = {"pkg-b": {"externals": [{"spec": "pkg-b@1.0", "prefix": f"{str(tmp_path)}"}]}}
     mutable_config.set("packages", packages_yaml)
 
-    s = spack.concretize.concretize_one("pkg-a%gcc@10.2.1", spack.context.current())
+    s = spack.concretize.concretize_one("pkg-a%gcc@10.2.1", spack.test.harness.current())
 
     a, b = s["pkg-a"], s["pkg-b"]
 
@@ -164,9 +162,9 @@ def test_views_can_handle_duplicate_runtime_nodes(
     monkeypatch.setattr(spack.database.Database, "installed", lambda self, spec: True)
     nodes = list(root.traverse())
 
-    view = ViewDescriptor(str(tmp_path), str(tmp_path), config=spack.config.CONFIG)
+    view = ViewDescriptor(str(tmp_path), str(tmp_path), config=spack.test.harness.current().config)
     candidate_specs = view.specs_for_view(
-        nodes, spack.context.current().store, spack.context.current().repo
+        nodes, spack.test.harness.current().store, spack.test.harness.current().repo
     )
 
     for x in expected:
@@ -178,7 +176,7 @@ def test_views_can_handle_duplicate_runtime_nodes(
 
 def test_runtimes_can_be_concretized_as_standalone(runtime_repo):
     """Tests that we can concretize a runtime as a standalone"""
-    gcc_runtime = spack.concretize.concretize_one("gcc-runtime", spack.context.current())
+    gcc_runtime = spack.concretize.concretize_one("gcc-runtime", spack.test.harness.current())
 
     deps = gcc_runtime.dependencies()
     assert len(deps) == 1
@@ -229,13 +227,13 @@ def test_multiple_intel_oneapi_compilers_versions(mutable_config, runtime_repo):
     )
 
     pkga_v1 = spack.concretize.concretize_one(
-        "pkg-a %c,cxx=intel-oneapi-compilers@1.0", spack.context.current()
+        "pkg-a %c,cxx=intel-oneapi-compilers@1.0", spack.test.harness.current()
     )
     assert pkga_v1.satisfies("%intel-oneapi-runtime@1.0"), pkga_v1.tree()
     assert pkga_v1["intel-oneapi-runtime"].satisfies("%gcc-runtime@9.4.0"), pkga_v1.tree()
 
     pkga_v2 = spack.concretize.concretize_one(
-        "pkg-a %c,cxx=intel-oneapi-compilers@2.0", spack.context.current()
+        "pkg-a %c,cxx=intel-oneapi-compilers@2.0", spack.test.harness.current()
     )
     assert pkga_v2.satisfies("%intel-oneapi-runtime@2.0")
     assert pkga_v2["intel-oneapi-runtime"].satisfies("%gcc-runtime@10.2.1"), pkga_v2.tree()

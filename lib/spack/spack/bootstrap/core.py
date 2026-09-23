@@ -224,6 +224,7 @@ class BuildcacheBootstrapper(Bootstrapper):
                 client=ctx.network,
                 store=ctx.store,
                 patchelf=spack.relocate.patchelf_finder(ctx),
+                gpg=None,
             )
 
     def _install_and_test(

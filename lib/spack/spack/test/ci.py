@@ -10,16 +10,15 @@ from urllib.error import HTTPError
 import pytest
 
 import spack.concretize
-import spack.config
-import spack.context
 import spack.environment as ev
 import spack.error
 import spack.paths
 import spack.reporters.cdash
+import spack.test.harness
 import spack.util.filesystem as fs
 import spack.util.git
 import spack.util.web
-from spack import ci, repo
+from spack import ci
 from spack.spec import Spec
 from spack.test.conftest import MockHTTPResponse, RepoBuilder
 from spack.version import Version
@@ -143,8 +142,8 @@ def test_pipeline_dag(config, repo_builder: RepoBuilder):
     repo_builder.add_package("pkg-b", dependencies=[("pkg-d", None, None), ("pkg-e", None, None)])
     repo_builder.add_package("pkg-a", dependencies=[("pkg-b", None, None), ("pkg-c", None, None)])
 
-    with repo.use_repositories(repo_builder.root):
-        spec_a = spack.concretize.concretize_one("pkg-a", spack.context.current())
+    with spack.test.harness.use_repositories(repo_builder.root):
+        spec_a = spack.concretize.concretize_one("pkg-a", spack.test.harness.current())
 
         key_a = ci.common.PipelineDag.key(spec_a)
         key_b = ci.common.PipelineDag.key(spec_a["pkg-b"])
@@ -250,7 +249,7 @@ def test_import_signing_key(mock_gnupghome):
         signing_key = fd.read()
 
     # Just make sure this does not raise any exceptions
-    ci.import_signing_key(signing_key)
+    ci.import_signing_key(signing_key, spack.test.harness.current())
 
 
 def test_download_and_extract_artifacts(tmp_path: pathlib.Path, monkeypatch):
@@ -287,9 +286,11 @@ def test_ci_copy_stage_logs_to_artifacts_fail(tmp_path: pathlib.Path, config, ca
     """The copy will fail because the spec is not concrete so does not have
     a package."""
     log_dir = tmp_path / "log_dir"
-    concrete_spec = spack.concretize.concretize_one("printing-package", spack.context.current())
+    concrete_spec = spack.concretize.concretize_one(
+        "printing-package", spack.test.harness.current()
+    )
     ci.copy_stage_logs_to_artifacts(
-        concrete_spec, str(log_dir), store=spack.context.current().store
+        concrete_spec, str(log_dir), store=spack.test.harness.current().store
     )
     _, err = capfd.readouterr()
     assert "Unable to copy files" in err
@@ -407,7 +408,7 @@ def test_get_spec_filter_list(mutable_mock_env_path, mutable_mock_repo):
 
     and simulates a change in libdwarf.
     """
-    e1 = ev.create("test", ctx=spack.context.current())
+    e1 = ev.create("test", ctx=spack.test.harness.current())
     e1.add("mpileaks")
     e1.add("hypre")
     e1.concretize()
@@ -465,7 +466,7 @@ def test_get_spec_filter_list(mutable_mock_env_path, mutable_mock_repo):
 
 @pytest.mark.regression("29947")
 def test_affected_specs_on_first_concretization(mutable_mock_env_path):
-    e = ev.create("first_concretization", ctx=spack.context.current())
+    e = ev.create("first_concretization", ctx=spack.test.harness.current())
     e.add("mpileaks~shared")
     e.add("mpileaks+shared")
     e.concretize()
@@ -498,7 +499,7 @@ def test_ci_create_buildcache(working_env, config, monkeypatch):
     """Test that create_buildcache returns a list of objects with the correct
     keys and types."""
     monkeypatch.setattr(ci, "push_to_build_cache", lambda a, b, c, **kwargs: True)
-    ctx = spack.context.current()
+    ctx = spack.test.harness.current()
     resources = {"ctx": ctx}
 
     results = ci.create_buildcache(
@@ -530,7 +531,9 @@ def test_ci_run_standalone_tests_missing_requirements(working_env, config, capfd
     assert "Job spec is required" in err
 
     args = {
-        "job_spec": spack.concretize.concretize_one("printing-package", spack.context.current())
+        "job_spec": spack.concretize.concretize_one(
+            "printing-package", spack.test.harness.current()
+        )
     }
     ci.run_standalone_tests(**args)
     err = capfd.readouterr()[1]
@@ -547,7 +550,7 @@ def test_ci_run_standalone_tests_not_installed_junit(
 
     ci.run_standalone_tests(
         log_file=str(log_file),
-        job_spec=spack.concretize.concretize_one("printing-package", spack.context.current()),
+        job_spec=spack.concretize.concretize_one("printing-package", spack.test.harness.current()),
         repro_dir=str(repro_dir),
         fail_fast=True,
     )
@@ -575,11 +578,13 @@ def test_ci_run_standalone_tests_not_installed_cdash(
     os.environ["SPACK_CDASH_BUILD_NAME"] = "ci-test-build"
     os.environ["SPACK_CDASH_BUILD_STAMP"] = "ci-test-build-stamp"
     os.environ["CI_RUNNER_DESCRIPTION"] = "test-runner"
-    client = spack.util.web.NetworkClient.from_config(spack.config.CONFIG)
-    handler = ci.CDashHandler(ci_cdash, urlopen=client.urlopen, config=spack.config.CONFIG)
+    client = spack.util.web.NetworkClient.from_config(spack.test.harness.current().config)
+    handler = ci.CDashHandler(
+        ci_cdash, urlopen=client.urlopen, config=spack.test.harness.current().config
+    )
     ci.run_standalone_tests(
         log_file=str(log_file),
-        job_spec=spack.concretize.concretize_one("printing-package", spack.context.current()),
+        job_spec=spack.concretize.concretize_one("printing-package", spack.test.harness.current()),
         repro_dir=str(repro_dir),
         cdash=handler,
     )
@@ -601,7 +606,7 @@ def test_ci_skipped_report(tmp_path: pathlib.Path, config, monkeypatch):
     # the cdash url is fake; never upload reports to it
     monkeypatch.setattr(spack.reporters.cdash.CDash, "upload", lambda self, filename: None)
     pkg = "trivial-smoke-test"
-    spec = spack.concretize.concretize_one(pkg, spack.context.current())
+    spec = spack.concretize.concretize_one(pkg, spack.test.harness.current())
     ci_cdash = {
         "url": "file://fake",
         "build-group": "fake-group",
@@ -611,8 +616,10 @@ def test_ci_skipped_report(tmp_path: pathlib.Path, config, monkeypatch):
     os.environ["SPACK_CDASH_BUILD_NAME"] = "fake-test-build"
     os.environ["SPACK_CDASH_BUILD_STAMP"] = "ci-test-build-stamp"
     os.environ["CI_RUNNER_DESCRIPTION"] = "test-runner"
-    client = spack.util.web.NetworkClient.from_config(spack.config.CONFIG)
-    handler = ci.CDashHandler(ci_cdash, urlopen=client.urlopen, config=spack.config.CONFIG)
+    client = spack.util.web.NetworkClient.from_config(spack.test.harness.current().config)
+    handler = ci.CDashHandler(
+        ci_cdash, urlopen=client.urlopen, config=spack.test.harness.current().config
+    )
     reason = "Testing skip"
     handler.report_skipped(spec, str(tmp_path), reason=reason)
 

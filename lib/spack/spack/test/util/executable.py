@@ -10,7 +10,7 @@ from typing import List
 import pytest
 
 import spack.main
-import spack.store
+import spack.test.harness
 import spack.util.executable as ex
 import spack.util.filesystem as fs
 from spack.hooks.sbang import filter_shebangs_in_directory
@@ -38,7 +38,7 @@ print(u'\\xc3')
 
         # make it executable
         fs.set_executable(script_name)
-        filter_shebangs_in_directory(".", spack.store.STORE, [script_name])
+        filter_shebangs_in_directory(".", spack.test.harness.current().store, [script_name])
 
         assert "\xc3" == script(*script_args, output=str).strip()
 

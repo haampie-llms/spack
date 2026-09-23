@@ -16,6 +16,7 @@ import spack.cmd.commands
 import spack.config
 import spack.main
 import spack.paths
+import spack.test.harness
 from spack.cmd.commands import _dest_to_fish_complete, _positional_to_subroutine
 from spack.util.executable import Executable
 
@@ -30,7 +31,7 @@ def commands(*args: str) -> str:
 def test_names():
     """Test default output of spack commands."""
     out1 = commands().strip().splitlines()
-    assert out1 == spack.cmd.all_commands()
+    assert out1 == spack.cmd.all_commands(spack.test.harness.current().config)
     assert "rm" not in out1
 
     out2 = commands("--aliases").strip().splitlines()
@@ -67,7 +68,9 @@ def test_subcommands():
 def test_alias_overrides_builtin(mutable_config: spack.config.Configuration, capfd):
     """Test that spack commands cannot be overridden by aliases."""
     mutable_config.set("config:aliases", {"install": "find"})
-    cmd, args = spack.main.resolve_alias("install", ["install", "-v"])
+    cmd, args = spack.main.resolve_alias(
+        "install", ["install", "-v"], spack.test.harness.current().config
+    )
     assert cmd == "install" and args == ["install", "-v"]
     out = capfd.readouterr().err
     assert "Alias 'install' (mapping to 'find') attempts to override built-in command" in out
@@ -76,7 +79,9 @@ def test_alias_overrides_builtin(mutable_config: spack.config.Configuration, cap
 def test_alias_with_space(mutable_config: spack.config.Configuration, capfd):
     """Test that spack aliases with spaces are rejected."""
     mutable_config.set("config:aliases", {"foo bar": "find"})
-    cmd, args = spack.main.resolve_alias("install", ["install", "-v"])
+    cmd, args = spack.main.resolve_alias(
+        "install", ["install", "-v"], spack.test.harness.current().config
+    )
     assert cmd == "install" and args == ["install", "-v"]
     out = capfd.readouterr().err
     assert "Alias 'foo bar' (mapping to 'find') contains a space, which is not supported" in out
@@ -85,7 +90,9 @@ def test_alias_with_space(mutable_config: spack.config.Configuration, capfd):
 def test_alias_resolves_properly(mutable_config: spack.config.Configuration):
     """Test that spack aliases resolve properly."""
     mutable_config.set("config:aliases", {"my_find": "find"})
-    cmd, args = spack.main.resolve_alias("my_find", ["my_find", "-v"])
+    cmd, args = spack.main.resolve_alias(
+        "my_find", ["my_find", "-v"], spack.test.harness.current().config
+    )
     assert cmd == "find" and args == ["find", "-v"]
 
 
@@ -134,7 +141,7 @@ _cmd-spack-install:
 
 
 def test_rst_with_header(tmp_path: pathlib.Path):
-    local_commands = spack.main.SpackCommand("commands")
+    local_commands = spack.test.harness.SpackCommand("commands")
     fake_header = "this is a header!\n\n"
 
     filename = tmp_path / "header.txt"
@@ -264,7 +271,7 @@ def test_update_completion_arg(shell, tmp_path: pathlib.Path, monkeypatch):
 
     monkeypatch.setattr(spack.cmd.commands, "update_completion_args", mock_args)
 
-    local_commands = spack.main.SpackCommand("commands")
+    local_commands = spack.test.harness.SpackCommand("commands")
     # ensure things fail if --update-completion isn't specified alone
     with pytest.raises(spack.main.SpackCommandError):
         local_commands("--update-completion", "-a")

@@ -7,12 +7,11 @@ import shutil
 import pytest
 
 import spack.cmd.isolate
-import spack.config
-import spack.main
+import spack.test.harness
 from spack.test.conftest import _create_mock_configuration_scopes
 
-sp_isolate = spack.main.SpackCommand("isolate")
-sp_config = spack.main.SpackCommand("config")
+sp_isolate = spack.test.harness.SpackCommand("isolate")
+sp_config = spack.test.harness.SpackCommand("config")
 
 
 @pytest.fixture(scope="function")
@@ -24,7 +23,7 @@ def mutable_config_with_dir(tmp_path_factory: pytest.TempPathFactory, configurat
     shutil.copytree(configuration_dir, mutable_dir)
 
     scopes = _create_mock_configuration_scopes(mutable_dir)
-    with spack.config.use_configuration(*scopes) as cfg:
+    with spack.test.harness.use_configuration(*scopes) as cfg:
         yield cfg, mutable_dir
 
 
@@ -52,7 +51,7 @@ def test_isolate_smoke_test(mock_pre_isolate_config):
     assert os.path.exists(os.path.join(spack.cmd.isolate.ISOLATE_SCOPE_PATH, "bootstrap.yaml"))
     assert os.path.exists(os.path.join(spack.cmd.isolate.ISOLATE_SCOPE_PATH, "config.yaml"))
     # we reload the config after isolation
-    with spack.config.use_configuration(cfg_dir / "spack"):
+    with spack.test.harness.use_configuration(cfg_dir / "spack"):
         assert "isolate" in sp_config("scopes")
 
 
@@ -61,7 +60,7 @@ def test_isolate_added_config(mock_pre_isolate_config):
     isolated_path = iso_root / "test-isolation"
     sp_isolate("--path", str(isolated_path))
     # configuration has changed on disk, this refreshes it in memory
-    with spack.config.use_configuration(cfg_dir / "spack"):
+    with spack.test.harness.use_configuration(cfg_dir / "spack"):
         sp_config("add", "config:build_jobs:42")
         assert (isolated_path / "config.yaml").exists()
         with open(isolated_path / "config.yaml", "r", encoding="utf-8") as f:
@@ -105,7 +104,7 @@ def test_self_isolate(mock_pre_isolate_config):
     assert os.path.exists(os.path.join(spack.cmd.isolate.ISOLATE_SCOPE_PATH, "bootstrap.yaml"))
     assert os.path.exists(os.path.join(spack.cmd.isolate.ISOLATE_SCOPE_PATH, "config.yaml"))
     # configuration has changed on disk, this refreshes it in memory
-    with spack.config.use_configuration(cfg_dir / "spack"):
+    with spack.test.harness.use_configuration(cfg_dir / "spack"):
         sp_config("add", "packages:gcc:buildable:false")
         new_config_path = os.path.join(spack.cmd.isolate.ISOLATE_SCOPE_PATH, "packages.yaml")
         assert os.path.exists(new_config_path)
@@ -126,7 +125,7 @@ def test_self_isolate_overwrite(mock_pre_isolate_config):
     new_concr_config_path = os.path.join(spack.cmd.isolate.ISOLATE_SCOPE_PATH, "concretizer.yaml")
     new_pkgs_config_path = os.path.join(spack.cmd.isolate.ISOLATE_SCOPE_PATH, "packages.yaml")
     # configuration has changed on disk, this refreshes it in memory
-    with spack.config.use_configuration(cfg_dir / "spack"):
+    with spack.test.harness.use_configuration(cfg_dir / "spack"):
         sp_config("add", "concretizer:reuse:false")
         assert os.path.exists(new_concr_config_path)
         with open(new_concr_config_path, "r", encoding="utf-8") as f:
@@ -137,7 +136,7 @@ concretizer:
         assert text == expected_text
     sp_isolate("--self", "--overwrite")
 
-    with spack.config.use_configuration(cfg_dir / "spack"):
+    with spack.test.harness.use_configuration(cfg_dir / "spack"):
         sp_config("add", "packages:gcc:buildable:false")
         assert not os.path.exists(new_concr_config_path)
         assert os.path.exists(new_pkgs_config_path)
@@ -155,5 +154,5 @@ def test_isolate_undo(mock_pre_isolate_config):
     isolated_path = iso_root / "test-isolation"
     sp_isolate("--path", str(isolated_path))
     sp_isolate("--undo")
-    with spack.config.use_configuration(cfg_dir / "spack"):
+    with spack.test.harness.use_configuration(cfg_dir / "spack"):
         assert "isolate" not in sp_config("scopes")

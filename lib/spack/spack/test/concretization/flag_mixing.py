@@ -36,12 +36,10 @@ import pathlib
 import pytest
 
 import spack.concretize
-import spack.config
-import spack.context
 import spack.environment as ev
 import spack.paths
-import spack.repo
 import spack.spec
+import spack.test.harness
 import spack.util.spack_yaml as syaml
 from spack.concretize_ui import HeadlessUI
 
@@ -49,13 +47,13 @@ from spack.concretize_ui import HeadlessUI
 @pytest.fixture
 def test_repo(mutable_config, monkeypatch, mock_stage):
     repo_dir = pathlib.Path(spack.paths.test_repos_path) / "spack_repo" / "flags_test"
-    with spack.repo.use_repositories(str(repo_dir)) as mock_packages_repo:
+    with spack.test.harness.use_repositories(str(repo_dir)) as mock_packages_repo:
         yield mock_packages_repo
 
 
 def update_concretize_scope(conf_str, section):
     conf = syaml.load_config(conf_str)
-    spack.config.CONFIG.set(section, conf[section], scope="concretize")
+    spack.test.harness.current().config.set(section, conf[section], scope="concretize")
 
 
 def test_mix_spec_and_requirements(concretize_scope, test_repo):
@@ -66,12 +64,12 @@ packages:
 """
     update_concretize_scope(conf_str, "packages")
 
-    s1 = spack.concretize.concretize_one('y cflags="-a"', spack.context.current())
+    s1 = spack.concretize.concretize_one('y cflags="-a"', spack.test.harness.current())
     assert s1.satisfies('cflags="-a -c"')
 
 
 def test_mix_spec_and_dependent(concretize_scope, test_repo):
-    s1 = spack.concretize.concretize_one('x ^y cflags="-a"', spack.context.current())
+    s1 = spack.concretize.concretize_one('x ^y cflags="-a"', spack.test.harness.current())
     assert s1["y"].satisfies('cflags="-a -d1"')
 
 
@@ -95,7 +93,9 @@ def test_mix_spec_and_compiler_cfg(concretize_scope, test_repo):
     conf_str = _compiler_cfg_one_entry_with_cflags("-Wall")
     update_concretize_scope(conf_str, "packages")
 
-    s1 = spack.concretize.concretize_one('y cflags="-O2" %gcc@12.100.100', spack.context.current())
+    s1 = spack.concretize.concretize_one(
+        'y cflags="-O2" %gcc@12.100.100', spack.test.harness.current()
+    )
     assert s1.satisfies('cflags="-Wall -O2"')
 
 
@@ -117,7 +117,7 @@ def test_pkg_flags_from_compiler_and_none(concretize_scope, mock_packages):
     s2 = spack.spec.Spec("cmake-client^cmake%clang@19.1.0")
     concrete = dict(
         spack.concretize._concretize_together(
-            [(s1, None), (s2, None)], spack.context.current(), ui=HeadlessUI()
+            [(s1, None), (s2, None)], spack.test.harness.current(), ui=HeadlessUI()
         )
     )
 
@@ -178,7 +178,7 @@ packages:
         spec_str = f"y {cmd_flags_str} {compiler_spec}"
         expected_dflags = None
 
-    root_spec = spack.concretize.concretize_one(spec_str, spack.context.current())
+    root_spec = spack.concretize.concretize_one(spec_str, spack.test.harness.current())
     spec = root_spec["y"]
     satisfy_flags = " ".join(x for x in [cmd_flags, req_flags, cmp_flags, expected_dflags] if x)
     assert spec.satisfies(f'cflags="{satisfy_flags}"')
@@ -186,11 +186,11 @@ packages:
 
 
 def test_two_dependents_flag_mixing(concretize_scope, test_repo):
-    root_spec1 = spack.concretize.concretize_one("w~moveflaglater", spack.context.current())
+    root_spec1 = spack.concretize.concretize_one("w~moveflaglater", spack.test.harness.current())
     spec1 = root_spec1["y"]
     assert spec1.compiler_flags["cflags"] == "-d0 -d1 -d2".split()
 
-    root_spec2 = spack.concretize.concretize_one("w+moveflaglater", spack.context.current())
+    root_spec2 = spack.concretize.concretize_one("w+moveflaglater", spack.test.harness.current())
     spec2 = root_spec2["y"]
     assert spec2.compiler_flags["cflags"] == "-d3 -d1 -d2".split()
 
@@ -200,14 +200,14 @@ def test_propagate_and_compiler_cfg(concretize_scope, test_repo):
     update_concretize_scope(conf_str, "packages")
 
     root_spec = spack.concretize.concretize_one(
-        "v cflags=='-f1' %gcc@12.100.100", spack.context.current()
+        "v cflags=='-f1' %gcc@12.100.100", spack.test.harness.current()
     )
     assert root_spec["y"].satisfies("cflags='-f1 -f2'")
 
 
 def test_propagate_and_pkg_dep(concretize_scope, test_repo):
     root_spec1 = spack.concretize.concretize_one(
-        "x ~activatemultiflag cflags=='-f1'", spack.context.current()
+        "x ~activatemultiflag cflags=='-f1'", spack.test.harness.current()
     )
     assert root_spec1["y"].satisfies("cflags='-f1 -d1'")
 
@@ -220,7 +220,7 @@ packages:
 """
     update_concretize_scope(conf_str, "packages")
 
-    root_spec1 = spack.concretize.concretize_one("v cflags=='-f1'", spack.context.current())
+    root_spec1 = spack.concretize.concretize_one("v cflags=='-f1'", spack.test.harness.current())
     assert root_spec1["y"].satisfies("cflags='-f1 -f2'")
 
     # Next, check that a requirement does not "undo" a request for
@@ -232,7 +232,7 @@ packages:
 """
     update_concretize_scope(conf_str, "packages")
 
-    root_spec2 = spack.concretize.concretize_one("v cflags=='-f1'", spack.context.current())
+    root_spec2 = spack.concretize.concretize_one("v cflags=='-f1'", spack.test.harness.current())
     assert root_spec2["y"].satisfies("cflags='-f1'")
 
     # Note: requirements cannot enforce propagation: any attempt to do
@@ -258,7 +258,7 @@ spack:
 
     manifest_file = tmp_path / ev.manifest_name
     manifest_file.write_text(env_content)
-    e = ev.create("test", manifest_file, ctx=spack.context.current())
+    e = ev.create("test", manifest_file, ctx=spack.test.harness.current())
     with e:
         e.concretize()
     e.write()
@@ -276,7 +276,7 @@ def test_diamond_dep_flag_mixing(concretize_scope, test_repo):
     nodes of the diamond always appear in the same order).
     `Spec.traverse` is responsible for handling both of these needs.
     """
-    root_spec1 = spack.concretize.concretize_one("t", spack.context.current())
+    root_spec1 = spack.concretize.concretize_one("t", spack.test.harness.current())
     spec1 = root_spec1["y"]
     assert spec1.satisfies('cflags="-c1 -c2 -d1 -d2 -e1 -e2"')
     assert spec1.compiler_flags["cflags"] == "-c1 -c2 -e1 -e2 -d1 -d2".split()
@@ -287,7 +287,7 @@ def test_flag_injection_different_compilers(mock_packages, mutable_config):
     from the propagation source.
     """
     s = spack.concretize.concretize_one(
-        'mpileaks cflags=="-O2" %gcc ^callpath %llvm', spack.context.current()
+        'mpileaks cflags=="-O2" %gcc ^callpath %llvm', spack.test.harness.current()
     )
     assert s.satisfies('cflags="-O2"') and s["c"].name == "gcc"
     assert not s["callpath"].satisfies('cflags="-O2"') and s["callpath"]["c"].name == "llvm"
@@ -311,7 +311,7 @@ def test_flags_and_duplicate_nodes(spec_str, expected, not_expected, config, moc
     """Tests that we can concretize a spec with flags on a node that is present with duplicates
     in the DAG. For instance, a compiler built with a previous version of itself.
     """
-    s = spack.concretize.concretize_one(spec_str, spack.context.current())
+    s = spack.concretize.concretize_one(spec_str, spack.test.harness.current())
     assert all(s.satisfies(x) for x in expected)
     assert all(not s.satisfies(x) for x in not_expected)
 
@@ -345,7 +345,7 @@ packages:
     update_concretize_scope(packages_yaml, "packages")
 
     s = spack.concretize.concretize_one(
-        "llvm-client %c,cxx=gcc@12.100.100", spack.context.current()
+        "llvm-client %c,cxx=gcc@12.100.100", spack.test.harness.current()
     )
 
     # gcc, not llvm, compiles llvm-client, and llvm is pulled in only as a library

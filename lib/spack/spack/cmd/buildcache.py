@@ -532,7 +532,7 @@ def push_fn(args, ctx):
 
     # Select a signing key, or None if unsigned.
     signing_key = (
-        None if unsigned else (args.key or spack.binary_distribution.select_signing_key())
+        None if unsigned else (args.key or spack.binary_distribution.select_signing_key(ctx.gpg))
     )
 
     specs = _specs_to_be_packaged(
@@ -644,6 +644,7 @@ def install_fn(args, ctx):
             client=ctx.network,
             store=ctx.store,
             patchelf=spack.relocate.patchelf_finder(ctx),
+            gpg=ctx.gpg,
         )
 
 
@@ -688,6 +689,7 @@ def keys_fn(args, ctx):
         mirrors=mirror_map,
         config=ctx.config,
         client=ctx.network,
+        gpg=ctx.gpg,
     )
 
 
@@ -1326,6 +1328,7 @@ def migrate_fn(args, ctx):
         config=ctx.config,
         client=ctx.network,
         repo_provider=ctx.repo_provider,
+        gpg=None if unsigned else ctx.gpg,
     )
 
 

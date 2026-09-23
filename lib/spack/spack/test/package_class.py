@@ -8,22 +8,21 @@ etc.).  Only methods like ``possible_dependencies()`` that deal with the
 static DSL metadata for packages.
 """
 
+import multiprocessing
 import os
 import pathlib
 import shutil
 
 import pytest
 
-import spack.binary_distribution
 import spack.concretize
-import spack.context
 import spack.deptypes as dt
 import spack.error
 import spack.install_test
 import spack.package_base
 import spack.spec
-import spack.store
 import spack.subprocess_context
+import spack.test.harness
 import spack.util.filesystem as fs
 from spack.error import InstallError
 from spack.package_base import PackageBase
@@ -69,8 +68,8 @@ def mock_inspector(config, mock_packages, request):
     return inspector_cls(
         configuration=config,
         repo=mock_packages,
-        store=spack.store.STORE,
-        binary_index=spack.binary_distribution.BINARY_INDEX,
+        store=spack.test.harness.current().store,
+        binary_index=spack.test.harness.current().binary_index,
     )
 
 
@@ -198,7 +197,7 @@ def setup_install_test(source_paths, test_root):
 )
 def test_cache_extra_sources(install_mockery, spec, sources, extras, expect):
     """Test the package's cache extra test sources helper function."""
-    s = spack.concretize.concretize_one(spec, spack.context.current())
+    s = spack.concretize.concretize_one(spec, spack.test.harness.current())
 
     source_path = s.package.stage.source_path
     srcs = [fs.join_path(source_path, src) for src in sources]
@@ -236,7 +235,7 @@ def test_cache_extra_sources(install_mockery, spec, sources, extras, expect):
 
 
 def test_cache_extra_sources_fails(install_mockery, tmp_path: pathlib.Path):
-    s = spack.concretize.concretize_one("pkg-a", spack.context.current())
+    s = spack.concretize.concretize_one("pkg-a", spack.test.harness.current())
 
     with pytest.raises(InstallError) as exc_info:
         spack.install_test.cache_extra_test_sources(s.package, [str(tmp_path), "no-such-file"])
@@ -276,7 +275,7 @@ def test_package_license():
     )
 
     pkg = LicensedPackage(spack.spec.Spec("licensed-package"))
-    pkg.context = spack.context.current()
+    pkg.context = spack.test.harness.current()
     assert pkg.global_license_file is None
 
     pkg.license_files = ["license.txt"]
@@ -322,7 +321,7 @@ def test_package_test_no_compilers(mock_packages, monkeypatch, capfd):
 
 def test_package_subscript(config, mock_packages):
     """Tests that we can use the subscript notation on packages, and that it returns a package"""
-    root = spack.concretize.concretize_one("mpileaks", spack.context.current())
+    root = spack.concretize.concretize_one("mpileaks", spack.test.harness.current())
     root_pkg = root.package
 
     # Subscript of a virtual
@@ -334,16 +333,19 @@ def test_package_subscript(config, mock_packages):
 
 
 def test_deserialize_preserves_package_attribute(config, mock_packages):
-    x = spack.concretize.concretize_one("mpileaks", spack.context.current()).package
+    x = spack.concretize.concretize_one("mpileaks", spack.test.harness.current()).package
     assert x.spec._package is x
 
-    y = spack.subprocess_context.deserialize(spack.subprocess_context.serialize(x))
+    spawn = multiprocessing.get_context("spawn")
+    y = spack.subprocess_context.PackageInstallContext(x, ctx=spawn).restore()
     assert y.spec._package is y
+    # The package's context is the one whose repositories were enabled on restore
+    assert "repo" in y.context.__dict__
 
 
 @pytest.mark.require_provenance
 def test_git_provenance_commit_version(config, mock_packages):
-    spec = spack.concretize.concretize_one("git-ref-package@stable", spack.context.current())
+    spec = spack.concretize.concretize_one("git-ref-package@stable", spack.test.harness.current())
     assert spec.satisfies(f"commit={'c' * 40}")
 
 
@@ -362,14 +364,16 @@ def test_git_provenance_find_commit_ls_remote(
     spec_str = f"git-test-commit@{version}"
 
     if pre_stage:
-        spack.concretize.concretize_one(spec_str, spack.context.current()).package.do_stage(False)
+        spack.concretize.concretize_one(spec_str, spack.test.harness.current()).package.do_stage(
+            False
+        )
     else:
         # explicitly disable ability to use stage or mirror, force url path
         monkeypatch.setattr(
             spack.package_base.PackageBase, "do_fetch", lambda *args, **kwargs: None
         )
 
-    spec = spack.concretize.concretize_one(spec_str, spack.context.current())
+    spec = spack.concretize.concretize_one(spec_str, spack.test.harness.current())
 
     if pre_stage:
         # confirmation that we actually had an expanded stage to query with ls-remote
@@ -399,7 +403,7 @@ def test_git_provenance_cant_resolve_commit(
     monkeypatch.setattr(spack.package_base.PackageBase, "git", repo_path, raising=False)
     monkeypatch.setattr(mock_packages.get_pkg_class("git-ref-package"), "git", repo_path)
     monkeypatch.setattr(spack.package_base.PackageBase, "do_fetch", lambda *args, **kwargs: None)
-    spec = spack.concretize.concretize_one("git-ref-package@develop", spack.context.current())
+    spec = spack.concretize.concretize_one("git-ref-package@develop", spack.test.harness.current())
     captured = capfd.readouterr()
     assert "commit" not in spec.variants
     assert "Warning: Unable to resolve the git commit" in captured.err

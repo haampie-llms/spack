@@ -22,15 +22,12 @@ import pytest
 
 import spack.binary_distribution
 import spack.concretize
-import spack.config
-import spack.context
 import spack.environment as ev
-import spack.main
 import spack.mirrors.mirror
 import spack.oci.image
 import spack.spec
 import spack.stage
-import spack.store
+import spack.test.harness
 import spack.url_buildcache
 import spack.util.gpg
 import spack.util.spack_yaml as syaml
@@ -61,15 +58,15 @@ from spack.util.filesystem import join_path, readlink, working_dir
 
 pytestmark = pytest.mark.not_on_windows("does not run on windows")
 
-mirror_cmd = spack.main.SpackCommand("mirror")
-install_cmd = spack.main.SpackCommand("install")
-uninstall_cmd = spack.main.SpackCommand("uninstall")
-buildcache_cmd = spack.main.SpackCommand("buildcache")
+mirror_cmd = spack.test.harness.SpackCommand("mirror")
+install_cmd = spack.test.harness.SpackCommand("install")
+uninstall_cmd = spack.test.harness.SpackCommand("uninstall")
+buildcache_cmd = spack.test.harness.SpackCommand("buildcache")
 
 
 def _net():
     """Configuration and network client of the current process."""
-    ctx = spack.context.current()
+    ctx = spack.test.harness.current()
     return {"config": ctx.config, "client": ctx.network}
 
 
@@ -159,29 +156,30 @@ def test_push_and_fetch_keys(mock_gnupghome, tmp_path: pathlib.Path):
 
     # dir 1: create a new key, record its fingerprint, and push it to a new
     #        mirror
-    with spack.util.gpg.gnupghome_override(gpg_dir1):
-        spack.util.gpg.create(name="test-key", email="fake@test.key", expires="0", comment=None)
+    ctx = spack.test.harness.current()
+    gpg1 = spack.util.gpg.Gpg(gpg_dir1, ctx)
+    spack.util.gpg.create(gpg1, name="test-key", email="fake@test.key", expires="0", comment=None)
 
-        keys = spack.util.gpg.public_keys()
-        assert len(keys) == 1
-        fpr = str(keys[0])
+    keys = spack.util.gpg.public_keys(gpg1)
+    assert len(keys) == 1
+    fpr = str(keys[0])
 
-        spack.binary_distribution._url_push_keys(
-            mirror, keys=[fpr], tmpdir=str(tmp_path), update_index=True, **_net()
-        )
+    spack.binary_distribution._url_push_keys(
+        mirror, keys=[fpr], tmpdir=str(tmp_path), update_index=True, gpg=gpg1, **_net()
+    )
 
     # dir 2: import the key from the mirror, and confirm that its fingerprint
     #        matches the one created above
-    with spack.util.gpg.gnupghome_override(gpg_dir2):
-        assert len(spack.util.gpg.public_keys()) == 0
+    gpg2 = spack.util.gpg.Gpg(gpg_dir2, ctx)
+    assert len(spack.util.gpg.public_keys(gpg2)) == 0
 
-        spack.binary_distribution.trust_keys(
-            mirrors=mirrors, yes_to_all=True, install=True, trust=True, force=True, **_net()
-        )
+    spack.binary_distribution.trust_keys(
+        mirrors=mirrors, yes_to_all=True, install=True, trust=True, force=True, gpg=gpg2, **_net()
+    )
 
-        new_keys = spack.util.gpg.public_keys()
-        assert len(new_keys) == 1
-        assert str(new_keys[0]) == fpr
+    new_keys = spack.util.gpg.public_keys(gpg2)
+    assert len(new_keys) == 1
+    assert str(new_keys[0]) == fpr
 
 
 @pytest.mark.maybeslow
@@ -196,12 +194,12 @@ def test_built_spec_cache(install_mockery, tmp_path: pathlib.Path):
     mirror_cmd("add", "--type", "binary", "--unsigned", "test-mirror", str(tmp_path))
     buildcache_cmd("list", "-a", "-l")
 
-    gspec = spack.concretize.concretize_one("garply", spack.context.current())
-    cspec = spack.concretize.concretize_one("corge", spack.context.current())
+    gspec = spack.concretize.concretize_one("garply", spack.test.harness.current())
+    cspec = spack.concretize.concretize_one("corge", spack.test.harness.current())
 
     for s in [gspec, cspec]:
         results = spack.binary_distribution.get_mirrors_for_spec(
-            s, binary_index=spack.context.current().binary_index, **_net()
+            s, binary_index=spack.test.harness.current().binary_index, gpg=None, **_net()
         )
         assert len(results) == 1
         assert results[0].url == url_util.path_to_file_url(str(tmp_path))
@@ -210,7 +208,7 @@ def test_built_spec_cache(install_mockery, tmp_path: pathlib.Path):
 def test_download_tarball_reports_signature_verification_failure(
     monkeypatch, mock_packages, capfd
 ):
-    spec = spack.concretize.concretize_one("corge", spack.context.current())
+    spec = spack.concretize.concretize_one("corge", spack.test.harness.current())
     mirror_url = "file:///test-mirror"
 
     class MockMirror:
@@ -245,7 +243,9 @@ def test_download_tarball_reports_signature_verification_failure(
         lambda layout_version: MockCacheEntry,
     )
 
-    assert spack.binary_distribution.download_tarball(spec, unsigned=None, **_net()) is None
+    assert (
+        spack.binary_distribution.download_tarball(spec, unsigned=None, gpg=None, **_net()) is None
+    )
 
     output = capfd.readouterr().err
     assert "Failed to verify signature for binary package corge/" in output
@@ -268,7 +268,7 @@ def test_spec_needs_rebuild(monkeypatch, tmp_path: pathlib.Path):
     mirror_dir = tmp_path / "mirror_dir"
     mirror_url = url_util.path_to_file_url(str(mirror_dir))
 
-    s = spack.concretize.concretize_one("libdwarf", spack.context.current())
+    s = spack.concretize.concretize_one("libdwarf", spack.test.harness.current())
 
     # Install a package
     install_cmd("--fake", "--include-build-deps", s.name)
@@ -299,7 +299,7 @@ def test_generate_index_missing(
     mirror_url = url_util.path_to_file_url(str(mirror_dir))
     mutable_config.set("mirrors", {"test": mirror_url})
 
-    s = spack.concretize.concretize_one("libdwarf", spack.context.current())
+    s = spack.concretize.concretize_one("libdwarf", spack.test.harness.current())
 
     # Install a package
     install_cmd("--fake", "--no-cache", s.name)
@@ -371,9 +371,13 @@ def test_push_index_keeps_records_of_other_formats(tmp_path: pathlib.Path, view:
     metadata = spack.url_buildcache.MirrorMetadata(
         mirror_url, spack.binary_distribution.CURRENT_BUILD_CACHE_LAYOUT_VERSION, view
     )
-    client = web_util.NetworkClient.from_config(spack.config.CONFIG)
+    client = web_util.NetworkClient.from_config(spack.test.harness.current().config)
     result = spack.binary_distribution.DefaultIndexHandler(
-        metadata, None, urlopen=client.urlopen, config=spack.config.CONFIG, client=client
+        metadata,
+        None,
+        urlopen=client.urlopen,
+        config=spack.test.harness.current().config,
+        client=client,
     ).conditional_fetch()
     assert result.hash == new["checksum"]
 
@@ -390,8 +394,8 @@ def test_use_bin_index(monkeypatch, tmp_path: pathlib.Path, mutable_config: Conf
     """
     index_cache_root = str(tmp_path / "index_cache")
     monkeypatch.setattr(
-        spack.binary_distribution,
-        "BINARY_INDEX",
+        spack.test.harness.current(),
+        "binary_index",
         spack.binary_distribution.BinaryIndexCache(
             index_cache_root,
             config=mutable_config,
@@ -404,14 +408,14 @@ def test_use_bin_index(monkeypatch, tmp_path: pathlib.Path, mutable_config: Conf
     mirror_dir = tmp_path / "mirror_dir"
     mirror_url = url_util.path_to_file_url(str(mirror_dir))
     mutable_config.set("mirrors", {"test": mirror_url})
-    s = spack.concretize.concretize_one("libdwarf", spack.context.current())
+    s = spack.concretize.concretize_one("libdwarf", spack.test.harness.current())
     install_cmd("--fake", "--no-cache", s.name)
     buildcache_cmd("push", "-u", str(mirror_dir), s.name)
     buildcache_cmd("update-index", str(mirror_dir))
 
     # Now the test
     buildcache_cmd("list", "-al")
-    spack.binary_distribution.BINARY_INDEX = spack.binary_distribution.BinaryIndexCache(
+    spack.test.harness.current().binary_index = spack.binary_distribution.BinaryIndexCache(
         index_cache_root,
         config=mutable_config,
         client=web_util.NetworkClient.from_config(mutable_config),
@@ -429,8 +433,8 @@ def test_use_bin_index_active_env_with_view(
     """
     index_cache_root = str(tmp_path / "index_cache")
     monkeypatch.setattr(
-        spack.binary_distribution,
-        "BINARY_INDEX",
+        spack.test.harness.current(),
+        "binary_index",
         spack.binary_distribution.BinaryIndexCache(
             index_cache_root,
             config=mutable_config,
@@ -443,18 +447,18 @@ def test_use_bin_index_active_env_with_view(
     mirror_dir = tmp_path / "mirror_dir"
     mirror_url = url_util.path_to_file_url(str(mirror_dir))
     mutable_config.set("mirrors", {"test": {"url": mirror_url, "view": "test"}})
-    s = spack.concretize.concretize_one("libdwarf", spack.context.current())
+    s = spack.concretize.concretize_one("libdwarf", spack.test.harness.current())
 
     # Create an environment and install specs for the view
-    ev.create("testenv", ctx=spack.context.current())
-    with ev.read("testenv", ctx=spack.context.current()):
+    ev.create("testenv", ctx=spack.test.harness.current())
+    with ev.read("testenv", ctx=spack.test.harness.current()):
         install_cmd("--add", "--fake", "--no-cache", s.name)
         buildcache_cmd("push", "-u", "test", s.name)
         buildcache_cmd("update-index", "test")
 
     # Now the test
     buildcache_cmd("list", "-al")
-    spack.binary_distribution.BINARY_INDEX = spack.binary_distribution.BinaryIndexCache(
+    spack.test.harness.current().binary_index = spack.binary_distribution.BinaryIndexCache(
         index_cache_root,
         config=mutable_config,
         client=web_util.NetworkClient.from_config(mutable_config),
@@ -472,8 +476,8 @@ def test_use_bin_index_with_view(
     """
     index_cache_root = str(tmp_path / "index_cache")
     monkeypatch.setattr(
-        spack.binary_distribution,
-        "BINARY_INDEX",
+        spack.test.harness.current(),
+        "binary_index",
         spack.binary_distribution.BinaryIndexCache(
             index_cache_root,
             config=mutable_config,
@@ -486,11 +490,11 @@ def test_use_bin_index_with_view(
     mirror_dir = tmp_path / "mirror_dir"
     mirror_url = url_util.path_to_file_url(str(mirror_dir))
     mutable_config.set("mirrors", {"test": {"url": mirror_url, "view": "test"}})
-    s = spack.concretize.concretize_one("libdwarf", spack.context.current())
+    s = spack.concretize.concretize_one("libdwarf", spack.test.harness.current())
 
     # Create an environment and install specs for the view
-    ev.create("testenv", ctx=spack.context.current())
-    with ev.read("testenv", ctx=spack.context.current()):
+    ev.create("testenv", ctx=spack.test.harness.current())
+    with ev.read("testenv", ctx=spack.test.harness.current()):
         install_cmd("--add", "--fake", "--no-cache", s.name)
         buildcache_cmd("push", "-u", "test", s.name)
 
@@ -498,7 +502,7 @@ def test_use_bin_index_with_view(
 
     # Now the test
     buildcache_cmd("list", "-al")
-    spack.binary_distribution.BINARY_INDEX = spack.binary_distribution.BinaryIndexCache(
+    spack.test.harness.current().binary_index = spack.binary_distribution.BinaryIndexCache(
         index_cache_root,
         config=mutable_config,
         client=web_util.NetworkClient.from_config(mutable_config),
@@ -585,9 +589,12 @@ def test_generate_indices_exception(monkeypatch, tmp_path: pathlib.Path, capfd):
 
 def test_update_sbang(tmp_path: pathlib.Path, temporary_mirror, mock_fetch, install_mockery):
     """Test relocation of the sbang shebang line in a package script"""
-    s = spack.concretize.concretize_one("old-sbang", spack.context.current())
+    s = spack.concretize.concretize_one("old-sbang", spack.test.harness.current())
     PackageInstaller([s.package]).install()
-    old_prefix, old_sbang_shebang = s.prefix, sbang.sbang_shebang_line_for(spack.store.STORE)
+    old_prefix, old_sbang_shebang = (
+        s.prefix,
+        sbang.sbang_shebang_line_for(spack.test.harness.current().store),
+    )
     old_contents = f"""\
 {old_sbang_shebang}
 #!/usr/bin/env python3
@@ -601,9 +608,12 @@ def test_update_sbang(tmp_path: pathlib.Path, temporary_mirror, mock_fetch, inst
     buildcache_cmd("push", "--update-index", "--unsigned", temporary_mirror, f"/{s.dag_hash()}")
 
     # Switch the store to the new install tree locations
-    with spack.store.use_store(str(tmp_path)):
+    with spack.test.harness.use_store(str(tmp_path)):
         s._prefix = None  # clear the cached old prefix
-        new_prefix, new_sbang_shebang = s.prefix, sbang.sbang_shebang_line_for(spack.store.STORE)
+        new_prefix, new_sbang_shebang = (
+            s.prefix,
+            sbang.sbang_shebang_line_for(spack.test.harness.current().store),
+        )
         assert old_prefix != new_prefix
         assert old_sbang_shebang != new_sbang_shebang
         PackageInstaller(
@@ -612,7 +622,7 @@ def test_update_sbang(tmp_path: pathlib.Path, temporary_mirror, mock_fetch, inst
 
         # Check that the sbang line refers to the new install tree
         new_contents = f"""\
-{sbang.sbang_shebang_line_for(spack.store.STORE)}
+{sbang.sbang_shebang_line_for(spack.test.harness.current().store)}
 #!/usr/bin/env python3
 
 {s.prefix.bin}
@@ -1269,7 +1279,7 @@ def test_url_buildcache_entry_v3(monkeypatch, tmp_path: pathlib.Path):
     mirror_dir = tmp_path / "mirror_dir"
     mirror_url = url_util.path_to_file_url(str(mirror_dir))
 
-    s = spack.concretize.concretize_one("libdwarf", spack.context.current())
+    s = spack.concretize.concretize_one("libdwarf", spack.test.harness.current())
 
     # Install libdwarf
     install_cmd("--fake", "--include-build-deps", s.name)
@@ -1593,12 +1603,12 @@ def test_get_entries_from_cache_nested_mirrors(monkeypatch, tmp_path: pathlib.Pa
     mirror_url = url_util.path_to_file_url(str(mirror_dir))
 
     # Install and push libdwarf to the root mirror
-    s = spack.concretize.concretize_one("libdwarf", spack.context.current())
+    s = spack.concretize.concretize_one("libdwarf", spack.test.harness.current())
     install_cmd("--fake", s.name)
     buildcache_cmd("push", "-u", str(mirror_dir), s.name)
 
     # Install and push libzlib to the nested mirror
-    s = spack.concretize.concretize_one("zlib", spack.context.current())
+    s = spack.concretize.concretize_one("zlib", spack.test.harness.current())
     install_cmd("--fake", s.name)
     buildcache_cmd("push", "-u", str(mirror_dir / "nested"), s.name)
 
@@ -1909,7 +1919,7 @@ def test_select_signing_key_shows_fingerprints(monkeypatch):
     keys = [Key("AAAA"), Key("BBBB")]
     monkeypatch.setattr(spack.util.gpg, "signing_keys", lambda *a: keys)
     with pytest.raises(spack.binary_distribution.PickKeyException, match="AAAA\n  BBBB"):
-        spack.binary_distribution.select_signing_key()
+        spack.binary_distribution.select_signing_key(None)
 
 
 @pytest.mark.parametrize(

@@ -241,13 +241,12 @@ def _concretize_separately(
     # parallelism is disabled (e.g. Windows), and when there is at most one spec to solve
     for j, (i, concrete, duration) in enumerate(
         spack.util.parallel.imap_unordered(
-            _concretize_task,
+            _concretize_task_in_environment,
             args,
             processes=processes,
             debug=tty.is_debug(),
             maxtaskperchild=1,
-            serialize_env=True,
-            shared=ctx,
+            shared=(ctx, ctx.environment),
         ),
         start=1,
     ):
@@ -276,6 +275,16 @@ def _concretize_task(
         start = time.time()
         spec = concretize_one(Spec(spec_str), ctx, tests=tests, factory=factory)
         return index, spec, time.time() - start
+
+
+def _concretize_task_in_environment(
+    shared: Tuple["spack.context.SpackContext", Optional["spack.environment.Environment"]],
+    packed_arguments: Tuple[int, str, TestsType, Optional["SpecFiltersFactory"]],
+) -> Tuple[int, Spec, float]:
+    """Like ``_concretize_task``, in the environment that pickling the context drops."""
+    ctx, env = shared
+    ctx._set_environment(env)
+    return _concretize_task(ctx, packed_arguments)
 
 
 def concretize_one(

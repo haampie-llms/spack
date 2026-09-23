@@ -79,7 +79,6 @@ def imap_unordered(
     processes: int,
     maxtaskperchild: Optional[int] = None,
     debug=False,
-    serialize_env: bool = False,
     shared: Any = None,
 ):
     """Wrapper around multiprocessing.Pool.imap_unordered.
@@ -104,7 +103,7 @@ def imap_unordered(
 
     from spack.subprocess_context import GlobalStateMarshaler
 
-    marshaler = GlobalStateMarshaler(serialize_env=serialize_env)
+    marshaler = GlobalStateMarshaler()
     with multiprocessing.Pool(
         processes,
         initializer=_init_worker,
@@ -153,13 +152,8 @@ class _SharedProcessPoolExecutor(concurrent.futures.ProcessPoolExecutor):
         return self.submit(_call_with_shared, fn, *args, **kwargs)
 
 
-def make_concurrent_executor(
-    jobs: Optional[int] = None, *, serialize_env: bool = False, shared: Any = None
-):
+def make_concurrent_executor(jobs: Optional[int] = None, *, shared: Any = None):
     """Create a concurrent executor.
-
-    If serialize_env is False (default), the active Spack environment is not transmitted to the
-    worker processes, which avoids the cost of pickling potentially large environment state.
 
     The ``shared`` object is sent once to each worker process, instead of with every task: tasks
     submitted with ``submit_shared`` receive it as first argument."""
@@ -170,7 +164,7 @@ def make_concurrent_executor(
     from spack.subprocess_context import GlobalStateMarshaler
 
     jobs = jobs or min(cpus_available(), 16)
-    marshaler = GlobalStateMarshaler(serialize_env=serialize_env)
+    marshaler = GlobalStateMarshaler()
     return _SharedProcessPoolExecutor(  # novermin
         jobs, initializer=_init_worker, initargs=(marshaler, shared)
     )

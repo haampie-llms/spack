@@ -8,11 +8,10 @@ from typing import List
 import pytest
 
 import spack.concretize
-import spack.config
-import spack.context
 import spack.deptypes as dt
 import spack.repo
 import spack.spec
+import spack.test.harness
 from spack.installer import PackageInstaller
 from spack.solver.asp import UnsatisfiableSpecError
 from spack.solver.error import SolverError
@@ -32,7 +31,7 @@ def install_specs(mutable_database, mock_packages, mutable_config, install_mocke
 
     def _impl(*specs_str):
         concrete_specs = [
-            spack.concretize.concretize_one(s, spack.context.current()) for s in specs_str
+            spack.concretize.concretize_one(s, spack.test.harness.current()) for s in specs_str
         ]
         PackageInstaller([s.package for s in concrete_specs], fake=True, explicit=True).install()
         return concrete_specs
@@ -41,7 +40,7 @@ def install_specs(mutable_database, mock_packages, mutable_config, install_mocke
 
 
 def _enable_splicing():
-    spack.config.CONFIG.set("concretizer:splice", {"automatic": True})
+    spack.test.harness.current().config.set("concretizer:splice", {"automatic": True})
 
 
 @pytest.mark.parametrize("spec_str", ["splice-z", "splice-h@1"])
@@ -49,7 +48,7 @@ def test_spec_reuse(spec_str, install_specs, mutable_config):
     """Tests reuse of splice-z, without splicing, as a root and as a dependency of splice-h"""
     splice_z = install_specs("splice-z@1.0.0+compat")[0]
     mutable_config.set("packages", _make_specs_non_buildable(["splice-z"]))
-    concrete = spack.concretize.concretize_one(spec_str, spack.context.current())
+    concrete = spack.concretize.concretize_one(spec_str, spack.test.harness.current())
     assert concrete["splice-z"].satisfies(splice_z)
 
 
@@ -65,9 +64,9 @@ def test_splice_installed_hash(install_specs, mutable_config):
 
     goal_spec = "splice-t@1 ^splice-h@1.0.2+compat ^splice-z@1.0.0"
     with pytest.raises(UnsatisfiableSpecError):
-        spack.concretize.concretize_one(goal_spec, spack.context.current())
+        spack.concretize.concretize_one(goal_spec, spack.test.harness.current())
     _enable_splicing()
-    concrete = spack.concretize.concretize_one(goal_spec, spack.context.current())
+    concrete = spack.concretize.concretize_one(goal_spec, spack.test.harness.current())
 
     # splice-t has a dependency that is changing, thus its hash should be different
     assert concrete.dag_hash() != splice_t.dag_hash()
@@ -87,10 +86,10 @@ def test_splice_build_splice_node(install_specs, mutable_config):
 
     goal_spec = "splice-t@1 ^splice-h@1.0.2+compat ^splice-z@1.0.0+compat"
     with pytest.raises(UnsatisfiableSpecError):
-        spack.concretize.concretize_one(goal_spec, spack.context.current())
+        spack.concretize.concretize_one(goal_spec, spack.test.harness.current())
 
     _enable_splicing()
-    concrete = spack.concretize.concretize_one(goal_spec, spack.context.current())
+    concrete = spack.concretize.concretize_one(goal_spec, spack.test.harness.current())
 
     # splice-t has a dependency that is changing, thus its hash should be different
     assert concrete.dag_hash() != splice_t.dag_hash()
@@ -113,10 +112,10 @@ def test_double_splice(install_specs, mutable_config):
 
     goal_spec = "splice-t@1 ^splice-h@1.0.2+compat ^splice-z@1.0.2+compat"
     with pytest.raises(UnsatisfiableSpecError):
-        spack.concretize.concretize_one(goal_spec, spack.context.current())
+        spack.concretize.concretize_one(goal_spec, spack.test.harness.current())
 
     _enable_splicing()
-    concrete = spack.concretize.concretize_one(goal_spec, spack.context.current())
+    concrete = spack.concretize.concretize_one(goal_spec, spack.test.harness.current())
 
     # splice-t and splice-h have a dependency that is changing, thus its hash should be different
     assert concrete.dag_hash() != splice_t.dag_hash()
@@ -160,10 +159,10 @@ def test_virtual_multi_splices_in(original_spec, goal_spec, install_specs, mutab
     mutable_config.set("packages", _make_specs_non_buildable(["depends-on-virtual-with-abi"]))
 
     with pytest.raises(UnsatisfiableSpecError):
-        spack.concretize.concretize_one(goal_spec, spack.context.current())
+        spack.concretize.concretize_one(goal_spec, spack.test.harness.current())
 
     _enable_splicing()
-    spliced = spack.concretize.concretize_one(goal_spec, spack.context.current())
+    spliced = spack.concretize.concretize_one(goal_spec, spack.test.harness.current())
 
     assert spliced.dag_hash() != original.dag_hash()
     assert spliced.build_spec.dag_hash() == original.dag_hash()
@@ -202,10 +201,10 @@ def test_manyvariant_matching_variant_splice(
     mutable_config.set("packages", {"depends-on-manyvariants": {"buildable": False}})
 
     with pytest.raises((UnsatisfiableSpecError, SolverError)):
-        spack.concretize.concretize_one(goal_spec, spack.context.current())
+        spack.concretize.concretize_one(goal_spec, spack.test.harness.current())
 
     _enable_splicing()
-    spliced = spack.concretize.concretize_one(goal_spec, spack.context.current())
+    spliced = spack.concretize.concretize_one(goal_spec, spack.test.harness.current())
 
     assert spliced.dag_hash() != original.dag_hash()
     assert spliced.build_spec.dag_hash() == original.dag_hash()
@@ -234,10 +233,10 @@ def test_external_splice_same_name(install_specs, mutable_config):
 
     _enable_splicing()
     concrete_splice_h = spack.concretize.concretize_one(
-        "splice-h@1.0.0 ^splice-z@1.0.2", spack.context.current()
+        "splice-h@1.0.0 ^splice-z@1.0.2", spack.test.harness.current()
     )
     concrete_splice_t = spack.concretize.concretize_one(
-        "splice-t@1.0 ^splice-h@1.0.1 ^splice-z@1.0.2", spack.context.current()
+        "splice-t@1.0 ^splice-h@1.0.1 ^splice-z@1.0.2", spack.test.harness.current()
     )
 
     assert concrete_splice_h.dag_hash() != original_splice_h.dag_hash()
@@ -257,7 +256,7 @@ def test_spliced_build_deps_only_in_build_spec(install_specs):
 
     _enable_splicing()
     spliced = spack.concretize.concretize_one(
-        "splice-t@1.0 ^splice-h@1.0.2 ^splice-z@1.0.0", spack.context.current()
+        "splice-t@1.0 ^splice-h@1.0.2 ^splice-z@1.0.0", spack.test.harness.current()
     )
     build_spec = spliced.build_spec
 
@@ -277,7 +276,7 @@ def test_spliced_transitive_dependency(install_specs, mutable_config):
 
     _enable_splicing()
     spliced = spack.concretize.concretize_one(
-        "splice-depends-on-t^splice-h@1.0.2", spack.context.current()
+        "splice-depends-on-t^splice-h@1.0.2", spack.test.harness.current()
     )
 
     # Spec has been spliced
@@ -299,7 +298,7 @@ def test_fresh_ancestor_of_spliced_dep_is_not_spliced(install_specs, mutable_con
 
     # splice-t is a fresh root: it depends on the reused, spliced splice-h.
     concrete = spack.concretize.concretize_one(
-        "splice-t@1.0 ^splice-h@1.0.0+compat ^splice-z@1.0.2+compat", spack.context.current()
+        "splice-t@1.0 ^splice-h@1.0.0+compat ^splice-z@1.0.2+compat", spack.test.harness.current()
     )
 
     assert all(node.concrete for node in concrete.traverse())
@@ -332,7 +331,7 @@ def test_spliced_spec_keeps_package_hash(install_specs, mutable_config):
 
     _enable_splicing()
     spliced = spack.concretize.concretize_one(
-        "splice-t@1.0 ^splice-h@1.0.2 ^splice-z@1.0.0", spack.context.current()
+        "splice-t@1.0 ^splice-h@1.0.2 ^splice-z@1.0.0", spack.test.harness.current()
     )
 
     # Spec has been spliced, and its package.py is the one it was built from
@@ -344,6 +343,6 @@ def test_spliced_spec_keeps_package_hash(install_specs, mutable_config):
     # package hashes from the repo
     recomputed = spliced.copy()
     recomputed._mark_concrete(False)
-    spack.repo.freeze_provided_virtuals([recomputed], repo=spack.repo.PATH)
-    spack.spec.assign_hashes([recomputed], repo=spack.repo.PATH)
+    spack.repo.freeze_provided_virtuals([recomputed], repo=spack.test.harness.current().repo)
+    spack.spec.assign_hashes([recomputed], repo=spack.test.harness.current().repo)
     assert recomputed.dag_hash() == spliced.dag_hash()

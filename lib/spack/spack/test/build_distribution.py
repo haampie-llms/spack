@@ -9,19 +9,21 @@ import pytest
 
 import spack.binary_distribution as bd
 import spack.concretize
-import spack.context
 import spack.mirrors.mirror
+import spack.test.harness
 from spack.installer import PackageInstaller
 
 pytestmark = pytest.mark.not_on_windows("does not run on windows")
 
 
 def test_build_tarball_overwrite(install_mockery, mock_fetch, monkeypatch, tmp_path: pathlib.Path):
-    spec = spack.concretize.concretize_one("trivial-install-test-package", spack.context.current())
+    spec = spack.concretize.concretize_one(
+        "trivial-install-test-package", spack.test.harness.current()
+    )
     PackageInstaller([spec.package], fake=True).install()
 
     specs = [spec]
-    ctx = spack.context.current()
+    ctx = spack.test.harness.current()
 
     def make_uploader(mirror, force=False):
         return bd.make_uploader(mirror, force=force, ctx=ctx)

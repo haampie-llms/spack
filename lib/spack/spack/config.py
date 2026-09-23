@@ -40,7 +40,7 @@ import tempfile
 import warnings
 from collections import defaultdict
 from itertools import chain
-from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple, Union, cast
+from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple, Union
 
 from spack.vendor import jsonschema
 from spack.vendor.typing_extensions import Protocol
@@ -885,11 +885,11 @@ class Configuration:
         Accepts a path syntax that allows us to grab nested config map
         entries.  Getting the ``config`` section would look like::
 
-            spack.config.CONFIG.get("config")
+            config.get("config")
 
         and the ``dirty`` section in the ``config`` scope would be::
 
-            spack.config.CONFIG.get("config:dirty")
+            config.get("config:dirty")
 
         We use ``:`` as the separator, like YAML objects.
         """
@@ -1724,27 +1724,16 @@ def create() -> Configuration:
     return list(create_incremental())[-1]
 
 
-#: This is the singleton configuration instance for Spack.
-CONFIG = cast(Configuration, lang.Singleton(create_incremental))
-
-#: Many cached config values depend on the current platform, so drop them when it changes.
-spack.platforms.on_host_changed.append(lambda: CONFIG.clear_caches())
-
-
-def writable_scopes() -> List[ConfigScope]:
-    """Return list of writable scopes. Higher-priority scopes come first in the list."""
-    scopes = [x for x in CONFIG.scopes.values() if x.writable]
-    scopes.reverse()
-    return scopes
-
-
-def flattened_configuration(manifest: Optional[YamlConfigDict] = None) -> YamlConfigDict:
+def flattened_configuration(
+    config: Configuration, manifest: Optional[YamlConfigDict] = None
+) -> YamlConfigDict:
     """Return every configuration section, merged across scopes, as a single document.
 
     The sections are written under the top level key of an environment manifest, so that the
     result can be read back by the same code that reads a ``spack.yaml``.
 
     Args:
+        config: configuration to flatten
         manifest: content of an environment manifest to merge the sections into. Its other
             keys, like ``specs`` and ``view``, are kept as they are. Passing the manifest of
             the active environment is what makes the result describe that environment.
@@ -1758,7 +1747,7 @@ def flattened_configuration(manifest: Optional[YamlConfigDict] = None) -> YamlCo
         flattened[top_level_key] = syaml.syaml_dict()
 
     for section in SECTION_SCHEMAS:
-        flattened[top_level_key][section] = CONFIG.get(section)
+        flattened[top_level_key][section] = config.get(section)
 
     return flattened
 
@@ -2132,34 +2121,6 @@ def ensure_latest_format_fn(section: str) -> Callable[[YamlConfigDict, "Configur
     return getattr(getattr(spack.schema, section), "update", lambda data, config: False)
 
 
-@contextlib.contextmanager
-def use_configuration(
-    *scopes_or_paths: Union[ScopeWithOptionalPriority, str],
-) -> Generator[Configuration, None, None]:
-    """Use the configuration scopes passed as arguments within the context manager.
-
-    This function invalidates caches, and is therefore very slow.
-
-    Args:
-        *scopes_or_paths: scope objects or paths to be used
-
-    Returns:
-        Configuration object associated with the scopes passed as arguments
-    """
-    global CONFIG
-
-    # Normalize input and construct a Configuration object
-    configuration = create_from(*scopes_or_paths)
-    CONFIG.clear_caches(), configuration.clear_caches()
-
-    saved_config, CONFIG = CONFIG, configuration
-
-    try:
-        yield configuration
-    finally:
-        CONFIG = saved_config
-
-
 def _normalize_input(entry: Union[ScopeWithOptionalPriority, str]) -> ScopeWithPriority:
     if isinstance(entry, tuple):
         return entry
@@ -2201,10 +2162,7 @@ def create_from(*scopes_or_paths: Union[ScopeWithOptionalPriority, str]) -> Conf
 
 
 def determine_number_of_jobs(
-    *,
-    parallel: bool = False,
-    max_cpus: int = cpus_available(),
-    config: Optional[Configuration] = None,
+    *, parallel: bool = False, max_cpus: int = cpus_available(), config: Configuration
 ) -> int:
     """
     Packages that require sequential builds need 1 job. Otherwise we use the
@@ -2215,22 +2173,20 @@ def determine_number_of_jobs(
     Parameters:
         parallel: true when package supports parallel builds
         max_cpus: maximum number of CPUs to use (defaults to cpus_available())
-        config: configuration object (defaults to global config)
+        config: configuration object
     """
     if not parallel:
         return 1
 
-    cfg = config or CONFIG
-
     # Command line overrides all
     try:
-        command_line = cfg.get("config:build_jobs", default=None, scope="command_line")
+        command_line = config.get("config:build_jobs", default=None, scope="command_line")
         if command_line is not None:
             return command_line
     except ValueError:
         pass
 
-    return min(max_cpus, cfg.get("config:build_jobs", 16))
+    return min(max_cpus, config.get("config:build_jobs", 16))
 
 
 def architecture():

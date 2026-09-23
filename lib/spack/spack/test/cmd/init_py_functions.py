@@ -5,9 +5,9 @@ import pathlib
 
 import pytest
 
-import spack.context
 import spack.environment as ev
 import spack.error
+import spack.test.harness
 from spack.cmd import (
     CommandNameError,
     PythonNameError,
@@ -80,17 +80,17 @@ def test_special_cases_concretization_parse_specs(
     if len(args) > 1:
         # We convert the last one to a specfile input
         filename = tmp_path / "spec.json"
-        spec = parse_specs(args[-1], spack.context.current(), concretize=True)[0]
+        spec = parse_specs(args[-1], spack.test.harness.current(), concretize=True)[0]
         with open(filename, "w", encoding="utf-8") as f:
             spec.to_json(f)
         args[-1] = str(filename)
 
     if error:
         with pytest.raises(error):
-            parse_specs(args, spack.context.current(), concretize=True)
+            parse_specs(args, spack.test.harness.current(), concretize=True)
     else:
         # assertion error from monkeypatch above if test fails
-        parse_specs(args, spack.context.current(), concretize=True)
+        parse_specs(args, spack.test.harness.current(), concretize=True)
 
 
 @pytest.mark.parametrize(
@@ -125,23 +125,23 @@ def test_special_cases_concretization_matching_specs_from_env(
 
     mutable_config.set("concretizer:unify", unify)
 
-    ev.create("test", ctx=spack.context.current())
-    env = ev.read("test", ctx=spack.context.current())
+    ev.create("test", ctx=spack.test.harness.current())
+    env = ev.read("test", ctx=spack.test.harness.current())
 
     args = [f"/{mutable_database.query(s)[0].dag_hash()}" for s in spec_strs]
     if len(args) > 1:
         # We convert the last one to a specfile input
         filename = tmp_path / "spec.json"
-        spec = parse_specs(args[-1], spack.context.current(), concretize=True)[0]
+        spec = parse_specs(args[-1], spack.test.harness.current(), concretize=True)[0]
         with open(filename, "w", encoding="utf-8") as f:
             spec.to_json(f)
         args[-1] = str(filename)
 
     with env:
-        specs = parse_specs(args, spack.context.current(), concretize=False)
+        specs = parse_specs(args, spack.test.harness.current(), concretize=False)
         if error:
             with pytest.raises(error):
-                matching_specs_from_env(specs, spack.context.current())
+                matching_specs_from_env(specs, spack.test.harness.current())
         else:
             # assertion error from monkeypatch above if test fails
-            matching_specs_from_env(specs, spack.context.current())
+            matching_specs_from_env(specs, spack.test.harness.current())

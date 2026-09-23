@@ -12,10 +12,10 @@ import urllib.error
 import pytest
 
 import spack.concretize
-import spack.context
 import spack.error
 import spack.fetch_strategy as fs
 import spack.package_base
+import spack.test.harness
 import spack.url
 import spack.util.web as web_util
 import spack.version
@@ -201,7 +201,7 @@ def test_fetch(
     # Get a spec and tweak the test package with new checksum params. versions is a class-level
     # dict shared across instances and cached with the package module, so add the version via
     # monkeypatch to restore it after the test instead of leaking it into later tests.
-    s = spack.concretize.concretize_one("url-test", spack.context.current())
+    s = spack.concretize.concretize_one("url-test", spack.test.harness.current())
     s.package.url = mock_archive.url
     monkeypatch.setitem(
         s.package.versions,
@@ -247,7 +247,7 @@ def test_from_list_url(mock_packages, config: Configuration, spec, url, digest, 
     have checksums in the package.
     """
     with config.override("config:url_fetch_method", _fetch_method):
-        s = spack.concretize.concretize_one(spec, spack.context.current())
+        s = spack.concretize.concretize_one(spec, spack.test.harness.current())
         fetch_strategy = fs.from_list_url(s.package)
         assert isinstance(fetch_strategy, fs.URLFetchStrategy)
         assert os.path.basename(fetch_strategy.url) == url
@@ -274,7 +274,7 @@ def test_new_version_from_list_url(
     """Test non-specific URLs from the url-list-test package."""
     with config.override("config:url_fetch_method", _fetch_method):
         s = spack.concretize.concretize_one(
-            f"url-list-test @{requested_version}", spack.context.current()
+            f"url-list-test @{requested_version}", spack.test.harness.current()
         )
         fetch_strategy = fs.from_list_url(s.package)
 
@@ -289,7 +289,7 @@ def test_new_version_from_list_url(
 
 def test_nosource_from_list_url(mock_packages, config):
     """This test confirms BundlePackages do not have list url."""
-    s = spack.concretize.concretize_one("nosource", spack.context.current())
+    s = spack.concretize.concretize_one("nosource", spack.test.harness.current())
     fetch_strategy = fs.from_list_url(s.package)
     assert fetch_strategy is None
 

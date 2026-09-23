@@ -19,6 +19,7 @@ import spack.config
 import spack.error
 import spack.fetch_strategy
 import spack.stage
+import spack.test.harness
 import spack.util.executable
 import spack.util.url as url_util
 from spack.config import Configuration, canonicalize_path
@@ -852,7 +853,9 @@ class TestStage:
 
         assert spack.stage._resolve_paths([path_with_user], config=config) == [path_with_user]
 
-        canonicalized_tempdir = canonicalize_path("$tempdir", config=spack.config.CONFIG)
+        canonicalized_tempdir = canonicalize_path(
+            "$tempdir", config=spack.test.harness.current().config
+        )
         temp_has_user = user in canonicalized_tempdir.split(os.sep)
         paths = [
             os.path.join("$tempdir", "stage"),
@@ -861,7 +864,9 @@ class TestStage:
             os.path.join("$tempdir", "$user", "stage", "$user"),
         ]
 
-        res_paths = [canonicalize_path(p, config=spack.config.CONFIG) for p in paths]
+        res_paths = [
+            canonicalize_path(p, config=spack.test.harness.current().config) for p in paths
+        ]
         if temp_has_user:
             res_paths[1] = canonicalized_tempdir
             res_paths[2] = os.path.join(canonicalized_tempdir, user)

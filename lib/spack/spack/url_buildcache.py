@@ -219,13 +219,15 @@ class URLBuildcacheEntry:
         *,
         config: spack.config.Configuration,
         client: web_util.NetworkClient,
+        gpg: Optional[spack.util.gpg.Gpg] = None,
     ):
-        """Lazily initialize the object"""
+        """Lazily initialize the object. ``gpg`` is required to verify or sign."""
         self.mirror_url: str = mirror_url
         self.spec: Optional[spack.spec.Spec] = spec
         self.allow_unsigned: bool = allow_unsigned
         self.config = config
         self.client = client
+        self.gpg = gpg
         self.manifest: Optional[BuildcacheManifest] = None
         self.remote_manifest_url: str = ""
         self.stages: Dict[BlobRecord, spack.stage.Stage] = {}
@@ -461,7 +463,12 @@ class URLBuildcacheEntry:
 
     @classmethod
     def verify_and_extract_manifest(
-        cls, manifest_contents: str, verify: bool = False, *, config: spack.config.Configuration
+        cls,
+        manifest_contents: str,
+        verify: bool = False,
+        *,
+        config: spack.config.Configuration,
+        gpg: Optional[spack.util.gpg.Gpg] = None,
     ) -> dict:
         """Possibly verify clearsig, then extract contents and return as json"""
         if spack.util.gpg.is_clearsig(manifest_contents):
@@ -471,7 +478,7 @@ class URLBuildcacheEntry:
                     manifest_path = os.path.join(tmpdir, "manifest.json.sig")
                     with open(manifest_path, "w", encoding="utf-8") as fd:
                         fd.write(manifest_contents)
-                    if not try_verify(manifest_path, config=config):
+                    if not try_verify(manifest_path, config=config, gpg=gpg):
                         raise NoVerifyException("Signature could not be verified")
 
             return spack.util.gpg.extract_json_from_clearsig(manifest_contents)
@@ -513,7 +520,7 @@ class URLBuildcacheEntry:
             raise BuildcacheEntryError("Unable to read manifest or manifest empty")
 
         manifest_contents = self.verify_and_extract_manifest(
-            manifest_contents, verify=not self.allow_unsigned, config=self.config
+            manifest_contents, verify=not self.allow_unsigned, config=self.config, gpg=self.gpg
         )
 
         self.manifest = BuildcacheManifest.from_dict(manifest_contents)
@@ -604,6 +611,7 @@ class URLBuildcacheEntry:
         signing_key: Optional[str] = None,
         *,
         client: web_util.NetworkClient,
+        gpg: Optional[spack.util.gpg.Gpg] = None,
     ) -> None:
         """Given a BuildcacheManifest, push it to the mirror using the given manifest
         name.  The component_type is used to indicate what type of thing the manifest
@@ -622,7 +630,7 @@ class URLBuildcacheEntry:
             # line length.
 
         if signing_key:
-            manifest_path = sign_file(signing_key, manifest_path)
+            manifest_path = sign_file(signing_key, manifest_path, gpg)
 
         manifest_destination_url = url_util.join(
             mirror_url, *cls.get_relative_path_components(component_type), manifest_file_name
@@ -793,7 +801,7 @@ class URLBuildcacheEntry:
 
         # possibly sign the manifest
         if signing_key:
-            manifest_path = sign_file(signing_key, manifest_path)
+            manifest_path = sign_file(signing_key, manifest_path, self.gpg)
 
         # Push the manifest file to the remote. The remote manifest url for
         # a given concrete spec is fixed, so we don't have to recompute it,
@@ -840,13 +848,15 @@ class URLBuildcacheEntryV2(URLBuildcacheEntry):
         *,
         config: spack.config.Configuration,
         client: web_util.NetworkClient,
+        gpg: Optional[spack.util.gpg.Gpg] = None,
     ):
-        """Lazily initialize the object"""
+        """Lazily initialize the object. ``gpg`` is required to verify."""
         self.mirror_url: str = push_url_base
         self.spec: Optional[spack.spec.Spec] = spec
         self.allow_unsigned: bool = allow_unsigned
         self.config = config
         self.client = client
+        self.gpg = gpg
 
         self.has_metadata: bool = False
         self.has_tarball: bool = False
@@ -975,7 +985,7 @@ class URLBuildcacheEntryV2(URLBuildcacheEntry):
         self.local_specfile_path = self.spec_stage.save_filename
 
         if not self.allow_unsigned and not try_verify(
-            self.local_specfile_path, config=self.config
+            self.local_specfile_path, config=self.config, gpg=self.gpg
         ):
             raise NoVerifyException(f"Signature on {self.remote_spec_url} could not be verified")
 
@@ -1091,7 +1101,12 @@ class URLBuildcacheEntryV2(URLBuildcacheEntry):
 
     @classmethod
     def verify_and_extract_manifest(
-        cls, manifest_contents: str, verify: bool = False, *, config: spack.config.Configuration
+        cls,
+        manifest_contents: str,
+        verify: bool = False,
+        *,
+        config: spack.config.Configuration,
+        gpg: Optional[spack.util.gpg.Gpg] = None,
     ) -> dict:
         raise BuildcacheEntryError("v2 buildcache entries do not have a manifest file")
 
@@ -1112,6 +1127,7 @@ class URLBuildcacheEntryV2(URLBuildcacheEntry):
         signing_key: Optional[str] = None,
         *,
         client: web_util.NetworkClient,
+        gpg: Optional[spack.util.gpg.Gpg] = None,
     ) -> None:
         raise BuildcacheEntryError("v2 buildcache layout is unaware of manifests and blobs")
 
@@ -1439,28 +1455,35 @@ def get_valid_spec_file(path: str, max_supported_layout: int) -> Tuple[Dict, int
     return spec_dict, layout_version
 
 
-def sign_file(key: str, file_path: str) -> str:
+def sign_file(key: str, file_path: str, gpg: Optional[spack.util.gpg.Gpg]) -> str:
     """sign and return the path to the signed file"""
+    if gpg is None:
+        raise BuildcacheEntryError(f"cannot sign {file_path} without GnuPG")
     signed_file_path = f"{file_path}.sig"
-    spack.util.gpg.sign(key, file_path, signed_file_path, clearsign=True)
+    spack.util.gpg.sign(gpg, key, file_path, signed_file_path, clearsign=True)
     return signed_file_path
 
 
-def try_verify(specfile_path, *, config: spack.config.Configuration):
+def try_verify(
+    specfile_path, *, config: spack.config.Configuration, gpg: Optional[spack.util.gpg.Gpg]
+):
     """Utility function to attempt to verify a local file.  Assumes the
     file is a clearsigned signature file.
 
     Args:
         specfile_path (str): Path to file to be verified.
         config: configuration with the GPG warning settings
+        gpg: GnuPG to verify with. Without it, nothing is verified.
 
     Returns:
         ``True`` if the signature could be verified, ``False`` otherwise.
     """
+    if gpg is None:
+        return False
     suppress = config.get("config:suppress_gpg_warnings", False)
 
     try:
-        spack.util.gpg.verify(specfile_path, suppress_warnings=suppress)
+        spack.util.gpg.verify(gpg, specfile_path, suppress_warnings=suppress)
     except Exception:
         return False
 

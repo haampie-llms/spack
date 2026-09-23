@@ -65,11 +65,6 @@ class BootstrapEnvironment(spack.environment.Environment):
             )
         )
 
-    @classmethod
-    def bootstrap_gpg_home(cls, config: spack.config.Configuration) -> pathlib.Path:
-        """Location of the GPG home directory used for bootstrapping"""
-        return pathlib.Path(root_path(config)).joinpath(".bootstrap_gpg_home")
-
     def view_root(self) -> pathlib.Path:
         """Location of the view"""
         return pathlib.Path(self.path).joinpath("view")
@@ -97,25 +92,22 @@ class BootstrapEnvironment(spack.environment.Environment):
             tty.msg(f"[BOOTSTRAPPING] Installing dependencies ({', '.join(colorized_specs)})")
             self.write(regenerate=False)
             with tty.SuppressOutput(msg_enabled=log_enabled, warn_enabled=log_enabled):
-                gnupghome = str(self.bootstrap_gpg_home(self.ctx.config))
-                with spack.util.gpg.gnupghome_override(gnupghome):
-                    download_and_trust_key(self.ctx)
-                    fetch_policy = (
-                        "cache_only"
-                        if not self.ctx.config.get("bootstrap:dev:enable_source", False)
-                        else "auto"
+                # The bootstrap context has its own GnuPG home
+                download_and_trust_key(self.ctx)
+                fetch_policy = (
+                    "cache_only"
+                    if not self.ctx.config.get("bootstrap:dev:enable_source", False)
+                    else "auto"
+                )
+                try:
+                    self.install_all(
+                        fail_fast=True, root_policy=fetch_policy, dependencies_policy=fetch_policy
                     )
-                    try:
-                        self.install_all(
-                            fail_fast=True,
-                            root_policy=fetch_policy,
-                            dependencies_policy=fetch_policy,
-                        )
-                    except BaseException:
-                        # catch any exception as we always want to clean up
-                        shutil.rmtree(self.path)
-                        raise
-                    self.write(regenerate=True)
+                except BaseException:
+                    # catch any exception as we always want to clean up
+                    shutil.rmtree(self.path)
+                    raise
+                self.write(regenerate=True)
 
     def load(self) -> None:
         """Update PATH and sys.path."""
@@ -187,7 +179,7 @@ def download_and_trust_key(ctx: spack.context.SpackContext):
             stage.fetch()
         except spack.error.FetchError as e:
             raise RuntimeError("Cannot fetch Spack Public key for binary cache validation") from e
-        spack.util.gpg.trust(stage.save_filename, fprs=[fingerprint])
+        spack.util.gpg.trust(ctx.gpg, stage.save_filename, fprs=[fingerprint])
 
 
 def ensure_environment_dependencies(ctx: spack.context.SpackContext) -> None:

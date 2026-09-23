@@ -6,7 +6,7 @@ import re
 
 import pytest
 
-from spack.main import SpackCommand
+from spack.test.harness import SpackCommand
 from spack.util.tty.color import color_when
 
 dependents = SpackCommand("dependents")

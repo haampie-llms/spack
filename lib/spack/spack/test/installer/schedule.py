@@ -9,11 +9,11 @@ from typing import Dict, List, Optional, Set, Tuple
 
 import pytest
 
-import spack.config
 import spack.deptypes as dt
 import spack.error
 import spack.spec
 import spack.store
+import spack.test.harness
 import spack.traverse
 from spack.config import Configuration
 from spack.database import Database
@@ -40,7 +40,7 @@ def install_spec_in_db(spec: Spec, store: Store):
     prefix = store.layout.path_for_spec(spec)
     spec.set_prefix(prefix)
     # Use the layout to create a proper installation directory structure
-    store.layout.create_install_directory(spec, spack.config.CONFIG)
+    store.layout.create_install_directory(spec, spack.test.harness.current().config)
     store.db.add(spec, explicit=False)
 
 
@@ -907,7 +907,7 @@ class TestScheduleBuilds:
 
     def _mark_installed(self, spec, store):
         """Create the install directory structure and register the spec in the DB as installed."""
-        store.layout.create_install_directory(spec, spack.config.CONFIG)
+        store.layout.create_install_directory(spec, spack.test.harness.current().config)
         store.db.add(spec, explicit=True)
 
     def test_not_installed_no_running_starts_build(self, temporary_store, mock_packages):
@@ -1073,7 +1073,7 @@ class TestScheduleBuilds:
     ):
         """An installed-implicit spec in explicit set produces a DbUpdate."""
         spec = self._make_spec("trivial-install-test-package", temporary_store)
-        temporary_store.layout.create_install_directory(spec, spack.config.CONFIG)
+        temporary_store.layout.create_install_directory(spec, spack.test.harness.current().config)
         temporary_store.db.add(spec, explicit=False)
         pending = [spec.dag_hash()]
         result = _schedule(

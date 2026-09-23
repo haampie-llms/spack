@@ -18,17 +18,15 @@ import spack.buildcache_migrate as migrate
 import spack.buildcache_prune
 import spack.cmd.buildcache
 import spack.concretize
-import spack.config
-import spack.context
 import spack.environment as ev
 import spack.error
 import spack.main
 import spack.mirrors.mirror
 import spack.repo
 import spack.spec
+import spack.test.harness
 import spack.util.url as url_util
 import spack.util.web as web_util
-from spack.active_environment import active_environment
 from spack.installer import PackageInstaller
 from spack.paths import test_path
 from spack.url_buildcache import (
@@ -41,19 +39,19 @@ from spack.url_buildcache import (
 from spack.util.filesystem import copy_tree, find, getuid
 from spack.util.lang import nullcontext
 
-buildcache = spack.main.SpackCommand("buildcache")
-install = spack.main.SpackCommand("install")
-env = spack.main.SpackCommand("env")
-add = spack.main.SpackCommand("add")
-gpg = spack.main.SpackCommand("gpg")
-mirror = spack.main.SpackCommand("mirror")
-uninstall = spack.main.SpackCommand("uninstall")
+buildcache = spack.test.harness.SpackCommand("buildcache")
+install = spack.test.harness.SpackCommand("install")
+env = spack.test.harness.SpackCommand("env")
+add = spack.test.harness.SpackCommand("add")
+gpg = spack.test.harness.SpackCommand("gpg")
+mirror = spack.test.harness.SpackCommand("mirror")
+uninstall = spack.test.harness.SpackCommand("uninstall")
 
 pytestmark = pytest.mark.not_on_windows("does not run on windows")
 
 
 def _entry_resources():
-    ctx = spack.context.current()
+    ctx = spack.test.harness.current()
     return {"config": ctx.config, "client": ctx.network}
 
 
@@ -105,13 +103,13 @@ def tests_buildcache_create_env(
     pkg = "trivial-install-test-package"
 
     env("create", "--without-view", "test")
-    with ev.read("test", ctx=spack.context.current()):
+    with ev.read("test", ctx=spack.test.harness.current()):
         add(pkg)
         install()
 
         buildcache("push", "--unsigned", str(tmp_path))
 
-    spec = spack.concretize.concretize_one(pkg, spack.context.current())
+    spec = spack.concretize.concretize_one(pkg, spack.test.harness.current())
 
     mirror_url = tmp_path.as_uri()
 
@@ -164,7 +162,7 @@ def test_update_key_index(
 
     gpg("create", "Test Signing Key", "nobody@nowhere.com")
 
-    s = spack.concretize.concretize_one("libdwarf", spack.context.current())
+    s = spack.concretize.concretize_one("libdwarf", spack.test.harness.current())
 
     # Install a package
     install("--fake", "--include-build-deps", s.name)
@@ -196,7 +194,7 @@ def test_buildcache_autopush(tmp_path: pathlib.Path, install_mockery, mock_fetch
     mirror("add", "--unsigned", "mirror", mirror_dir.as_uri())
     mirror("add", "--autopush", "--unsigned", "mirror-autopush", mirror_autopush_dir.as_uri())
 
-    s = spack.concretize.concretize_one("libdwarf", spack.context.current())
+    s = spack.concretize.concretize_one("libdwarf", spack.test.harness.current())
 
     # Install and generate build cache index
     PackageInstaller([s.package], fake=True, explicit=True).install()
@@ -251,12 +249,12 @@ def test_buildcache_sync(
         assert found_pkg, f"Expected to find {in_env_pkg} in {dest_mirror_dir}"
 
     # Install a package and put it in the buildcache
-    s = spack.concretize.concretize_one(out_env_pkg, spack.context.current())
+    s = spack.concretize.concretize_one(out_env_pkg, spack.test.harness.current())
     install("--fake", s.name)
     buildcache("push", "-u", "-f", src_mirror_url, s.name)
 
     env("create", "--without-view", "test")
-    with ev.read("test", ctx=spack.context.current()):
+    with ev.read("test", ctx=spack.test.harness.current()):
         add(in_env_pkg)
         install()
         buildcache("push", "-u", "-f", src_mirror_url, in_env_pkg)
@@ -298,7 +296,7 @@ def test_buildcache_sync(
 
         manifest_file = str(tmp_path / "manifest_dest.json")
         with open(manifest_file, "w", encoding="utf-8") as fd:
-            test_env = active_environment()
+            test_env = spack.test.harness.current().environment
             assert test_env is not None
 
             manifest: Dict[str, Dict[str, str]] = {}
@@ -343,7 +341,7 @@ def test_buildcache_create_install(
 
     mirror_url = tmp_path.as_uri()
 
-    spec = spack.concretize.concretize_one(pkg, spack.context.current())
+    spec = spack.concretize.concretize_one(pkg, spack.test.harness.current())
     cache_class = get_url_buildcache_class(
         layout_version=spack.binary_distribution.CURRENT_BUILD_CACHE_LAYOUT_VERSION
     )
@@ -380,7 +378,7 @@ def _mock_uploader(tmp_path: pathlib.Path):
                 spack.mirrors.mirror.Mirror.from_local_path(str(tmp_path)),
                 False,
                 False,
-                ctx=spack.context.current(),
+                ctx=spack.test.harness.current(),
             )
             self.pushed = []
 
@@ -439,7 +437,7 @@ def test_correct_specs_are_pushed(
     mock_packages,
     temporary_store,
 ):
-    spec = spack.concretize.concretize_one("dttop", spack.context.current())
+    spec = spack.concretize.concretize_one("dttop", spack.test.harness.current())
     PackageInstaller([spec.package], explicit=True, fake=True).install()
     slash_hash = f"/{spec.dag_hash()}"
 
@@ -500,7 +498,7 @@ def test_push_and_install_with_mirror_marked_unsigned_does_not_require_extra_fla
 def test_skip_no_redistribute(mock_packages, config):
     specs = list(
         spack.concretize.concretize_one(
-            "no-redistribute-dependent", spack.context.current()
+            "no-redistribute-dependent", spack.test.harness.current()
         ).traverse()
     )
     filtered = spack.cmd.buildcache._skip_no_redistribute_for_public(specs)
@@ -511,8 +509,8 @@ def test_skip_no_redistribute(mock_packages, config):
 def test_filter_specs_for_push_with_exclude(mock_packages, mutable_config):
     """Test that _filter_specs_for_push excludes specs matching the mirror's exclude patterns."""
     specs = [
-        spack.concretize.concretize_one("brillig", spack.context.current()),
-        spack.concretize.concretize_one("canfail", spack.context.current()),
+        spack.concretize.concretize_one("brillig", spack.test.harness.current()),
+        spack.concretize.concretize_one("canfail", spack.test.harness.current()),
     ]
     mirror = spack.mirrors.mirror.Mirror(
         {"url": "https://example.com", "exclude_binary": ["brillig"]}
@@ -526,8 +524,8 @@ def test_filter_specs_for_push_with_include(mock_packages, mutable_config):
     """Test that _filter_specs_for_push only includes specs matching the mirror's include
     patterns."""
     specs = [
-        spack.concretize.concretize_one("brillig", spack.context.current()),
-        spack.concretize.concretize_one("canfail", spack.context.current()),
+        spack.concretize.concretize_one("brillig", spack.test.harness.current()),
+        spack.concretize.concretize_one("canfail", spack.test.harness.current()),
     ]
     mirror = spack.mirrors.mirror.Mirror(
         {"url": "https://example.com", "include_binary": ["canfail"]}
@@ -546,7 +544,7 @@ def test_best_effort_vs_fail_fast_when_dep_not_installed(tmp_path: pathlib.Path,
 
     # Uninstall mpich so that its dependent mpileaks can't be pushed
     for s in mutable_database.query_local("mpich"):
-        spack.repo.attach_packages([s], spack.context.current())
+        spack.repo.attach_packages([s], spack.test.harness.current())
         s.package.do_uninstall(force=True)
 
     with pytest.raises(spack.cmd.buildcache.PackagesAreNotInstalledError, match="mpich"):
@@ -555,14 +553,14 @@ def test_best_effort_vs_fail_fast_when_dep_not_installed(tmp_path: pathlib.Path,
     # nothing should be pushed due to --fail-fast.
     assert not os.listdir(tmp_path)
     assert not spack.binary_distribution.update_cache_and_get_specs(
-        spack.context.current().binary_index, config=spack.config.CONFIG
+        spack.test.harness.current().binary_index, config=spack.test.harness.current().config
     )
 
     with pytest.raises(spack.cmd.buildcache.PackageNotInstalledError):
         buildcache("push", "--update-index", "my-mirror", "mpileaks^mpich")
 
     specs = spack.binary_distribution.update_cache_and_get_specs(
-        spack.context.current().binary_index, config=spack.config.CONFIG
+        spack.test.harness.current().binary_index, config=spack.test.harness.current().config
     )
 
     # everything but mpich should be pushed
@@ -578,14 +576,14 @@ def test_allow_missing_when_dep_not_installed(tmp_path: pathlib.Path, mutable_da
 
     # Uninstall mpich so that its dependent mpileaks can't be pushed
     for s in mutable_database.query_local("mpich"):
-        spack.repo.attach_packages([s], spack.context.current())
+        spack.repo.attach_packages([s], spack.test.harness.current())
         s.package.do_uninstall(force=True)
 
     # There should be warnings but no errors
     buildcache("push", "--update-index", "--allow-missing", "my-mirror", "mpileaks^mpich")
 
     specs = spack.binary_distribution.update_cache_and_get_specs(
-        spack.context.current().binary_index, config=spack.config.CONFIG
+        spack.test.harness.current().binary_index, config=spack.test.harness.current().config
     )
 
     # Everything but mpich should be pushed
@@ -601,7 +599,7 @@ def test_push_without_build_deps(
 
     mirror("add", "--unsigned", "my-mirror", str(tmp_path))
 
-    s = spack.concretize.concretize_one("dtrun3", spack.context.current())
+    s = spack.concretize.concretize_one("dtrun3", spack.test.harness.current())
     PackageInstaller([s.package], explicit=True, fake=True, include_build_deps=True).install()
     s["dtbuild3"].package.do_uninstall()
 
@@ -616,7 +614,7 @@ def test_push_without_build_deps(
         "push", "--update-index", "--without-build-dependencies", "my-mirror", f"/{s.dag_hash()}"
     )
     assert spack.binary_distribution.update_cache_and_get_specs(
-        spack.context.current().binary_index, config=spack.config.CONFIG
+        spack.test.harness.current().binary_index, config=spack.test.harness.current().config
     ) == [s]
 
 
@@ -637,7 +635,7 @@ def test_check_mirror_for_layout(v2_buildcache_layout, mutable_config, capfd):
 
     check_mirror_for_layout(
         spack.mirrors.mirror.Mirror.from_local_path(str(test_mirror_path)),
-        client=spack.context.current().network,
+        client=spack.test.harness.current().network,
     )
     err = str(capfd.readouterr()[1])
     assert all([word in err for word in ["Warning", "missing", "layout"]])
@@ -662,7 +660,7 @@ def test_url_buildcache_entry_v2_exists(
     build_cache = v2_cache_class(mirror_url, **_entry_resources())
     assert not build_cache.exists([BuildcacheComponent.SPEC, BuildcacheComponent.TARBALL])
 
-    spec = spack.concretize.concretize_one("libdwarf", spack.context.current())
+    spec = spack.concretize.concretize_one("libdwarf", spack.test.harness.current())
 
     # In v2 we have to ask for both, because we need to have the spec to have the tarball
     build_cache = v2_cache_class(mirror_url, spec, allow_unsigned=True, **_entry_resources())
@@ -878,7 +876,7 @@ def test_buildcache_prune_orphaned_blobs(tmp_path, mutable_database, mock_gnupgh
     manifest_url = URLBuildcacheEntry.get_manifest_url(
         spec, mirror_url=f"file://{mirror_directory}"
     )
-    client = web_util.NetworkClient.from_config(spack.config.CONFIG)
+    client = web_util.NetworkClient.from_config(spack.test.harness.current().config)
     web_util.remove_url(manifest_url, client=client)
 
     # Ensure the blobs are still there before pruning
@@ -919,7 +917,7 @@ def test_buildcache_prune_orphaned_manifest(tmp_path, mutable_database, mock_gnu
     manifest_url = f"file://{cache_entry.get_manifest_url(spec=spec, mirror_url=mirror_directory)}"
 
     # Remove the blobs from the cache, orphaning the manifest
-    client = web_util.NetworkClient.from_config(spack.config.CONFIG)
+    client = web_util.NetworkClient.from_config(spack.test.harness.current().config)
     for blob_file in manifest.data:
         blob_url = cache_entry.get_blob_url(mirror_url=mirror_directory, record=blob_file)
         web_util.remove_url(url=f"file://{blob_url}", client=client)
@@ -971,7 +969,7 @@ def test_buildcache_prune_direct_with_keeplist(
     output = buildcache(*cmd_args)
 
     # Since all packages are in the keeplist, nothing should be pruned
-    client = web_util.NetworkClient.from_config(spack.config.CONFIG)
+    client = web_util.NetworkClient.from_config(spack.test.harness.current().config)
     assert web_util.url_exists(manifest_url, client=client)
     assert "No specs to prune - all specs are in the keeplist" in output
 
@@ -1001,7 +999,7 @@ def test_buildcache_prune_direct_removes_unlisted(
     )
     manifest_url = cache_entry.get_manifest_url(spec1, f"file://{mirror_directory}")
 
-    client = web_util.NetworkClient.from_config(spack.config.CONFIG)
+    client = web_util.NetworkClient.from_config(spack.test.harness.current().config)
     assert web_util.url_exists(manifest_url, client=client)
 
     # Run direct pruning
@@ -1087,7 +1085,7 @@ def test_buildcache_prune_new_specs_race_condition(
 
     # Run end-to-end buildcache prune - this should not delete `libelf`, despite it
     # not being in the keeplist, because its mtime is after the pruning started
-    client = web_util.NetworkClient.from_config(spack.config.CONFIG)
+    client = web_util.NetworkClient.from_config(spack.test.harness.current().config)
     assert web_util.url_exists(manifest_url, client=client)
     buildcache("prune", "my-mirror", "--keeplist", str(keeplist_file))
     assert web_util.url_exists(manifest_url, client=client)
@@ -1097,10 +1095,10 @@ def create_env_from_concrete_spec(spec: spack.spec.Spec):
     """Build cache index view source is current active environment"""
     # Create a unique environment for this spec only
     env_name = f"specenv-{spec.dag_hash()}"
-    if not ev.exists(env_name, config=spack.config.CONFIG):
+    if not ev.exists(env_name, config=spack.test.harness.current().config):
         env("create", "--without-view", env_name)
 
-    e = ev.environment_from_name_or_dir(env_name, ctx=spack.context.current())
+    e = ev.environment_from_name_or_dir(env_name, ctx=spack.test.harness.current())
     with e:
         add(f"{spec.name}/{spec.dag_hash()}")
         # This should handle updating the environment to mark all packages as installed
@@ -1135,9 +1133,13 @@ def read_specs_in_index(mirror_directory, view):
     mirror_metadata = spack.binary_distribution.MirrorMetadata(
         f"file://{mirror_directory}", spack.mirrors.mirror.SUPPORTED_URL_LAYOUT_VERSIONS[0], view
     )
-    client = web_util.NetworkClient.from_config(spack.config.CONFIG)
+    client = web_util.NetworkClient.from_config(spack.test.harness.current().config)
     fetcher = spack.binary_distribution.DefaultIndexHandler(
-        mirror_metadata, None, urlopen=client.urlopen, config=spack.config.CONFIG, client=client
+        mirror_metadata,
+        None,
+        urlopen=client.urlopen,
+        config=spack.test.harness.current().config,
+        client=client,
     )
     result = fetcher.conditional_fetch()
     db_dict = json.loads(result.data)
@@ -1460,7 +1462,7 @@ spack:
     mirror_dir = tmp_path / "mirror"
     mirror_dir.mkdir()
 
-    with ev.Environment(env_dir, ctx=spack.context.current()) as e:
+    with ev.Environment(env_dir, ctx=spack.test.harness.current()) as e:
         e.concretize()
         e.write()
         for _, root in e.concretized_specs():
@@ -1498,7 +1500,7 @@ spack:
     mirror_dir = tmp_path / "mirror"
     mirror_dir.mkdir()
 
-    with ev.Environment(env_dir, ctx=spack.context.current()) as e:
+    with ev.Environment(env_dir, ctx=spack.test.harness.current()) as e:
         e.concretize()
         e.write()
         for _, root in e.concretized_specs():
@@ -1542,7 +1544,7 @@ spack:
     mirror_dir = tmp_path / "mirror"
     mirror_dir.mkdir()
 
-    with ev.Environment(env_dir, ctx=spack.context.current()):
+    with ev.Environment(env_dir, ctx=spack.test.harness.current()):
         with pytest.raises(spack.main.SpackCommandError):
             buildcache(
                 "push", "--unsigned", "--group", "nonexistent", str(mirror_dir), fail_on_error=True
@@ -1567,7 +1569,7 @@ spack:
     mirror_dir = tmp_path / "mirror"
     mirror_dir.mkdir()
 
-    with ev.Environment(env_dir, ctx=spack.context.current()):
+    with ev.Environment(env_dir, ctx=spack.test.harness.current()):
         with pytest.raises(spack.main.SpackCommandError):
             buildcache(
                 "push",

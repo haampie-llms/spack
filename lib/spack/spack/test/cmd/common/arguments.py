@@ -9,12 +9,10 @@ import pytest
 import spack.cmd
 import spack.concretize
 import spack.config
-import spack.context
 import spack.deprecation
 import spack.environment as ev
 import spack.error
-import spack.main
-import spack.repo
+import spack.test.harness
 from spack.cmd.common import arguments
 from spack.config import Configuration
 from spack.solver.asp import UnsatisfiableSpecError
@@ -28,21 +26,21 @@ def job_parser():
     arguments.add_common_arguments(p, ["jobs"])
     scopes = [spack.config.InternalConfigScope("command_line", {"config": {}})]
 
-    with spack.config.use_configuration(*scopes):
+    with spack.test.harness.use_configuration(*scopes):
         yield p
 
 
 def test_setting_jobs_flag(job_parser):
     namespace = job_parser.parse_args(["-j", "24"])
-    arguments.apply_deferred_config(namespace, spack.context.current())
+    arguments.apply_deferred_config(namespace, spack.test.harness.current())
     assert namespace.jobs == 24
-    assert spack.config.CONFIG.get("config:build_jobs", scope="command_line") == 24
+    assert spack.test.harness.current().config.get("config:build_jobs", scope="command_line") == 24
 
 
 def test_omitted_job_flag(job_parser):
     namespace = job_parser.parse_args([])
     assert namespace.jobs is None
-    assert spack.config.CONFIG.get("config:build_jobs") is None
+    assert spack.test.harness.current().config.get("config:build_jobs") is None
 
 
 def test_negative_integers_not_allowed_for_parallel_jobs(job_parser):
@@ -64,7 +62,7 @@ def test_negative_integers_not_allowed_for_parallel_jobs(job_parser):
 )
 @pytest.mark.regression("12951")
 def test_parse_spec_flags_with_spaces(specs, cflags, propagation, negated_variants):
-    spec_list = spack.cmd.parse_specs(specs, spack.context.current())
+    spec_list = spack.cmd.parse_specs(specs, spack.test.harness.current())
     assert len(spec_list) == 1
 
     s = spec_list.pop()
@@ -87,37 +85,40 @@ def test_match_spec_env(mock_packages, mutable_mock_env_path):
     """
     # Initial sanity check: we are planning on choosing a non-default
     # value, so make sure that is in fact not the default.
-    check_defaults = spack.cmd.parse_specs(["pkg-a"], spack.context.current(), concretize=True)[0]
+    check_defaults = spack.cmd.parse_specs(
+        ["pkg-a"], spack.test.harness.current(), concretize=True
+    )[0]
     assert not check_defaults.satisfies("foobar=baz")
 
-    e = ev.create("test", ctx=spack.context.current())
+    e = ev.create("test", ctx=spack.test.harness.current())
     e.add("pkg-a foobar=baz")
     e.concretize()
     with e:
         env_spec = spack.cmd.matching_spec_from_env(
-            spack.cmd.parse_specs(["pkg-a"], spack.context.current())[0], spack.context.current()
+            spack.cmd.parse_specs(["pkg-a"], spack.test.harness.current())[0],
+            spack.test.harness.current(),
         )
         assert env_spec.satisfies("foobar=baz")
         assert env_spec.concrete
 
 
 def test_multiple_env_match_raises_error(mock_packages, mutable_mock_env_path):
-    e = ev.create("test", ctx=spack.context.current())
+    e = ev.create("test", ctx=spack.test.harness.current())
     e.add("pkg-a foobar=baz")
     e.add("pkg-a foobar=fee")
     e.concretize()
     with e:
         with pytest.raises(ev.SpackEnvironmentError) as exc_info:
             spack.cmd.matching_spec_from_env(
-                spack.cmd.parse_specs(["pkg-a"], spack.context.current())[0],
-                spack.context.current(),
+                spack.cmd.parse_specs(["pkg-a"], spack.test.harness.current())[0],
+                spack.test.harness.current(),
             )
 
     assert "matches multiple specs" in exc_info.value.message
 
 
 def test_root_and_dep_match_returns_root(mock_packages, mutable_mock_env_path):
-    e = ev.create("test", ctx=spack.context.current())
+    e = ev.create("test", ctx=spack.test.harness.current())
     e.add("pkg-b@0.9")
     e.add("pkg-a foobar=bar")  # Depends on b, should choose b@1.0
     e.concretize()
@@ -125,13 +126,14 @@ def test_root_and_dep_match_returns_root(mock_packages, mutable_mock_env_path):
         # This query matches the root b and b as a dependency of a. In that
         # case the root instance should be preferred.
         env_spec1 = spack.cmd.matching_spec_from_env(
-            spack.cmd.parse_specs(["pkg-b"], spack.context.current())[0], spack.context.current()
+            spack.cmd.parse_specs(["pkg-b"], spack.test.harness.current())[0],
+            spack.test.harness.current(),
         )
         assert env_spec1.satisfies("@0.9")
 
         env_spec2 = spack.cmd.matching_spec_from_env(
-            spack.cmd.parse_specs(["pkg-b@1.0"], spack.context.current())[0],
-            spack.context.current(),
+            spack.cmd.parse_specs(["pkg-b@1.0"], spack.test.harness.current())[0],
+            spack.test.harness.current(),
         )
         assert env_spec2
 
@@ -147,7 +149,7 @@ def test_root_and_dep_match_returns_root(mock_packages, mutable_mock_env_path):
 )
 def test_concretizer_arguments(mutable_config: Configuration, mock_packages, arg, conf):
     """Ensure that ConfigSetAction is doing the right thing."""
-    spec = spack.main.SpackCommand("spec")
+    spec = spack.test.harness.SpackCommand("spec")
 
     assert mutable_config.get("concretizer:reuse", None, scope="command_line") is None
 
@@ -184,7 +186,7 @@ def test_missing_config_scopes_are_valid_scope_arguments(mock_missing_dir_includ
         help="configuration scope to modify",
     )
     namespace = a.parse_args(["--scope", "sub_base"])
-    arguments.apply_deferred_config(namespace, spack.context.current())
+    arguments.apply_deferred_config(namespace, spack.test.harness.current())
     assert namespace.scope == "sub_base"
 
 
@@ -201,7 +203,7 @@ def test_missing_config_scopes_not_valid_read_scope(mock_missing_dir_include_sco
     )
     namespace = a.parse_args(["--scope", "sub_base"])
     with pytest.raises(ValueError, match="scope context does not exist"):
-        arguments.apply_deferred_config(namespace, spack.context.current())
+        arguments.apply_deferred_config(namespace, spack.test.harness.current())
 
 
 def test_deprecated_flag_allows_deprecations_on_packages_with_an_allow_list(
@@ -213,7 +215,7 @@ def test_deprecated_flag_allows_deprecations_on_packages_with_an_allow_list(
     mutable_config.set(
         "packages:deprecated-with-labels:deprecation:allow", [{"labels": ["CVE-2026-0002"]}]
     )
-    spec = spack.main.SpackCommand("spec")
+    spec = spack.test.harness.SpackCommand("spec")
 
     with pytest.raises(UnsatisfiableSpecError, match="deprecated"):
         spec("deprecated-with-labels@3.0")
@@ -229,7 +231,7 @@ def test_deprecated_flag_is_honored_by_the_install_time_check(
     """
     with mutable_config.override("packages:all:deprecation:allow", [{"severity": "critical"}]):
         concrete = spack.concretize.concretize_one(
-            "deprecated-with-labels@3.0", spack.context.current()
+            "deprecated-with-labels@3.0", spack.test.harness.current()
         )
 
     mutable_config.set(
@@ -238,15 +240,19 @@ def test_deprecated_flag_is_honored_by_the_install_time_check(
     with pytest.raises(spack.error.InstallError, match="deprecated"):
         spack.deprecation.check_deprecations(
             [concrete],
-            policy=spack.deprecation.Policy.from_config(spack.config.CONFIG, repo=spack.repo.PATH),
+            policy=spack.deprecation.Policy.from_config(
+                spack.test.harness.current().config, repo=spack.test.harness.current().repo
+            ),
         )
 
     parser = argparse.ArgumentParser()
     arguments.add_concretizer_args(parser)
     namespace = parser.parse_args(["--deprecated"])
-    arguments.apply_deferred_config(namespace, spack.context.current())
+    arguments.apply_deferred_config(namespace, spack.test.harness.current())
 
     spack.deprecation.check_deprecations(
         [concrete],
-        policy=spack.deprecation.Policy.from_config(spack.config.CONFIG, repo=spack.repo.PATH),
+        policy=spack.deprecation.Policy.from_config(
+            spack.test.harness.current().config, repo=spack.test.harness.current().repo
+        ),
     )  # must not raise

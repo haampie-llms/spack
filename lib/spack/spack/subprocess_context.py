@@ -18,17 +18,10 @@ import multiprocessing
 import multiprocessing.context
 import pickle
 from types import ModuleType
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Union
 
-import spack.config
-import spack.context
 import spack.paths
 import spack.platforms
-import spack.repo
-import spack.store
-import spack.util.gpg
-import spack.util.lang
-from spack.active_environment import active_environment
 
 if TYPE_CHECKING:
     import spack.package_base
@@ -37,34 +30,11 @@ if TYPE_CHECKING:
 MONKEYPATCHES: list = []
 
 
-def serialize(pkg: "spack.package_base.PackageBase") -> io.BytesIO:
-    serialized_pkg = io.BytesIO()
-    pickle.dump(pkg, serialized_pkg)
-    serialized_pkg.seek(0)
-    return serialized_pkg
-
-
-def deserialize(serialized_pkg: io.BytesIO) -> "spack.package_base.PackageBase":
-    pkg = pickle.load(serialized_pkg)
-    pkg.spec._package = pkg
-    # ensure overwritten package class attributes get applied
-    spack.repo.PATH.get_pkg_class(pkg.spec.name)
-    # The dependencies come without packages, which setting up the build environment reads
-    spack.repo.attach_packages([pkg.spec], pkg.context)
-    return pkg
-
-
-class SpackTestProcess:
-    def __init__(self, fn):
-        self.fn = fn
-
-    def _restore_and_run(self, fn, test_state):
-        test_state.restore()
-        fn()
-
-    def create(self):
-        test_state = GlobalStateMarshaler()
-        return multiprocessing.Process(target=self._restore_and_run, args=(self.fn, test_state))
+def serialize(obj) -> io.BytesIO:
+    serialized_obj = io.BytesIO()
+    pickle.dump(obj, serialized_obj)
+    serialized_obj.seek(0)
+    return serialized_obj
 
 
 class PackageInstallContext:
@@ -78,44 +48,49 @@ class PackageInstallContext:
         ctx: Optional[multiprocessing.context.BaseContext] = None,
     ):
         ctx = ctx or multiprocessing.get_context()
-        self.global_state = GlobalStateMarshaler(ctx=ctx, serialize_env=True)
-        self.pkg = pkg if ctx.get_start_method() == "fork" else serialize(pkg)
-        self.spack_working_dir = spack.paths.spack_working_dir
+        self.global_state = GlobalStateMarshaler(ctx=ctx)
+        self.pkg: Union["spack.package_base.PackageBase", io.BytesIO] = pkg
+        if ctx.get_start_method() != "fork":
+            # The context goes first: its repositories import the package class on unpickling.
+            # One pickler, so that the package refers to the same context.
+            stream = io.BytesIO()
+            pickler = pickle.Pickler(stream)
+            pickler.dump(pkg.context)
+            pickler.dump(pkg)
+            stream.seek(0)
+            self.pkg = stream
 
     def restore(self) -> "spack.package_base.PackageBase":
-        spack.paths.spack_working_dir = self.spack_working_dir
         self.global_state.restore()
-        return deserialize(self.pkg) if isinstance(self.pkg, io.BytesIO) else self.pkg
+        if not isinstance(self.pkg, io.BytesIO):
+            return self.pkg
+        import spack.repo
+
+        unpickler = pickle.Unpickler(self.pkg)
+        ctx = unpickler.load()
+        ctx.repo  # enable the repositories before the package is unpickled
+        pkg = unpickler.load()
+        pkg.spec._package = pkg
+        # The dependencies come without packages, which setting up the build environment reads
+        spack.repo.attach_packages([pkg.spec], ctx)
+        return pkg
 
 
 class GlobalStateMarshaler:
-    """Class to serialize and restore global state for child processes if needed.
-
-    Spack may modify state that is normally read from disk or command line in memory;
-    this object is responsible for properly serializing that state to be applied to a subprocess.
+    """Class to serialize and restore the process state that child processes need, and that is
+    not part of the context they receive: the platform, the working directory and, in tests,
+    monkeypatches.
     """
 
-    def __init__(
-        self,
-        *,
-        ctx: Optional[Optional[multiprocessing.context.BaseContext]] = None,
-        serialize_env: bool = False,
-    ) -> None:
+    def __init__(self, *, ctx: Optional[multiprocessing.context.BaseContext] = None) -> None:
         ctx = ctx or multiprocessing.get_context()
         self.is_forked = ctx.get_start_method() == "fork"
         if self.is_forked:
             return
 
-        self.config = spack.util.lang.ensure_unwrapped(spack.config.CONFIG)
         self.platform = spack.platforms.host
-        self.store = spack.store.STORE
         self.test_patches = TestPatches.create()
         self.spack_working_dir = spack.paths.spack_working_dir
-        self.gnupg_home = str(spack.util.gpg.GNUPGHOME) if spack.util.gpg.GNUPGHOME else None
-        if serialize_env:
-            self.env = active_environment()
-        else:
-            self.env = None
 
     def restore(self):
         if self.is_forked:
@@ -127,19 +102,9 @@ class GlobalStateMarshaler:
             web.clear_ssl_contexts()
             s3_client_cache.clear()
             return
-        spack.config.CONFIG = self.config
-        spack.repo.enable_repo(
-            spack.repo.RepoPath.from_config(self.config, cache=spack.context.current().misc_cache)
-        )
         spack.platforms.host = self.platform
-        spack.store.STORE = self.store
         spack.paths.spack_working_dir = self.spack_working_dir
-        if self.gnupg_home:
-            spack.util.gpg.GPG = spack.util.gpg.Gpg(self.gnupg_home)
-            spack.util.gpg.GNUPGHOME = spack.util.gpg.GPG.home
         self.test_patches.restore()
-        if self.env:
-            self.env.activate()
 
 
 class TestPatches:

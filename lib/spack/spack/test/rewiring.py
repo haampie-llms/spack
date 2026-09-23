@@ -9,10 +9,10 @@ import sys
 import pytest
 
 import spack.concretize
-import spack.context
 import spack.deptypes as dt
 import spack.repo
 import spack.rewiring
+import spack.test.harness
 from spack.installer import PackageInstaller
 from spack.store import Store
 from spack.test.relocate import text_in_bin
@@ -37,14 +37,14 @@ def check_spliced_spec_prefixes(spliced_spec):
 @pytest.mark.parametrize("transitive", [True, False])
 def test_rewire_db(mock_fetch, temporary_store: Store, install_mockery, transitive):
     """Tests basic rewiring without binary executables."""
-    spec = spack.concretize.concretize_one("splice-t^splice-h~foo", spack.context.current())
-    dep = spack.concretize.concretize_one("splice-h+foo", spack.context.current())
+    spec = spack.concretize.concretize_one("splice-t^splice-h~foo", spack.test.harness.current())
+    dep = spack.concretize.concretize_one("splice-h+foo", spack.test.harness.current())
     PackageInstaller([spec.package, dep.package], explicit=True).install()
     spliced_spec = spec.splice(dep, transitive=transitive)
-    spack.repo.attach_packages([spliced_spec], spack.context.current())
+    spack.repo.attach_packages([spliced_spec], spack.test.harness.current())
     assert spec.dag_hash() != spliced_spec.dag_hash()
 
-    spack.rewiring.rewire(spliced_spec, spack.context.current())
+    spack.rewiring.rewire(spliced_spec, spack.test.harness.current())
 
     # check that the prefix exists
     assert os.path.exists(spliced_spec.prefix)
@@ -62,15 +62,15 @@ def test_rewire_db(mock_fetch, temporary_store: Store, install_mockery, transiti
 @pytest.mark.parametrize("transitive", [True, False])
 def test_rewire_bin(mock_fetch, temporary_store: Store, install_mockery, transitive):
     """Tests basic rewiring with binary executables."""
-    spec = spack.concretize.concretize_one("quux", spack.context.current())
-    dep = spack.concretize.concretize_one("garply cflags=-g", spack.context.current())
+    spec = spack.concretize.concretize_one("quux", spack.test.harness.current())
+    dep = spack.concretize.concretize_one("garply cflags=-g", spack.test.harness.current())
     PackageInstaller([spec.package, dep.package], explicit=True).install()
     spliced_spec = spec.splice(dep, transitive=transitive)
-    spack.repo.attach_packages([spliced_spec], spack.context.current())
+    spack.repo.attach_packages([spliced_spec], spack.test.harness.current())
 
     assert spec.dag_hash() != spliced_spec.dag_hash()
 
-    spack.rewiring.rewire(spliced_spec, spack.context.current())
+    spack.rewiring.rewire(spliced_spec, spack.test.harness.current())
 
     # check that the prefix exists
     assert os.path.exists(spliced_spec.prefix)
@@ -92,12 +92,12 @@ def test_rewire_bin(mock_fetch, temporary_store: Store, install_mockery, transit
 def test_rewire_writes_new_metadata(mock_fetch, temporary_store: Store, install_mockery):
     """Tests that new metadata was written during a rewire.
     Accuracy of metadata is left to other tests."""
-    spec = spack.concretize.concretize_one("quux", spack.context.current())
-    dep = spack.concretize.concretize_one("garply cflags=-g", spack.context.current())
+    spec = spack.concretize.concretize_one("quux", spack.test.harness.current())
+    dep = spack.concretize.concretize_one("garply cflags=-g", spack.test.harness.current())
     PackageInstaller([spec.package, dep.package], explicit=True).install()
     spliced_spec = spec.splice(dep, transitive=True)
-    spack.repo.attach_packages([spliced_spec], spack.context.current())
-    spack.rewiring.rewire(spliced_spec, spack.context.current())
+    spack.repo.attach_packages([spliced_spec], spack.test.harness.current())
+    spack.rewiring.rewire(spliced_spec, spack.test.harness.current())
 
     # test install manifests
     for node in spliced_spec.traverse(root=True):
@@ -135,12 +135,12 @@ def test_rewire_writes_new_metadata(mock_fetch, temporary_store: Store, install_
 @pytest.mark.parametrize("transitive", [True, False])
 def test_uninstall_rewired_spec(mock_fetch, temporary_store: Store, install_mockery, transitive):
     """Test that rewired packages can be uninstalled as normal."""
-    spec = spack.concretize.concretize_one("quux", spack.context.current())
-    dep = spack.concretize.concretize_one("garply cflags=-g", spack.context.current())
+    spec = spack.concretize.concretize_one("quux", spack.test.harness.current())
+    dep = spack.concretize.concretize_one("garply cflags=-g", spack.test.harness.current())
     PackageInstaller([spec.package, dep.package], explicit=True).install()
     spliced_spec = spec.splice(dep, transitive=transitive)
-    spack.repo.attach_packages([spliced_spec], spack.context.current())
-    spack.rewiring.rewire(spliced_spec, spack.context.current())
+    spack.repo.attach_packages([spliced_spec], spack.test.harness.current())
+    spack.rewiring.rewire(spliced_spec, spack.test.harness.current())
     spliced_spec.package.do_uninstall()
     assert len(temporary_store.db.query(spliced_spec)) == 0
     assert not os.path.exists(spliced_spec.prefix)
@@ -150,14 +150,14 @@ def test_uninstall_rewired_spec(mock_fetch, temporary_store: Store, install_mock
 def test_rewire_not_installed_fails(mock_fetch, install_mockery):
     """Tests error when an attempt is made to rewire a package that was not
     previously installed."""
-    spec = spack.concretize.concretize_one("quux", spack.context.current())
-    dep = spack.concretize.concretize_one("garply cflags=-g", spack.context.current())
+    spec = spack.concretize.concretize_one("quux", spack.test.harness.current())
+    dep = spack.concretize.concretize_one("garply cflags=-g", spack.test.harness.current())
     spliced_spec = spec.splice(dep, False)
     with pytest.raises(
         spack.rewiring.PackageNotInstalledError,
         match="failed due to missing install of build spec",
     ):
-        spack.rewiring.rewire(spliced_spec, spack.context.current())
+        spack.rewiring.rewire(spliced_spec, spack.test.harness.current())
 
 
 def test_rewire_virtual(mock_fetch, install_mockery):
@@ -165,14 +165,14 @@ def test_rewire_virtual(mock_fetch, install_mockery):
     dep = "splice-a"
     alt_dep = "splice-h"
 
-    spec = spack.concretize.concretize_one(f"splice-vt^{dep}", spack.context.current())
-    alt_spec = spack.concretize.concretize_one(alt_dep, spack.context.current())
+    spec = spack.concretize.concretize_one(f"splice-vt^{dep}", spack.test.harness.current())
+    alt_spec = spack.concretize.concretize_one(alt_dep, spack.test.harness.current())
 
     PackageInstaller([spec.package, alt_spec.package]).install()
 
     spliced_spec = spec.splice(alt_spec, True)
-    spack.repo.attach_packages([spliced_spec], spack.context.current())
-    spack.rewiring.rewire(spliced_spec, spack.context.current())
+    spack.repo.attach_packages([spliced_spec], spack.test.harness.current())
+    spack.rewiring.rewire(spliced_spec, spack.test.harness.current())
 
     # Confirm the original spec still has the original virtual implementation.
     assert spec.satisfies(f"^{dep}")

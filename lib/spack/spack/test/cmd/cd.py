@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
-from spack.main import SpackCommand
+from spack.test.harness import SpackCommand
 
 cd = SpackCommand("cd")
 

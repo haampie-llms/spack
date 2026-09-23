@@ -76,7 +76,7 @@ indent-style = "space"
 line-ending = "lf"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "TID251"]
+select = ["E", "F", "W", "I"]
 ignore = ["E203", "E731", "F811"]
 typing-modules = ["spack.vendor.typing_extensions"]
 
@@ -99,30 +99,6 @@ spack = ["spack"]
 [tool.ruff.lint.per-file-ignores]
 "var/spack/*/package.py" = ["F403", "F405", "F811", "F821"]
 "*-ci-package.py" = ["F403", "F405", "F821"]
-# Files that still read process globals
-"lib/spack/spack/test/**" = ["TID251"]
-"lib/spack/spack/binary_distribution.py" = ["TID251"]
-"lib/spack/spack/caches.py" = ["TID251"]
-"lib/spack/spack/context.py" = ["TID251"]
-"lib/spack/spack/main.py" = ["TID251"]
-"lib/spack/spack/repo.py" = ["TID251"]
-"lib/spack/spack/store.py" = ["TID251"]
-"lib/spack/spack/subprocess_context.py" = ["TID251"]
-"lib/spack/spack/util/gpg.py" = ["TID251"]
-"share/spack/qa/config_state.py" = ["TID251"]
-
-[tool.ruff.lint.flake8-tidy-imports.banned-api]
-"spack.config.CONFIG".msg = "take a configuration argument"
-"spack.store.STORE".msg = "take a store argument"
-"spack.repo.PATH".msg = "take a repository argument"
-"spack.repo.repo_or_default".msg = "take a repository argument"
-"spack.binary_distribution.BINARY_INDEX".msg = "take a buildcache index argument"
-"spack.caches.MISC_CACHE".msg = "take a cache argument"
-"spack.compilers.libraries.COMPILER_CACHE".msg = "take a compiler cache argument"
-"spack.active_environment.active_environment".msg = "take an environment argument"
-"spack.environment.active_environment".msg = "take an environment argument"
-"spack.context.current".msg = "take a context argument"
-
 
 [tool.mypy]
 files = ["lib/spack/spack/**/*.py"]

@@ -13,12 +13,12 @@ import pytest
 
 import spack.cmd.logs
 import spack.concretize
-import spack.context
 import spack.error
 import spack.main
 import spack.spec
-from spack.main import SpackCommand
+import spack.test.harness
 from spack.store import Store
+from spack.test.harness import SpackCommand
 
 logs = SpackCommand("logs")
 install = SpackCommand("install")
@@ -52,7 +52,7 @@ def _rewind_collect_and_decode(rw_stream):
 def test_logs_cmd_errors(
     temporary_store: Store, install_mockery, mock_fetch, mock_archive, mock_packages
 ):
-    spec = spack.concretize.concretize_one("pkg-c", spack.context.current())
+    spec = spack.concretize.concretize_one("pkg-c", spack.test.harness.current())
     assert not temporary_store.db.installed(spec)
 
     with pytest.raises(spack.error.SpackError, match="is not installed or staged"):
@@ -84,7 +84,7 @@ def test_dump_logs(
     decompress them.
     """
     cmdline_spec = spack.spec.Spec("libelf")
-    concrete_spec = spack.concretize.concretize_one(cmdline_spec, spack.context.current())
+    concrete_spec = spack.concretize.concretize_one(cmdline_spec, spack.test.harness.current())
 
     # Sanity check, make sure this test is checking what we want: to
     # start with

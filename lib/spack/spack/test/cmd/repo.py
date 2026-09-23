@@ -9,21 +9,20 @@ from typing import Dict, Optional, Union
 
 import pytest
 
-import spack.caches
 import spack.cmd.repo
 import spack.config
-import spack.context
 import spack.environment as ev
 import spack.main
 import spack.repo
 import spack.repo_migrate
+import spack.test.harness
 from spack.config import Configuration
 from spack.error import SpackError
 from spack.util.executable import Executable
 from spack.util.filesystem import working_dir
 
-repo = spack.main.SpackCommand("repo")
-env = spack.main.SpackCommand("env")
+repo = spack.test.harness.SpackCommand("repo")
+env = spack.test.harness.SpackCommand("env")
 
 
 def test_help_option():
@@ -114,7 +113,7 @@ spack:
         env("create", "test", "./spack.yaml")
         # check that repo path was correctly substituted with the environment variable
         current_dir = os.getcwd()
-        with ev.read("test", ctx=spack.context.current()) as newenv:
+        with ev.read("test", ctx=spack.test.harness.current()) as newenv:
             repos_specs = mutable_config.get("repos", default={}, scope=newenv.scope_name)
             assert current_dir in repos_specs.values()
 
@@ -206,7 +205,7 @@ class NonTrivialImport(Package):
 def test_repo_migrate(tmp_path: pathlib.Path, config):
     old_root, _ = spack.repo.create_repo(str(tmp_path), "org.repo", package_api=(1, 0))
     pkgs_path = pathlib.Path(
-        spack.repo.from_path(old_root, cache=spack.caches.MISC_CACHE).packages_path
+        spack.repo.from_path(old_root, cache=spack.test.harness.current().misc_cache).packages_path
     )
     new_root = pathlib.Path(old_root) / "spack_repo" / "org" / "repo"
 
@@ -338,7 +337,7 @@ def test_add_repo_name_already_exists(tmp_path: pathlib.Path):
             paths=[],
             destination=None,
             config=config,
-            cache=spack.caches.MISC_CACHE,
+            cache=spack.test.harness.current().misc_cache,
         )
 
 
@@ -355,7 +354,7 @@ def test_add_repo_destination_with_local_path(tmp_path: pathlib.Path):
             paths=[],
             destination="/some/destination",
             config=make_repo_config(),
-            cache=spack.caches.MISC_CACHE,
+            cache=spack.test.harness.current().misc_cache,
         )
     with pytest.raises(SpackError, match="The --paths flag is only valid for git repositories"):
         spack.cmd.repo._add_repo(
@@ -365,7 +364,7 @@ def test_add_repo_destination_with_local_path(tmp_path: pathlib.Path):
             paths=["path1", "path2"],
             destination=None,
             config=make_repo_config(),
-            cache=spack.caches.MISC_CACHE,
+            cache=spack.test.harness.current().misc_cache,
         )
 
 
@@ -386,7 +385,7 @@ def test_add_repo_computed_key_already_exists(tmp_path: pathlib.Path, monkeypatc
             paths=[],
             destination=None,
             config=make_repo_config({"test_repo": "/some/path"}),
-            cache=spack.caches.MISC_CACHE,
+            cache=spack.test.harness.current().misc_cache,
         )
 
 
@@ -411,7 +410,7 @@ def test_add_repo_git_url_with_paths(monkeypatch):
         paths=["path1", "path2"],
         destination=None,
         config=config,
-        cache=spack.caches.MISC_CACHE,
+        cache=spack.test.harness.current().misc_cache,
     )
 
     assert key == "git_test"
@@ -442,7 +441,7 @@ def test_add_repo_git_url_with_destination(monkeypatch):
         paths=[],
         destination="/custom/destination",
         config=config,
-        cache=spack.caches.MISC_CACHE,
+        cache=spack.test.harness.current().misc_cache,
     )
 
     assert key == "git_test"
@@ -472,7 +471,7 @@ def test_add_repo_ssh_git_url_detection(monkeypatch):
         paths=[],
         destination=None,
         config=config,
-        cache=spack.caches.MISC_CACHE,
+        cache=spack.test.harness.current().misc_cache,
     )
 
     assert key == "ssh_git_test"
@@ -502,7 +501,7 @@ def test_add_repo_no_usable_repositories_error(monkeypatch):
             paths=[],
             destination=None,
             config=config,
-            cache=spack.caches.MISC_CACHE,
+            cache=spack.test.harness.current().misc_cache,
         )
 
 
@@ -525,7 +524,7 @@ def test_add_repo_multiple_repos_no_name_error(monkeypatch):
             paths=[],
             destination=None,
             config=make_repo_config(),
-            cache=spack.caches.MISC_CACHE,
+            cache=spack.test.harness.current().misc_cache,
         )
 
 
@@ -548,7 +547,7 @@ def test_add_repo_git_url_basic_success(monkeypatch):
         paths=[],
         destination=None,
         config=config,
-        cache=spack.caches.MISC_CACHE,
+        cache=spack.test.harness.current().misc_cache,
     )
 
     assert key == "test_git_repo"
@@ -578,7 +577,7 @@ def test_add_repo_git_url_with_custom_destination(monkeypatch):
         paths=[],
         destination="/custom/destination",
         config=config,
-        cache=spack.caches.MISC_CACHE,
+        cache=spack.test.harness.current().misc_cache,
     )
 
     assert key == "test_git_repo"
@@ -605,7 +604,7 @@ def test_add_repo_git_url_with_single_repo_path_new(monkeypatch):
         paths=["subdirectory/repo"],
         destination=None,
         config=config,
-        cache=spack.caches.MISC_CACHE,
+        cache=spack.test.harness.current().misc_cache,
     )
 
     assert key == "test_git_repo"
@@ -629,7 +628,7 @@ def test_add_repo_local_path_success(monkeypatch, tmp_path: pathlib.Path):
         paths=[],
         destination=None,
         config=config,
-        cache=spack.caches.MISC_CACHE,
+        cache=spack.test.harness.current().misc_cache,
     )
 
     assert key == "test_local_repo"
@@ -655,7 +654,7 @@ def test_add_repo_auto_name_from_namespace(monkeypatch, tmp_path: pathlib.Path):
         paths=[],
         destination=None,
         config=config,
-        cache=spack.caches.MISC_CACHE,
+        cache=spack.test.harness.current().misc_cache,
     )
 
     assert key == "auto_name_repo"
@@ -686,7 +685,7 @@ def test_add_repo_partial_repo_construction_warning(monkeypatch, capfd):
         paths=[],
         destination=None,
         config=make_repo_config(),
-        cache=spack.caches.MISC_CACHE,
+        cache=spack.test.harness.current().misc_cache,
     )
 
     assert key == "test_mixed_repo"
@@ -724,7 +723,7 @@ def test_add_repo_git_url_detection_edge_cases(monkeypatch, test_url, expected_t
         paths=[],
         destination=None,
         config=config,
-        cache=spack.caches.MISC_CACHE,
+        cache=spack.test.harness.current().misc_cache,
     )
 
     entry = config.get("repos").get("test_repo")
@@ -788,7 +787,7 @@ def test_add_repo_prepends_instead_of_appends(monkeypatch, tmp_path: pathlib.Pat
         paths=[],
         destination=None,
         config=config,
-        cache=spack.caches.MISC_CACHE,
+        cache=spack.test.harness.current().misc_cache,
     )
 
     assert key == "new_repo"
@@ -984,7 +983,7 @@ def test_repo_show_version_updates_no_changes(mock_git_package_changes):
     """Test that show-version-updates handles empty results gracefully"""
     test_repo, _, commits = mock_git_package_changes
 
-    with spack.repo.use_repositories(test_repo):
+    with spack.test.harness.use_repositories(test_repo):
         # Use the same commit for both refs - no changes
         output = repo("show-version-updates", test_repo.root, commits[-1], commits[-1])
 
@@ -999,7 +998,7 @@ def test_repo_show_version_updates_success(mock_git_package_changes):
     """Test that show-version-updates successfully outputs the correct specs"""
     test_repo, _, commits = mock_git_package_changes
 
-    with spack.repo.use_repositories(test_repo):
+    with spack.test.harness.use_repositories(test_repo):
         # commits are ordered from newest to oldest after reversal
         # commits[-3] = add v2.1.5, commits[-5] = add v2.1.7 and v2.1.8
         # Find versions added between these commits
@@ -1025,9 +1024,9 @@ def test_repo_show_version_updates_excludes_manual_packages(monkeypatch, mock_gi
     """Test --no-manual-packages flag excludes packages with manual_download=True"""
     test_repo, _, commits = mock_git_package_changes
 
-    with spack.repo.use_repositories(test_repo):
+    with spack.test.harness.use_repositories(test_repo):
         # Set manual_download=True on the package
-        pkg_class = spack.repo.PATH.get_pkg_class("diff-test")
+        pkg_class = spack.test.harness.current().repo.get_pkg_class("diff-test")
         monkeypatch.setattr(pkg_class, "manual_download", True)
 
         # Run show-version-updates with --no-manual-packages flag
@@ -1050,9 +1049,9 @@ def test_repo_show_version_updates_excludes_non_redistributable(
     """Test --only-redistributable flag excludes packages if redistribute_source returns False"""
     test_repo, _, commits = mock_git_package_changes
 
-    with spack.repo.use_repositories(test_repo):
+    with spack.test.harness.use_repositories(test_repo):
         # Set redistribute_source to return False
-        pkg_class = spack.repo.PATH.get_pkg_class("diff-test")
+        pkg_class = spack.test.harness.current().repo.get_pkg_class("diff-test")
         monkeypatch.setattr(pkg_class, "redistribute_source", classmethod(lambda cls, spec: False))
 
         # Run show-version-updates with --only-redistributable flag
@@ -1073,7 +1072,7 @@ def test_repo_show_version_updates_excludes_git_versions(mock_git_package_change
     """Test --no-git-versions flag excludes versions from git (tag/commit)"""
     test_repo, _, commits = mock_git_package_changes
 
-    with spack.repo.use_repositories(test_repo):
+    with spack.test.harness.use_repositories(test_repo):
         # commits[-4] = add v2.1.6 (git version), commits[-5] = add v2.1.7 and v2.1.8 (sha256)
         # Without --no-git-versions, v2.1.6 would be included
         output = repo(
@@ -1093,9 +1092,9 @@ def test_repo_show_version_updates_excludes_deprecated(monkeypatch, mock_git_pac
     """Test --no-deprecated flag excludes versions marked with deprecated=True"""
     test_repo, _, commits = mock_git_package_changes
 
-    with spack.repo.use_repositories(test_repo):
+    with spack.test.harness.use_repositories(test_repo):
         # Mark version 2.1.7 as deprecated
-        pkg_class = spack.repo.PATH.get_pkg_class("diff-test")
+        pkg_class = spack.test.harness.current().repo.get_pkg_class("diff-test")
         for v in pkg_class.versions:
             if str(v) == "2.1.7":
                 pkg_class.versions[v]["deprecated"] = True

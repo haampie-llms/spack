@@ -8,10 +8,10 @@ import io
 import pytest
 
 import spack.cmd.tags
-import spack.context
 import spack.tag
-from spack.main import SpackCommand
+import spack.test.harness
 from spack.repo import RepoPath
+from spack.test.harness import SpackCommand
 
 install = SpackCommand("install")
 
@@ -44,7 +44,7 @@ more_tags_json = """
 def test_tag_get_all_available(mock_packages):
     for skip in [False, True]:
         all_pkgs = spack.cmd.tags.packages_with_tags(
-            ["tag1", "tag2", "tag3"], False, skip, spack.context.current()
+            ["tag1", "tag2", "tag3"], False, skip, spack.test.harness.current()
         )
         assert sorted(all_pkgs["tag1"]) == ["mpich", "mpich2"]
         assert all_pkgs["tag2"] == ["mpich"]
@@ -71,11 +71,13 @@ def ensure_tags_results_equal(results, expected):
 )
 def test_tag_get_available(tags, expected, mock_packages):
     # Ensure results for all tags
-    all_tag_pkgs = spack.cmd.tags.packages_with_tags(tags, False, False, spack.context.current())
+    all_tag_pkgs = spack.cmd.tags.packages_with_tags(
+        tags, False, False, spack.test.harness.current()
+    )
     ensure_tags_results_equal(all_tag_pkgs, expected)
 
     # Ensure results for tags expecting results since skipping otherwise
-    only_pkgs = spack.cmd.tags.packages_with_tags(tags, False, True, spack.context.current())
+    only_pkgs = spack.cmd.tags.packages_with_tags(tags, False, True, spack.test.harness.current())
     if expected[tags[0]]:
         ensure_tags_results_equal(only_pkgs, expected)
     else:
@@ -87,7 +89,7 @@ def test_tag_get_installed_packages(mock_packages, mock_archive, mock_fetch, ins
 
     for skip in [False, True]:
         all_pkgs = spack.cmd.tags.packages_with_tags(
-            ["tag1", "tag2", "tag3"], True, skip, spack.context.current()
+            ["tag1", "tag2", "tag3"], True, skip, spack.test.harness.current()
         )
         assert sorted(all_pkgs["tag1"]) == ["mpich"]
         assert all_pkgs["tag2"] == ["mpich"]

@@ -100,5 +100,6 @@ def bootstrap_context(ctx: spack.context.SpackContext) -> spack.context.SpackCon
     config.push_scope(spack.config.InternalConfigScope("bootstrap_overrides", overrides))
 
     result = spack.context.SpackContext(config, is_bootstrap=True)
+    result.gpg_home = os.path.join(root_path(user), ".bootstrap_gpg_home")
     result.share(ctx, "repo", "misc_cache", "compiler_cache", "network")
     return result

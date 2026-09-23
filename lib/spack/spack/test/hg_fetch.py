@@ -8,7 +8,7 @@ import pathlib
 import pytest
 
 import spack.concretize
-import spack.context
+import spack.test.harness
 from spack.config import Configuration
 from spack.fetch_strategy import HgFetchStrategy
 from spack.stage import stage_from_config
@@ -44,7 +44,7 @@ def test_fetch(
     h = mock_hg_repository.hash
 
     # Construct the package under test
-    s = spack.concretize.concretize_one("hg-test", spack.context.current())
+    s = spack.concretize.concretize_one("hg-test", spack.test.harness.current())
     monkeypatch.setitem(s.package.versions, Version("hg"), t.args)
 
     # Enter the stage directory and check some properties

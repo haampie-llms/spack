@@ -9,7 +9,6 @@ import pytest
 
 import spack.cmd.modules
 import spack.concretize
-import spack.config
 import spack.context
 import spack.error
 import spack.modules
@@ -18,7 +17,7 @@ import spack.modules.tcl
 import spack.package_base
 import spack.package_prefs
 import spack.repo
-import spack.store
+import spack.test.harness
 from spack.config import Configuration
 from spack.installer import PackageInstaller
 from spack.modules.common import UpstreamModuleIndex
@@ -64,12 +63,12 @@ def mock_package_perms(monkeypatch):
 def test_modules_written_with_proper_permissions(
     mock_module_filename, mock_package_perms, mock_packages, config
 ):
-    spec = spack.concretize.concretize_one("mpileaks", spack.context.current())
+    spec = spack.concretize.concretize_one("mpileaks", spack.test.harness.current())
 
     # The code tested is common to all module types, but has to be tested from
     # one. Tcl picked at random
     generator = spack.modules.tcl.TclModulefileWriter.from_spec(
-        spec, "default", ctx=spack.context.current()
+        spec, "default", ctx=spack.test.harness.current()
     )
     generator.write()
 
@@ -80,11 +79,11 @@ def test_modules_written_with_proper_permissions(
 def test_modules_default_symlink(
     module_type, mock_packages, mock_module_filename, mock_module_defaults, config
 ):
-    spec = spack.concretize.concretize_one("mpileaks@2.3", spack.context.current())
+    spec = spack.concretize.concretize_one("mpileaks@2.3", spack.test.harness.current())
     mock_module_defaults(spec.format("{name}{@version}"), True)
 
     generator_cls = spack.modules.module_types[module_type]
-    generator = generator_cls.from_spec(spec, "default", ctx=spack.context.current())
+    generator = generator_cls.from_spec(spec, "default", ctx=spack.test.harness.current())
     generator.write()
 
     link_path = os.path.join(os.path.dirname(mock_module_filename), "default")
@@ -171,7 +170,7 @@ module_index:
     mock_db = MockDb(dbs, {s1.dag_hash(): "d1"})
     upstream_index = UpstreamModuleIndex(mock_db, module_indices)
 
-    ctx = spack.context.SpackContext(spack.config.CONFIG)
+    ctx = spack.context.SpackContext(spack.test.harness.current().config)
     ctx.store = types.SimpleNamespace(db=mock_db)
     m1_path = spack.modules.get_module("tcl", s1, True, ctx=ctx, upstream_index=upstream_index)
     assert m1_path == "/path/to/a"
@@ -180,10 +179,12 @@ module_index:
 @pytest.mark.regression("14347")
 def test_load_installed_package_not_in_repo(install_mockery, mock_fetch, monkeypatch):
     """Test that installed packages that have been removed are still loadable"""
-    spec = spack.concretize.concretize_one("trivial-install-test-package", spack.context.current())
+    spec = spack.concretize.concretize_one(
+        "trivial-install-test-package", spack.test.harness.current()
+    )
     PackageInstaller([spec.package], explicit=True).install()
     spack.modules.module_types["tcl"].from_spec(
-        spec, "default", True, ctx=spack.context.current()
+        spec, "default", True, ctx=spack.test.harness.current()
     ).write()
 
     def find_nothing(*args):
@@ -191,11 +192,11 @@ def test_load_installed_package_not_in_repo(install_mockery, mock_fetch, monkeyp
 
     # Mock deletion of the package
     spec._package = None
-    monkeypatch.setattr(spack.repo.PATH, "get", find_nothing)
+    monkeypatch.setattr(spack.test.harness.current().repo, "get", find_nothing)
     with pytest.raises(spack.repo.UnknownPackageError):
-        spack.repo.attach_packages([spec], spack.context.current())
+        spack.repo.attach_packages([spec], spack.test.harness.current())
 
-    ctx = spack.context.current()
+    ctx = spack.test.harness.current()
     module_path = spack.modules.get_module(
         "tcl",
         spec,
@@ -205,7 +206,7 @@ def test_load_installed_package_not_in_repo(install_mockery, mock_fetch, monkeyp
     )
     assert module_path
 
-    spack.package_base.PackageBase.uninstall_by_spec(spec, spack.store.STORE)
+    spack.package_base.PackageBase.uninstall_by_spec(spec, spack.test.harness.current().store)
 
 
 @pytest.mark.regression("37649")
