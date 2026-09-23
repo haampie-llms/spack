@@ -1196,8 +1196,6 @@ class Environment:
         state["_txlock_enabled"] = self.txlock.enabled
         state.pop("txlock", None)
         state.pop("_repo", None)
-        state.pop("repo_token", None)
-        state.pop("store_token", None)
         return state
 
     def __setstate__(self, state):
