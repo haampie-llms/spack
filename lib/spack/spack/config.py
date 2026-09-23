@@ -2097,7 +2097,6 @@ def _normalize_input(entry: Union[ScopeWithOptionalPriority, str]) -> ScopeWithP
     return default_priority, DirectoryConfigScope(name, path)
 
 
-@lang.memoized
 def create_from(*scopes_or_paths: Union[ScopeWithOptionalPriority, str]) -> Configuration:
     """Creates a configuration object from the scopes passed in input.
 
