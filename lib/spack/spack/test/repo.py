@@ -609,6 +609,30 @@ spack:
     )
 
 
+def test_reading_the_active_environment_keeps_store_and_repo(tmp_path: pathlib.Path):
+    """Re-reading the active environment only swaps its configuration scope: the store and
+    repositories it activated are kept."""
+    spack.repo.create_repo(str(tmp_path / "foo"), namespace="bar")
+    (tmp_path / "spack.yaml").write_text(
+        """\
+spack:
+    repos:
+        bar: $env/foo/spack_repo/bar
+    config:
+        install_tree:
+            root: $env/opt
+"""
+    )
+    ctx = spack.test.harness.current()
+    env = spack.environment.Environment(tmp_path, ctx=ctx)
+    with env:
+        store, repo = ctx.store, ctx.repo
+        with env.write_transaction():
+            pass
+        assert ctx.store is store and ctx.repo is repo
+        assert ctx.config.get("config:install_tree:root") == "$env/opt"
+
+
 def test_repo_update(tmp_path: pathlib.Path):
     existing_root, _ = spack.repo.create_repo(str(tmp_path), namespace="foo")
     nonexisting_root = str(tmp_path / "nonexisting")

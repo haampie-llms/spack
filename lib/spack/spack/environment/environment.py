@@ -3707,11 +3707,22 @@ class EnvironmentManifestFile(collections.abc.Mapping):
 
     @contextlib.contextmanager
     def use_config(self, ctx: "spack.context.SpackContext"):
-        """Ensure only the manifest's configuration scopes are in the configuration of ``ctx``."""
-        with no_active_environment(ctx):
-            self.prepare_config_scope(ctx.config)
+        """Ensure only the manifest's configuration scopes are in the configuration of ``ctx``.
+
+        Only the scope of the active environment is swapped out, so the store and repositories of
+        ``ctx`` stay as they are."""
+        config, active, env_path = ctx.config, ctx.environment, ctx.config.env_path
+        if active is not None:
+            active.manifest.deactivate_config_scope(config)
+        config.env_path = str(self.manifest_dir)
+        self.prepare_config_scope(config)
+        try:
             yield
-            self.deactivate_config_scope(ctx.config)
+        finally:
+            self.deactivate_config_scope(config)
+            config.env_path = env_path
+            if active is not None:
+                active.manifest.prepare_config_scope(config)
 
 
 def environment_path_scope(
