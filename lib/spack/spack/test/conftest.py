@@ -701,12 +701,12 @@ def mock_binary_index(monkeypatch, tmp_path_factory: pytest.TempPathFactory):
     """
     tmpdir = tmp_path_factory.mktemp("mock_binary_index")
     index_path = tmpdir / "binary_index"
+    ctx = spack.test.harness.current()
     mock_index = spack.binary_distribution.BinaryIndexCache(
-        str(index_path),
-        config=spack.test.harness.current().config,
-        client=spack.util.web.NetworkClient.from_config(spack.test.harness.current().config),
+        str(index_path), config=ctx.config, client=ctx.network
     )
-    monkeypatch.setattr(spack.test.harness.current(), "binary_index", mock_index)
+    # Set the built member directly: getattr would first build the real index
+    monkeypatch.setitem(ctx.__dict__, "binary_index", mock_index)
     yield
 
 
