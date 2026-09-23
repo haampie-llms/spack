@@ -272,7 +272,9 @@ def ci_reindex(args, ctx):
     remote_mirror_url = mirror_urls[0]
     mirror = spack.mirrors.mirror.Mirror(remote_mirror_url)
 
-    buildcache.update_index(mirror, ctx.config, ctx.network, update_keys=True)
+    buildcache.update_index(
+        mirror, ctx.config, ctx.network, update_keys=True, repo_provider=ctx.repo_provider
+    )
 
 
 def ci_rebuild(args, ctx):

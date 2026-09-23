@@ -85,7 +85,6 @@ from spack.vendor.typing_extensions import Literal
 import spack
 import spack.aliases
 import spack.compilers.flags
-import spack.context
 import spack.deptypes as dt
 import spack.enums
 import spack.error
@@ -2831,13 +2830,13 @@ class Spec:
         return None
 
     @staticmethod
-    def from_specfile(path):
+    def from_specfile(path, *, repo_provider: Optional["spack.repo.RepoProvider"] = None):
         """Construct a spec from a JSON or YAML spec file path"""
         with open(path, "r", encoding="utf-8") as fd:
             file_content = fd.read()
             if path.endswith(".json"):
-                return Spec.from_json(file_content)
-            return Spec.from_yaml(file_content)
+                return Spec.from_json(file_content, repo_provider=repo_provider)
+            return Spec.from_yaml(file_content, repo_provider=repo_provider)
 
     @staticmethod
     def override(init_spec, change_spec, *, repo: "spack.repo.RepoPath"):
@@ -3005,11 +3004,12 @@ class Spec:
         return spec_builder(spec_dict)
 
     @staticmethod
-    def from_dict(data) -> "Spec":
+    def from_dict(data, *, repo_provider: Optional["spack.repo.RepoProvider"] = None) -> "Spec":
         """Construct a spec from JSON/YAML.
 
         Args:
             data: a nested dict/list data structure read from YAML or JSON.
+            repo_provider: repositories to reconstruct the virtuals that formats before v6 omit
         """
         # Figure out the specfile format
         if isinstance(data["spec"], list):
@@ -3019,20 +3019,20 @@ class Spec:
 
         # get the right reader
         reader = specfile_reader_for_version(version)
-        return reader.load(data)
+        return reader.load(data, repo_provider=repo_provider)
 
     @staticmethod
-    def from_yaml(stream) -> "Spec":
+    def from_yaml(stream, *, repo_provider: Optional["spack.repo.RepoProvider"] = None) -> "Spec":
         """Construct a spec from YAML.
 
         Args:
             stream: string or file object to read from.
         """
         data = syaml.load(stream)
-        return Spec.from_dict(data)
+        return Spec.from_dict(data, repo_provider=repo_provider)
 
     @staticmethod
-    def from_json(stream) -> "Spec":
+    def from_json(stream, *, repo_provider: Optional["spack.repo.RepoProvider"] = None) -> "Spec":
         """Construct a spec from JSON.
 
         Args:
@@ -3040,12 +3040,12 @@ class Spec:
         """
         try:
             data = sjson.load(stream)
-            return Spec.from_dict(data)
+            return Spec.from_dict(data, repo_provider=repo_provider)
         except Exception as e:
             raise sjson.SpackJSONError("error parsing JSON spec:", e) from e
 
     @staticmethod
-    def from_signed_json(stream):
+    def from_signed_json(stream, *, repo_provider: Optional["spack.repo.RepoProvider"] = None):
         """Construct a spec from clearsigned json spec file.
 
         Args:
@@ -3056,7 +3056,7 @@ class Spec:
             data = stream.read()
 
         extracted_json = spack.util.gpg.extract_json_from_clearsig(data)
-        return Spec.from_dict(extracted_json)
+        return Spec.from_dict(extracted_json, repo_provider=repo_provider)
 
     @staticmethod
     def from_detection(
@@ -5482,7 +5482,7 @@ class SpecfileReaderBase(abc.ABC):
         return Spec(f"{d['name']}@{vn.VersionList.from_dict(d)}")
 
     @classmethod
-    def load(cls, data) -> Spec:
+    def load(cls, data, *, repo_provider: Optional["spack.repo.RepoProvider"] = None) -> Spec:
         """Construct a spec from JSON/YAML using the format version 2.
 
         This format is used in Spack v0.17, was introduced in
@@ -5514,6 +5514,8 @@ class SpecfileReaderBase(abc.ABC):
             )
 
         specs_by_hash = wire_spec_nodes(nodes, hash_type, cls)
+        if cls.SPEC_VERSION < 6:
+            reconstruct_virtuals(specs_by_hash.values(), repo_provider, cls.SPEC_VERSION)
         root_spec_hash = nodes[0][hash_type]
         return specs_by_hash[root_spec_hash]
 
@@ -5566,10 +5568,18 @@ def wire_spec_nodes(
                 )
             node_spec._build_spec = build_spec
 
-    if reader.SPEC_VERSION < 6:
-        spack.repo.reconstruct_virtuals(specs_by_hash.values(), repo=spack.context.current().repo)
-
     return specs_by_hash
+
+
+def reconstruct_virtuals(
+    specs: Iterable[Spec], repo_provider: Optional["spack.repo.RepoProvider"], version: int
+) -> None:
+    """Fill in the virtuals that spec format ``version`` (before v6) does not record. Without
+    repositories nothing is reconstructed, as for packages absent from them."""
+    if repo_provider is None:
+        tty.debug(f"no repositories to reconstruct the virtuals of spec format v{version}")
+        return
+    spack.repo.reconstruct_virtuals(specs, repo=repo_provider())
 
 
 @register_reader
@@ -5577,7 +5587,7 @@ class SpecfileV1(SpecfileReaderBase):
     SPEC_VERSION = 1
 
     @classmethod
-    def load(cls, data) -> Spec:
+    def load(cls, data, *, repo_provider: Optional["spack.repo.RepoProvider"] = None) -> Spec:
         """Construct a spec from JSON/YAML using the format version 1.
 
         Note: Version 1 format has no notion of a build_spec, and names are
@@ -5609,7 +5619,7 @@ class SpecfileV1(SpecfileReaderBase):
                     direct=dep.direct,
                 )
 
-        spack.repo.reconstruct_virtuals(dep_list, repo=spack.context.current().repo)
+        reconstruct_virtuals(dep_list, repo_provider, cls.SPEC_VERSION)
         return result
 
     @classmethod

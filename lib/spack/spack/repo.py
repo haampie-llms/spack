@@ -2195,6 +2195,10 @@ def _provided_specs(
     return tuple(provided)
 
 
+#: Returns the repositories to read old spec formats with, called only when needed
+RepoProvider = Callable[[], RepoPath]
+
+
 def attach_packages(
     specs: Iterable["spack.spec.Spec"],
     ctx: "spack.context.SpackContext",

@@ -901,7 +901,7 @@ class TestSpecSemantics:
 
         monkeypatch.setattr(spack.repo.RepoPath, "get_pkg_class", no_class_loads)
 
-        old = Spec.from_dict(as_dict)
+        old = Spec.from_dict(as_dict, repo_provider=spack.context.current().repo_provider)
         assert old.original_spec_format() == 5
         assert old["mpich"].provided_virtuals == (Spec("mpi@:3"),)
         assert old.dag_hash() == concrete.dag_hash()
@@ -928,7 +928,7 @@ class TestSpecSemantics:
         as_dict = self._old_spec_dict(root)
         assert as_dict["spec"]["nodes"][0]["concrete"] is False
 
-        reread = Spec.from_dict(as_dict)
+        reread = Spec.from_dict(as_dict, repo_provider=spack.context.current().repo_provider)
         assert not reread.concrete
         with pytest.raises(SpecError):
             reread.provided_virtuals
@@ -941,7 +941,8 @@ class TestSpecSemantics:
         )
         as_dict["spec"]["nodes"][0]["name"] = "no-such-package"
 
-        assert Spec.from_dict(as_dict).provided_virtuals == ()
+        provider = spack.context.current().repo_provider
+        assert Spec.from_dict(as_dict, repo_provider=provider).provided_virtuals == ()
 
     @pytest.mark.regression("53012")
     def test_disjoint_provides_clauses_provide_nothing(self, monkeypatch):

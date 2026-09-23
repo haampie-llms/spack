@@ -29,6 +29,7 @@ from collections import defaultdict
 from contextlib import closing
 from typing import (
     IO,
+    TYPE_CHECKING,
     Any,
     Callable,
     Dict,
@@ -111,6 +112,9 @@ from .url_buildcache import (
 )
 from .vendor.typing_extensions import TypedDict
 
+if TYPE_CHECKING:
+    import spack.repo
+
 
 class BuildCacheDatabase(spack.database.Database):
     """A database for binary buildcaches.
@@ -122,8 +126,10 @@ class BuildCacheDatabase(spack.database.Database):
 
     record_fields = ("spec", "ref_count", "in_buildcache")
 
-    def __init__(self, root):
-        super().__init__(root, lock_cfg=spack.database.NO_LOCK, layout=None)
+    def __init__(self, root, *, repo_provider: Optional["spack.repo.RepoProvider"] = None):
+        super().__init__(
+            root, lock_cfg=spack.database.NO_LOCK, layout=None, repo_provider=repo_provider
+        )
         self._write_transaction_impl = spack.util.lang.nullcontext
         self._read_transaction_impl = spack.util.lang.nullcontext
 
@@ -197,6 +203,7 @@ class BinaryIndexCache:
         *,
         config: spack.config.Configuration,
         client: web_util.NetworkClient,
+        repo_provider: Optional["spack.repo.RepoProvider"] = None,
     ) -> None:
         """
         Args:
@@ -204,9 +211,11 @@ class BinaryIndexCache:
                 ``config``.
             config: configuration this index cache derives from.
             client: network client to fetch remote indices with.
+            repo_provider: repositories to read indices of spec formats before v6 with
         """
         self._config = config
         self._client = client
+        self._repo_provider = repo_provider
         self._index_cache_root: str = cache_root or binary_index_location(config=config)
 
         # the key associated with the serialized _local_index_cache
@@ -276,7 +285,7 @@ class BinaryIndexCache:
 
     def _associate_built_specs_with_mirror(self, cache_key, mirror_metadata: MirrorMetadata):
         with tempfile.TemporaryDirectory(dir=spack.stage.stage_root(self._config)) as tmpdir:
-            db = BuildCacheDatabase(tmpdir)
+            db = BuildCacheDatabase(tmpdir, repo_provider=self._repo_provider)
 
             with self._index_file_cache.read_transaction(cache_key) as f:
                 if f is not None:
@@ -559,7 +568,10 @@ def binary_index_location(*, config: spack.config.Configuration):
 
 def _binary_index() -> BinaryIndexCache:
     """Build the default binary cache index from the global configuration."""
-    return BinaryIndexCache(config=spack.config.CONFIG, client=spack.context.current().network)
+    ctx = spack.context.current()
+    return BinaryIndexCache(
+        config=spack.config.CONFIG, client=ctx.network, repo_provider=ctx.repo_provider
+    )
 
 
 #: Default binary cache index instance
@@ -737,6 +749,7 @@ def _read_specs_and_push_index(
     timer=timer.NULL_TIMER,
     config: spack.config.Configuration,
     client: web_util.NetworkClient,
+    repo_provider: Optional["spack.repo.RepoProvider"] = None,
 ):
     """Read listed specs, generate the index, and push it to the mirror.
 
@@ -764,7 +777,7 @@ def _read_specs_and_push_index(
             try:
                 cache_entry = read_method(file)
                 spec_dict = cache_entry.fetch_metadata()
-                fetched_spec = spack.spec.Spec.from_dict(spec_dict)
+                fetched_spec = spack.spec.Spec.from_dict(spec_dict, repo_provider=repo_provider)
             except Exception as e:
                 tty.warn(f"Unable to fetch spec for manifest {file} due to: {e}")
                 continue
@@ -788,6 +801,7 @@ def _url_generate_package_index(
     timer=timer.NULL_TIMER,
     config: spack.config.Configuration,
     client: web_util.NetworkClient,
+    repo_provider: Optional["spack.repo.RepoProvider"] = None,
 ):
     """Create or replace the build cache index on the given mirror.  The
     buildcache index contains an entry for each binary package under the
@@ -813,7 +827,7 @@ def _url_generate_package_index(
     tty.debug(f"Retrieving spec descriptor files from {url} to build index")
 
     if not db:
-        db = BuildCacheDatabase(tmpdir)
+        db = BuildCacheDatabase(tmpdir, repo_provider=repo_provider)
         db._write()
 
     try:
@@ -1165,6 +1179,7 @@ class OCIUploader(Uploader):
                 self.executor,
                 config=self.config,
                 client=self.client,
+                repo_provider=self.ctx.repo_provider,
             )
 
         return skipped, upload_errors
@@ -1224,6 +1239,7 @@ class URLUploader(Uploader):
             config=self.config,
             client=self.client,
             store=self.store,
+            repo_provider=self.ctx.repo_provider,
         )
 
 
@@ -1300,6 +1316,7 @@ def _url_push(
     config: spack.config.Configuration,
     client: web_util.NetworkClient,
     store: spack.store.Store,
+    repo_provider: Optional["spack.repo.RepoProvider"] = None,
 ) -> Tuple[List[spack.spec.Spec], List[Tuple[spack.spec.Spec, BaseException]]]:
     """Pushes to the provided build cache, and returns a list of skipped specs that were already
     present (when force=False), and a list of errors. Does not raise on error."""
@@ -1392,7 +1409,9 @@ def _url_push(
     if update_index:
         index_tmpdir = os.path.join(tmpdir, "index")
         os.mkdir(index_tmpdir)
-        _url_generate_package_index(out_url, index_tmpdir, config=config, client=client)
+        _url_generate_package_index(
+            out_url, index_tmpdir, config=config, client=client, repo_provider=repo_provider
+        )
 
     return skipped, errors
 
@@ -1811,6 +1830,7 @@ def _oci_update_index(
     timer=timer.NULL_TIMER,
     config: spack.config.Configuration,
     client: web_util.NetworkClient,
+    repo_provider: Optional["spack.repo.RepoProvider"] = None,
 ) -> None:
     urlopen = spack.oci.opener.opener_for(client)
     with timer.measure("list"):
@@ -1825,10 +1845,10 @@ def _oci_update_index(
 
         # Populate the database
         db_root_dir = os.path.join(tmpdir, "db_root")
-        db = BuildCacheDatabase(db_root_dir)
+        db = BuildCacheDatabase(db_root_dir, repo_provider=repo_provider)
 
         for spec_dict in spec_dicts:
-            spec = spack.spec.Spec.from_dict(spec_dict)
+            spec = spack.spec.Spec.from_dict(spec_dict, repo_provider=repo_provider)
             db.add(spec)
             db.mark(spec, "in_buildcache", True)
 

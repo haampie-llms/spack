@@ -1408,7 +1408,7 @@ def test_database_v8_reconstructs_provided_virtuals(database, tmp_path: pathlib.
     index_json.parent.mkdir(parents=True)
     index_json.write_text(json.dumps(data))
 
-    db = Database(str(tmp_path))
+    db = Database(str(tmp_path), repo_provider=spack.context.current().repo_provider)
     mpich = db.query_one("mpich")
     assert mpich is not None and mpich.provided_virtuals == (spack.spec.Spec("mpi@:3"),)
     expected = {s.dag_hash() for s in database.query("mpi")}

@@ -23,9 +23,21 @@ import pathlib
 import shutil
 import sys
 import uuid
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Generator,
+    List,
+    Optional,
+    Tuple,
+    Union,
+    cast,
+)
 
 import spack.config
+import spack.context
 import spack.database
 import spack.directory_layout
 import spack.error
@@ -36,6 +48,9 @@ import spack.util.lang
 import spack.util.path
 from spack.util import filesystem as fs
 from spack.util import tty
+
+if TYPE_CHECKING:
+    import spack.repo
 
 #: default installation root, relative to the Spack install path
 DEFAULT_INSTALL_TREE_ROOT = os.path.join(spack.paths.opt_path, "spack")
@@ -118,6 +133,7 @@ class Store:
             truncated to this length
         upstreams: optional list of upstream databases
         lock_cfg: lock configuration for the database
+        repo_provider: repositories to read metadata of spec formats before v6 with
     """
 
     def __init__(
@@ -129,19 +145,29 @@ class Store:
         upstreams: Optional[List[spack.database.Database]] = None,
         lock_cfg: spack.database.LockConfiguration = spack.database.NO_LOCK,
         env_path: Optional[str] = None,
+        repo_provider: Optional["spack.repo.RepoProvider"] = None,
     ) -> None:
         self.root = root
         self.env_path = env_path
+        self.repo_provider = repo_provider
         self.unpadded_root = unpadded_root or root
         self.projections = projections
         self.hash_length = hash_length
         self.upstreams = upstreams
         self.lock_cfg = lock_cfg
         self.layout = spack.directory_layout.DirectoryLayout(
-            root, projections=projections, hash_length=hash_length, env_path=env_path
+            root,
+            projections=projections,
+            hash_length=hash_length,
+            env_path=env_path,
+            repo_provider=repo_provider,
         )
         self.db = spack.database.Database(
-            root, upstream_dbs=upstreams, lock_cfg=lock_cfg, layout=self.layout
+            root,
+            upstream_dbs=upstreams,
+            lock_cfg=lock_cfg,
+            layout=self.layout,
+            repo_provider=repo_provider,
         )
 
         timeout_format_str = (
@@ -227,14 +253,20 @@ class Store:
             self.upstreams,
             self.lock_cfg,
             self.env_path,
+            self.repo_provider,
         )
 
 
-def create(configuration: spack.config.Configuration) -> Store:
+def create(
+    configuration: spack.config.Configuration,
+    *,
+    repo_provider: Optional["spack.repo.RepoProvider"] = None,
+) -> Store:
     """Create a store from the configuration passed as input.
 
     Args:
         configuration: configuration to create a store.
+        repo_provider: repositories to read metadata of spec formats before v6 with
     """
     config_dict = configuration.get_config("config")
     root, unpadded_root, projections = parse_install_tree(configuration)
@@ -244,7 +276,9 @@ def create(configuration: spack.config.Configuration) -> Store:
         install_properties["install_tree"]
         for install_properties in configuration.get_config("upstreams").values()
     ]
-    upstreams = _construct_upstream_dbs_from_install_roots(install_roots, config=configuration)
+    upstreams = _construct_upstream_dbs_from_install_roots(
+        install_roots, config=configuration, repo_provider=repo_provider
+    )
 
     return Store(
         root=root,
@@ -254,12 +288,14 @@ def create(configuration: spack.config.Configuration) -> Store:
         upstreams=upstreams,
         lock_cfg=spack.database.lock_configuration(configuration),
         env_path=configuration.env_path,
+        repo_provider=repo_provider,
     )
 
 
 def _create_global() -> Store:
-    result = create(configuration=spack.config.CONFIG)
-    return result
+    return create(
+        configuration=spack.config.CONFIG, repo_provider=spack.context.current().repo_provider
+    )
 
 
 #: Singleton store instance
@@ -285,7 +321,10 @@ def restore(token):
 
 
 def _construct_upstream_dbs_from_install_roots(
-    install_roots: List[str], *, config: spack.config.Configuration
+    install_roots: List[str],
+    *,
+    config: spack.config.Configuration,
+    repo_provider: Optional["spack.repo.RepoProvider"] = None,
 ) -> List[spack.database.Database]:
     accumulated_upstream_dbs: List[spack.database.Database] = []
     for install_root in reversed(install_roots):
@@ -294,6 +333,7 @@ def _construct_upstream_dbs_from_install_roots(
             spack.config.canonicalize_path(install_root, config=config),
             is_upstream=True,
             upstream_dbs=upstream_dbs,
+            repo_provider=repo_provider,
         )
         next_db._read()
         accumulated_upstream_dbs.insert(0, next_db)

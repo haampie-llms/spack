@@ -662,7 +662,7 @@ def test_edge_virtuals_reconstructed_for_specfile_v3(config, mock_packages):
         for dep in node.get("dependencies", ()):
             dep["type"] = list(dep.pop("parameters")["deptypes"])
 
-    reread = Spec.from_dict(as_dict)
+    reread = Spec.from_dict(as_dict, repo_provider=spack.context.current().repo_provider)
     assert reread.original_spec_format() == 3
     assert "mpi" in reread.edges_to_dependencies(name="mpich")[0].virtuals
 
