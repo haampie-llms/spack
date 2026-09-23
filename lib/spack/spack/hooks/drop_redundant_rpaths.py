@@ -82,11 +82,21 @@ class ElfFilesWithRPathVisitor(BaseDirectoryVisitor):
 
     def visit_file(self, root, rel_path, depth):
         filepath = os.path.join(root, rel_path)
-        s = os.lstat(filepath)
-        identifier = (s.st_ino, s.st_dev)
+        # Most files are not ELF: check the magic bytes before anything else.
+        try:
+            fd = os.open(filepath, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        except OSError:
+            return
+        try:
+            if os.read(fd, 4) != b"\x7fELF":
+                return
+            s = os.fstat(fd)
+        finally:
+            os.close(fd)
 
         # We're hitting a hardlink or symlink of an excluded lib, no need to parse.
         if s.st_nlink > 1:
+            identifier = (s.st_ino, s.st_dev)
             if identifier in self.visited:
                 return
             self.visited.add(identifier)

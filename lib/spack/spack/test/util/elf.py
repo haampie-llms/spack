@@ -4,6 +4,7 @@
 
 
 import io
+import os
 import pathlib
 
 import pytest
@@ -11,8 +12,9 @@ import pytest
 import spack.platforms
 import spack.util.executable
 import spack.util.filesystem as fs
-from spack.hooks.drop_redundant_rpaths import drop_redundant_rpaths
+from spack.hooks.drop_redundant_rpaths import ElfFilesWithRPathVisitor, drop_redundant_rpaths
 from spack.util import elf
+from spack.util.filesystem import visit_directory_tree
 
 
 # note that our elf parser is platform independent... but I guess creating an elf file
@@ -202,6 +204,28 @@ def test_drop_redundant_rpath(tmp_path: pathlib.Path, binary_with_rpaths):
     new_rpaths = elf.get_rpaths(binary)
     assert new_rpaths and set(existing_dirs).issubset(new_rpaths)
     assert set(non_existing_dirs).isdisjoint(new_rpaths)
+
+
+@pytest.mark.requires_executables("gcc")
+@skip_unless_linux
+def test_drop_redundant_rpaths_in_prefix(tmp_path: pathlib.Path, binary_with_rpaths):
+    """The post install hook patches ELF files in the prefix, and leaves other files alone."""
+    (tmp_path / "exists").mkdir()
+    rpaths = [str(tmp_path / "exists"), str(tmp_path / "missing")]
+    prefix = tmp_path / "prefix"
+    (prefix / "bin").mkdir(parents=True)
+    binary = prefix / "bin" / "exe"
+    binary.write_bytes(pathlib.Path(binary_with_rpaths(rpaths=rpaths)).read_bytes())
+    os.link(binary, prefix / "bin" / "hardlink")
+    (prefix / "bin" / "symlink").symlink_to("exe")
+    script = prefix / "bin" / "script"
+    script.write_text(f"#!/bin/sh\n# {rpaths[1]}\n")
+
+    visit_directory_tree(str(prefix), ElfFilesWithRPathVisitor())
+
+    new_rpaths = elf.get_rpaths(str(binary))
+    assert new_rpaths and rpaths[0] in new_rpaths and rpaths[1] not in new_rpaths
+    assert script.read_text() == f"#!/bin/sh\n# {rpaths[1]}\n"
 
 
 def test_elf_invalid_e_shnum(tmp_path: pathlib.Path):
