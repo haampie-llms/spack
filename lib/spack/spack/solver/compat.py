@@ -49,9 +49,7 @@ def load_clingo(ctx: "spack.context.SpackContext") -> ModuleType:
         # Make sure we didn't import an empty module
         _ensure_clingo_or_raise(clingo_mod, ctx.config)
     except ImportError:
-        import spack.bootstrap
-
-        spack.bootstrap.ensure_clingo_importable_or_raise(ctx)
+        ctx.ensure_clingo()
         clingo_mod = importlib.import_module("clingo")
     return _set_clingo_module_cache(clingo_mod)
 

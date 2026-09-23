@@ -7,6 +7,7 @@ import pytest
 
 import spack.compilers.config
 import spack.compilers.libraries
+import spack.detection
 import spack.spec
 
 
@@ -29,7 +30,7 @@ done
     )
     prefix = gcc_path.parent.parent
     arch = spack.spec.ArchSpec.default_arch()
-    new_compilers = spack.compilers.config.find_compilers(
+    new_compilers = spack.detection.find_compilers(
         [str(prefix)], config=mutable_config, repo=mock_packages, scope="site", max_workers=1
     )
     assert [x.format("{name}@{version}") for x in new_compilers] == ["gcc@4.5.3"]

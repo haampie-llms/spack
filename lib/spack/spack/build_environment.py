@@ -69,16 +69,19 @@ import spack.builder
 import spack.compilers.libraries
 import spack.config
 import spack.deptypes as dt
+import spack.detection
 import spack.error
 import spack.hooks.sbang
 import spack.multimethod
 import spack.package_base
 import spack.paths
 import spack.platforms
+import spack.repo
 import spack.schema.environment
 import spack.spec
 import spack.stage
 import spack.subprocess_context
+import spack.user_environment
 import spack.util.executable
 import spack.util.module_cmd
 from spack import traverse
@@ -95,6 +98,7 @@ from spack.util.environment import (
     env_flag,
     filter_system_paths,
     get_path,
+    inspect_path,
     is_system_path,
     validate,
 )
@@ -630,8 +634,6 @@ def set_package_py_globals(pkg, context: Context = Context.BUILD):
     module.static_to_shared_library = static_to_shared_library
 
     # Package API functions that take no package, bound to the package's context
-    import spack.compilers.config as compilers_config
-    import spack.user_environment as user_environment
 
     ctx = pkg.context
     module.determine_number_of_jobs = functools.partial(
@@ -645,10 +647,10 @@ def set_package_py_globals(pkg, context: Context = Context.BUILD):
     )
     module.filter_shebang = lambda path: spack.hooks.sbang.filter_shebang_for(path, ctx.store)
     module.find_compilers = functools.partial(
-        compilers_config.find_compilers, config=ctx.config, repo=ctx.repo
+        spack.detection.find_compilers, config=ctx.config, repo=ctx.repo
     )
     module.environment_modifications_for_specs = functools.partial(
-        user_environment.modifications_for_specs, ctx=ctx
+        modifications_for_specs, ctx=ctx
     )
 
     module.propagate_changes_to_mro()
@@ -1757,3 +1759,51 @@ class ModuleChangePropagator:
     def propagate_changes_to_mro(self):
         for module_in_mro in self.modules_in_mro:
             module_in_mro.__dict__.update(self._set_attributes)
+
+
+def modifications_for_specs(
+    *specs: spack.spec.Spec,
+    ctx: "spack.context.SpackContext",
+    view=None,
+    set_package_py_globals: bool = True,
+):
+    """List of environment (shell) modifications to be processed for spec.
+
+    This list is specific to the location of the spec or its projection in
+    the view.
+
+    Args:
+        specs: spec(s) for which to list the environment modifications
+        ctx: context the packages of the specs are attached from
+        view: view associated with the spec passed as first argument
+        set_package_py_globals: whether or not to set the global variables in the
+            package.py files (this may be problematic when using buildcaches that have
+            been built on a different but compatible OS)
+    """
+    config = ctx.config
+    spack.repo.attach_packages(specs, ctx)
+    env = EnvironmentModifications()
+    topo_ordered = list(
+        traverse.traverse_nodes(specs, root=True, deptype=("run", "link"), order="topo")
+    )
+
+    # Static environment changes (prefix inspections)
+    for s in reversed(topo_ordered):
+        static = inspect_path(
+            s.prefix,
+            spack.user_environment.prefix_inspections(s.platform, config),
+            exclude=is_system_path,
+        )
+        env.extend(static)
+
+    # Dynamic environment changes (setup_run_environment etc)
+    setup_context = SetupContext(*specs, context=Context.RUN)
+    if set_package_py_globals:
+        setup_context.set_all_package_py_globals()
+    env.extend(setup_context.get_env_modifications())
+
+    # Apply view projections if any.
+    if view:
+        spack.user_environment.project_env_mods(*topo_ordered, view=view, env=env, config=config)
+
+    return env

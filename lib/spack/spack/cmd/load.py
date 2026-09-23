@@ -5,6 +5,7 @@
 import argparse
 import sys
 
+import spack.build_environment
 import spack.cmd
 import spack.cmd.common
 import spack.user_environment as uenv
@@ -97,7 +98,7 @@ def load(parser, args, ctx):
         return 1
 
     with ctx.store.db.read_transaction():
-        env_mod = uenv.modifications_for_specs(*specs, ctx=ctx)
+        env_mod = spack.build_environment.modifications_for_specs(*specs, ctx=ctx)
         for spec in specs:
             env_mod.prepend_path(uenv.spack_loaded_hashes_var, spec.dag_hash())
         cmds = env_mod.shell_modifications(args.shell)

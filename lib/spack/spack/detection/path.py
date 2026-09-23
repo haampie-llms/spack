@@ -19,6 +19,7 @@ from typing import Dict, Iterable, List, NamedTuple, Optional, Set, Tuple, Type
 
 import spack.config
 import spack.error
+import spack.operating_systems.windows_os
 import spack.repo
 import spack.spec
 import spack.util.elf as elf_utils
@@ -40,6 +41,7 @@ from .common import (
     find_win32_additional_install_paths,
     library_prefix,
     path_to_dict,
+    update_configuration,
 )
 
 #: Timeout used for package detection (seconds)
@@ -474,17 +476,13 @@ def _bind_package_api(
 ) -> None:
     """Binds the package API functions that take no package to the detection resources, in the
     modules of the package class and its bases."""
-    import spack.compilers.config
-
-    find_compilers = functools.partial(
-        spack.compilers.config.find_compilers, config=config, repo=repo
-    )
+    bound_find_compilers = functools.partial(find_compilers, config=config, repo=repo)
     for cls in inspect.getmro(pkg):
         module = sys.modules.get(cls.__module__)
         if module is None or cls.__module__.startswith("spack."):
             continue
         if hasattr(module, "find_compilers"):
-            module.find_compilers = find_compilers  # type: ignore[attr-defined]
+            module.find_compilers = bound_find_compilers  # type: ignore[attr-defined]
 
 
 def by_path(
@@ -547,3 +545,43 @@ def by_path(
                     )
 
     return result
+
+
+#: Tag of the compiler packages
+COMPILER_TAG = "compiler"
+
+
+def find_compilers(
+    path_hints: Optional[List[str]] = None,
+    *,
+    config: spack.config.Configuration,
+    repo: spack.repo.RepoPath,
+    scope: Optional[str] = None,
+    max_workers: Optional[int] = None,
+) -> List[spack.spec.Spec]:
+    """Searches for compiler in the paths given as argument. If any new compiler is found, the
+    configuration is updated, and the list of new compiler objects is returned.
+
+    Args:
+        path_hints: list of path hints where to look for. A sensible default based on the ``PATH``
+            environment variable will be used if the value is None
+        config: configuration to be updated with the new compilers
+        repo: package repository used to detect compilers
+        scope: configuration scope to modify
+        max_workers: number of processes used to search for compilers
+    """
+    if path_hints is None:
+        path_hints = spack.util.environment.get_path("PATH")
+    default_paths = spack.util.filesystem.search_paths_for_executables(*path_hints)
+    if sys.platform == "win32":
+        default_paths.extend(spack.operating_systems.windows_os.WindowsOs().compiler_search_paths)
+    compiler_pkgs = repo.packages_with_tags(COMPILER_TAG, full=True)
+
+    detected_packages = by_path(
+        compiler_pkgs, repo=repo, config=config, path_hints=default_paths, max_workers=max_workers
+    )
+
+    new_compilers = update_configuration(
+        detected_packages, config=config, buildable=True, scope=scope
+    )
+    return new_compilers

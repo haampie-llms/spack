@@ -30,6 +30,7 @@ from typing import (
 )
 
 import spack
+import spack.build_environment
 import spack.concretize
 import spack.config
 import spack.deptypes as dt
@@ -1959,7 +1960,9 @@ class Environment:
             db = self.ctx.store.db
             with db.read_transaction():
                 installed_roots = [s for s in self.concrete_roots() if db.installed(s)]
-            mods = uenv.modifications_for_specs(*installed_roots, ctx=self.ctx, view=view)
+            mods = spack.build_environment.modifications_for_specs(
+                *installed_roots, ctx=self.ctx, view=view
+            )
         except Exception as e:
             # Failing to setup spec-specific changes shouldn't be a hard error.
             tty.warn(

@@ -5,12 +5,14 @@
 
 import os
 import sys
-from typing import List
+from typing import TYPE_CHECKING, List
 
 import spack.config
-import spack.context
 import spack.paths
 from spack.util import tty
+
+if TYPE_CHECKING:
+    import spack.context
 
 
 def spec_for_current_python() -> str:
@@ -63,7 +65,7 @@ def _bootstrap_config_scopes(config: spack.config.Configuration) -> List[spack.c
     return config_scopes
 
 
-def bootstrap_context(ctx: spack.context.SpackContext) -> spack.context.SpackContext:
+def bootstrap_context(ctx: "spack.context.SpackContext") -> "spack.context.SpackContext":
     """Return the context to bootstrap Spack's own dependencies in, derived from ``ctx``.
 
     Its configuration has the default and bootstrap scopes, plus the ``bootstrap``, ``config``
@@ -99,7 +101,7 @@ def bootstrap_context(ctx: spack.context.SpackContext) -> spack.context.SpackCon
     }
     config.push_scope(spack.config.InternalConfigScope("bootstrap_overrides", overrides))
 
-    result = spack.context.SpackContext(config, is_bootstrap=True)
+    result = type(ctx)(config, is_bootstrap=True)
     result.gpg_home = os.path.join(root_path(user), ".bootstrap_gpg_home")
     result.share(ctx, "repo", "misc_cache", "compiler_cache", "network")
     return result

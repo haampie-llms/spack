@@ -885,9 +885,7 @@ class PyclingoDriver:
         # needs to modify active config scope, so cannot be run within
         # bootstrap config scope
         if sys.platform == "win32":
-            from spack.bootstrap import ensure_winsdk_external_or_raise
-
-            ensure_winsdk_external_or_raise(setup.context)
+            setup.context.ensure_windows_sdk()
 
         # assemble a list of the control files needed for this problem. Some are conditionally
         # included depending on what features we're using in the solve.

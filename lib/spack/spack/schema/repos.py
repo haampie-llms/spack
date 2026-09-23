@@ -102,24 +102,19 @@ def update(data: Dict[str, Any], config: "spack.config.Configuration") -> bool:
     if not isinstance(data["repos"], list):
         return False
 
-    import spack.caches
-    import spack.config
-    from spack.repo import from_path
+    from spack.repo import namespace_of
     from spack.util import tty
-
-    cache = spack.caches.misc_cache(config=config)
 
     # Convert old format [paths...] to new format {namespace: path, ...}
     repos = {}
     for path in data["repos"]:
         try:
-            root = spack.config.canonicalize_path(path, config=config)
-            repo = from_path(root, cache=cache)
+            namespace = namespace_of(path, config)
         except Exception as e:
             tty.warn(f"package repository {path} is disabled due to: {e}")
             continue
-        if repo.namespace is not None:
-            repos[repo.namespace] = path
+        if namespace is not None:
+            repos[namespace] = path
 
     data["repos"] = repos
     return True

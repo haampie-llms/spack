@@ -6,7 +6,7 @@ import json
 import os
 import traceback
 import warnings
-from typing import Any, Dict, Iterable, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional
 
 from spack.vendor import jsonschema
 from spack.vendor.jsonschema import exceptions
@@ -14,7 +14,6 @@ from spack.vendor.jsonschema import exceptions
 import spack.cmd
 import spack.compilers.config
 import spack.config
-import spack.context
 import spack.deptypes as dt
 import spack.error
 import spack.platforms
@@ -23,6 +22,9 @@ import spack.spec
 from spack.detection.path import ExecutablesFinder
 from spack.schema.cray_manifest import schema as manifest_schema
 from spack.util import tty
+
+if TYPE_CHECKING:
+    import spack.context
 
 #: Cray systems can store a Spack-compatible description of system
 #: packages here.
@@ -120,7 +122,7 @@ def extract_compiler_paths(entry: Dict[str, Any]) -> List[str]:
     return paths
 
 
-def spec_from_entry(entry, *, ctx: spack.context.SpackContext):
+def spec_from_entry(entry, *, ctx: "spack.context.SpackContext"):
     arch_str = ""
     if "arch" in entry:
         local_platform = spack.platforms.host()
@@ -199,7 +201,7 @@ def spec_from_entry(entry, *, ctx: spack.context.SpackContext):
     return spec
 
 
-def entries_to_specs(entries, *, ctx: spack.context.SpackContext):
+def entries_to_specs(entries, *, ctx: "spack.context.SpackContext"):
     spec_dict = {}
     for entry in entries:
         try:
@@ -231,7 +233,7 @@ def entries_to_specs(entries, *, ctx: spack.context.SpackContext):
     return spec_dict
 
 
-def read(path, apply_updates, *, ctx: spack.context.SpackContext):
+def read(path, apply_updates, *, ctx: "spack.context.SpackContext"):
     decode_exception_type = json.decoder.JSONDecodeError
     try:
         with open(path, "r", encoding="utf-8") as json_file:
