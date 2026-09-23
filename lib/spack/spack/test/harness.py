@@ -49,15 +49,6 @@ def reset_derived_members() -> None:
         ctx.__dict__.pop(member, None)
 
 
-def _swap_member(ctx: spack.context.SpackContext, member: str, value: Any) -> Any:
-    """Replace a built member of ``ctx``; ``None`` rebuilds it on next access. Return the
-    previous value, or ``None`` if it was not built."""
-    previous = ctx.__dict__.pop(member, None)
-    if value is not None:
-        ctx.__dict__[member] = value
-    return previous
-
-
 @contextlib.contextmanager
 def use_configuration(
     *scopes_or_paths: Union[spack.config.ScopeWithOptionalPriority, str],
@@ -82,11 +73,11 @@ def use_configuration_and_store(
     """Like ``use_configuration``, with a store built from the new configuration."""
     ctx = current()
     with use_configuration(*scopes_or_paths) as configuration:
-        saved = _swap_member(ctx, "store", None)
+        saved = ctx.swap("store", None)
         try:
             yield configuration
         finally:
-            _swap_member(ctx, "store", saved)
+            ctx.swap("store", saved)
 
 
 @contextlib.contextmanager
@@ -107,11 +98,11 @@ def use_store(
         spack.config.InternalConfigScope(name=scope_name, data={"config": {"install_tree": data}})
     )
     store = spack.store.create(config, repo_provider=ctx.repo_provider)
-    saved = _swap_member(ctx, "store", store)
+    saved = ctx.swap("store", store)
     try:
         yield store
     finally:
-        _swap_member(ctx, "store", saved)
+        ctx.swap("store", saved)
         config.remove_scope(scope_name=scope_name)
 
 
@@ -159,15 +150,13 @@ def use_repositories(
     repos_key = "repos:" if override else "repos"
     config.push_scope(spack.config.InternalConfigScope(name=scope_name, data={repos_key: paths}))
     old_repo.disable()
-    new_repo.enable()
-    saved = _swap_member(ctx, "repo", new_repo)
+    ctx.swap("repo", new_repo)
     try:
         yield new_repo
     finally:
-        _swap_member(ctx, "repo", saved)
-        config.remove_scope(scope_name=scope_name)
         new_repo.disable()
-        old_repo.enable()
+        ctx.swap("repo", old_repo)
+        config.remove_scope(scope_name=scope_name)
 
 
 @contextlib.contextmanager

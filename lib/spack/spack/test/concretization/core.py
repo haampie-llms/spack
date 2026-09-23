@@ -6270,9 +6270,7 @@ def test_develop_specs_read_no_global(
         mutable_config.set(
             "develop", {"develop-test": {"spec": "develop-test@develop", "path": str(develop_dir)}}
         )
-        context = spack.context.SpackContext(spack.test.harness.current().config, environment=env)
-
-        result = spack.solver.asp.Solver(context=context).solve([Spec("develop-test@develop")])
+        result = spack.solver.asp.Solver(context=env.ctx).solve([Spec("develop-test@develop")])
 
         assert result.specs
         assert str(develop_dir) in result.specs[0].variants["dev_path"]
