@@ -7,10 +7,13 @@
    :lines: 17-
 """
 
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict
 
 import spack.schema
 import spack.schema.projections
+
+if TYPE_CHECKING:
+    import spack.config
 
 #: Properties for inclusion in other schemas
 properties: Dict[str, Any] = {
@@ -274,7 +277,7 @@ schema = {
 }
 
 
-def update(data: dict) -> bool:
+def update(data: dict, config: "spack.config.Configuration") -> bool:
     """Update the data in place to remove deprecated properties.
 
     Args:

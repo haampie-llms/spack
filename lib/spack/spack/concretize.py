@@ -214,7 +214,7 @@ def _concretize_separately(
 
     to_concretize = [abstract for abstract, concrete in spec_list if not concrete]
     args = [
-        (i, str(abstract), tests, factory, ctx)
+        (i, str(abstract), tests, factory)
         for i, abstract in enumerate(to_concretize)
         if not abstract.concrete
     ]
@@ -249,6 +249,7 @@ def _concretize_separately(
             debug=tty.is_debug(),
             maxtaskperchild=1,
             serialize_env=True,
+            shared=ctx,
         ),
         start=1,
     ):
@@ -265,11 +266,10 @@ def _concretize_separately(
 
 
 def _concretize_task(
-    packed_arguments: Tuple[
-        int, str, TestsType, Optional["SpecFiltersFactory"], spack.context.SpackContext
-    ],
+    ctx: spack.context.SpackContext,
+    packed_arguments: Tuple[int, str, TestsType, Optional["SpecFiltersFactory"]],
 ) -> Tuple[int, Spec, float]:
-    index, spec_str, tests, factory, ctx = packed_arguments
+    index, spec_str, tests, factory = packed_arguments
     with tty.SuppressOutput(msg_enabled=False):
         start = time.time()
         spec = concretize_one(Spec(spec_str), ctx, tests=tests, factory=factory)

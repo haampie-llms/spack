@@ -1193,6 +1193,7 @@ class OCIUploader(Uploader):
             None,
             None,
             *roots,
+            config=self.config,
             client=self.client,
         )
 
@@ -1514,6 +1515,7 @@ def _oci_put_manifest(
     extra_config: Optional[dict],
     annotations: Optional[dict],
     *specs: spack.spec.Spec,
+    config: spack.config.Configuration,
     client: web_util.NetworkClient,
 ):
     architecture = _oci_archspec_to_gooarch(specs[0])
@@ -1537,7 +1539,7 @@ def _oci_put_manifest(
         base_manifest_mediaType == "application/vnd.docker.distribution.manifest.v2+json"
     )
 
-    spack.user_environment.environment_modifications_for_specs(*specs).apply_modifications(env)
+    spack.user_environment.modifications_for_specs(*specs, config=config).apply_modifications(env)
 
     # Create an oci.image.config file
     config = copy.deepcopy(base_config)
@@ -1772,6 +1774,7 @@ def _oci_push(
             extra_config(spec),
             {"org.opencontainers.image.description": spec.format()},
             spec,
+            config=config,
             client=client,
         )
         for spec in manifests_to_upload

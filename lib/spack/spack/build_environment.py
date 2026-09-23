@@ -630,6 +630,9 @@ def set_package_py_globals(pkg, context: Context = Context.BUILD):
     module.static_to_shared_library = static_to_shared_library
 
     # Package API functions that take no package, bound to the package's context
+    import spack.compilers.config as compilers_config
+    import spack.user_environment as user_environment
+
     ctx = pkg.context
     module.determine_number_of_jobs = functools.partial(
         spack.config.determine_number_of_jobs, config=ctx.config
@@ -641,6 +644,12 @@ def set_package_py_globals(pkg, context: Context = Context.BUILD):
         spack.hooks.sbang.sbang_shebang_line_for, ctx.store
     )
     module.filter_shebang = lambda path: spack.hooks.sbang.filter_shebang_for(path, ctx.store)
+    module.find_compilers = functools.partial(
+        compilers_config.find_compilers, config=ctx.config, repo=ctx.repo
+    )
+    module.environment_modifications_for_specs = functools.partial(
+        user_environment.modifications_for_specs, config=ctx.config
+    )
 
     module.propagate_changes_to_mro()
 

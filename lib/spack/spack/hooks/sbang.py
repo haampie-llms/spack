@@ -9,7 +9,6 @@ import stat
 import sys
 import tempfile
 
-import spack.context
 import spack.error
 import spack.store
 from spack.util import tty
@@ -67,14 +66,20 @@ def sbang_shebang_line_for(store: spack.store.Store) -> str:
     return "#!/bin/sh %s" % sbang_install_path_for(store)
 
 
+def _package_api_only(name: str) -> spack.error.SpackError:
+    return spack.error.SpackError(
+        f"spack.package.{name} is available to package code only, while Spack sets up a package"
+    )
+
+
 def sbang_install_path() -> str:
     """Location sbang is installed within the install tree (package API)."""
-    return sbang_install_path_for(spack.context.current().store)
+    raise _package_api_only("sbang_install_path")
 
 
 def sbang_shebang_line() -> str:
     """Full shebang line that should be prepended to files to use sbang (package API)."""
-    return sbang_shebang_line_for(spack.context.current().store)
+    raise _package_api_only("sbang_shebang_line")
 
 
 def get_interpreter(binary_string):
@@ -89,7 +94,7 @@ def filter_shebang(path):
     Adds a second shebang line, using sbang, at the beginning of a file, if necessary
     (package API).
     """
-    return filter_shebang_for(path, spack.context.current().store)
+    raise _package_api_only("filter_shebang")
 
 
 def filter_shebang_for(path, store: spack.store.Store):

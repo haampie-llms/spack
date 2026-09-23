@@ -194,14 +194,20 @@ MachO = MachO
 LC_ID_DYLIB = LC_ID_DYLIB
 
 
+class _PackageAPIError(SpackError):
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"spack.package.{name} is available to package code only, "
+            "while Spack sets up or detects a package"
+        )
+
+
 class CompilerPropertyDetector(_CompilerPropertyDetector):
     """Detects compiler properties of a given compiler spec. Useful for compiler wrappers."""
 
     def __init__(self, compiler_spec: Spec) -> None:
         # Recipes construct detectors from the spec alone
-        import spack.context
-
-        ctx = spack.context.current()
+        ctx = compiler_spec.package.context
         super().__init__(compiler_spec, repo=ctx.repo, cache=ctx.compiler_cache)
 
 
@@ -243,12 +249,7 @@ def find_compilers(path_hints: Optional[List[str]] = None) -> List[Spec]:
         path_hints: list of path hints where to look for. A sensible default based on the ``PATH``
             environment variable will be used if the value is None
     """
-    # Local imports to avoid polluting the package API
-    import spack.context
-    from spack.compilers.config import find_compilers as _find_compilers
-
-    ctx = spack.context.current()
-    return _find_compilers(path_hints, config=ctx.config, repo=ctx.repo)
+    raise _PackageAPIError("find_compilers")
 
 
 #: Assigning this to :attr:`spack.package_base.PackageBase.flag_handler` means that compiler flags

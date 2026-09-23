@@ -12,6 +12,7 @@ from typing import (
     Iterator,
     List,
     Mapping,
+    NamedTuple,
     Optional,
     Tuple,
     Union,
@@ -19,7 +20,6 @@ from typing import (
 )
 
 import spack.config
-import spack.context
 import spack.util.spack_yaml as syaml
 import spack.util.url as url_util
 from spack.error import MirrorError
@@ -52,7 +52,11 @@ def _spec_matches_filters(spec: "spack.spec.Spec", include: List[str], exclude: 
     return True
 
 
-def _url_or_path_to_url(url_or_path: str) -> str:
+class _EnvPath(NamedTuple):
+    env_path: Optional[str]
+
+
+def _url_or_path_to_url(url_or_path: str, env_path: Optional[str]) -> str:
     """For simplicity we allow mirror URLs in config files to be local, relative paths.
     This helper function takes care of distinguishing between URLs and paths, and
     canonicalizes paths before transforming them into file:// URLs."""
@@ -62,7 +66,7 @@ def _url_or_path_to_url(url_or_path: str) -> str:
         return url_or_path
 
     # Otherwise we interpret it as path, and we should promote it to file:// URL.
-    path = spack.config.canonicalize_path(url_or_path, config=spack.context.current().config)
+    path = spack.config.canonicalize_path(url_or_path, config=_EnvPath(env_path))
     return url_util.path_to_file_url(path)
 
 
@@ -75,9 +79,13 @@ class Mirror:
     to them. These two URLs are usually the same.
     """
 
-    def __init__(self, data: Union[str, dict], name: Optional[str] = None) -> None:
+    def __init__(
+        self, data: Union[str, dict], name: Optional[str] = None, *, env_path: Optional[str] = None
+    ) -> None:
         self._data = data
         self._name = name
+        #: Environment of the configuration the mirror is read from, for ``$env`` in paths
+        self._env_path = env_path
 
     @staticmethod
     def from_yaml(stream: Union[str, IO[str]], name: Optional[str] = None) -> "Mirror":
@@ -354,7 +362,7 @@ class Mirror:
 
         # Whole mirror config is just a url.
         if isinstance(self._data, str):
-            return _url_or_path_to_url(self._data)
+            return _url_or_path_to_url(self._data, self._env_path)
 
         # Default value
         url = self._data.get("url")
@@ -371,7 +379,7 @@ class Mirror:
         if not url:
             raise ValueError(f"Mirror {self.name} has no URL configured")
 
-        return _url_or_path_to_url(url)
+        return _url_or_path_to_url(url, self._env_path)
 
     def get_credentials(self, direction: str) -> Dict[str, Any]:
         """Get the mirror credentials from the mirror config
@@ -434,6 +442,7 @@ class MirrorCollection(Mapping[str, Mirror]):
         binary: Optional[bool] = None,
         source: Optional[bool] = None,
         autopush: Optional[bool] = None,
+        env_path: Optional[str] = None,
     ):
         """Initialize a mirror collection.
 
@@ -447,7 +456,8 @@ class MirrorCollection(Mapping[str, Mirror]):
                     If None, do not filter on source mirrors.
             autopush: If True, only include mirrors that have autopush enabled.
                       If False, omit mirrors that have autopush enabled.
-                      If None, do not filter on autopush."""
+                      If None, do not filter on autopush.
+            env_path: Environment of the configuration the mirrors are read from."""
 
         def _filter(m: Mirror):
             if source is not None and m.source != source:
@@ -458,7 +468,9 @@ class MirrorCollection(Mapping[str, Mirror]):
                 return False
             return True
 
-        all_mirrors = (Mirror(data=mirror, name=name) for name, mirror in mirrors.items())
+        all_mirrors = (
+            Mirror(data=mirror, name=name, env_path=env_path) for name, mirror in mirrors.items()
+        )
         self._mirrors = {m.name: m for m in all_mirrors if _filter(m)}
 
     @staticmethod
@@ -479,6 +491,7 @@ class MirrorCollection(Mapping[str, Mirror]):
             binary=binary,
             source=source,
             autopush=autopush,
+            env_path=config.env_path,
         )
 
     def __eq__(self, other: object) -> bool:

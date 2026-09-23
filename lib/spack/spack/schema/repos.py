@@ -8,7 +8,10 @@
    :lines: 18-
 """
 
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict
+
+if TYPE_CHECKING:
+    import spack.config
 
 #: Properties for inclusion in other schemas
 properties: Dict[str, Any] = {
@@ -94,24 +97,24 @@ schema = {
 }
 
 
-def update(data: Dict[str, Any]) -> bool:
+def update(data: Dict[str, Any], config: "spack.config.Configuration") -> bool:
     """Update the repos.yaml configuration data to the new format."""
     if not isinstance(data["repos"], list):
         return False
 
+    import spack.caches
     import spack.config
-    import spack.context
     from spack.repo import from_path
     from spack.util import tty
 
-    ctx = spack.context.current()
+    cache = spack.caches.misc_cache(config=config)
 
     # Convert old format [paths...] to new format {namespace: path, ...}
     repos = {}
     for path in data["repos"]:
         try:
-            root = spack.config.canonicalize_path(path, config=ctx.config)
-            repo = from_path(root, cache=ctx.misc_cache)
+            root = spack.config.canonicalize_path(path, config=config)
+            repo = from_path(root, cache=cache)
         except Exception as e:
             tty.warn(f"package repository {path} is disabled due to: {e}")
             continue

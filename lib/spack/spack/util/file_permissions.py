@@ -5,15 +5,14 @@
 import os
 import stat as st
 
-import spack.context
+import spack.config
 import spack.package_prefs as pp
 import spack.util.filesystem as fs
 from spack.error import SpackError
 
 
-def set_permissions_by_spec(path, spec):
+def set_permissions_by_spec(path, spec, config: spack.config.Configuration):
     # Get permissions for spec
-    config = spack.context.current().config
     if os.path.isdir(path):
         perms = pp.get_package_dir_permissions(spec, config=config)
     else:

@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
 import pytest
 
+import spack.config
 import spack.context
 import spack.enums
 import spack.repo
@@ -387,7 +388,7 @@ def lib_built_with_deprecated_tool(mutable_config, temporary_store):
         spec = concretize_one("deprecated-tool-lib ^deprecated-tool@1.0", spack.context.current())
     assert spec["deprecated-tool"].satisfies("@1.0")
     for node in spec.traverse():
-        temporary_store.layout.create_install_directory(node)
+        temporary_store.layout.create_install_directory(node, spack.config.CONFIG)
         temporary_store.db.add(node, explicit=node.name == spec.name)
     return spec
 

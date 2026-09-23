@@ -8,6 +8,7 @@ import sys
 
 import pytest
 
+import spack.config
 import spack.error
 import spack.spec
 from spack.config import Configuration
@@ -150,7 +151,7 @@ def test_package_installer_with_injected_ui(temporary_store, mock_packages):
     Uses the mark-explicit path (spec installed implicitly, requested explicitly) so the loop
     schedules, reports, and persists to the database without spawning build processes."""
     spec = _make_concrete("trivial-install-test-package")
-    temporary_store.layout.create_install_directory(spec)
+    temporary_store.layout.create_install_directory(spec, spack.config.CONFIG)
     temporary_store.db.add(spec, explicit=False)
 
     ui = _install(None, spec)
@@ -248,7 +249,7 @@ def test_overwrite_reinstalls_through_event_loop(temporary_store, mock_packages)
     """An overwrite install of an already-installed spec launches a build and refreshes the
     database record."""
     spec = _make_concrete("trivial-install-test-package")
-    temporary_store.layout.create_install_directory(spec)
+    temporary_store.layout.create_install_directory(spec, spack.config.CONFIG)
     temporary_store.db.add(spec, explicit=True)
     old_time = _record(temporary_store, spec).installation_time
 

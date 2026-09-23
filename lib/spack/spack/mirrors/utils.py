@@ -7,7 +7,6 @@ from collections import Counter
 
 import spack.caches
 import spack.config
-import spack.context
 import spack.repo
 import spack.spec
 import spack.util.spack_yaml as syaml
@@ -239,10 +238,9 @@ def create_mirror_from_package_object(
     return True
 
 
-def require_mirror_name(mirror_name):
+def require_mirror_name(mirror_name, config: spack.config.Configuration):
     """Find a mirror by name and raise if it does not exist"""
-    # Entry point for argparse type conversions, which have no context
-    mirror = MirrorCollection.from_config(spack.context.current().config).get(mirror_name)
+    mirror = MirrorCollection.from_config(config).get(mirror_name)
     if not mirror:
         raise ValueError(f'no mirror named "{mirror_name}"')
     return mirror

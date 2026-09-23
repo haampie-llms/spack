@@ -7,4 +7,4 @@ import spack.verify
 
 def post_install(spec, explicit=None):
     if not spec.external:
-        spack.verify.write_manifest(spec)
+        spack.verify.write_manifest(spec, spec.package.context.config)

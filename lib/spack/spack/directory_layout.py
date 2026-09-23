@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-import spack.context
+import spack.config
 import spack.error
 import spack.projections
 import spack.spec
@@ -95,8 +95,11 @@ class DirectoryLayout:
         *,
         projections: Optional[Dict[str, str]] = None,
         hash_length: Optional[int] = None,
+        env_path: Optional[str] = None,
     ) -> None:
         self.root = root
+        #: Environment of the configuration the layout is read from, for ``$env`` in projections
+        self.env_path = env_path
         projections = projections or default_projections
         self.projections = {key: projection.lower() for key, projection in projections.items()}
 
@@ -133,9 +136,7 @@ class DirectoryLayout:
     def relative_path_for_spec(self, spec: "spack.spec.Spec") -> str:
         _check_concrete(spec)
 
-        projection = spack.projections.get_projection(
-            self.projections, spec, spack.context.current().config
-        )
+        projection = spack.projections.get_projection(self.projections, spec, self)
         path = spec.format_path(projection)
         return str(Path(path))
 
@@ -232,7 +233,9 @@ class DirectoryLayout:
     def build_packages_path(self, spec: "spack.spec.Spec") -> str:
         return os.path.join(self.metadata_path(spec), self.packages_dir)
 
-    def create_install_directory(self, spec: "spack.spec.Spec") -> None:
+    def create_install_directory(
+        self, spec: "spack.spec.Spec", config: spack.config.Configuration
+    ) -> None:
         _check_concrete(spec)
 
         # Create install directory with properly configured permissions
@@ -242,7 +245,6 @@ class DirectoryLayout:
         # Each package folder can have its own specific permissions, while
         # intermediate folders (arch/compiler) are set with access permissions
         # equivalent to the root permissions of the layout.
-        config = spack.context.current().config
         group = get_package_group(spec, config=config)
         perms = get_package_dir_permissions(spec, config=config)
 

@@ -11,6 +11,7 @@ import stat
 
 import pytest
 
+import spack.config
 import spack.spec
 import spack.store
 import spack.util.filesystem as fs
@@ -155,7 +156,7 @@ def test_check_prefix_manifest(tmp_path: pathlib.Path):
     link = os.path.join(bin_dir, "run")
     symlink(file, link)
 
-    spack.verify.write_manifest(spec)
+    spack.verify.write_manifest(spec, spack.config.CONFIG)
     results = spack.verify.check_spec_manifest(spec)
     assert not results.has_errors()
 

@@ -1,12 +1,10 @@
-import spack.config
-from spack.active_environment import active_environment
-
+# ``ctx`` is the context of the ``spack python`` invocation
 KEY = "concretizer:unify"
 
-before = spack.config.CONFIG.get(KEY)
-with active_environment().manifest.use_config():
-    within = spack.config.CONFIG.get(KEY)
-after = spack.config.CONFIG.get(KEY)
+before = ctx.config.get(KEY)  # noqa: F821
+with ctx.environment.manifest.use_config(ctx.config):  # noqa: F821
+    within = ctx.config.get(KEY)  # noqa: F821
+after = ctx.config.get(KEY)  # noqa: F821
 
 if before == within == after:
     print(f"SUCCESS: {before}")

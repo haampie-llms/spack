@@ -37,8 +37,8 @@ def _for_each_enabled(
 
 
 def post_install(spec, explicit: bool):
-    _for_each_enabled(spec, "write", spack.context.current(), explicit)
+    _for_each_enabled(spec, "write", spec.package.context, explicit)
 
 
 def post_uninstall(spec):
-    _for_each_enabled(spec, "remove", spack.context.current())
+    _for_each_enabled(spec, "remove", spec.package.context)

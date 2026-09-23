@@ -2271,7 +2271,9 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
         Extensions added to this view will modify the installation prefix of
         this package.
         """
-        return YamlFilesystemView(self.prefix, self.context.store.layout)
+        return YamlFilesystemView(
+            self.prefix, self.context.store.layout, env_path=self.context.config.env_path
+        )
 
     def do_restage(self):
         """Reverts expanded/checked out source to a pristine state."""

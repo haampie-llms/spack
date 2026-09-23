@@ -20,6 +20,7 @@ import spack.cmd
 import spack.cmd.external
 import spack.compilers.config
 import spack.concretize
+import spack.config
 import spack.context
 import spack.cray_manifest
 import spack.deprecation
@@ -205,6 +206,7 @@ def test_compiler_from_entry(mock_executable):
         ).compiler_json(),
         manifest_path="/example/file",
         repo=spack.repo.PATH,
+        config=spack.config.CONFIG,
     )
 
     assert compiler.satisfies("gcc@7.5.0 target=x86_64 os=centos8")
@@ -301,7 +303,10 @@ def test_failed_translate_compiler_name(_common_arch):
 
     with pytest.raises(spack.compilers.config.UnknownCompilerError):
         compiler_from_entry(
-            unknown_compiler.compiler_json(), manifest_path="/example/file", repo=spack.repo.PATH
+            unknown_compiler.compiler_json(),
+            manifest_path="/example/file",
+            repo=spack.repo.PATH,
+            config=spack.config.CONFIG,
         )
 
     spec_json = JsonSpecEntry(
@@ -353,7 +358,7 @@ def test_read_cray_manifest_add_compiler_failure(
 ):
     """Tests the Cray manifest can be read even if some compilers cannot be added."""
 
-    def _mock(entry, *, manifest_path, repo):
+    def _mock(entry, *, manifest_path, repo, config):
         if entry["name"] == "clang":
             raise RuntimeError("cannot determine the compiler")
         return spack.spec.Spec(f"{entry['name']}@{entry['version']}")
@@ -368,7 +373,7 @@ def test_read_cray_manifest_add_compiler_failure(
 def test_read_cray_manifest_twice_no_duplicates(
     mutable_config, temporary_store, manifest_file, monkeypatch, tmp_path: pathlib.Path
 ):
-    def _mock(entry, *, manifest_path, repo):
+    def _mock(entry, *, manifest_path, repo, config):
         return spack.spec.Spec(f"{entry['name']}@{entry['version']}", external_path=str(tmp_path))
 
     monkeypatch.setattr(spack.cray_manifest, "compiler_from_entry", _mock)

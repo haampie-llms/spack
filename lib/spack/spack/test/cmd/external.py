@@ -8,6 +8,7 @@ import sys
 import pytest
 
 import spack.cmd.external
+import spack.config
 import spack.cray_manifest
 import spack.detection
 import spack.detection.path
@@ -269,6 +270,7 @@ def test_overriding_prefix(mock_executable, mutable_config, monkeypatch, mock_pa
         pkg_name="gcc",
         initial_guess=[str(search_dir)],
         repository=mock_packages,
+        config=spack.config.CONFIG,
         additional_search_paths=[],
     )
 

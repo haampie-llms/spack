@@ -16,6 +16,7 @@ import tempfile
 from typing import List, Tuple
 
 import spack.concretize
+import spack.config
 import spack.context
 import spack.sandbox
 import spack.store
@@ -164,7 +165,7 @@ def test_enable_sandbox_paths(
     custom_read_link.symlink_to(custom_read_target)
 
     # Ensure the sbang exists
-    temporary_store.install_sbang()
+    temporary_store.install_sbang(spack.config.CONFIG)
     sbang_file = pathlib.Path(temporary_store.unpadded_root) / "bin" / "sbang"
 
     config = {

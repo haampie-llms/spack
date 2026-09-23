@@ -7,7 +7,7 @@ import sys
 
 import spack.build_environment
 import spack.config
-import spack.context
+import spack.error
 import spack.spec
 from spack import traverse
 from spack.enums import Context
@@ -131,13 +131,12 @@ def modifications_for_specs(
 def environment_modifications_for_specs(
     *specs: spack.spec.Spec, view=None, set_package_py_globals: bool = True
 ):
-    """Same as :func:`modifications_for_specs`, with the current configuration.
+    """Same as :func:`modifications_for_specs`, with the configuration of the package.
 
-    This is part of the package API; library code calls :func:`modifications_for_specs`.
+    This is part of the package API, and is bound to the package's configuration in its module.
+    Library code calls :func:`modifications_for_specs`.
     """
-    return modifications_for_specs(
-        *specs,
-        config=spack.context.current().config,
-        view=view,
-        set_package_py_globals=set_package_py_globals,
+    raise spack.error.SpackError(
+        "spack.package.environment_modifications_for_specs is available to package code only, "
+        "while Spack sets up a package"
     )

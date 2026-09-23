@@ -587,7 +587,7 @@ def test_update_sbang(tmp_path: pathlib.Path, temporary_mirror, mock_fetch, inst
     """Test relocation of the sbang shebang line in a package script"""
     s = spack.concretize.concretize_one("old-sbang", spack.context.current())
     PackageInstaller([s.package]).install()
-    old_prefix, old_sbang_shebang = s.prefix, sbang.sbang_shebang_line()
+    old_prefix, old_sbang_shebang = s.prefix, sbang.sbang_shebang_line_for(spack.store.STORE)
     old_contents = f"""\
 {old_sbang_shebang}
 #!/usr/bin/env python3
@@ -603,7 +603,7 @@ def test_update_sbang(tmp_path: pathlib.Path, temporary_mirror, mock_fetch, inst
     # Switch the store to the new install tree locations
     with spack.store.use_store(str(tmp_path)):
         s._prefix = None  # clear the cached old prefix
-        new_prefix, new_sbang_shebang = s.prefix, sbang.sbang_shebang_line()
+        new_prefix, new_sbang_shebang = s.prefix, sbang.sbang_shebang_line_for(spack.store.STORE)
         assert old_prefix != new_prefix
         assert old_sbang_shebang != new_sbang_shebang
         PackageInstaller(
@@ -612,7 +612,7 @@ def test_update_sbang(tmp_path: pathlib.Path, temporary_mirror, mock_fetch, inst
 
         # Check that the sbang line refers to the new install tree
         new_contents = f"""\
-{sbang.sbang_shebang_line()}
+{sbang.sbang_shebang_line_for(spack.store.STORE)}
 #!/usr/bin/env python3
 
 {s.prefix.bin}

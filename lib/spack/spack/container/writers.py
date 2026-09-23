@@ -12,7 +12,7 @@ from typing import Optional
 
 import spack.vendor.jsonschema
 
-import spack.context
+import spack.config
 import spack.environment as ev
 import spack.error
 import spack.schema.env
@@ -47,25 +47,27 @@ def writer(name):
     return _decorator
 
 
-def create(configuration, last_phase=None):
+def create(configuration, spack_config: spack.config.Configuration, last_phase=None):
     """Returns a writer that conforms to the configuration passed as input.
 
     Args:
         configuration (dict): how to generate the current recipe
+        spack_config: Spack configuration, for the template directories
         last_phase (str): last phase to be printed or None to print them all
     """
     name = configuration[ev.TOP_LEVEL_KEY]["container"]["format"]
-    return _writer_factory[name](configuration, last_phase)
+    return _writer_factory[name](configuration, spack_config, last_phase)
 
 
-def recipe(configuration, last_phase=None):
+def recipe(configuration, spack_config: spack.config.Configuration, last_phase=None):
     """Returns a recipe that conforms to the configuration passed as input.
 
     Args:
         configuration (dict): how to generate the current recipe
+        spack_config: Spack configuration, for the template directories
         last_phase (str): last phase to be printed or None to print them all
     """
-    return create(configuration, last_phase)()
+    return create(configuration, spack_config, last_phase)()
 
 
 def _stage_base_images(images_config):
@@ -141,7 +143,8 @@ class PathContext(tengine.Context):
     # Must be set by derived classes
     template_name: Optional[str] = None
 
-    def __init__(self, config, last_phase):
+    def __init__(self, config, spack_config: spack.config.Configuration, last_phase):
+        self.spack_config = spack_config
         self.config = config[ev.TOP_LEVEL_KEY]
         self.container_config = self.config["container"]
 
@@ -287,7 +290,7 @@ class PathContext(tengine.Context):
             config_args = _spack_checkout_config(images_config)
             command = checkout_command(*config_args)
             template_path = bootstrap_template_for(self.operating_system_key)
-            env = tengine.make_environment(spack.context.current().config)
+            env = tengine.make_environment(self.spack_config)
             context = {"bootstrap": {"image": self.bootstrap_image, "spack_checkout": command}}
             bootstrap_recipe = env.get_template(template_path).render(**context)
 
@@ -304,7 +307,7 @@ class PathContext(tengine.Context):
 
     def __call__(self):
         """Returns the recipe as a string"""
-        env = tengine.make_environment(spack.context.current().config)
+        env = tengine.make_environment(self.spack_config)
         template_name = self.container_config.get("template", self.template_name)
         t = env.get_template(template_name)
         return t.render(**self.to_dict())

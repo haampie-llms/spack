@@ -43,6 +43,7 @@ from itertools import chain
 from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple, Union, cast
 
 from spack.vendor import jsonschema
+from spack.vendor.typing_extensions import Protocol
 
 import spack
 import spack.error
@@ -867,7 +868,7 @@ class Configuration:
 
             # If configuration is in an old format, transform it and keep track of the scope that
             # may need to be written out to disk.
-            if _update_in_memory(data, section):
+            if _update_in_memory(data, section, self):
                 updated_scopes.append(config_scope)
 
             merged_section = spack.schema.merge_yaml(merged_section, data)
@@ -2101,7 +2102,7 @@ def process_config_path(path: str) -> List[str]:
     return ConfigPath.process(path)
 
 
-def _update_in_memory(data: YamlConfigDict, section: str) -> bool:
+def _update_in_memory(data: YamlConfigDict, section: str, config: "Configuration") -> bool:
     """Update the format of the configuration data in memory.
 
     This function assumes the section is valid (i.e. validation
@@ -2110,15 +2111,17 @@ def _update_in_memory(data: YamlConfigDict, section: str) -> bool:
     Args:
         data: configuration data
         section: section of the configuration to update
+        config: configuration the data is part of
 
     Returns:
         True if the data was changed, False otherwise
     """
-    return ensure_latest_format_fn(section)(data)
+    return ensure_latest_format_fn(section)(data, config)
 
 
-def ensure_latest_format_fn(section: str) -> Callable[[YamlConfigDict], bool]:
-    """Return a function that takes a config dictionary and update it to the latest format.
+def ensure_latest_format_fn(section: str) -> Callable[[YamlConfigDict, "Configuration"], bool]:
+    """Return a function that takes a config dictionary and the configuration it is part of, and
+    updates the dictionary to the latest format.
 
     The function returns True iff there was any update.
 
@@ -2126,7 +2129,7 @@ def ensure_latest_format_fn(section: str) -> Callable[[YamlConfigDict], bool]:
         section: section of the configuration e.g. "packages", "config", etc.
     """
     # Every module we need is already imported at the top level, so getattr should not raise
-    return getattr(getattr(spack.schema, section), "update", lambda _: False)
+    return getattr(getattr(spack.schema, section), "update", lambda data, config: False)
 
 
 @contextlib.contextmanager
@@ -2260,7 +2263,14 @@ NOMATCH = object()
 
 
 # Substitutions to perform
-def replacements(config: "Configuration"):
+class HasEnvPath(Protocol):
+    """What path substitution reads from a configuration: the root of its environment."""
+
+    @property
+    def env_path(self) -> Optional[str]: ...
+
+
+def replacements(config: HasEnvPath):
     arch = architecture()
 
     return {
@@ -2282,7 +2292,7 @@ def replacements(config: "Configuration"):
     }
 
 
-def substitute_config_variables(path, config: "Configuration"):
+def substitute_config_variables(path, config: HasEnvPath):
     """Substitute placeholders into paths.
 
     Spack allows paths in configs to have some placeholders, as follows:
@@ -2321,7 +2331,7 @@ def substitute_config_variables(path, config: "Configuration"):
     return re.sub(r"(\$\w+\b|\$\{\w+\})", repl, path)
 
 
-def substitute_path_variables(path, config: "Configuration"):
+def substitute_path_variables(path, config: HasEnvPath):
     """Substitute config vars, expand environment vars, expand user home."""
     path = substitute_config_variables(path, config)
     path = os.path.expandvars(path)
@@ -2329,9 +2339,7 @@ def substitute_path_variables(path, config: "Configuration"):
     return path
 
 
-def canonicalize_path(
-    path: str, default_wd: Optional[str] = None, *, config: "Configuration"
-) -> str:
+def canonicalize_path(path: str, default_wd: Optional[str] = None, *, config: HasEnvPath) -> str:
     """Same as substitute_path_variables, but also take absolute path.
 
     If the string is a yaml object with file annotations, make absolute paths

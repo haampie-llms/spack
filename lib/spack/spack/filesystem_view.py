@@ -14,7 +14,6 @@ from typing import Callable, Dict, List, Optional
 from spack.vendor.typing_extensions import Literal
 
 import spack.config
-import spack.context
 import spack.directory_layout
 import spack.projections
 import spack.relocate
@@ -165,6 +164,7 @@ class FilesystemView:
         verbose: bool = False,
         link_type: LinkType = "symlink",
         link_dirs: bool = False,
+        env_path: Optional[str] = None,
     ):
         """
         Initialize a filesystem view under the given ``root`` directory with
@@ -175,6 +175,8 @@ class FilesystemView:
         self._root = root
         self.layout = layout
         self.projections = {} if projections is None else projections
+        #: Environment of the configuration the projections are read from, for ``$env``
+        self.env_path = env_path
 
         self.ignore_conflicts = ignore_conflicts
         self.verbose = verbose
@@ -293,6 +295,7 @@ class YamlFilesystemView(FilesystemView):
         ignore_conflicts: bool = False,
         verbose: bool = False,
         link_type: LinkType = "symlink",
+        env_path: Optional[str] = None,
     ):
         super().__init__(
             root,
@@ -301,6 +304,7 @@ class YamlFilesystemView(FilesystemView):
             ignore_conflicts=ignore_conflicts,
             verbose=verbose,
             link_type=link_type,
+            env_path=env_path,
         )
 
         # Super class gets projections from the kwargs
@@ -545,9 +549,7 @@ class YamlFilesystemView(FilesystemView):
         if spec.package.extendee_spec:
             locator_spec = spec.package.extendee_spec
 
-        proj = spack.projections.get_projection(
-            self.projections, locator_spec, spack.context.current().config
-        )
+        proj = spack.projections.get_projection(self.projections, locator_spec, self)
         if proj:
             return os.path.join(self._root, locator_spec.format_path(proj))
         return self._root
@@ -807,9 +809,7 @@ class SimpleFilesystemView(FilesystemView):
         if spec.package.extendee_spec:
             spec = spec.package.extendee_spec
 
-        p = spack.projections.get_projection(
-            self.projections, spec, spack.context.current().config
-        )
+        p = spack.projections.get_projection(self.projections, spec, self)
         return spec.format_path(p) if p else ""
 
     def get_projection_for_spec(self, spec):
@@ -823,9 +823,7 @@ class SimpleFilesystemView(FilesystemView):
         if spec.package.extendee_spec:
             spec = spec.package.extendee_spec
 
-        proj = spack.projections.get_projection(
-            self.projections, spec, spack.context.current().config
-        )
+        proj = spack.projections.get_projection(self.projections, spec, self)
         if proj:
             return os.path.join(self._root, spec.format_path(proj))
         return self._root

@@ -6,6 +6,7 @@ import pathlib
 
 import pytest
 
+import spack.config
 import spack.context
 import spack.environment
 import spack.package_base
@@ -656,7 +657,7 @@ def test_repo_update(tmp_path: pathlib.Path):
     existing_root, _ = spack.repo.create_repo(str(tmp_path), namespace="foo")
     nonexisting_root = str(tmp_path / "nonexisting")
     config = {"repos": [existing_root, nonexisting_root]}
-    assert spack.schema.repos.update(config)
+    assert spack.schema.repos.update(config, spack.config.CONFIG)
     assert config["repos"] == {
         "foo": existing_root
         # non-existing root is removed for simplicity; would be a warning otherwise.

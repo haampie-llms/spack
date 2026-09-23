@@ -26,7 +26,6 @@ import uuid
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union, cast
 
 import spack.config
-import spack.context
 import spack.database
 import spack.directory_layout
 import spack.error
@@ -129,15 +128,17 @@ class Store:
         hash_length: Optional[int] = None,
         upstreams: Optional[List[spack.database.Database]] = None,
         lock_cfg: spack.database.LockConfiguration = spack.database.NO_LOCK,
+        env_path: Optional[str] = None,
     ) -> None:
         self.root = root
+        self.env_path = env_path
         self.unpadded_root = unpadded_root or root
         self.projections = projections
         self.hash_length = hash_length
         self.upstreams = upstreams
         self.lock_cfg = lock_cfg
         self.layout = spack.directory_layout.DirectoryLayout(
-            root, projections=projections, hash_length=hash_length
+            root, projections=projections, hash_length=hash_length, env_path=env_path
         )
         self.db = spack.database.Database(
             root, upstream_dbs=upstreams, lock_cfg=lock_cfg, layout=self.layout
@@ -169,7 +170,7 @@ class Store:
         """Convenience function to reindex the store DB with its own layout."""
         return self.db.reindex()
 
-    def install_sbang(self) -> None:
+    def install_sbang(self, config: spack.config.Configuration) -> None:
         """Install the sbang script in this store's bin directory.
 
         sbang is a short shell script that Spack prepends to scripts with shebangs that are too
@@ -193,7 +194,6 @@ class Store:
         os.makedirs(bin_dir, exist_ok=True)
 
         all_spec = spack.spec.Spec("all")
-        config = spack.context.current().config
         group_name = spack.package_prefs.get_package_group(all_spec, config=config)
         config_mode = spack.package_prefs.get_package_dir_permissions(all_spec, config=config)
         gid = grp.getgrnam(group_name).gr_gid if group_name else -1
@@ -220,6 +220,7 @@ class Store:
             self.hash_length,
             self.upstreams,
             self.lock_cfg,
+            self.env_path,
         )
 
 
@@ -246,6 +247,7 @@ def create(configuration: spack.config.Configuration) -> Store:
         hash_length=hash_length,
         upstreams=upstreams,
         lock_cfg=spack.database.lock_configuration(configuration),
+        env_path=configuration.env_path,
     )
 
 

@@ -5,12 +5,13 @@
 import argparse
 import os
 import textwrap
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 import spack.cmd
 import spack.config
 import spack.deprecation
 import spack.deptypes as dt
+import spack.error
 import spack.mirrors.mirror
 import spack.mirrors.utils
 import spack.reporters
@@ -64,14 +65,32 @@ def defer_config(namespace: argparse.Namespace, fn: Callable[["SpackContext"], N
     deferred.append(fn)
 
 
+class Deferred:
+    """Value of an argument that depends on the command's context, resolved before it runs."""
+
+    def __init__(self, fn: Callable[["SpackContext"], Any]) -> None:
+        self.fn = fn
+
+
+def _resolve(value: Any, ctx: "SpackContext") -> Any:
+    if isinstance(value, Deferred):
+        try:
+            return value.fn(ctx)
+        except argparse.ArgumentTypeError as e:
+            raise spack.error.SpackError(str(e)) from e
+    if isinstance(value, list):
+        return [_resolve(v, ctx) for v in value]
+    return value
+
+
 def apply_deferred_config(args: argparse.Namespace, ctx: "SpackContext") -> None:
-    """Apply the configuration changes recorded while parsing ``args``."""
+    """Apply the configuration changes recorded while parsing ``args``, and resolve the
+    arguments whose value depends on the context."""
     for fn in getattr(args, "_deferred_config", ()):
         fn(ctx)
     args._deferred_config = []
-    for key, value in vars(args).items():
-        if isinstance(value, _DeferredScope):
-            setattr(args, key, value.fn(ctx.config))
+    for key, value in list(vars(args).items()):
+        setattr(args, key, _resolve(value, ctx))
 
 
 class ConstraintAction(argparse.Action):
@@ -168,13 +187,6 @@ class DeptypeAction(argparse.Action):
         setattr(namespace, self.dest, deptype)
 
 
-class _DeferredScope:
-    """Default of a scope argument, resolved against the command's configuration."""
-
-    def __init__(self, fn: Callable[["spack.config.Configuration"], str]) -> None:
-        self.fn = fn
-
-
 class ConfigScope(argparse.Action):
     """Pick one of the configured config scopes.
 
@@ -191,7 +203,7 @@ class ConfigScope(argparse.Action):
         kwargs.pop("type", None)
         default = kwargs.get("default")
         if callable(default):
-            kwargs["default"] = _DeferredScope(default)
+            kwargs["default"] = Deferred(lambda ctx: default(ctx.config))
         super().__init__(*args, **kwargs)
 
     def __call__(self, parser, namespace, values, option_string=None):
@@ -820,10 +832,13 @@ def mirror_name_or_url(m):
         return spack.mirrors.mirror.Mirror(m)
 
     # Otherwise, the named mirror is required to exist.
-    try:
-        return spack.mirrors.utils.require_mirror_name(m)
-    except ValueError as e:
-        raise argparse.ArgumentTypeError(f"{e}. Did you mean {os.path.join('.', m)}?") from e
+    def _lookup(ctx: "SpackContext"):
+        try:
+            return spack.mirrors.utils.require_mirror_name(m, ctx.config)
+        except ValueError as e:
+            raise argparse.ArgumentTypeError(f"{e}. Did you mean {os.path.join('.', m)}?") from e
+
+    return Deferred(_lookup)
 
 
 def mirror_url(url):
@@ -841,7 +856,10 @@ def mirror_directory(path):
 
 
 def mirror_name(name):
-    try:
-        return spack.mirrors.utils.require_mirror_name(name)
-    except ValueError as e:
-        raise argparse.ArgumentTypeError(str(e)) from e
+    def _lookup(ctx: "SpackContext"):
+        try:
+            return spack.mirrors.utils.require_mirror_name(name, ctx.config)
+        except ValueError as e:
+            raise argparse.ArgumentTypeError(str(e)) from e
+
+    return Deferred(_lookup)

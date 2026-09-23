@@ -772,6 +772,7 @@ class ViewDescriptor:
     ) -> None:
         self.base = base_path
         self.raw_root = root
+        self.env_path = base_path
         self.root = spack.config.canonicalize_path(root, default_wd=base_path, config=config)
         self.projections = projections or {}
         self.select = select or []
@@ -958,6 +959,7 @@ class ViewDescriptor:
             projections=self.projections,
             link_type=self.link_type,
             link_dirs=self.link_dirs,
+            env_path=self.env_path,
         )
 
     def __contains__(self, spec):

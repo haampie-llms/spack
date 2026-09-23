@@ -13,6 +13,7 @@ from spack.vendor.jsonschema import exceptions
 
 import spack.cmd
 import spack.compilers.config
+import spack.config
 import spack.context
 import spack.deptypes as dt
 import spack.error
@@ -51,7 +52,11 @@ def translated_compiler_name(manifest_compiler_name, *, repo: spack.repo.RepoPat
 
 
 def compiler_from_entry(
-    entry: dict, *, manifest_path: str, repo: spack.repo.RepoPath
+    entry: dict,
+    *,
+    manifest_path: str,
+    repo: spack.repo.RepoPath,
+    config: spack.config.Configuration,
 ) -> Optional[spack.spec.Spec]:
     # Note that manifest_path is only passed here to compose a
     # useful warning message when paths appear to be missing.
@@ -74,7 +79,7 @@ def compiler_from_entry(
 
     try:
         compiler_spec = compiler_spec_from_paths(
-            pkg_name=compiler_name, compiler_paths=paths, repo=repo
+            pkg_name=compiler_name, compiler_paths=paths, repo=repo, config=config
         )
     except spack.error.SpackError as e:
         tty.debug(f"[CRAY MANIFEST] {e}")
@@ -87,12 +92,16 @@ def compiler_from_entry(
 
 
 def compiler_spec_from_paths(
-    *, pkg_name: str, compiler_paths: Iterable[str], repo: spack.repo.RepoPath
+    *,
+    pkg_name: str,
+    compiler_paths: Iterable[str],
+    repo: spack.repo.RepoPath,
+    config: spack.config.Configuration,
 ) -> spack.spec.Spec:
     """Returns the external spec associated with a series of compilers, if any."""
     pkg_cls = repo.get_pkg_class(pkg_name)
     finder = ExecutablesFinder()
-    specs = finder.detect_specs(pkg=pkg_cls, paths=compiler_paths, repo_path=repo)
+    specs = finder.detect_specs(pkg=pkg_cls, paths=compiler_paths, repo_path=repo, config=config)
 
     if not specs or len(specs) > 1:
         raise CrayCompilerDetectionError(
@@ -239,7 +248,9 @@ def read(path, apply_updates, *, ctx: spack.context.SpackContext):
         for x in json_data["compilers"]:
             # We don't want to fail reading the manifest, if a single compiler fails
             try:
-                candidate = compiler_from_entry(x, manifest_path=path, repo=ctx.repo)
+                candidate = compiler_from_entry(
+                    x, manifest_path=path, repo=ctx.repo, config=ctx.config
+                )
             except Exception:
                 candidate = None
 

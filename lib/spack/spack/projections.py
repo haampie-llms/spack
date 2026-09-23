@@ -5,7 +5,7 @@
 import spack.config
 
 
-def get_projection(projections, spec, config: spack.config.Configuration):
+def get_projection(projections, spec, config: spack.config.HasEnvPath):
     """
     Get the projection for a spec from a projections dict.
     """

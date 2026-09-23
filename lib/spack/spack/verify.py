@@ -7,6 +7,7 @@ import os
 import stat
 from typing import Any, Dict
 
+import spack.config
 import spack.util.file_permissions as fp
 import spack.util.spack_json as sjson
 from spack.directory_layout import MANIFEST_FILE_NAME, METADATA_DIR
@@ -46,7 +47,7 @@ def create_manifest_entry(path: str) -> Dict[str, Any]:
     return data
 
 
-def write_manifest(spec):
+def write_manifest(spec, config: spack.config.Configuration):
     manifest_file = os.path.join(spec.prefix, METADATA_DIR, MANIFEST_FILE_NAME)
 
     if not os.path.exists(manifest_file):
@@ -62,7 +63,7 @@ def write_manifest(spec):
         with open(manifest_file, "w", encoding="utf-8") as f:
             sjson.dump(manifest, f)
 
-        fp.set_permissions_by_spec(manifest_file, spec)
+        fp.set_permissions_by_spec(manifest_file, spec, config)
 
 
 def check_entry(path, data):
