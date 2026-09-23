@@ -69,7 +69,7 @@ from spack.version import Version, VersionList, ver
 from spack.version.git_ref_lookup import GitRefLookup
 
 
-def check_spec(abstract, concrete):
+def check_spec(abstract, concrete, *, ctx: SpackContext):
     if abstract.versions.concrete:
         assert abstract.versions == concrete.versions
 
@@ -85,7 +85,7 @@ def check_spec(abstract, concrete):
             cflag = concrete.compiler_flags[flag]
             assert set(aflag) <= set(cflag)
 
-    for name in spack.test.harness.current().repo.get_pkg_class(abstract.name).variant_names():
+    for name in ctx.repo.get_pkg_class(abstract.name).variant_names():
         assert name in concrete.variants
 
     for flag in concrete.compiler_flags.valid_compiler_flags():
@@ -95,12 +95,12 @@ def check_spec(abstract, concrete):
         assert abstract.architecture == concrete.architecture
 
 
-def check_concretize(abstract_spec):
+def check_concretize(abstract_spec, *, ctx: SpackContext):
     abstract = Spec(abstract_spec)
-    concrete = spack.concretize.concretize_one(abstract, spack.test.harness.current())
+    concrete = spack.concretize.concretize_one(abstract, ctx)
     assert not abstract.concrete
     assert concrete.concrete
-    check_spec(abstract, concrete)
+    check_spec(abstract, concrete, ctx=ctx)
     return concrete
 
 
@@ -347,11 +347,11 @@ def weights_from_result(result: Result, *, name: str) -> Dict[str, int]:
 # which changes the config.
 @pytest.mark.usefixtures("mutable_config", "mock_packages")
 class TestConcretize:
-    def test_concretize(self, spec):
-        check_concretize(spec)
+    def test_concretize(self, spec, ctx: SpackContext):
+        check_concretize(spec, ctx=ctx)
 
-    def test_concretize_mention_build_dep(self):
-        spec = check_concretize("cmake-client ^cmake@=3.21.3")
+    def test_concretize_mention_build_dep(self, ctx: SpackContext):
+        spec = check_concretize("cmake-client ^cmake@=3.21.3", ctx=ctx)
 
         # Check parent's perspective of child
         to_dependencies = spec.edges_to_dependencies(name="cmake")
@@ -364,40 +364,40 @@ class TestConcretize:
         assert len(from_dependents) == 1
         assert from_dependents[0].depflag == dt.BUILD
 
-    def test_concretize_preferred_version(self):
-        spec = check_concretize("python")
+    def test_concretize_preferred_version(self, ctx: SpackContext):
+        spec = check_concretize("python", ctx=ctx)
         assert spec.version == ver("=2.7.11")
-        spec = check_concretize("python@3.5.1")
+        spec = check_concretize("python@3.5.1", ctx=ctx)
         assert spec.version == ver("=3.5.1")
 
-    def test_concretize_with_restricted_virtual(self):
-        check_concretize("mpileaks ^mpich2")
+    def test_concretize_with_restricted_virtual(self, ctx: SpackContext):
+        check_concretize("mpileaks ^mpich2", ctx=ctx)
 
-        concrete = check_concretize("mpileaks   ^mpich2@1.1")
+        concrete = check_concretize("mpileaks   ^mpich2@1.1", ctx=ctx)
         assert concrete["mpich2"].satisfies("mpich2@1.1")
 
-        concrete = check_concretize("mpileaks   ^mpich2@1.2")
+        concrete = check_concretize("mpileaks   ^mpich2@1.2", ctx=ctx)
         assert concrete["mpich2"].satisfies("mpich2@1.2")
 
-        concrete = check_concretize("mpileaks   ^mpich2@:1.5")
+        concrete = check_concretize("mpileaks   ^mpich2@:1.5", ctx=ctx)
         assert concrete["mpich2"].satisfies("mpich2@:1.5")
 
-        concrete = check_concretize("mpileaks   ^mpich2@:1.3")
+        concrete = check_concretize("mpileaks   ^mpich2@:1.3", ctx=ctx)
         assert concrete["mpich2"].satisfies("mpich2@:1.3")
 
-        concrete = check_concretize("mpileaks   ^mpich2@:1.2")
+        concrete = check_concretize("mpileaks   ^mpich2@:1.2", ctx=ctx)
         assert concrete["mpich2"].satisfies("mpich2@:1.2")
 
-        concrete = check_concretize("mpileaks   ^mpich2@:1.1")
+        concrete = check_concretize("mpileaks   ^mpich2@:1.1", ctx=ctx)
         assert concrete["mpich2"].satisfies("mpich2@:1.1")
 
-        concrete = check_concretize("mpileaks   ^mpich2@1.1:")
+        concrete = check_concretize("mpileaks   ^mpich2@1.1:", ctx=ctx)
         assert concrete["mpich2"].satisfies("mpich2@1.1:")
 
-        concrete = check_concretize("mpileaks   ^mpich2@1.5:")
+        concrete = check_concretize("mpileaks   ^mpich2@1.5:", ctx=ctx)
         assert concrete["mpich2"].satisfies("mpich2@1.5:")
 
-        concrete = check_concretize("mpileaks   ^mpich2@1.3.1:1.4")
+        concrete = check_concretize("mpileaks   ^mpich2@1.3.1:1.4", ctx=ctx)
         assert concrete["mpich2"].satisfies("mpich2@1.3.1:1.4")
 
     def test_concretize_with_provides_when(self, mock_packages: RepoPath):
@@ -686,9 +686,9 @@ spack:
         cflags = spec.compiler_flags["cflags"]
         assert any(x == "-foo-flag foo-val" for x in cflags)
 
-    def concretize_multi_provider(self):
+    def concretize_multi_provider(self, ctx: SpackContext):
         s = Spec("mpileaks ^multi-provider-mpi@3.0")
-        s = spack.concretize.concretize_one(s, spack.test.harness.current())
+        s = spack.concretize.concretize_one(s, ctx)
         assert s["mpi"].version == ver("1.10.3")
 
     def test_concretize_dependent_with_singlevalued_variant_type(self, ctx: SpackContext):
@@ -696,11 +696,11 @@ spack:
         s = spack.concretize.concretize_one(s, ctx)
 
     @pytest.mark.parametrize("spec,version", [("dealii", "develop"), ("xsdk", "0.4.0")])
-    def concretize_difficult_packages(self, a, b):
+    def concretize_difficult_packages(self, a, b, ctx: SpackContext):
         """Test a couple of large packages that are often broken due
         to current limitations in the concretizer"""
         s = Spec(a + "@" + b)
-        s = spack.concretize.concretize_one(s, spack.test.harness.current())
+        s = spack.concretize.concretize_one(s, ctx)
         assert s[a].version == ver(b)
 
     def test_concretize_two_virtuals(self, ctx: SpackContext):
@@ -4643,7 +4643,9 @@ def test_caret_in_input_cannot_set_transitive_build_dependencies(
 
 @pytest.mark.regression("51167")
 @pytest.mark.require_provenance
-def test_commit_variant_enters_the_hash(mutable_config, mock_packages, monkeypatch):
+def test_commit_variant_enters_the_hash(
+    mutable_config, mock_packages, monkeypatch, ctx: SpackContext
+):
     """Tests that an implicit commit variant, obtained from resolving the commit sha of a branch,
     enters the hash of the spec.
     """
@@ -4659,13 +4661,9 @@ def test_commit_variant_enters_the_hash(mutable_config, mock_packages, monkeypat
 
     monkeypatch.setattr(spack.package_base.PackageBase, "_resolve_git_provenance", _mock_resolve)
 
-    before = spack.concretize.concretize_one(
-        "git-ref-package@develop", spack.test.harness.current()
-    )
+    before = spack.concretize.concretize_one("git-ref-package@develop", ctx)
     first_call = False
-    after = spack.concretize.concretize_one(
-        "git-ref-package@develop", spack.test.harness.current()
-    )
+    after = spack.concretize.concretize_one("git-ref-package@develop", ctx)
 
     assert before.package.needs_commit(before.version)
     assert before.satisfies(f"commit={'b' * 40}")

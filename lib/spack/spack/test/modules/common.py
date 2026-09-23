@@ -156,7 +156,7 @@ module_index:
         upstream_index.upstream_module(s4, "tcl")
 
 
-def test_get_module_upstream(monkeypatch):
+def test_get_module_upstream(monkeypatch, ctx: SpackContext):
     s1 = MockSpec("spec-1")
 
     tcl_module_index = """\
@@ -173,9 +173,11 @@ module_index:
     mock_db = MockDb(dbs, {s1.dag_hash(): "d1"})
     upstream_index = UpstreamModuleIndex(mock_db, module_indices)
 
-    ctx = SpackContext(spack.test.harness.current().config)
-    ctx.store = types.SimpleNamespace(db=mock_db)
-    m1_path = spack.modules.get_module("tcl", s1, True, ctx=ctx, upstream_index=upstream_index)
+    module_ctx = SpackContext(ctx.config)
+    module_ctx.store = types.SimpleNamespace(db=mock_db)
+    m1_path = spack.modules.get_module(
+        "tcl", s1, True, ctx=module_ctx, upstream_index=upstream_index
+    )
     assert m1_path == "/path/to/a"
 
 

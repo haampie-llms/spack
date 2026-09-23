@@ -1970,7 +1970,7 @@ def test_included_path_git_errs(
 
 def test_missing_include_scope_list(mock_missing_dir_include_scopes):
     """Tests that an included scope with a non existent file/directory
-    is still listed as a scope under spack.test.harness.current().config.scopes"""
+    is still listed as a scope under ctx.config.scopes"""
     assert "sub_base" in list(mock_missing_dir_include_scopes.scopes), (
         "Missing Optional Scope Missing from Config Scopes"
     )

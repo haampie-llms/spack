@@ -149,7 +149,7 @@ def test_config_scopes_path(mutable_config):
 
 
 def test_get_config_scope(mock_low_high_config):
-    assert config("get", "repos").strip() == "repos: {}"
+    assert config("get", "mirrors").strip() == "mirrors: {}"
 
 
 def test_get_config_roundtrip(mutable_config):
@@ -175,29 +175,29 @@ def test_get_config_scope_merged(mock_low_high_config):
     fs.mkdirp(low_path)
     fs.mkdirp(high_path)
 
-    with open(os.path.join(low_path, "repos.yaml"), "w", encoding="utf-8") as f:
+    with open(os.path.join(low_path, "mirrors.yaml"), "w", encoding="utf-8") as f:
         f.write(
             """\
-repos:
-  repo3: repo3
+mirrors:
+  mirror3: file:///mirror3
 """
         )
 
-    with open(os.path.join(high_path, "repos.yaml"), "w", encoding="utf-8") as f:
+    with open(os.path.join(high_path, "mirrors.yaml"), "w", encoding="utf-8") as f:
         f.write(
             """\
-repos:
-  repo1: repo1
-  repo2: repo2
+mirrors:
+  mirror1: file:///mirror1
+  mirror2: file:///mirror2
 """
         )
 
     assert (
-        config("get", "repos").strip()
-        == """repos:
-  repo1: repo1
-  repo2: repo2
-  repo3: repo3"""
+        config("get", "mirrors").strip()
+        == """mirrors:
+  mirror1: file:///mirror1
+  mirror2: file:///mirror2
+  mirror3: file:///mirror3"""
     )
 
 

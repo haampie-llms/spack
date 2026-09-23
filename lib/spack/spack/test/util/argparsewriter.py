@@ -13,13 +13,7 @@ import io
 
 import pytest
 
-import spack.main
-import spack.test.harness
 import spack.util.argparsewriter as aw
-
-parser = spack.main.make_argument_parser()
-parser.config = spack.test.harness.current().config
-spack.main.add_all_commands(parser)
 
 
 class ProgWriter(aw.ArgparseWriter):

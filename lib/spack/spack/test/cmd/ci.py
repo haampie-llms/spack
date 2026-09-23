@@ -559,7 +559,7 @@ class RebuildEnv(NamedTuple):
 
 
 def create_rebuild_env(
-    tmp_path: pathlib.Path, pkg_name: str, broken_tests: bool = False
+    tmp_path: pathlib.Path, pkg_name: str, broken_tests: bool = False, *, ctx: SpackContext
 ) -> RebuildEnv:
     scratch = tmp_path / "working_dir"
     log_dir = scratch / "logs"
@@ -604,7 +604,7 @@ spack:
 """
         )
 
-    with ev.Environment(env_dir, ctx=spack.test.harness.current()) as env:
+    with ev.Environment(env_dir, ctx=ctx) as env:
         env.concretize()
         env.write()
 
@@ -665,9 +665,10 @@ def test_ci_rebuild_mock_success(
     mock_binary_index,
     monkeypatch,
     broken_tests,
+    ctx: SpackContext,
 ):
     pkg_name = "archive-files"
-    rebuild_env = create_rebuild_env(tmp_path, pkg_name, broken_tests)
+    rebuild_env = create_rebuild_env(tmp_path, pkg_name, broken_tests, ctx=ctx)
 
     monkeypatch.setattr(spack.cmd.ci, "SPACK_COMMAND", "echo")
     # the cdash url in the environment is fake; never upload reports to it
@@ -700,9 +701,10 @@ def test_ci_rebuild_mock_failure_to_push(
     mock_binary_index,
     ci_base_environment,
     monkeypatch,
+    ctx: SpackContext,
 ):
     pkg_name = "trivial-install-test-package"
-    rebuild_env = create_rebuild_env(tmp_path, pkg_name)
+    rebuild_env = create_rebuild_env(tmp_path, pkg_name, ctx=ctx)
 
     # Mock the install script succuess
     def mock_success(*args, **kwargs):
@@ -1772,7 +1774,7 @@ spack:
         assert "buildcache-destination" in pipeline_doc["rebuild-index"]["script"][1]
 
 
-def dynamic_mapping_setup(tmp_path: pathlib.Path):
+def dynamic_mapping_setup(tmp_path: pathlib.Path, *, ctx: SpackContext):
     filename = str(tmp_path / "spack.yaml")
     with open(filename, "w", encoding="utf-8") as f:
         f.write(
@@ -1792,7 +1794,7 @@ spack:
 """
         )
 
-    spec_a = spack.concretize.concretize_one("pkg-a", spack.test.harness.current())
+    spec_a = spack.concretize.concretize_one("pkg-a", ctx)
 
     return gitlab_generator.get_job_name(spec_a)
 
@@ -1813,7 +1815,7 @@ def test_ci_dynamic_mapping_empty(
 
     mock_server("https://fake.spack.io/mapper", _urlopen)
 
-    _ = dynamic_mapping_setup(tmp_path)
+    _ = dynamic_mapping_setup(tmp_path, ctx=ctx)
     with working_dir(str(tmp_path)):
         env_cmd("create", "test", "./spack.yaml")
         outputfile = str(tmp_path / ".gitlab-ci.yml")
@@ -1843,7 +1845,7 @@ def test_ci_dynamic_mapping_full(
 
     mock_server("https://fake.spack.io/mapper", _urlopen)
 
-    label = dynamic_mapping_setup(tmp_path)
+    label = dynamic_mapping_setup(tmp_path, ctx=ctx)
     with working_dir(str(tmp_path)):
         env_cmd("create", "test", "./spack.yaml")
         outputfile = str(tmp_path / ".gitlab-ci.yml")

@@ -16,7 +16,6 @@ import pytest
 import spack.concretize
 import spack.package_base
 import spack.spec
-import spack.test.harness
 from spack.context import SpackContext
 from spack.util.filesystem import working_dir
 from spack.version import (
@@ -34,14 +33,11 @@ from spack.version import (
 from spack.version.git_ref_lookup import SEMVER_REGEX, GitRefLookup, assign_git_versions
 
 
-def assign_versions(spec_str: str) -> spack.spec.Spec:
+def assign_versions(spec_str: str, *, ctx: SpackContext) -> spack.spec.Spec:
     """Assign git versions to a spec, reading the repositories, cache and configuration the
     fixtures of the calling test have set up."""
     return assign_git_versions(
-        spack.spec.Spec(spec_str),
-        repo=spack.test.harness.current().repo,
-        misc_cache=spack.test.harness.current().misc_cache,
-        config=spack.test.harness.current().config,
+        spack.spec.Spec(spec_str), repo=ctx.repo, misc_cache=ctx.misc_cache, config=ctx.config
     )
 
 
@@ -716,14 +712,16 @@ def test_invalid_versions(version_str):
         Version(version_str)
 
 
-def test_versions_from_git(git, mock_git_version_info, monkeypatch, mock_packages):
+def test_versions_from_git(
+    git, mock_git_version_info, monkeypatch, mock_packages, ctx: SpackContext
+):
     repo_path, filename, commits = mock_git_version_info
     monkeypatch.setattr(
         spack.package_base.PackageBase, "git", pathlib.Path(repo_path).as_uri(), raising=False
     )
 
     for commit in commits:
-        spec = assign_versions("git-test-commit@%s" % commit)
+        spec = assign_versions("git-test-commit@%s" % commit, ctx=ctx)
         version: GitVersion = spec.version
         comparator = [str(v) if not isinstance(v, int) else v for v in version.ref_version]
 
@@ -811,13 +809,13 @@ def test_git_ref_assignment_must_be_within_the_constraint():
         GitVersion("git.main=1.3:").assigned(Version("1.2"))
 
 
-def test_git_branch_with_slash(monkeypatch):
+def test_git_branch_with_slash(monkeypatch, ctx: SpackContext):
     def get(self, ref):
         assert ref == "feature/bar"
         return "1.2", 0
 
     monkeypatch.setattr(GitRefLookup, "get", get)
-    spec = assign_versions("git-test-commit@git.feature/bar")
+    spec = assign_versions("git-test-commit@git.feature/bar", ctx=ctx)
     assert str(spec.version) == "git.feature/bar=1.2"
     serialized = VersionList([spec.version]).to_dict()
     assert VersionList.from_dict(serialized) == VersionList([spec.version])
@@ -1007,12 +1005,13 @@ def test_git_versions_without_explicit_reference(
     mock_git_version_info,
     mock_packages,
     monkeypatch,
+    ctx: SpackContext,
 ):
     repo_path, filename, commits = mock_git_version_info
     monkeypatch.setattr(
         spack.package_base.PackageBase, "git", pathlib.Path(repo_path).as_uri(), raising=False
     )
-    spec = assign_versions(spec_str)
+    spec = assign_versions(spec_str, ctx=ctx)
 
     for test_str, expected in tested_intersects:
         assert spec.intersects(test_str) is expected, test_str

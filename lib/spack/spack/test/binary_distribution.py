@@ -65,9 +65,9 @@ uninstall_cmd = spack.test.harness.SpackCommand("uninstall")
 buildcache_cmd = spack.test.harness.SpackCommand("buildcache")
 
 
-def _net():
+def _net(*, ctx: SpackContext):
     """Configuration and network client of the current process."""
-    ctx = spack.test.harness.current()
+    ctx = ctx
     return {"config": ctx.config, "client": ctx.network}
 
 
@@ -165,7 +165,7 @@ def test_push_and_fetch_keys(mock_gnupghome, tmp_path: pathlib.Path, ctx: SpackC
     fpr = str(keys[0])
 
     spack.binary_distribution._url_push_keys(
-        mirror, keys=[fpr], tmpdir=str(tmp_path), update_index=True, gpg=gpg1, **_net()
+        mirror, keys=[fpr], tmpdir=str(tmp_path), update_index=True, gpg=gpg1, **_net(ctx=ctx)
     )
 
     # dir 2: import the key from the mirror, and confirm that its fingerprint
@@ -174,7 +174,13 @@ def test_push_and_fetch_keys(mock_gnupghome, tmp_path: pathlib.Path, ctx: SpackC
     assert len(spack.util.gpg.public_keys(gpg2)) == 0
 
     spack.binary_distribution.trust_keys(
-        mirrors=mirrors, yes_to_all=True, install=True, trust=True, force=True, gpg=gpg2, **_net()
+        mirrors=mirrors,
+        yes_to_all=True,
+        install=True,
+        trust=True,
+        force=True,
+        gpg=gpg2,
+        **_net(ctx=ctx),
     )
 
     new_keys = spack.util.gpg.public_keys(gpg2)
@@ -199,7 +205,7 @@ def test_built_spec_cache(install_mockery, tmp_path: pathlib.Path, ctx: SpackCon
 
     for s in [gspec, cspec]:
         results = spack.binary_distribution.get_mirrors_for_spec(
-            s, binary_index=ctx.binary_index, gpg=None, **_net()
+            s, binary_index=ctx.binary_index, gpg=None, **_net(ctx=ctx)
         )
         assert len(results) == 1
         assert results[0].url == url_util.path_to_file_url(str(tmp_path))
@@ -244,7 +250,8 @@ def test_download_tarball_reports_signature_verification_failure(
     )
 
     assert (
-        spack.binary_distribution.download_tarball(spec, unsigned=None, gpg=None, **_net()) is None
+        spack.binary_distribution.download_tarball(spec, unsigned=None, gpg=None, **_net(ctx=ctx))
+        is None
     )
 
     output = capfd.readouterr().err
@@ -276,14 +283,14 @@ def test_spec_needs_rebuild(monkeypatch, tmp_path: pathlib.Path, ctx: SpackConte
     # Put installed package in the buildcache
     buildcache_cmd("push", "-u", str(mirror_dir), s.name)
 
-    rebuild = spack.binary_distribution.needs_rebuild(s, mirror_url, **_net())
+    rebuild = spack.binary_distribution.needs_rebuild(s, mirror_url, **_net(ctx=ctx))
 
     assert not rebuild
 
     # Now monkey patch Spec to change the hash on the package
     monkeypatch.setattr(spack.spec.Spec, "dag_hash", fake_dag_hash)
 
-    rebuild = spack.binary_distribution.needs_rebuild(s, mirror_url, **_net())
+    rebuild = spack.binary_distribution.needs_rebuild(s, mirror_url, **_net(ctx=ctx))
 
     assert rebuild
 
@@ -349,7 +356,7 @@ def test_push_index_keeps_records_of_other_formats(
 
     def update_index():
         spack.binary_distribution._url_generate_package_index(
-            mirror_url, str(tmp_path), name=view, **_net()
+            mirror_url, str(tmp_path), name=view, **_net(ctx=ctx)
         )
 
     def records():
@@ -519,7 +526,7 @@ def test_use_bin_index_with_view(
     assert "libdwarf" in cache_list
 
 
-def test_generate_key_index_failure(monkeypatch, tmp_path: pathlib.Path):
+def test_generate_key_index_failure(monkeypatch, tmp_path: pathlib.Path, ctx: SpackContext):
     def list_url(url, recursive=False, *, client):
         if "fails-listing" in url:
             raise Exception("Couldn't list the directory")
@@ -533,16 +540,18 @@ def test_generate_key_index_failure(monkeypatch, tmp_path: pathlib.Path):
 
     with pytest.raises(CannotListKeys, match="Encountered problem listing keys"):
         spack.binary_distribution.generate_key_index(
-            "s3://non-existent/fails-listing", str(tmp_path), **_net()
+            "s3://non-existent/fails-listing", str(tmp_path), **_net(ctx=ctx)
         )
 
     with pytest.raises(GenerateIndexError, match="problem pushing .* Couldn't upload"):
         spack.binary_distribution.generate_key_index(
-            "s3://non-existent/fails-uploading", str(tmp_path), **_net()
+            "s3://non-existent/fails-uploading", str(tmp_path), **_net(ctx=ctx)
         )
 
 
-def test_generate_package_index_failure(monkeypatch, tmp_path: pathlib.Path, capfd):
+def test_generate_package_index_failure(
+    monkeypatch, tmp_path: pathlib.Path, capfd, ctx: SpackContext
+):
     def mock_list_url(url, recursive=False, *, client):
         raise OSError("Some HTTP error")
 
@@ -551,7 +560,9 @@ def test_generate_package_index_failure(monkeypatch, tmp_path: pathlib.Path, cap
     test_url = "file:///fake/keys/dir"
 
     with pytest.raises(GenerateIndexError, match="Unable to generate package index"):
-        spack.binary_distribution._url_generate_package_index(test_url, str(tmp_path), **_net())
+        spack.binary_distribution._url_generate_package_index(
+            test_url, str(tmp_path), **_net(ctx=ctx)
+        )
 
     assert (
         "Warning: Encountered problem listing packages at "
@@ -559,7 +570,9 @@ def test_generate_package_index_failure(monkeypatch, tmp_path: pathlib.Path, cap
     )
 
 
-def test_generate_package_index_push_failure(monkeypatch, tmp_path: pathlib.Path):
+def test_generate_package_index_push_failure(
+    monkeypatch, tmp_path: pathlib.Path, ctx: SpackContext
+):
     monkeypatch.setattr(
         spack.binary_distribution,
         "get_entries_from_cache",
@@ -575,10 +588,12 @@ def test_generate_package_index_push_failure(monkeypatch, tmp_path: pathlib.Path
 
     test_url = "file:///fake/keys/dir"
     with pytest.raises(GenerateIndexError, match="problem pushing package index"):
-        spack.binary_distribution._url_generate_package_index(test_url, str(tmp_path), **_net())
+        spack.binary_distribution._url_generate_package_index(
+            test_url, str(tmp_path), **_net(ctx=ctx)
+        )
 
 
-def test_generate_indices_exception(monkeypatch, tmp_path: pathlib.Path, capfd):
+def test_generate_indices_exception(monkeypatch, tmp_path: pathlib.Path, capfd, ctx: SpackContext):
     def mock_list_url(url, recursive=False, *, client):
         raise OSError("Test Exception handling")
 
@@ -587,10 +602,10 @@ def test_generate_indices_exception(monkeypatch, tmp_path: pathlib.Path, capfd):
     url = "file:///fake/keys/dir"
 
     with pytest.raises(GenerateIndexError, match=f"Encountered problem listing keys at {url}"):
-        spack.binary_distribution.generate_key_index(url, str(tmp_path), **_net())
+        spack.binary_distribution.generate_key_index(url, str(tmp_path), **_net(ctx=ctx))
 
     with pytest.raises(GenerateIndexError, match="Unable to generate package index"):
-        spack.binary_distribution._url_generate_package_index(url, str(tmp_path), **_net())
+        spack.binary_distribution._url_generate_package_index(url, str(tmp_path), **_net(ctx=ctx))
 
     assert f"Encountered problem listing packages at {url}" in capfd.readouterr().err
 
@@ -1294,7 +1309,7 @@ def test_url_buildcache_entry_v3(monkeypatch, tmp_path: pathlib.Path, ctx: Spack
     cache_class = get_url_buildcache_class(
         spack.binary_distribution.CURRENT_BUILD_CACHE_LAYOUT_VERSION
     )
-    build_cache = cache_class(mirror_url, s, allow_unsigned=True, **_net())
+    build_cache = cache_class(mirror_url, s, allow_unsigned=True, **_net(ctx=ctx))
 
     manifest = build_cache.read_manifest()
     spec_dict = build_cache.fetch_metadata()
@@ -1426,7 +1441,7 @@ def mock_index(tmp_path: pathlib.Path, monkeypatch) -> IndexInformation:
     )
 
 
-def test_etag_fetching_304():
+def test_etag_fetching_304(ctx: SpackContext):
     # Test conditional fetch with etags. If the remote hasn't modified the file
     # it returns 304, which is an HTTPError in urllib-land. That should be
     # handled as success, since it means the local cache is up-to-date.
@@ -1447,7 +1462,7 @@ def test_etag_fetching_304():
         spack.binary_distribution.MirrorMetadata(
             "https://www.example.com", spack.binary_distribution.CURRENT_BUILD_CACHE_LAYOUT_VERSION
         ),
-        **_net(),
+        **_net(ctx=ctx),
         etag="112a8bbc1b3f7f185621c1ee335f0502",
         urlopen=response_304,
     )
@@ -1457,7 +1472,7 @@ def test_etag_fetching_304():
     assert result.fresh
 
 
-def test_etag_fetching_200(mock_index):
+def test_etag_fetching_200(mock_index, ctx: SpackContext):
     # Test conditional fetch with etags. The remote has modified the file.
     def response_200(request: urllib.request.Request):
         url = request.get_full_url()
@@ -1475,7 +1490,7 @@ def test_etag_fetching_200(mock_index):
         spack.binary_distribution.MirrorMetadata(
             "https://www.example.com", spack.binary_distribution.CURRENT_BUILD_CACHE_LAYOUT_VERSION
         ),
-        **_net(),
+        **_net(ctx=ctx),
         etag="112a8bbc1b3f7f185621c1ee335f0502",
         urlopen=response_200,
     )
@@ -1489,7 +1504,7 @@ def test_etag_fetching_200(mock_index):
     assert result.hash == mock_index.index_hash
 
 
-def test_etag_fetching_404():
+def test_etag_fetching_404(ctx: SpackContext):
     # Test conditional fetch with etags. The remote has modified the file.
     def response_404(request: urllib.request.Request):
         raise urllib.error.HTTPError(
@@ -1504,7 +1519,7 @@ def test_etag_fetching_404():
         spack.binary_distribution.MirrorMetadata(
             "https://www.example.com", spack.binary_distribution.CURRENT_BUILD_CACHE_LAYOUT_VERSION
         ),
-        **_net(),
+        **_net(ctx=ctx),
         etag="112a8bbc1b3f7f185621c1ee335f0502",
         urlopen=response_404,
     )
@@ -1513,7 +1528,7 @@ def test_etag_fetching_404():
         fetcher.conditional_fetch()
 
 
-def test_default_index_fetch_200(mock_index):
+def test_default_index_fetch_200(mock_index, ctx: SpackContext):
     # We fetch the manifest and then the index blob if the hash is outdated
     def urlopen(request: urllib.request.Request):
         url = request.get_full_url()
@@ -1531,7 +1546,7 @@ def test_default_index_fetch_200(mock_index):
         spack.binary_distribution.MirrorMetadata(
             "https://www.example.com", spack.binary_distribution.CURRENT_BUILD_CACHE_LAYOUT_VERSION
         ),
-        **_net(),
+        **_net(ctx=ctx),
         local_hash="outdated",
         urlopen=urlopen,
     )
@@ -1546,7 +1561,7 @@ def test_default_index_fetch_200(mock_index):
     assert result.hash == mock_index.index_hash
 
 
-def test_default_index_404():
+def test_default_index_404(ctx: SpackContext):
     # We get a fetch error if the index can't be fetched
     def urlopen(request: urllib.request.Request):
         raise urllib.error.HTTPError(
@@ -1561,7 +1576,7 @@ def test_default_index_404():
         spack.binary_distribution.MirrorMetadata(
             "https://www.example.com", spack.binary_distribution.CURRENT_BUILD_CACHE_LAYOUT_VERSION
         ),
-        **_net(),
+        **_net(ctx=ctx),
         local_hash=None,
         urlopen=urlopen,
     )
@@ -1570,7 +1585,7 @@ def test_default_index_404():
         fetcher.conditional_fetch()
 
 
-def test_default_index_not_modified(mock_index):
+def test_default_index_not_modified(mock_index, ctx: SpackContext):
     # We don't fetch the index blob if hash didn't change
     def urlopen(request: urllib.request.Request):
         url = request.get_full_url()
@@ -1589,7 +1604,7 @@ def test_default_index_not_modified(mock_index):
         spack.binary_distribution.MirrorMetadata(
             "https://www.example.com", spack.binary_distribution.CURRENT_BUILD_CACHE_LAYOUT_VERSION
         ),
-        **_net(),
+        **_net(ctx=ctx),
         local_hash=mock_index.index_hash,
         urlopen=urlopen,
     )
@@ -1618,11 +1633,13 @@ def test_get_entries_from_cache_nested_mirrors(
     install_cmd("--fake", s.name)
     buildcache_cmd("push", "-u", str(mirror_dir / "nested"), s.name)
 
-    spec_manifests, _ = get_entries_from_cache(str(mirror_url), BuildcacheComponent.SPEC, **_net())
+    spec_manifests, _ = get_entries_from_cache(
+        str(mirror_url), BuildcacheComponent.SPEC, **_net(ctx=ctx)
+    )
 
     nested_mirror_url = url_util.path_to_file_url(str(mirror_dir / "nested"))
     spec_manifests_nested, _ = get_entries_from_cache(
-        str(nested_mirror_url), BuildcacheComponent.SPEC, **_net()
+        str(nested_mirror_url), BuildcacheComponent.SPEC, **_net(ctx=ctx)
     )
 
     # Expected specs in root mirror
@@ -1651,7 +1668,7 @@ class FakeAwsCli:
         return self.output
 
 
-def test_entries_from_cache_aws_cli(monkeypatch):
+def test_entries_from_cache_aws_cli(monkeypatch, ctx: SpackContext):
     """Verify that _entries_from_cache_aws_cli:
     * Lists manifests using `aws s3 ls` (not downloading them)
     * Filters out non-matching keys
@@ -1671,7 +1688,7 @@ def test_entries_from_cache_aws_cli(monkeypatch):
     monkeypatch.setattr(spack.url_buildcache, "which", lambda name: fake_aws)
 
     filename_to_mtime, read_fn = spack.url_buildcache._entries_from_cache_aws_cli(
-        "s3://my-bucket/mirror", BuildcacheComponent.SPEC, **_net()
+        "s3://my-bucket/mirror", BuildcacheComponent.SPEC, **_net(ctx=ctx)
     )
 
     assert read_fn is not None
@@ -1685,30 +1702,30 @@ def test_entries_from_cache_aws_cli(monkeypatch):
     assert fake_aws.calls[0][:2] == ("s3", "ls")
 
 
-def test_entries_from_cache_aws_cli_no_aws(monkeypatch):
+def test_entries_from_cache_aws_cli_no_aws(monkeypatch, ctx: SpackContext):
     """Verify that we fall back gracefully (rather than erroring) when awscli is not available."""
     monkeypatch.setattr(spack.url_buildcache, "which", lambda name: None)
 
     filename_to_mtime, read_fn = spack.url_buildcache._entries_from_cache_aws_cli(
-        "s3://my-bucket/mirror", BuildcacheComponent.SPEC, **_net()
+        "s3://my-bucket/mirror", BuildcacheComponent.SPEC, **_net(ctx=ctx)
     )
 
     assert filename_to_mtime is None
     assert read_fn is None
 
 
-def test_entries_from_cache_aws_cli_process_error(monkeypatch):
+def test_entries_from_cache_aws_cli_process_error(monkeypatch, ctx: SpackContext):
     """Verify that an `aws s3 ls` failure gets raised as ProcessError."""
     fake_aws = FakeAwsCli(error=ProcessError("aws s3 ls failed"))
     monkeypatch.setattr(spack.url_buildcache, "which", lambda name: fake_aws)
 
     with pytest.raises(ListMirrorSpecsError):
         spack.url_buildcache._entries_from_cache_aws_cli(
-            "s3://my-bucket/mirror", BuildcacheComponent.SPEC, **_net()
+            "s3://my-bucket/mirror", BuildcacheComponent.SPEC, **_net(ctx=ctx)
         )
 
 
-def test_get_entries_from_cache_falls_back_from_aws_cli(monkeypatch):
+def test_get_entries_from_cache_falls_back_from_aws_cli(monkeypatch, ctx: SpackContext):
     """Verify that get_entries_from_cache catches a failure from the aws-cli
     listing strategy and falls back to the next strategy instead of re-raising."""
     fallback_result = ({"the-manifest": 123.0}, lambda x: x)
@@ -1723,7 +1740,7 @@ def test_get_entries_from_cache_falls_back_from_aws_cli(monkeypatch):
     monkeypatch.setattr(spack.url_buildcache, "_entries_from_cache_fallback", fake_fallback)
 
     result = spack.url_buildcache.get_entries_from_cache(
-        "s3://my-bucket/mirror", BuildcacheComponent.SPEC, **_net()
+        "s3://my-bucket/mirror", BuildcacheComponent.SPEC, **_net(ctx=ctx)
     )
 
     assert result == fallback_result
@@ -1844,9 +1861,9 @@ def test_update_does_not_warn_on_mirror_with_no_index(monkeypatch, tmp_path, mut
     assert binary_index.mirrors_without_index == {mirror_url, mirror_url2}
 
 
-def test_load_buildcache_index(monkeypatch, tmp_path):
+def test_load_buildcache_index(monkeypatch, tmp_path, ctx: SpackContext):
     """Tests that load_buildcache_index uses the local cache (no network call)."""
-    mock_index = spack.binary_distribution.BinaryIndexCache(str(tmp_path / "idx"), **_net())
+    mock_index = spack.binary_distribution.BinaryIndexCache(str(tmp_path / "idx"), **_net(ctx=ctx))
     regenerate_calls = []
     update_calls = []
 
@@ -1864,9 +1881,9 @@ def test_load_buildcache_index(monkeypatch, tmp_path):
     assert regenerate_calls == [False] and update_calls == []
 
 
-def test_load_buildcache_index_degrades_gracefully(monkeypatch, tmp_path):
+def test_load_buildcache_index_degrades_gracefully(monkeypatch, tmp_path, ctx: SpackContext):
     """Tests that load_buildcache_index swallows errors; status display never breaks a command."""
-    mock_index = spack.binary_distribution.BinaryIndexCache(str(tmp_path / "idx"), **_net())
+    mock_index = spack.binary_distribution.BinaryIndexCache(str(tmp_path / "idx"), **_net(ctx=ctx))
 
     def exploding_regenerate(clear_existing=False):
         raise OSError("disk error")

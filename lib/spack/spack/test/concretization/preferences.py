@@ -47,18 +47,18 @@ callpath:
     yield
 
 
-def concretize(abstract_spec):
-    return spack.concretize.concretize_one(abstract_spec, spack.test.harness.current())
+def concretize(abstract_spec, *, ctx: SpackContext):
+    return spack.concretize.concretize_one(abstract_spec, ctx)
 
 
-def update_packages(pkgname, section, value):
+def update_packages(pkgname, section, value, *, ctx: SpackContext):
     """Update config and reread package list"""
     conf = {pkgname: {section: value}}
-    spack.test.harness.current().config.set("packages", conf, scope="concretize")
+    ctx.config.set("packages", conf, scope="concretize")
 
 
-def assert_variant_values(spec, **variants):
-    concrete = concretize(spec)
+def assert_variant_values(spec, *, ctx: SpackContext, **variants):
+    concrete = concretize(spec, ctx=ctx)
     for variant, value in variants.items():
         assert concrete.variants[variant].value == value
 
@@ -94,72 +94,74 @@ class TestConcretizePreferences:
             ("singlevalue-variant", ["fum=why"], {"fum": "why"}),
         ],
     )
-    def test_preferred_variants(self, package_name, variant_value, expected_results):
+    def test_preferred_variants(
+        self, package_name, variant_value, expected_results, ctx: SpackContext
+    ):
         """Test preferred variants are applied correctly"""
-        update_packages(package_name, "variants", variant_value)
-        assert_variant_values(package_name, **expected_results)
+        update_packages(package_name, "variants", variant_value, ctx=ctx)
+        assert_variant_values(package_name, **expected_results, ctx=ctx)
 
     @pytest.mark.regression("50921")
     @pytest.mark.parametrize("config_type", ("require", "prefer"))
-    def test_preferred_commit_variant(self, config_type):
+    def test_preferred_commit_variant(self, config_type, ctx: SpackContext):
         """Tests that we can use auto-variants in requirements and preferences."""
         commit_value = "b" * 40
         name = "git-ref-package"
         value = f"commit={commit_value}"
-        update_packages(name, config_type, [value])
-        assert_variant_values(name, **{"commit": commit_value})
+        update_packages(name, config_type, [value], ctx=ctx)
+        assert_variant_values(name, **{"commit": commit_value}, ctx=ctx)
 
-    def test_preferred_variants_from_wildcard(self):
+    def test_preferred_variants_from_wildcard(self, ctx: SpackContext):
         """
         Test that 'foo=*' concretizes to any value
         """
-        update_packages("multivalue-variant", "variants", "foo=bar")
-        assert_variant_values("multivalue-variant foo=*", foo=("bar",))
+        update_packages("multivalue-variant", "variants", "foo=bar", ctx=ctx)
+        assert_variant_values("multivalue-variant foo=*", foo=("bar",), ctx=ctx)
 
-    def test_preferred_target(self, mutable_mock_repo):
+    def test_preferred_target(self, mutable_mock_repo, ctx: SpackContext):
         """Test preferred targets are applied correctly"""
-        spec = concretize("mpich")
+        spec = concretize("mpich", ctx=ctx)
         default = str(spec.target)
         preferred = str(spec.target.family)
 
-        update_packages("all", "target", [preferred])
-        spec = concretize("mpich")
+        update_packages("all", "target", [preferred], ctx=ctx)
+        spec = concretize("mpich", ctx=ctx)
         assert str(spec.target) == preferred
 
-        spec = concretize("mpileaks")
+        spec = concretize("mpileaks", ctx=ctx)
         assert str(spec["mpileaks"].target) == preferred
         assert str(spec["mpi"].target) == preferred
 
-        update_packages("all", "target", [default])
-        spec = concretize("mpileaks")
+        update_packages("all", "target", [default], ctx=ctx)
+        spec = concretize("mpileaks", ctx=ctx)
         assert str(spec["mpileaks"].target) == default
         assert str(spec["mpi"].target) == default
 
-    def test_preferred_versions(self):
+    def test_preferred_versions(self, ctx: SpackContext):
         """Test preferred package versions are applied correctly"""
-        update_packages("mpileaks", "version", ["2.3"])
-        spec = concretize("mpileaks")
+        update_packages("mpileaks", "version", ["2.3"], ctx=ctx)
+        spec = concretize("mpileaks", ctx=ctx)
         assert spec.version == Version("2.3")
 
-        update_packages("mpileaks", "version", ["2.2"])
-        spec = concretize("mpileaks")
+        update_packages("mpileaks", "version", ["2.2"], ctx=ctx)
+        spec = concretize("mpileaks", ctx=ctx)
         assert spec.version == Version("2.2")
 
-    def test_preferred_versions_mixed_version_types(self):
-        update_packages("mixedversions", "version", ["=2.0"])
-        spec = concretize("mixedversions")
+    def test_preferred_versions_mixed_version_types(self, ctx: SpackContext):
+        update_packages("mixedversions", "version", ["=2.0"], ctx=ctx)
+        spec = concretize("mixedversions", ctx=ctx)
         assert spec.version == Version("2.0")
 
-    def test_preferred_providers(self):
+    def test_preferred_providers(self, ctx: SpackContext):
         """Test preferred providers of virtual packages are
         applied correctly
         """
-        update_packages("all", "providers", {"mpi": ["mpich"]})
-        spec = concretize("mpileaks")
+        update_packages("all", "providers", {"mpi": ["mpich"]}, ctx=ctx)
+        spec = concretize("mpileaks", ctx=ctx)
         assert "mpich" in spec
 
-        update_packages("all", "providers", {"mpi": ["zmpi"]})
-        spec = concretize("mpileaks")
+        update_packages("all", "providers", {"mpi": ["zmpi"]}, ctx=ctx)
+        spec = concretize("mpileaks", ctx=ctx)
         assert "zmpi" in spec
 
     @pytest.mark.parametrize(
@@ -179,9 +181,9 @@ class TestConcretizePreferences:
     def test_config_set_pkg_property_url(self, update, expected, monkeypatch, ctx: SpackContext):
         """Test setting an existing attribute in the package class"""
         monkeypatch.setenv("SOMEPATH", "file:///some/where/else")
-        update_packages("mpileaks", "package_attributes", update)
+        update_packages("mpileaks", "package_attributes", update, ctx=ctx)
         with spack.test.harness.use_repositories(ctx, spack.paths.mock_packages_path):
-            spec = concretize("mpileaks")
+            spec = concretize("mpileaks", ctx=ctx)
             assert spec.package.fetcher.url == expected
 
     def test_config_set_pkg_property_new(self, mutable_config: Configuration, ctx: SpackContext):
@@ -204,7 +206,7 @@ mpileaks:
         )
         mutable_config.set("packages", conf, scope="concretize")
         with spack.test.harness.use_repositories(ctx, spack.paths.mock_packages_path):
-            spec = concretize("mpileaks")
+            spec = concretize("mpileaks", ctx=ctx)
             assert spec.package.v1 == 1
             assert spec.package.v2 is True
             assert spec.package.v3 == "yesterday"
@@ -212,9 +214,9 @@ mpileaks:
             assert dict(spec.package.v5) == {"x": 1, "y": 2}
             assert list(spec.package.v6) == [1, 2]
 
-        update_packages("mpileaks", "package_attributes", {})
+        update_packages("mpileaks", "package_attributes", {}, ctx=ctx)
         with spack.test.harness.use_repositories(ctx, spack.paths.mock_packages_path):
-            spec = concretize("mpileaks")
+            spec = concretize("mpileaks", ctx=ctx)
             with pytest.raises(AttributeError):
                 spec.package.v1
 
@@ -225,13 +227,13 @@ mpileaks:
 
         # now add packages.yaml with versions other than preferred
         # ensure that once config is in place, non-preferred version is used
-        update_packages("python", "version", ["3.5.0"])
+        update_packages("python", "version", ["3.5.0"], ctx=ctx)
         spec = spack.concretize.concretize_one("python", ctx)
         assert spec.version == Version("3.5.0")
 
     def test_preferred_undefined_raises(self, ctx: SpackContext):
         """Preference should not specify an undefined version"""
-        update_packages("python", "version", ["3.5.0.1"])
+        update_packages("python", "version", ["3.5.0.1"], ctx=ctx)
         spec = Spec("python")
         with pytest.raises(ConfigError):
             spack.concretize.concretize_one(spec, ctx)
@@ -241,7 +243,7 @@ mpileaks:
         a satisfying version defined in the package.py, we should use that
         (don't define a new version).
         """
-        update_packages("python", "version", ["3.5"])
+        update_packages("python", "version", ["3.5"], ctx=ctx)
         spec = spack.concretize.concretize_one("python", ctx)
         assert spec.satisfies("@3.5.1")
 
@@ -254,11 +256,11 @@ mpileaks:
 
         # now add packages.yaml with develop-like versions
         # ensure that once config is in place, develop-like version is used
-        update_packages("develop-test", "version", ["develop"])
+        update_packages("develop-test", "version", ["develop"], ctx=ctx)
         spec = spack.concretize.concretize_one("develop-test", ctx)
         assert spec.version == Version("develop")
 
-        update_packages("develop-test2", "version", ["0.2.15.develop"])
+        update_packages("develop-test2", "version", ["0.2.15.develop"], ctx=ctx)
         spec = spack.concretize.concretize_one("develop-test2", ctx)
         assert spec.version == Version("0.2.15.develop")
 

@@ -165,11 +165,11 @@ def test_mutate_spec_invalid(constraint, ctx: SpackContext):
         spec.mutate(spack.spec.Spec(constraint))
 
 
-def _test_mutate_from_cli(args, create=True):
+def _test_mutate_from_cli(args, create=True, *, ctx: SpackContext):
     if create:
-        ev.create("test", ctx=spack.test.harness.current())
+        ev.create("test", ctx=ctx)
 
-    env = ev.read("test", ctx=spack.test.harness.current())
+    env = ev.read("test", ctx=ctx)
 
     if create:
         env.add("cmake-client%cmake@3.4.3")
@@ -183,11 +183,11 @@ def _test_mutate_from_cli(args, create=True):
     return list(env.roots())
 
 
-def test_mutate_from_cli():
+def test_mutate_from_cli(ctx: SpackContext):
     match_spec = "%cmake@3.4.3"
     constraint = "@3.0"
     args = ["--concrete", f"--match-spec={match_spec}", constraint]
-    roots = _test_mutate_from_cli(args)
+    roots = _test_mutate_from_cli(args, ctx=ctx)
 
     assert any(r.satisfies(match_spec) for r in roots)
     for root in roots:
@@ -195,12 +195,12 @@ def test_mutate_from_cli():
             assert root.satisfies(constraint)
 
 
-def test_mutate_from_cli_multiple():
+def test_mutate_from_cli_multiple(ctx: SpackContext):
     match_spec = "%cmake@3.4.3"
     constraint1 = "@3.0"
     constraint2 = "build_system=foo"
     args = ["--concrete", f"--match-spec={match_spec}", constraint1, constraint2]
-    roots = _test_mutate_from_cli(args)
+    roots = _test_mutate_from_cli(args, ctx=ctx)
 
     assert any(r.satisfies(match_spec) for r in roots)
     for root in roots:
@@ -209,25 +209,25 @@ def test_mutate_from_cli_multiple():
             assert root.satisfies(constraint2)
 
 
-def test_mutate_from_cli_no_abstract():
+def test_mutate_from_cli_no_abstract(ctx: SpackContext):
     match_spec = "cmake"
     constraint = "@3.0"
     args = ["--concrete", f"--match-spec={match_spec}", constraint]
 
     with pytest.raises(ValueError, match="Cannot change abstract spec"):
-        _ = _test_mutate_from_cli(args)
+        _ = _test_mutate_from_cli(args, ctx=ctx)
 
     args = ["--concrete-only"] + args[1:]
-    roots = _test_mutate_from_cli(args, create=False)
+    roots = _test_mutate_from_cli(args, create=False, ctx=ctx)
 
     for root in roots:
         assert root[match_spec].satisfies(constraint)
 
 
-def test_mutate_from_cli_all_no_match_spec():
+def test_mutate_from_cli_all_no_match_spec(ctx: SpackContext):
     constraint = "cmake-client@3.0"
     args = ["--concrete", "--all", constraint]
-    roots = _test_mutate_from_cli(args)
+    roots = _test_mutate_from_cli(args, ctx=ctx)
 
     for root in roots:
         assert root.satisfies(constraint)

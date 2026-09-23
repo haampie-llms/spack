@@ -30,7 +30,7 @@ env = SpackCommand("env")
 
 @pytest.mark.usefixtures("mutable_mock_env_path", "mock_packages", "mock_fetch", "mutable_config")
 class TestDevelop:
-    def check_develop(self, env, spec, path=None, build_dir=None):
+    def check_develop(self, env, spec, path=None, build_dir=None, *, ctx: SpackContext):
         path = path or spec.name
 
         # check in memory representation
@@ -40,7 +40,7 @@ class TestDevelop:
         assert dev_specs_entry["spec"] == str(spec)
 
         # check yaml representation
-        dev_config = spack.test.harness.current().config.get("develop", {})
+        dev_config = ctx.config.get("develop", {})
         assert spec.name in dev_config
         yaml_entry = dev_config[spec.name]
         assert yaml_entry["spec"] == str(spec)
@@ -52,7 +52,7 @@ class TestDevelop:
 
         if build_dir is not None:
             scope = env.scope_name
-            assert build_dir == spack.test.harness.current().config.get(
+            assert build_dir == ctx.config.get(
                 "packages:{}:package_attributes:build_directory".format(spec.name), scope
             )
 
@@ -62,25 +62,25 @@ class TestDevelop:
             # develop checks that the path exists
             fs.mkdirp(os.path.join(e.path, "mpich"))
             develop("--no-clone", "mpich@1.0")
-            self.check_develop(e, spack.spec.Spec("mpich@=1.0"))
+            self.check_develop(e, spack.spec.Spec("mpich@=1.0"), ctx=ctx)
 
     def test_develop_no_clone(self, tmp_path: pathlib.Path, ctx: SpackContext):
         env("create", "test")
         with ev.read("test", ctx=ctx) as e:
             develop("--no-clone", "-p", str(tmp_path), "mpich@1.0")
-            self.check_develop(e, spack.spec.Spec("mpich@=1.0"), str(tmp_path))
+            self.check_develop(e, spack.spec.Spec("mpich@=1.0"), str(tmp_path), ctx=ctx)
 
     def test_develop_no_version(self, tmp_path: pathlib.Path, ctx: SpackContext):
         env("create", "test")
         with ev.read("test", ctx=ctx) as e:
             develop("--no-clone", "-p", str(tmp_path), "mpich")
-            self.check_develop(e, spack.spec.Spec("mpich@=main"), str(tmp_path))
+            self.check_develop(e, spack.spec.Spec("mpich@=main"), str(tmp_path), ctx=ctx)
 
     def test_develop(self, ctx: SpackContext):
         env("create", "test")
         with ev.read("test", ctx=ctx) as e:
             develop("mpich@1.0")
-            self.check_develop(e, spack.spec.Spec("mpich@=1.0"))
+            self.check_develop(e, spack.spec.Spec("mpich@=1.0"), ctx=ctx)
 
     def test_develop_git_ref(self, tmp_path: pathlib.Path, monkeypatch, ctx: SpackContext):
         """A develop spec with a bare git ref gets its Spack version assigned when the
@@ -104,26 +104,26 @@ class TestDevelop:
 
             # test develop with no args
             develop()
-            self.check_develop(e, spack.spec.Spec("mpich@=1.0"))
+            self.check_develop(e, spack.spec.Spec("mpich@=1.0"), ctx=ctx)
 
     def test_develop_build_directory(self, ctx: SpackContext):
         env("create", "test")
         with ev.read("test", ctx=ctx) as e:
             develop("-b", "test_build_dir", "mpich@1.0")
-            self.check_develop(e, spack.spec.Spec("mpich@=1.0"), None, "test_build_dir")
+            self.check_develop(e, spack.spec.Spec("mpich@=1.0"), None, "test_build_dir", ctx=ctx)
 
     def test_develop_twice(self, ctx: SpackContext):
         env("create", "test")
         with ev.read("test", ctx=ctx) as e:
             develop("mpich@1.0")
-            self.check_develop(e, spack.spec.Spec("mpich@=1.0"))
+            self.check_develop(e, spack.spec.Spec("mpich@=1.0"), ctx=ctx)
 
             develop("mpich@1.0")
             # disk representation isn't updated unless we write
             # second develop command doesn't change it, so we don't write
             # but we check disk representation
             e.write()
-            self.check_develop(e, spack.spec.Spec("mpich@=1.0"))
+            self.check_develop(e, spack.spec.Spec("mpich@=1.0"), ctx=ctx)
             assert len(e.dev_specs) == 1
 
     def test_develop_update_path(self, tmp_path: pathlib.Path, ctx: SpackContext):
@@ -131,7 +131,7 @@ class TestDevelop:
         with ev.read("test", ctx=ctx) as e:
             develop("mpich@1.0")
             develop("-p", str(tmp_path), "mpich@1.0")
-            self.check_develop(e, spack.spec.Spec("mpich@=1.0"), str(tmp_path))
+            self.check_develop(e, spack.spec.Spec("mpich@=1.0"), str(tmp_path), ctx=ctx)
             assert len(e.dev_specs) == 1
 
     def test_develop_update_spec(self, ctx: SpackContext):
@@ -139,7 +139,7 @@ class TestDevelop:
         with ev.read("test", ctx=ctx) as e:
             develop("mpich@1.0")
             develop("mpich@2.0")
-            self.check_develop(e, spack.spec.Spec("mpich@=2.0"))
+            self.check_develop(e, spack.spec.Spec("mpich@=2.0"), ctx=ctx)
             assert len(e.dev_specs) == 1
 
     def test_develop_applies_changes(self, monkeypatch, ctx: SpackContext):
@@ -237,7 +237,7 @@ class TestDevelop:
             monkeypatch.setattr(spack.stage.Stage, "steal_source", check_path)
 
             develop("-p", path, "mpich@1.0")
-            self.check_develop(e, spack.spec.Spec("mpich@=1.0"), path)
+            self.check_develop(e, spack.spec.Spec("mpich@=1.0"), path, ctx=ctx)
 
             # Check modifications actually worked
             spec = next(e.roots())
@@ -264,13 +264,13 @@ class TestDevelop:
             # Create path to allow develop to modify env
             fs.mkdirp(abspath)
             develop("--no-clone", "-p", path, "mpich@1.0")
-            self.check_develop(e, spack.spec.Spec("mpich@=1.0"), path)
+            self.check_develop(e, spack.spec.Spec("mpich@=1.0"), path, ctx=ctx)
 
             # Remove path to ensure develop with no args runs staging code
             os.rmdir(abspath)
 
             develop()
-            self.check_develop(e, spack.spec.Spec("mpich@=1.0"), path)
+            self.check_develop(e, spack.spec.Spec("mpich@=1.0"), path, ctx=ctx)
 
             # Check modifications actually worked
             spec = next(e.roots())

@@ -82,6 +82,7 @@ def test_mirror_cli_parallel_args(
     mutable_mock_env_path,
     monkeypatch,
     mutable_config: Configuration,
+    ctx: SpackContext,
 ):
     """Test the CLI parallel args"""
     mirror_dir = str(tmp_path / "mirror")
@@ -96,7 +97,7 @@ def test_mirror_cli_parallel_args(
     )
 
     env("create", env_name)
-    with ev.read(env_name, ctx=spack.test.harness.current()):
+    with ev.read(env_name, ctx=ctx):
         add("trivial-install-test-package")
         add("git-test")
         concretize()

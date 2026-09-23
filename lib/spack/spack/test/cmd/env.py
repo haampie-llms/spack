@@ -79,23 +79,23 @@ module = SpackCommand("module")
 sep = os.sep
 
 
-def setup_combined_multiple_env():
+def setup_combined_multiple_env(*, ctx: SpackContext):
     env("create", "test1")
-    test1 = ev.read("test1", ctx=spack.test.harness.current())
+    test1 = ev.read("test1", ctx=ctx)
     with test1:
         add("mpich@1.0")
         test1.concretize()
         test1.write()
 
     env("create", "test2")
-    test2 = ev.read("test2", ctx=spack.test.harness.current())
+    test2 = ev.read("test2", ctx=ctx)
     with test2:
         add("libelf")
         test2.concretize()
         test2.write()
 
     env("create", "--include-concrete", "test1", "--include-concrete", "test2", "combined_env")
-    combined = ev.read("combined_env", ctx=spack.test.harness.current())
+    combined = ev.read("combined_env", ctx=ctx)
     return test1, test2, combined
 
 
@@ -563,8 +563,9 @@ def test_env_install_include_concrete_env(
     install_mockery,
     mock_fetch,
     mutable_config: Configuration,
+    ctx: SpackContext,
 ):
-    test1, test2, combined = setup_combined_multiple_env()
+    test1, test2, combined = setup_combined_multiple_env(ctx=ctx)
 
     if unify is False:
         combined.manifest.set_default_view(False)
@@ -2174,8 +2175,8 @@ def test_env_not_concrete_include_concrete_env(ctx: SpackContext):
         env("create", "--include-concrete", "test", "combined_env")
 
 
-def test_env_multiple_include_concrete_envs():
-    test1, test2, combined = setup_combined_multiple_env()
+def test_env_multiple_include_concrete_envs(ctx: SpackContext):
+    test1, test2, combined = setup_combined_multiple_env(ctx=ctx)
 
     combined_yaml = combined.manifest["spack"]
 
@@ -2186,8 +2187,8 @@ def test_env_multiple_include_concrete_envs():
     assert not combined_yaml["specs"]
 
 
-def test_env_include_concrete_envs_lockfile():
-    test1, test2, combined = setup_combined_multiple_env()
+def test_env_include_concrete_envs_lockfile(ctx: SpackContext):
+    test1, test2, combined = setup_combined_multiple_env(ctx=ctx)
 
     combined_yaml = combined.manifest["spack"]
 
@@ -2206,7 +2207,7 @@ def test_env_include_concrete_envs_lockfile():
 
 
 def test_env_include_concrete_add_env(ctx: SpackContext):
-    test1, test2, combined = setup_combined_multiple_env()
+    test1, test2, combined = setup_combined_multiple_env(ctx=ctx)
 
     # create new env & concretize
     env("create", "new")
@@ -2237,8 +2238,8 @@ def test_env_include_concrete_add_env(ctx: SpackContext):
     assert new_env.path in lockfile_as_dict[ev.lockfile_include_key].keys()
 
 
-def test_env_include_concrete_remove_env():
-    test1, test2, combined = setup_combined_multiple_env()
+def test_env_include_concrete_remove_env(ctx: SpackContext):
+    test1, test2, combined = setup_combined_multiple_env(ctx=ctx)
 
     # remove test2 from combined
     combined.included_concrete_env_root_dirs = [test1.path]
@@ -2260,7 +2261,7 @@ def test_env_include_concrete_remove_env():
     assert test2.path not in lockfile_as_dict[ev.lockfile_include_key].keys()
 
 
-def configure_reuse(reuse_mode, combined_env) -> Optional[ev.Environment]:
+def configure_reuse(reuse_mode, combined_env, *, ctx: SpackContext) -> Optional[ev.Environment]:
     override_env = None
     _config: Dict[Any, Any] = {}
     if reuse_mode == "true":
@@ -2273,7 +2274,7 @@ def configure_reuse(reuse_mode, combined_env) -> Optional[ev.Environment]:
         # Create a new environment called external_test that enables the "debug"
         # The default is "~debug"
         env("create", "external_test")
-        override_env = ev.read("external_test", ctx=spack.test.harness.current())
+        override_env = ev.read("external_test", ctx=ctx)
         with override_env:
             add("mpich@1.0 +debug")
         override_env.concretize()
@@ -2317,10 +2318,10 @@ def test_env_include_concrete_reuse(reuse_mode, ctx: SpackContext):
     # This test verifies that concretizing with an included concrete
     # environment with "concretizer:reuse:true" the included
     # concrete spec overrides the default with mpi@1.0.
-    test1, _, combined = setup_combined_multiple_env()
+    test1, _, combined = setup_combined_multiple_env(ctx=ctx)
 
     # Set the reuse mode for the environment
-    override_env = configure_reuse(reuse_mode, combined)
+    override_env = configure_reuse(reuse_mode, combined, ctx=ctx)
     if override_env:
         # If there is an override environment (ie. testing reuse with
         # an external environment) update it here.
@@ -2363,11 +2364,11 @@ def test_env_include_concrete_reuse(reuse_mode, ctx: SpackContext):
 
 
 @pytest.mark.parametrize("unify", [True, False, "when_possible"])
-def test_env_include_concrete_env_reconcretized(mutable_config, unify):
+def test_env_include_concrete_env_reconcretized(mutable_config, unify, ctx: SpackContext):
     """Double check to make sure that concrete_specs for the local specs is empty
     after reconcretizing.
     """
-    _, _, combined = setup_combined_multiple_env()
+    _, _, combined = setup_combined_multiple_env(ctx=ctx)
 
     with open(combined.lock_path, encoding="utf-8") as f:
         lockfile_as_dict = combined._read_lockfile(f)
@@ -2387,11 +2388,11 @@ def test_env_include_concrete_env_reconcretized(mutable_config, unify):
     assert not lockfile_as_dict["concrete_specs"]
 
 
-def test_concretize_include_concrete_env():
+def test_concretize_include_concrete_env(ctx: SpackContext):
     """Tests that if we update an included environment, and later we re-concretize the environment
     that includes it, we use the latest version of the concrete specs.
     """
-    test1, _, combined = setup_combined_multiple_env()
+    test1, _, combined = setup_combined_multiple_env(ctx=ctx)
 
     # Nothing changed, so writing the combined environment leaves its lockfile alone
     with open(combined.lock_path, "rb") as f:

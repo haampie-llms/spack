@@ -18,7 +18,6 @@ import spack.mirrors.mirror
 import spack.mirrors.utils
 import spack.patch
 import spack.stage
-import spack.test.harness
 import spack.util.url as url_util
 from spack.cmd.common.arguments import mirror_name_or_url
 from spack.config import Configuration
@@ -44,7 +43,7 @@ def _clear_repos():
     yield
 
 
-def set_up_package(name, repository, url_attr, monkeypatch):
+def set_up_package(name, repository, url_attr, monkeypatch, *, ctx: SpackContext):
     """Set up a mock package to be mirrored.
     Each package needs us to:
 
@@ -52,7 +51,7 @@ def set_up_package(name, repository, url_attr, monkeypatch):
     2. Point the package's version args at that repo.
     """
     # Set up packages to point at mock repos.
-    s = spack.concretize.concretize_one(name, spack.test.harness.current())
+    s = spack.concretize.concretize_one(name, ctx)
     repos[name] = repository
 
     # change the fetch args of the first (only) version. versions is a class-level dict shared
@@ -64,19 +63,17 @@ def set_up_package(name, repository, url_attr, monkeypatch):
     monkeypatch.setitem(s.package.versions[v], url_attr, repository.url)
 
 
-def check_mirror(mutable_config: Configuration):
+def check_mirror(mutable_config: Configuration, *, ctx: SpackContext):
     with spack.stage.stage_from_config(
-        "spack-mirror-test", config=mutable_config, client=spack.test.harness.current().network
+        "spack-mirror-test", config=mutable_config, client=ctx.network
     ) as stage:
         mirror_root = os.path.join(stage.path, "test-mirror")
         # register mirror with spack config
         mirrors = {"spack-mirror-test": url_util.path_to_file_url(mirror_root)}
         with mutable_config.override("mirrors", mirrors):
             with mutable_config.override("config:checksum", False):
-                specs = [
-                    spack.concretize.concretize_one(x, spack.test.harness.current()) for x in repos
-                ]
-                spack.cmd.mirror.create(mirror_root, specs, spack.test.harness.current())
+                specs = [spack.concretize.concretize_one(x, ctx) for x in repos]
+                spack.cmd.mirror.create(mirror_root, specs, ctx)
 
             # Stage directory exists
             assert os.path.isdir(mirror_root)
@@ -85,14 +82,14 @@ def check_mirror(mutable_config: Configuration):
                 fetcher = spec.package.fetcher
                 per_package_ref = os.path.join(spec.name, "-".join([spec.name, str(spec.version)]))
                 mirror_layout = spack.mirrors.layout.default_mirror_layout(
-                    fetcher, per_package_ref, repo=spack.test.harness.current().repo
+                    fetcher, per_package_ref, repo=ctx.repo
                 )
                 expected_path = os.path.join(mirror_root, mirror_layout.path)
                 assert os.path.exists(expected_path)
 
             # Now try to fetch each package.
             for name, mock_repo in repos.items():
-                spec = spack.concretize.concretize_one(name, spack.test.harness.current())
+                spec = spack.concretize.concretize_one(name, ctx)
                 pkg = spec.package
 
                 with mutable_config.override("config:checksum", False):
@@ -117,24 +114,30 @@ def check_mirror(mutable_config: Configuration):
                         assert all(left in exclude for left in dcmp.left_only)
 
 
-def test_url_mirror(mock_archive, monkeypatch, mutable_config: Configuration):
-    set_up_package("trivial-install-test-package", mock_archive, "url", monkeypatch)
-    check_mirror(mutable_config)
+def test_url_mirror(mock_archive, monkeypatch, mutable_config: Configuration, ctx: SpackContext):
+    set_up_package("trivial-install-test-package", mock_archive, "url", monkeypatch, ctx=ctx)
+    check_mirror(mutable_config, ctx=ctx)
 
 
-def test_git_mirror(git, mock_git_repository, monkeypatch, mutable_config: Configuration):
-    set_up_package("git-test", mock_git_repository, "git", monkeypatch)
-    check_mirror(mutable_config)
+def test_git_mirror(
+    git, mock_git_repository, monkeypatch, mutable_config: Configuration, ctx: SpackContext
+):
+    set_up_package("git-test", mock_git_repository, "git", monkeypatch, ctx=ctx)
+    check_mirror(mutable_config, ctx=ctx)
 
 
-def test_svn_mirror(mock_svn_repository, monkeypatch, mutable_config: Configuration):
-    set_up_package("svn-test", mock_svn_repository, "svn", monkeypatch)
-    check_mirror(mutable_config)
+def test_svn_mirror(
+    mock_svn_repository, monkeypatch, mutable_config: Configuration, ctx: SpackContext
+):
+    set_up_package("svn-test", mock_svn_repository, "svn", monkeypatch, ctx=ctx)
+    check_mirror(mutable_config, ctx=ctx)
 
 
-def test_hg_mirror(mock_hg_repository, monkeypatch, mutable_config: Configuration):
-    set_up_package("hg-test", mock_hg_repository, "hg", monkeypatch)
-    check_mirror(mutable_config)
+def test_hg_mirror(
+    mock_hg_repository, monkeypatch, mutable_config: Configuration, ctx: SpackContext
+):
+    set_up_package("hg-test", mock_hg_repository, "hg", monkeypatch, ctx=ctx)
+    check_mirror(mutable_config, ctx=ctx)
 
 
 def test_all_mirror(
@@ -144,12 +147,13 @@ def test_all_mirror(
     mock_archive,
     monkeypatch,
     mutable_config: Configuration,
+    ctx: SpackContext,
 ):
-    set_up_package("git-test", mock_git_repository, "git", monkeypatch)
-    set_up_package("svn-test", mock_svn_repository, "svn", monkeypatch)
-    set_up_package("hg-test", mock_hg_repository, "hg", monkeypatch)
-    set_up_package("trivial-install-test-package", mock_archive, "url", monkeypatch)
-    check_mirror(mutable_config)
+    set_up_package("git-test", mock_git_repository, "git", monkeypatch, ctx=ctx)
+    set_up_package("svn-test", mock_svn_repository, "svn", monkeypatch, ctx=ctx)
+    set_up_package("hg-test", mock_hg_repository, "hg", monkeypatch, ctx=ctx)
+    set_up_package("trivial-install-test-package", mock_archive, "url", monkeypatch, ctx=ctx)
+    check_mirror(mutable_config, ctx=ctx)
 
 
 @pytest.mark.parametrize(

@@ -11,7 +11,7 @@ from typing import Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple, 
 import spack.deptypes as dt
 import spack.repo
 import spack.spec
-import spack.test.harness
+from spack.context import SpackContext
 from spack.installer.base import BuildChannels, ExitCode, JobServerBase, ProcessExitNotifier
 from spack.installer.build import BuildRequest, ChildInfo, create_build_channels
 from spack.installer.core import PackageInstaller, write_connection
@@ -192,13 +192,17 @@ class ScriptedLauncher:
 
 
 def _make_concrete(
-    name: str, deps: Sequence[spack.spec.Spec] = (), depflag: dt.DepFlag = dt.BUILD | dt.LINK
+    name: str,
+    deps: Sequence[spack.spec.Spec] = (),
+    depflag: dt.DepFlag = dt.BUILD | dt.LINK,
+    *,
+    ctx: SpackContext,
 ) -> spack.spec.Spec:
     spec = spack.spec.Spec(f"{name}@=1.0")
     for dep in deps:
         spec._add_dependency(dep, depflag=depflag, virtuals=())
     spec._mark_concrete()
-    spack.repo.attach_packages([spec], spack.test.harness.current())
+    spack.repo.attach_packages([spec], ctx)
     return spec
 
 

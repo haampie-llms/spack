@@ -24,10 +24,10 @@ pytestmark = pytest.mark.use_package_hash
 datadir = os.path.join(spack.paths.test_path, "data", "unparse")
 
 
-def compare_sans_name(repo, eq, spec1, spec2):
-    content1 = ph.canonical_source(spec1, repo=spack.test.harness.current().repo)
+def compare_sans_name(repo, eq, spec1, spec2, *, ctx: SpackContext):
+    content1 = ph.canonical_source(spec1, repo=ctx.repo)
     content1 = content1.replace(repo.get_pkg_class(spec1.name).__name__, "TestPackage")
-    content2 = ph.canonical_source(spec2, repo=spack.test.harness.current().repo)
+    content2 = ph.canonical_source(spec2, repo=ctx.repo)
     content2 = content2.replace(repo.get_pkg_class(spec2.name).__name__, "TestPackage")
     if eq:
         assert content1 == content2
@@ -35,16 +35,16 @@ def compare_sans_name(repo, eq, spec1, spec2):
         assert content1 != content2
 
 
-def compare_hash_sans_name(repo, eq, spec1, spec2):
-    content1 = ph.canonical_source(spec1, repo=spack.test.harness.current().repo)
+def compare_hash_sans_name(repo, eq, spec1, spec2, *, ctx: SpackContext):
+    content1 = ph.canonical_source(spec1, repo=ctx.repo)
     pkg_cls1 = repo.get_pkg_class(spec1.name)
     content1 = content1.replace(pkg_cls1.__name__, "TestPackage")
-    hash1 = pkg_cls1(spec1).content_hash(content=content1, repo=spack.test.harness.current().repo)
+    hash1 = pkg_cls1(spec1).content_hash(content=content1, repo=ctx.repo)
 
-    content2 = ph.canonical_source(spec2, repo=spack.test.harness.current().repo)
+    content2 = ph.canonical_source(spec2, repo=ctx.repo)
     pkg_cls2 = repo.get_pkg_class(spec2.name)
     content2 = content2.replace(pkg_cls2.__name__, "TestPackage")
-    hash2 = pkg_cls2(spec2).content_hash(content=content2, repo=spack.test.harness.current().repo)
+    hash2 = pkg_cls2(spec2).content_hash(content=content2, repo=ctx.repo)
 
     assert (hash1 == hash2) == eq
 
@@ -59,41 +59,41 @@ def test_different_variants(mock_packages, config, ctx: SpackContext):
     assert ph.package_hash(spec1, repo=ctx.repo) == ph.package_hash(spec2, repo=ctx.repo)
 
 
-def test_all_same_but_name(mock_packages: RepoPath, config):
+def test_all_same_but_name(mock_packages: RepoPath, config, ctx: SpackContext):
     spec1 = Spec("hash-test1@=1.2")
     spec2 = Spec("hash-test2@=1.2")
-    compare_sans_name(mock_packages, True, spec1, spec2)
+    compare_sans_name(mock_packages, True, spec1, spec2, ctx=ctx)
 
     spec1 = Spec("hash-test1@=1.2 +varianty")
     spec2 = Spec("hash-test2@=1.2 +varianty")
-    compare_sans_name(mock_packages, True, spec1, spec2)
+    compare_sans_name(mock_packages, True, spec1, spec2, ctx=ctx)
 
 
-def test_all_same_but_archive_hash(mock_packages: RepoPath, config):
+def test_all_same_but_archive_hash(mock_packages: RepoPath, config, ctx: SpackContext):
     """
     Archive hash is not intended to be reflected in Package hash.
     """
     spec1 = Spec("hash-test1@=1.3")
     spec2 = Spec("hash-test2@=1.3")
-    compare_sans_name(mock_packages, True, spec1, spec2)
+    compare_sans_name(mock_packages, True, spec1, spec2, ctx=ctx)
 
 
-def test_all_same_but_patch_contents(mock_packages: RepoPath, config):
+def test_all_same_but_patch_contents(mock_packages: RepoPath, config, ctx: SpackContext):
     spec1 = Spec("hash-test1@=1.1")
     spec2 = Spec("hash-test2@=1.1")
-    compare_sans_name(mock_packages, True, spec1, spec2)
+    compare_sans_name(mock_packages, True, spec1, spec2, ctx=ctx)
 
 
-def test_all_same_but_patches_to_apply(mock_packages: RepoPath, config):
+def test_all_same_but_patches_to_apply(mock_packages: RepoPath, config, ctx: SpackContext):
     spec1 = Spec("hash-test1@=1.4")
     spec2 = Spec("hash-test2@=1.4")
-    compare_sans_name(mock_packages, True, spec1, spec2)
+    compare_sans_name(mock_packages, True, spec1, spec2, ctx=ctx)
 
 
-def test_all_same_but_install(mock_packages: RepoPath, config):
+def test_all_same_but_install(mock_packages: RepoPath, config, ctx: SpackContext):
     spec1 = Spec("hash-test1@=1.5")
     spec2 = Spec("hash-test2@=1.5")
-    compare_sans_name(mock_packages, False, spec1, spec2)
+    compare_sans_name(mock_packages, False, spec1, spec2, ctx=ctx)
 
 
 def test_content_hash_all_same_but_patch_contents(
@@ -101,27 +101,27 @@ def test_content_hash_all_same_but_patch_contents(
 ):
     spec1 = spack.concretize.concretize_one("hash-test1@1.1", ctx)
     spec2 = spack.concretize.concretize_one("hash-test2@1.1", ctx)
-    compare_hash_sans_name(mock_packages, False, spec1, spec2)
+    compare_hash_sans_name(mock_packages, False, spec1, spec2, ctx=ctx)
 
 
-def test_content_hash_not_concretized(mock_packages: RepoPath, config):
+def test_content_hash_not_concretized(mock_packages: RepoPath, config, ctx: SpackContext):
     """Check that Package.content_hash() works on abstract specs."""
     # these are different due to the package hash
     spec1 = Spec("hash-test1@=1.1")
     spec2 = Spec("hash-test2@=1.3")
-    compare_hash_sans_name(mock_packages, False, spec1, spec2)
+    compare_hash_sans_name(mock_packages, False, spec1, spec2, ctx=ctx)
 
     # at v1.1 these are actually the same package when @when's are removed
     # and the name isn't considered
     spec1 = Spec("hash-test1@=1.1")
     spec2 = Spec("hash-test2@=1.1")
-    compare_hash_sans_name(mock_packages, True, spec1, spec2)
+    compare_hash_sans_name(mock_packages, True, spec1, spec2, ctx=ctx)
 
     # these end up being different b/c we can't eliminate much of the package.py
     # without a version.
     spec1 = Spec("hash-test1")
     spec2 = Spec("hash-test2")
-    compare_hash_sans_name(mock_packages, False, spec1, spec2)
+    compare_hash_sans_name(mock_packages, False, spec1, spec2, ctx=ctx)
 
 
 def test_package_hash_of_shadowed_package(
@@ -142,7 +142,7 @@ def test_package_hash_of_shadowed_package(
 def test_content_hash_different_variants(mock_packages: RepoPath, config, ctx: SpackContext):
     spec1 = spack.concretize.concretize_one("hash-test1@1.2 +variantx", ctx)
     spec2 = spack.concretize.concretize_one("hash-test2@1.2 ~variantx", ctx)
-    compare_hash_sans_name(mock_packages, True, spec1, spec2)
+    compare_hash_sans_name(mock_packages, True, spec1, spec2, ctx=ctx)
 
 
 def test_content_hash_cannot_get_details_from_ast(
@@ -159,7 +159,7 @@ def test_content_hash_cannot_get_details_from_ast(
     """
     spec3 = spack.concretize.concretize_one("hash-test1@1.7", ctx)
     spec4 = spack.concretize.concretize_one("hash-test3@1.7", ctx)
-    compare_hash_sans_name(mock_packages, False, spec3, spec4)
+    compare_hash_sans_name(mock_packages, False, spec3, spec4, ctx=ctx)
 
 
 def test_content_hash_all_same_but_archive_hash(
@@ -167,7 +167,7 @@ def test_content_hash_all_same_but_archive_hash(
 ):
     spec1 = spack.concretize.concretize_one("hash-test1@1.3", ctx)
     spec2 = spack.concretize.concretize_one("hash-test2@1.3", ctx)
-    compare_hash_sans_name(mock_packages, False, spec1, spec2)
+    compare_hash_sans_name(mock_packages, False, spec1, spec2, ctx=ctx)
 
 
 def test_content_hash_parse_dynamic_function_call(mock_packages, config, ctx: SpackContext):

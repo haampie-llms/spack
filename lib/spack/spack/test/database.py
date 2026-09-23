@@ -416,16 +416,16 @@ def _check_remove_and_add_package(database: Database, spec):
     database._check_ref_counts()
 
 
-def _mock_install(spec: str):
-    s = spack.concretize.concretize_one(spec, spack.test.harness.current())
+def _mock_install(spec: str, *, ctx: SpackContext):
+    s = spack.concretize.concretize_one(spec, ctx)
     PackageInstaller([s.package], fake=True, explicit=True).install()
 
 
-def _mock_remove(spec, db):
+def _mock_remove(spec, db, *, ctx: SpackContext):
     specs = db.query(spec)
     assert len(specs) == 1
     spec = specs[0]
-    spack.repo.attach_packages([spec], spack.test.harness.current())
+    spack.repo.attach_packages([spec], ctx)
     spec.package.do_uninstall(spec)
 
 
@@ -635,11 +635,12 @@ class ReadModify:
 
     def __call__(self):
         # Runs in a child process, which receives the test context
-        db = spack.test.harness.current().store.db
+        ctx = spack.test.harness.current()
+        db = ctx.store.db
         # check that other process can read DB
         _check_db_sanity(db)
         with db.write_transaction():
-            _mock_remove("mpileaks ^zmpi", db)
+            _mock_remove("mpileaks ^zmpi", db, ctx=ctx)
 
 
 def test_030_db_sanity_from_another_process(mutable_database):
@@ -765,10 +766,10 @@ def test_090_non_root_ref_counts(mutable_database):
     assert mpich_rec.ref_count == 0
 
 
-def test_100_no_write_with_exception_on_remove(database: Database):
+def test_100_no_write_with_exception_on_remove(database: Database, ctx: SpackContext):
     def fail_while_writing():
         with database.write_transaction():
-            _mock_remove("mpileaks ^zmpi", database)
+            _mock_remove("mpileaks ^zmpi", database, ctx=ctx)
             raise Exception()
 
     with database.read_transaction():
@@ -782,10 +783,10 @@ def test_100_no_write_with_exception_on_remove(database: Database):
         assert len(database.query("mpileaks ^zmpi", installed=InstallRecordStatus.ANY)) == 1
 
 
-def test_110_no_write_with_exception_on_install(database):
+def test_110_no_write_with_exception_on_install(database, ctx: SpackContext):
     def fail_while_writing():
         with database.write_transaction():
-            _mock_install("cmake")
+            _mock_install("cmake", ctx=ctx)
             raise Exception()
 
     with database.read_transaction():
@@ -1338,7 +1339,7 @@ def test_reindex_with_upstreams(
         )
     )
 
-    monkeypatch.setattr(ctx, "store", upstream_store)
+    ctx.swap("store", upstream_store)
     PackageInstaller([callpath.package], fake=True, explicit=True).install()
 
     local_store = spack.store.create(
@@ -1352,7 +1353,7 @@ def test_reindex_with_upstreams(
             )
         )
     )
-    monkeypatch.setattr(ctx, "store", local_store)
+    ctx.swap("store", local_store)
     PackageInstaller([mpileaks.package], fake=True, explicit=True).install()
 
     # Sanity check that callpath is from upstream.
@@ -1362,7 +1363,7 @@ def test_reindex_with_upstreams(
     # Install mpileaks also upstream with the same hash to ensure that determining upstreamness
     # checks local installs before upstream databases, even when the local database is being
     # reindexed.
-    monkeypatch.setattr(ctx, "store", upstream_store)
+    ctx.swap("store", upstream_store)
     PackageInstaller([mpileaks.package], fake=True, explicit=True).install()
 
     # Delete the local database

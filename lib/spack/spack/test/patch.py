@@ -420,7 +420,9 @@ def check_multi_dependency_patch_specs(
     libdwarf,
     fake,
     owner,
-    package_dir,  # specs
+    package_dir,
+    *,
+    ctx: SpackContext,  # specs
 ):  # parent spec properties
     """Validate patches on dependencies of patch-several-dependencies."""
     # basic patch on libelf
@@ -436,11 +438,7 @@ def check_multi_dependency_patch_specs(
     assert baz_sha256 in libdwarf.variants["patches"].value
 
     def get_patch(spec, ending):
-        return next(
-            p
-            for p in spec.patches_from(spack.test.harness.current().repo)
-            if p.path_or_url.endswith(ending)
-        )
+        return next(p for p in spec.patches_from(ctx.repo) if p.path_or_url.endswith(ending))
 
     # make sure file patches are reconstructed properly
     foo_patch = get_patch(libelf, "foo.patch")
@@ -488,7 +486,12 @@ def test_conditional_patched_deps_with_conditions(mock_packages, config, ctx: Sp
     fake = spec["fake"]
 
     check_multi_dependency_patch_specs(
-        libelf, libdwarf, fake, "builtin_mock.patch-several-dependencies", spec.package.package_dir
+        libelf,
+        libdwarf,
+        fake,
+        "builtin_mock.patch-several-dependencies",
+        spec.package.package_dir,
+        ctx=ctx,
     )
 
 
@@ -508,7 +511,12 @@ def test_write_and_read_sub_dags_with_patched_deps(mock_packages, config, ctx: S
 
     # make sure we can still read patches correctly for these specs
     check_multi_dependency_patch_specs(
-        libelf, libdwarf, fake, "builtin_mock.patch-several-dependencies", spec.package.package_dir
+        libelf,
+        libdwarf,
+        fake,
+        "builtin_mock.patch-several-dependencies",
+        spec.package.package_dir,
+        ctx=ctx,
     )
 
 

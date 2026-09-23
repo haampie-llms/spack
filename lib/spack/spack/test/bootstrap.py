@@ -306,6 +306,7 @@ def test_gpg_status_check(
     gpg_in_path,
     gpg_in_store,
     expected_missing,
+    ctx: SpackContext,
 ):
     """Test that gpg/gpg2 status is detected whether it's in PATH or in the bootstrap store."""
     if gpg_in_path:
@@ -321,7 +322,7 @@ def test_gpg_status_check(
 
     monkeypatch.setattr(spack.bootstrap.status, "_executables_in_store", _only_gnupg_in_store)
 
-    msg, _ = spack.bootstrap.status_message("buildcache", spack.test.harness.current())
+    msg, _ = spack.bootstrap.status_message("buildcache", ctx)
     assert ('MISSING "gpg2"' in msg) is expected_missing
 
 
@@ -545,7 +546,8 @@ SPACK_INSTALL_SOURCE = {
 class _RecordingInstaller:
     """Stand-in for ``create_installer``, recording what it is asked to install."""
 
-    def __init__(self) -> None:
+    def __init__(self, ctx: SpackContext) -> None:
+        self.ctx = ctx
         self.packages: Any = None
         self.installer_args: Optional[Dict[str, Any]] = None
         self.mirrors_when_installing: Optional[Dict[str, Any]] = None
@@ -556,7 +558,7 @@ class _RecordingInstaller:
         return self
 
     def install(self) -> None:
-        self.mirrors_when_installing = spack.test.harness.current().config.get("mirrors")
+        self.mirrors_when_installing = self.ctx.config.get("mirrors")
 
 
 class _FakeConcreteSpec:
@@ -568,9 +570,9 @@ class _FakeConcreteSpec:
 
 
 @pytest.fixture
-def recording_installer(monkeypatch):
+def recording_installer(monkeypatch, ctx: SpackContext):
     """Let the source bootstrapper run without detecting, concretizing or installing."""
-    installer = _RecordingInstaller()
+    installer = _RecordingInstaller(ctx)
     monkeypatch.setattr(spack.bootstrap.core, "_add_externals_if_missing", lambda ctx: None)
     monkeypatch.setattr(
         spack.concretize, "concretize_one", lambda spec, ctx: _FakeConcreteSpec(spec)
@@ -634,7 +636,7 @@ def test_the_source_bootstrapper_installs_from_its_own_mirror(
 
 
 def test_the_source_bootstrapper_concretizes_with_the_request(
-    recording_installer, mutable_config, monkeypatch
+    recording_installer, mutable_config, monkeypatch, ctx: SpackContext
 ):
     """Tests that the source bootstrapper concretizes with ``request.concretize``, and never
     calls ``spack.concretize.concretize_one``.
@@ -646,7 +648,7 @@ def test_the_source_bootstrapper_concretizes_with_the_request(
     monkeypatch.setattr(spack.concretize, "concretize_one", _regular_concretizer)
     mutable_config.set("bootstrap:sources", [SPACK_INSTALL_SOURCE])
     bootstrapper = spack.bootstrap.core.create_bootstrapper(
-        spack.bootstrap.core.bootstrapping_sources(mutable_config)[0], spack.test.harness.current()
+        spack.bootstrap.core.bootstrapping_sources(mutable_config)[0], ctx
     )
 
     request = spack.bootstrap.core.BootstrapRequest.for_module(

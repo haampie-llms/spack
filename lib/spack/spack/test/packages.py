@@ -33,9 +33,9 @@ class MyPrependFileLoader(spack.repo._PrependFileLoader):
         self.prepend = b""
 
 
-def pkg_factory(name):
+def pkg_factory(name, *, ctx: SpackContext):
     """Return a package object tied to an abstract spec"""
-    pkg_cls = spack.test.harness.current().repo.get_pkg_class(name)
+    pkg_cls = ctx.repo.get_pkg_class(name)
     return pkg_cls(Spec(name))
 
 
@@ -197,9 +197,9 @@ def test_url_for_version_with_only_overrides_with_gaps(mock_packages, config, ct
         ("hg-top-level", spack.fetch_strategy.HgFetchStrategy, "https://example.com/some/hg/repo"),
     ],
 )
-def test_fetcher_url(spec_str, expected_type, expected_url):
+def test_fetcher_url(spec_str, expected_type, expected_url, ctx: SpackContext):
     """Ensure that top-level git attribute can be used as a default."""
-    fetcher = spack.package_base.for_package_version(pkg_factory(spec_str), "1.0")
+    fetcher = spack.package_base.for_package_version(pkg_factory(spec_str, ctx=ctx), "1.0")
     assert isinstance(fetcher, expected_type)
     assert fetcher.url == expected_url
 
@@ -215,10 +215,10 @@ def test_fetcher_url(spec_str, expected_type, expected_url):
         ("git-svn-top-level", "1.0", spack.fetch_strategy.FetcherConflict),
     ],
 )
-def test_fetcher_errors(spec_str, version_str, exception_type):
+def test_fetcher_errors(spec_str, version_str, exception_type, ctx: SpackContext):
     """Verify that we can't extrapolate versions for non-URL packages."""
     with pytest.raises(exception_type):
-        spack.package_base.for_package_version(pkg_factory(spec_str), version_str)
+        spack.package_base.for_package_version(pkg_factory(spec_str, ctx=ctx), version_str)
 
 
 @pytest.mark.usefixtures("mock_packages", "config")
@@ -231,12 +231,14 @@ def test_fetcher_errors(spec_str, version_str, exception_type):
         ("2.3", "https://www.example.com/foo2.3.tar.gz", "23"),
     ],
 )
-def test_git_url_top_level_url_versions(version_str, expected_url, digest):
+def test_git_url_top_level_url_versions(version_str, expected_url, digest, ctx: SpackContext):
     """Test URL fetch strategy inference when url is specified with git."""
     # leading 62 zeros of sha256 hash
     leading_zeros = "0" * 62
 
-    fetcher = spack.package_base.for_package_version(pkg_factory("git-url-top-level"), version_str)
+    fetcher = spack.package_base.for_package_version(
+        pkg_factory("git-url-top-level", ctx=ctx), version_str
+    )
     assert isinstance(fetcher, spack.fetch_strategy.URLFetchStrategy)
     assert fetcher.url == expected_url
     assert fetcher.digest == leading_zeros + digest
@@ -255,23 +257,27 @@ def test_git_url_top_level_url_versions(version_str, expected_url, digest):
         ("develop", None, None, "develop"),
     ],
 )
-def test_git_url_top_level_git_versions(version_str, tag, commit, branch):
+def test_git_url_top_level_git_versions(version_str, tag, commit, branch, ctx: SpackContext):
     """Test git fetch strategy inference when url is specified with git."""
-    fetcher = spack.package_base.for_package_version(pkg_factory("git-url-top-level"), version_str)
+    fetcher = spack.package_base.for_package_version(
+        pkg_factory("git-url-top-level", ctx=ctx), version_str
+    )
     assert isinstance(fetcher, spack.fetch_strategy.GitFetchStrategy)
     assert fetcher.url == "https://example.com/some/git/repo"
     assert fetcher.tag == tag
     assert fetcher.commit == commit
     assert fetcher.branch == branch
-    assert fetcher.url == pkg_factory("git-url-top-level").git
+    assert fetcher.url == pkg_factory("git-url-top-level", ctx=ctx).git
 
 
 @pytest.mark.usefixtures("mock_packages", "config")
 @pytest.mark.parametrize("version_str", ["1.0", "1.1", "1.2", "1.3"])
-def test_git_url_top_level_conflicts(version_str):
+def test_git_url_top_level_conflicts(version_str, ctx: SpackContext):
     """Test git fetch strategy inference when url is specified with git."""
     with pytest.raises(spack.fetch_strategy.FetcherConflict):
-        spack.package_base.for_package_version(pkg_factory("git-url-top-level"), version_str)
+        spack.package_base.for_package_version(
+            pkg_factory("git-url-top-level", ctx=ctx), version_str
+        )
 
 
 def test_rpath_args(mutable_database, ctx: SpackContext):
@@ -310,10 +316,12 @@ def test_bundle_patch_directive(mock_directive_bundle, clear_directive_functions
         ("1.2", "12", {"cookie": "baz"}),
     ],
 )
-def test_fetch_options(version_str, digest_end, extra_options):
+def test_fetch_options(version_str, digest_end, extra_options, ctx: SpackContext):
     """Test fetch options inference."""
     leading_zeros = "000000000000000000000000000000"
-    fetcher = spack.package_base.for_package_version(pkg_factory("fetch-options"), version_str)
+    fetcher = spack.package_base.for_package_version(
+        pkg_factory("fetch-options", ctx=ctx), version_str
+    )
     assert isinstance(fetcher, spack.fetch_strategy.URLFetchStrategy)
     assert fetcher.digest == leading_zeros + digest_end
     assert fetcher.extra_options == extra_options

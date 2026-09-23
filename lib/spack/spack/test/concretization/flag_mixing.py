@@ -52,9 +52,9 @@ def test_repo(mutable_config, monkeypatch, mock_stage, ctx: SpackContext):
         yield mock_packages_repo
 
 
-def update_concretize_scope(conf_str, section):
+def update_concretize_scope(conf_str, section, *, ctx: SpackContext):
     conf = syaml.load_config(conf_str)
-    spack.test.harness.current().config.set(section, conf[section], scope="concretize")
+    ctx.config.set(section, conf[section], scope="concretize")
 
 
 def test_mix_spec_and_requirements(concretize_scope, test_repo, ctx: SpackContext):
@@ -63,7 +63,7 @@ packages:
   y:
     require: cflags="-c"
 """
-    update_concretize_scope(conf_str, "packages")
+    update_concretize_scope(conf_str, "packages", ctx=ctx)
 
     s1 = spack.concretize.concretize_one('y cflags="-a"', ctx)
     assert s1.satisfies('cflags="-a -c"')
@@ -92,7 +92,7 @@ packages:
 
 def test_mix_spec_and_compiler_cfg(concretize_scope, test_repo, ctx: SpackContext):
     conf_str = _compiler_cfg_one_entry_with_cflags("-Wall")
-    update_concretize_scope(conf_str, "packages")
+    update_concretize_scope(conf_str, "packages", ctx=ctx)
 
     s1 = spack.concretize.concretize_one('y cflags="-O2" %gcc@12.100.100', ctx)
     assert s1.satisfies('cflags="-Wall -O2"')
@@ -110,7 +110,7 @@ def test_pkg_flags_from_compiler_and_none(concretize_scope, mock_packages, ctx: 
           c: /fake/bin/clang
           cxx: /fake/bin/clang++
 """
-    update_concretize_scope(packages_yaml, "packages")
+    update_concretize_scope(packages_yaml, "packages", ctx=ctx)
 
     s1 = spack.spec.Spec("cmake%gcc@12.100.100")
     s2 = spack.spec.Spec("cmake-client^cmake%clang@19.1.0")
@@ -167,7 +167,7 @@ packages:
     require: cflags="{req_flags}"
 """
 
-    update_concretize_scope(conf_str, "packages")
+    update_concretize_scope(conf_str, "packages", ctx=ctx)
 
     compiler_spec = ""
     if cmp_flags:
@@ -201,7 +201,7 @@ def test_two_dependents_flag_mixing(concretize_scope, test_repo, ctx: SpackConte
 
 def test_propagate_and_compiler_cfg(concretize_scope, test_repo, ctx: SpackContext):
     conf_str = _compiler_cfg_one_entry_with_cflags("-f2")
-    update_concretize_scope(conf_str, "packages")
+    update_concretize_scope(conf_str, "packages", ctx=ctx)
 
     root_spec = spack.concretize.concretize_one("v cflags=='-f1' %gcc@12.100.100", ctx)
     assert root_spec["y"].satisfies("cflags='-f1 -f2'")
@@ -218,7 +218,7 @@ packages:
   y:
     require: cflags="-f2"
 """
-    update_concretize_scope(conf_str, "packages")
+    update_concretize_scope(conf_str, "packages", ctx=ctx)
 
     root_spec1 = spack.concretize.concretize_one("v cflags=='-f1'", ctx)
     assert root_spec1["y"].satisfies("cflags='-f1 -f2'")
@@ -230,7 +230,7 @@ packages:
   v:
     require: cflags="-f1"
 """
-    update_concretize_scope(conf_str, "packages")
+    update_concretize_scope(conf_str, "packages", ctx=ctx)
 
     root_spec2 = spack.concretize.concretize_one("v cflags=='-f1'", ctx)
     assert root_spec2["y"].satisfies("cflags='-f1'")
@@ -256,7 +256,7 @@ spack:
 """
 
     conf_str = _compiler_cfg_one_entry_with_cflags("-f1")
-    update_concretize_scope(conf_str, "packages")
+    update_concretize_scope(conf_str, "packages", ctx=ctx)
 
     manifest_file = tmp_path / ev.manifest_name
     manifest_file.write_text(env_content)
@@ -346,7 +346,7 @@ packages:
         flags:
           cflags: -Wall
 """
-    update_concretize_scope(packages_yaml, "packages")
+    update_concretize_scope(packages_yaml, "packages", ctx=ctx)
 
     s = spack.concretize.concretize_one("llvm-client %c,cxx=gcc@12.100.100", ctx)
 
