@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
 import concurrent.futures
+import functools
 import multiprocessing
 import os
 import sys
@@ -110,20 +111,12 @@ def imap_unordered(
         initargs=(marshaler, shared),
         maxtasksperchild=maxtaskperchild,
     ) as p:
-        for result in p.imap_unordered(Task(_SharedTask(f)), list_of_args):
+        for result in p.imap_unordered(
+            Task(functools.partial(_call_with_shared, f)), list_of_args
+        ):
             if isinstance(result, ErrorFromWorker):
                 raise RuntimeError(result.stacktrace if debug else str(result))
             yield result
-
-
-class _SharedTask:
-    """Calls a function with the object shared by the worker process as first argument."""
-
-    def __init__(self, func):
-        self.func = func
-
-    def __call__(self, args):
-        return self.func(_SHARED, args)
 
 
 class SequentialExecutor(concurrent.futures.Executor):
