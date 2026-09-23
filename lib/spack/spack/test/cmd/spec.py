@@ -14,6 +14,7 @@ import spack.concretize
 import spack.environment as ev
 import spack.error
 import spack.spec
+import spack.store
 from spack.config import Configuration
 from spack.main import SpackCommand, SpackCommandError
 from spack.store import Store
@@ -248,10 +249,10 @@ def test_buildcache_status_fn_marks_absent_spec(
     s = spack.concretize.concretize_one("mpileaks")
     assert temporary_store.db.install_status(s) == spack.spec.InstallStatus.absent
 
-    status_fn = spack.cmd.buildcache_status_fn({s.dag_hash()})
+    status_fn = spack.cmd.buildcache_status_fn({s.dag_hash()}, store=temporary_store)
     assert status_fn(s) == spack.spec.InstallStatus.buildcache
 
-    status_fn = spack.cmd.buildcache_status_fn(set())
+    status_fn = spack.cmd.buildcache_status_fn(set(), store=temporary_store)
     assert status_fn(s) == spack.spec.InstallStatus.absent
 
 
@@ -260,7 +261,7 @@ def test_buildcache_status_fn_installed_not_overridden(mutable_database):
     s = mutable_database.query_one("mpileaks^mpich")
     assert mutable_database.install_status(s) == spack.spec.InstallStatus.installed
 
-    status_fn = spack.cmd.buildcache_status_fn({s.dag_hash()})
+    status_fn = spack.cmd.buildcache_status_fn({s.dag_hash()}, store=spack.store.STORE)
     assert status_fn(s) == spack.spec.InstallStatus.installed
 
 

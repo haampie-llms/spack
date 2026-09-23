@@ -471,7 +471,7 @@ def test_reusable_externals_cray_manifest(temporary_store, mutable_config, manif
 
     mutable_config.set("concretizer:reuse", {"from": [{"type": "local"}]})
 
-    assert imported <= _reusable_hashes(spack.context.default())
+    assert imported <= _reusable_hashes(spack.context.current())
 
 
 def test_cray_manifest_externals_from_a_build_cache_are_not_reusable(
@@ -505,6 +505,6 @@ def test_reusable_externals_cray_manifest_from_upstream(mutable_config, tmp_path
     mutable_config.set("upstreams", {"site": {"install_tree": str(upstream_root)}})
     mutable_config.set("concretizer:reuse", {"from": [{"type": "local"}]})
 
-    context = spack.context.default()._replace(store=spack.store.create(mutable_config))
+    context = spack.context.SpackContext(mutable_config)
 
     assert imported <= _reusable_hashes(context)

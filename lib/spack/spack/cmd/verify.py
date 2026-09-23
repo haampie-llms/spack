@@ -8,10 +8,8 @@ from typing import List, Optional
 import spack.cmd
 import spack.package_base
 import spack.spec
-import spack.store
 import spack.verify
 import spack.verify_libraries
-from spack.active_environment import active_environment
 from spack.cmd.common import arguments
 from spack.util import tty
 from spack.util.filesystem import visit_directory_tree
@@ -74,18 +72,18 @@ def setup_parser(subparser: argparse.ArgumentParser):
     arguments.add_common_arguments(versions_subparser, ["constraint"])
 
 
-def verify(parser, args):
+def verify(parser, args, ctx):
     cmd = args.verify_command
     if cmd == "libraries":
-        return verify_libraries(args)
+        return verify_libraries(args, ctx)
     elif cmd == "manifest":
-        return verify_manifest(args)
+        return verify_manifest(args, ctx)
     elif cmd == "versions":
-        return verify_versions(args)
+        return verify_versions(args, ctx)
     parser.error("invalid verify subcommand")
 
 
-def verify_versions(args):
+def verify_versions(args, ctx):
     """Check that all versions of installed packages are known to Spack and non-deprecated.
 
     Reports errors for any of the following:
@@ -94,7 +92,7 @@ def verify_versions(args):
     2. Installed package version not known by the package recipe
     3. Installed package version deprecated in the package recipe
     """
-    specs = args.specs(installed=True)
+    specs = args.specs(ctx, installed=True)
 
     msg_lines = _verify_version(specs)
     if msg_lines:
@@ -143,9 +141,9 @@ def _verify_version(specs):
     return msg_lines
 
 
-def verify_libraries(args):
+def verify_libraries(args, ctx):
     """verify that shared libraries of install packages can be located in rpaths (Linux only)"""
-    specs_from_db = [s for s in args.specs(installed=True) if not s.external]
+    specs_from_db = [s for s in args.specs(ctx, installed=True) if not s.external]
 
     tty.info(f"Checking {len(specs_from_db)} packages for shared library resolution")
 
@@ -181,7 +179,7 @@ def _verify_libraries(spec: spack.spec.Spec, unresolved_libraries: List[str]) ->
     return f"{spec.cformat('{name}{@version}{/hash}')}: {spec.prefix}:\n{message}"
 
 
-def verify_manifest(args):
+def verify_manifest(args, ctx):
     """verify that install directories have not been modified since installation"""
     local = args.local
 
@@ -199,14 +197,14 @@ def verify_manifest(args):
 
         return 0
     else:
-        spec_args = spack.cmd.parse_specs(args.specs_or_files)
+        spec_args = spack.cmd.parse_specs(args.specs_or_files, ctx)
 
     if args.all:
-        query = spack.store.STORE.db.query_local if local else spack.store.STORE.db.query
+        query = ctx.store.db.query_local if local else ctx.store.db.query
 
         # construct spec list
         if spec_args:
-            spec_list = spack.cmd.parse_specs(args.specs_or_files)
+            spec_list = spack.cmd.parse_specs(args.specs_or_files, ctx)
             specs = []
             for spec in spec_list:
                 specs += query(spec, installed=True)
@@ -215,8 +213,10 @@ def verify_manifest(args):
 
     elif args.specs_or_files:
         # construct disambiguated spec list
-        env = active_environment()
-        specs = list(map(lambda x: spack.cmd.disambiguate_spec(x, env, local=local), spec_args))
+        env = ctx.environment
+        specs = [
+            spack.cmd.disambiguate_spec(x, env, store=ctx.store, local=local) for x in spec_args
+        ]
     else:
         args.subparser.error("use --all or specify specs to verify")
 

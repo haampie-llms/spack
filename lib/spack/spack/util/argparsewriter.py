@@ -77,19 +77,27 @@ class Command(NamedTuple):
 class ArgparseWriter(argparse.HelpFormatter, abc.ABC):
     """Analyze an argparse ArgumentParser for easy generation of help."""
 
-    def __init__(self, prog: str, out: IO = sys.stdout, aliases: bool = False) -> None:
+    def __init__(
+        self,
+        prog: str,
+        out: IO = sys.stdout,
+        aliases: bool = False,
+        config_scopes: Iterable[str] = (),
+    ) -> None:
         """Initialize a new ArgparseWriter instance.
 
         Args:
             prog: Program name.
             out: File object to write to.
             aliases: Whether or not to include subparsers for aliases.
+            config_scopes: Choices of the options that pick a configuration scope.
         """
         super().__init__(prog)
         self.level = 0
         self.prog = prog
         self.out = out
         self.aliases = aliases
+        self.config_scopes = list(config_scopes)
 
     def parse(self, parser: ArgumentParser, prog: str) -> Command:
         """Parse the parser object and return the relevant components.
@@ -127,7 +135,9 @@ class ArgparseWriter(argparse.HelpFormatter, abc.ABC):
                 help = self._expand_help(action) if action.help else ""
                 help = help.split("\n")[0]
 
-                if action.choices is not None:
+                if getattr(action, "picks_config_scope", False):
+                    dest = self.config_scopes or [action.dest]
+                elif action.choices is not None:
                     dest = [str(choice) for choice in action.choices]
                 else:
                     dest = [action.dest]

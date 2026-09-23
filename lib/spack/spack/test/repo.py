@@ -661,7 +661,7 @@ def test_repo_update(tmp_path: pathlib.Path):
 
 
 def test_mock_builtin_repo(mock_packages: RepoPath):
-    assert spack.repo.builtin_repo() is mock_packages.get_repo("builtin_mock")
+    assert spack.repo.builtin_repo(mock_packages) is mock_packages.get_repo("builtin_mock")
 
 
 def test_parse_config_descriptor_git_1(tmp_path: pathlib.Path):

@@ -12,6 +12,7 @@ import spack.caches
 import spack.cmd
 import spack.concretize
 import spack.config
+import spack.context
 import spack.fetch_strategy
 import spack.mirrors.mirror
 import spack.mirrors.utils
@@ -22,7 +23,6 @@ import spack.util.crypto
 import spack.util.parallel
 import spack.util.url as url_util
 import spack.util.web as web_util
-from spack.active_environment import active_environment
 from spack.cmd.common import arguments
 from spack.error import SpackError
 from spack.util import lang, tty
@@ -121,7 +121,7 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     add_parser.add_argument(
         "--scope",
         action=arguments.ConfigScope,
-        default=lambda: spack.config.CONFIG.default_modify_scope(),
+        default=lambda config: config.default_modify_scope(),
         help="configuration scope to modify",
     )
     add_parser.add_argument(
@@ -193,7 +193,7 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     set_url_parser.add_argument(
         "--scope",
         action=arguments.ConfigScope,
-        default=lambda: spack.config.CONFIG.default_modify_scope(),
+        default=lambda config: config.default_modify_scope(),
         help="configuration scope to modify",
     )
     arguments.add_connection_args(set_url_parser, False)
@@ -253,7 +253,7 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     set_parser.add_argument(
         "--scope",
         action=arguments.ConfigScope,
-        default=lambda: spack.config.CONFIG.default_modify_scope(),
+        default=lambda config: config.default_modify_scope(),
         help="configuration scope to modify",
     )
     set_parser.add_argument(
@@ -324,7 +324,7 @@ def _configure_access_pair(args, id_tok, id_variable_tok, secret_variable_tok, d
         return None
 
 
-def mirror_add(args):
+def mirror_add(args, ctx):
     """add a mirror to Spack"""
     if (
         args.s3_access_key_id
@@ -381,17 +381,17 @@ def mirror_add(args):
     spack.mirrors.utils.add(mirror, args.scope)
 
 
-def mirror_add_archive(args):
+def mirror_add_archive(args, ctx):
     """add a single archive, from a URL or path, to a mirror"""
     url = args.url
     if os.path.exists(url):
         url = url_util.path_to_file_url(os.path.abspath(url))
 
     # When no directory is provided, the source cache is used, like `spack mirror create`
-    mirror_root = args.directory or spack.caches.fetch_cache_location(config=spack.config.CONFIG)
+    mirror_root = args.directory or spack.caches.fetch_cache_location(config=ctx.config)
 
     fetcher = spack.fetch_strategy.URLFetchStrategy(url=url)
-    with spack.stage.stage_from_config(fetcher, config=spack.config.CONFIG) as stage:
+    with spack.stage.stage_from_config(fetcher, config=ctx.config) as stage:
         stage.fetch()
 
         # The archive is stored content-addressed, named after its sha256 checksum
@@ -409,10 +409,10 @@ def mirror_add_archive(args):
             tty.msg(f"Added archive to mirror {mirror_root} at {relative_dst}")
 
 
-def mirror_remove(args):
+def mirror_remove(args, ctx):
     """remove a mirror by name"""
     name = args.name
-    scopes = [args.scope] if args.scope else reversed(list(spack.config.CONFIG.scopes.keys()))
+    scopes = [args.scope] if args.scope else reversed(list(ctx.config.scopes.keys()))
 
     removed = False
     for scope in scopes:
@@ -428,8 +428,8 @@ def mirror_remove(args):
         tty.die(f"No mirror with name {name} in {comma_or(scopes)} scope")
 
 
-def _configure_mirror(args):
-    mirrors = spack.config.CONFIG.get("mirrors", scope=args.scope)
+def _configure_mirror(args, config: spack.config.Configuration):
+    mirrors = config.get("mirrors", scope=args.scope)
 
     if args.name not in mirrors:
         tty.die(f"No mirror found with name {args.name}.")
@@ -481,25 +481,25 @@ def _configure_mirror(args):
 
     if changed:
         mirrors[args.name] = entry.to_dict()
-        spack.config.CONFIG.set("mirrors", mirrors, scope=args.scope)
+        config.set("mirrors", mirrors, scope=args.scope)
     else:
         tty.msg("No changes made to mirror %s." % args.name)
 
 
-def mirror_set(args):
+def mirror_set(args, ctx):
     """configure the connection details of a mirror"""
-    _configure_mirror(args)
+    _configure_mirror(args, ctx.config)
 
 
-def mirror_set_url(args):
+def mirror_set_url(args, ctx):
     """change the URL of a mirror"""
-    _configure_mirror(args)
+    _configure_mirror(args, ctx.config)
 
 
-def mirror_list(args):
+def mirror_list(args, ctx):
     """print out available mirrors to the console"""
 
-    mirrors = spack.mirrors.mirror.MirrorCollection(scope=args.scope)
+    mirrors = spack.mirrors.mirror.MirrorCollection(scope=args.scope, config=ctx.config)
     if not mirrors:
         tty.msg("No mirrors configured.")
         return
@@ -507,27 +507,28 @@ def mirror_list(args):
     mirrors.display()
 
 
-def specs_from_text_file(filename, concretize=False):
+def specs_from_text_file(filename, ctx: spack.context.SpackContext, concretize=False):
     """Return a list of specs read from a text file.
 
     The file should contain one spec per line.
 
     Args:
         filename (str): name of the file containing the abstract specs.
+        ctx: context of the command
         concretize (bool): if True concretize the specs before returning
             the list.
     """
     with open(filename, "r", encoding="utf-8") as f:
         specs_in_file = f.readlines()
         specs_in_file = [s.strip() for s in specs_in_file]
-    return spack.cmd.parse_specs(" ".join(specs_in_file), concretize=concretize)
+    return spack.cmd.parse_specs(" ".join(specs_in_file), ctx, concretize=concretize)
 
 
-def concrete_specs_from_user(args):
+def concrete_specs_from_user(args, ctx: spack.context.SpackContext):
     """Return the list of concrete specs that the user wants to mirror. The list
     is passed either from command line or from a text file.
     """
-    specs = concrete_specs_from_cli_or_file(args)
+    specs = concrete_specs_from_cli_or_file(args, ctx)
     specs = extend_with_additional_versions(specs, num_versions=versions_per_spec(args))
     if args.dependencies:
         specs = extend_with_dependencies(specs)
@@ -563,28 +564,31 @@ def extend_with_dependencies(specs):
     return list(result)
 
 
-def concrete_specs_from_cli_or_file(args):
+def concrete_specs_from_cli_or_file(args, ctx: spack.context.SpackContext):
     if args.specs:
-        specs = spack.cmd.parse_specs(args.specs, concretize=False)
+        specs = spack.cmd.parse_specs(args.specs, ctx, concretize=False)
         if not specs:
             raise SpackError("unable to parse specs from command line")
 
     if args.file:
-        specs = specs_from_text_file(args.file, concretize=False)
+        specs = specs_from_text_file(args.file, ctx, concretize=False)
         if not specs:
             raise SpackError("unable to parse specs from file '{}'".format(args.file))
 
-    concrete_specs = spack.cmd.matching_specs_from_env(specs)
+    concrete_specs = spack.cmd.matching_specs_from_env(specs, ctx)
     return concrete_specs
 
 
 class IncludeFilter:
-    def __init__(self, args):
+    def __init__(self, args, ctx: spack.context.SpackContext):
+        self.repo = ctx.repo
         self.exclude_specs = []
         if args.exclude_file:
-            self.exclude_specs.extend(specs_from_text_file(args.exclude_file, concretize=False))
+            self.exclude_specs.extend(
+                specs_from_text_file(args.exclude_file, ctx, concretize=False)
+            )
         if args.exclude_specs:
-            self.exclude_specs.extend(spack.cmd.parse_specs(str(args.exclude_specs).split()))
+            self.exclude_specs.extend(spack.cmd.parse_specs(str(args.exclude_specs).split(), ctx))
         self.private = args.private
 
     def __call__(self, x):
@@ -595,7 +599,7 @@ class IncludeFilter:
         package does not explicitly forbid redistributing source."""
         if self.private:
             return True
-        elif spack.repo.PATH.get_pkg_class(x.fullname).redistribute_source(x):
+        elif self.repo.get_pkg_class(x.fullname).redistribute_source(x):
             return True
         else:
             tty.debug(
@@ -610,16 +614,14 @@ class IncludeFilter:
         return not any(x.satisfies(y) for y in self.exclude_specs)
 
 
-def concrete_specs_from_environment():
-    env = active_environment()
-    assert env, "an active environment is required"
+def concrete_specs_from_environment(env):
     mirror_specs = env.all_specs()
     mirror_specs = filter_externals(mirror_specs)
     return mirror_specs
 
 
-def all_specs_with_all_versions():
-    specs = [spack.spec.Spec(n) for n in spack.repo.PATH.all_package_names()]
+def all_specs_with_all_versions(repo: spack.repo.RepoPath):
+    specs = [spack.spec.Spec(n) for n in repo.all_package_names()]
     mirror_specs = spack.mirrors.utils.get_all_versions(specs)
     mirror_specs.sort(key=lambda s: (s.name, s.version))
     return mirror_specs
@@ -657,7 +659,7 @@ def process_mirror_stats(present, mirrored, error):
         sys.exit(1)
 
 
-def mirror_create(args):
+def mirror_create(args, ctx):
     """create a directory to be used as a spack mirror, and fill it with package archives"""
     if args.file and args.all:
         args.subparser.error(
@@ -681,14 +683,16 @@ def mirror_create(args):
         )
 
     # When no directory is provided, the source dir is used
-    path = args.directory or spack.caches.fetch_cache_location(config=spack.config.CONFIG)
+    path = args.directory or spack.caches.fetch_cache_location(config=ctx.config)
 
-    mirror_specs = _specs_to_mirror(args)
+    mirror_specs = _specs_to_mirror(args, ctx)
     workers = args.jobs
     if workers is None:
         if args.all:
             workers = min(
-                16, spack.config.determine_number_of_jobs(parallel=True), len(mirror_specs)
+                16,
+                spack.config.determine_number_of_jobs(parallel=True, config=ctx.config),
+                len(mirror_specs),
             )
         else:
             workers = 1
@@ -698,25 +702,26 @@ def mirror_create(args):
         path=path,
         skip_unstable_versions=args.skip_unstable_versions,
         workers=workers,
+        repo=ctx.repo,
     )
 
 
-def _specs_to_mirror(args):
-    include_fn = IncludeFilter(args)
+def _specs_to_mirror(args, ctx: spack.context.SpackContext):
+    include_fn = IncludeFilter(args, ctx)
 
-    if args.all and not active_environment():
-        mirror_specs = all_specs_with_all_versions()
-    elif args.all and active_environment():
-        mirror_specs = concrete_specs_from_environment()
+    if args.all and not ctx.environment:
+        mirror_specs = all_specs_with_all_versions(ctx.repo)
+    elif args.all and ctx.environment:
+        mirror_specs = concrete_specs_from_environment(ctx.environment)
     else:
-        mirror_specs = concrete_specs_from_user(args)
+        mirror_specs = concrete_specs_from_user(args, ctx)
 
     mirror_specs, _ = lang.stable_partition(mirror_specs, predicate_fn=include_fn)
     return mirror_specs
 
 
-def create_mirror_for_one_spec(candidate, mirror_cache):
-    pkg_cls = spack.repo.PATH.get_pkg_class(candidate.name)
+def create_mirror_for_one_spec(candidate, mirror_cache, repo: spack.repo.RepoPath):
+    pkg_cls = repo.get_pkg_class(candidate.name)
     pkg_obj = pkg_cls(spack.spec.Spec(candidate))
     mirror_stats = spack.mirrors.utils.MirrorStatsForOneSpec(candidate)
     spack.mirrors.utils.create_mirror_from_package_object(pkg_obj, mirror_cache, mirror_stats)
@@ -724,7 +729,9 @@ def create_mirror_for_one_spec(candidate, mirror_cache):
     return mirror_stats
 
 
-def create_mirror_for_all_specs(mirror_specs, path, skip_unstable_versions, workers):
+def create_mirror_for_all_specs(
+    mirror_specs, path, skip_unstable_versions, workers, repo: spack.repo.RepoPath
+):
     mirror_cache = spack.mirrors.utils.get_mirror_cache(
         path, skip_unstable_versions=skip_unstable_versions
     )
@@ -732,7 +739,7 @@ def create_mirror_for_all_specs(mirror_specs, path, skip_unstable_versions, work
     with spack.util.parallel.make_concurrent_executor(jobs=workers) as executor:
         # Submit tasks to the process pool
         futures = [
-            executor.submit(create_mirror_for_one_spec, candidate, mirror_cache)
+            executor.submit(create_mirror_for_one_spec, candidate, mirror_cache, repo)
             for candidate in mirror_specs
         ]
         for mirror_future in as_completed(futures):
@@ -743,7 +750,7 @@ def create_mirror_for_all_specs(mirror_specs, path, skip_unstable_versions, work
     return mirror_stats
 
 
-def create(path, specs, skip_unstable_versions=False):
+def create(path, specs, repo: spack.repo.RepoPath, skip_unstable_versions=False):
     """Create a directory to be used as a spack mirror, and fill it with
     package archives.
 
@@ -751,6 +758,7 @@ def create(path, specs, skip_unstable_versions=False):
         path: Path to create a mirror directory hierarchy in.
         specs: Any package versions matching these specs will be added \
             to the mirror.
+        repo: Repositories providing the packages of ``specs``.
         skip_unstable_versions: if true, this skips adding resources when
             they do not have a stable archive checksum (as determined by
             ``fetch_strategy.stable_target``)
@@ -764,16 +772,18 @@ def create(path, specs, skip_unstable_versions=False):
     """
     # automatically spec-ify anything in the specs array.
     specs = [s if isinstance(s, spack.spec.Spec) else spack.spec.Spec(s) for s in specs]
-    mirror_stats = create_mirror_for_all_specs(specs, path, skip_unstable_versions, workers=1)
+    mirror_stats = create_mirror_for_all_specs(
+        specs, path, skip_unstable_versions, workers=1, repo=repo
+    )
     return mirror_stats.stats()
 
 
-def mirror_destroy(args):
+def mirror_destroy(args, ctx):
     """given a url, recursively delete everything under it"""
     mirror_url = None
 
     if args.mirror_name:
-        result = spack.mirrors.mirror.MirrorCollection().lookup(args.mirror_name)
+        result = spack.mirrors.mirror.MirrorCollection(config=ctx.config).lookup(args.mirror_name)
         mirror_url = result.push_url
     elif args.mirror_url:
         mirror_url = args.mirror_url
@@ -781,7 +791,7 @@ def mirror_destroy(args):
     web_util.remove_url(mirror_url, recursive=True)
 
 
-def mirror(parser, args):
+def mirror(parser, args, ctx):
     action = {
         "create": mirror_create,
         "destroy": mirror_destroy,
@@ -796,6 +806,6 @@ def mirror(parser, args):
     }
 
     if args.no_checksum:
-        spack.config.CONFIG.set("config:checksum", False, scope="command_line")
+        ctx.config.set("config:checksum", False, scope="command_line")
 
-    action[args.mirror_command](args)
+    action[args.mirror_command](args, ctx)

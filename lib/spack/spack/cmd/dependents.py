@@ -7,9 +7,8 @@ import collections
 import sys
 
 import spack.cmd
+import spack.context
 import spack.repo
-import spack.store
-from spack.active_environment import active_environment
 from spack.cmd.common import arguments
 from spack.util import tty
 from spack.util.tty.colify import colify
@@ -38,7 +37,7 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     arguments.add_common_arguments(subparser, ["spec"])
 
 
-def inverted_dependencies():
+def inverted_dependencies(repo: spack.repo.RepoPath):
     """Iterate through all packages and return a dictionary mapping package
     names to possible dependencies.
 
@@ -47,14 +46,14 @@ def inverted_dependencies():
     actual dependents.
     """
     dag = collections.defaultdict(set)
-    for pkg_cls in spack.repo.PATH.all_package_classes():
+    for pkg_cls in repo.all_package_classes():
         for _, deps_by_name in pkg_cls.dependencies.items():
             for dep in deps_by_name:
                 deps = [dep]
 
                 # expand virtuals if necessary
-                if spack.repo.PATH.is_virtual(dep):
-                    deps += [s.name for s in spack.repo.PATH.providers_for(dep)]
+                if repo.is_virtual(dep):
+                    deps += [s.name for s in repo.providers_for(dep)]
 
                 for d in deps:
                     dag[d].add(pkg_cls.name)
@@ -84,19 +83,18 @@ def get_dependents(pkg_name, ideps, transitive=False, dependents=None):
     return dependents
 
 
-def dependents(parser, args):
-    specs = spack.cmd.parse_specs(args.spec)
+def dependents(parser, args, ctx: spack.context.SpackContext):
+    specs = spack.cmd.parse_specs(args.spec, ctx)
     if len(specs) != 1:
         args.subparser.error("takes only one spec")
 
     if args.installed:
-        env = active_environment()
-        spec = spack.cmd.disambiguate_spec(specs[0], env)
+        spec = spack.cmd.disambiguate_spec(specs[0], ctx.environment, store=ctx.store)
 
         format_string = "{name}{@version}{/hash:7}{%compiler}"
         if sys.stdout.isatty():
             tty.msg("Dependents of %s" % spec.cformat(format_string))
-        deps = spack.store.STORE.db.installed_relatives(spec, "parents", args.transitive)
+        deps = ctx.store.db.installed_relatives(spec, "parents", args.transitive)
         if deps:
             spack.cmd.display_specs(deps, long=True)
         else:
@@ -104,7 +102,7 @@ def dependents(parser, args):
 
     else:
         spec = specs[0]
-        ideps = inverted_dependencies()
+        ideps = inverted_dependencies(ctx.repo)
 
         dependents = get_dependents(spec.name, ideps, args.transitive)
         dependents.remove(spec.name)

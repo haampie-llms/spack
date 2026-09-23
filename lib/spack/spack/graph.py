@@ -540,7 +540,7 @@ class DAGWithDependencyTypes(DotGraphBuilder):
 
 def _static_edges(specs, depflag):
     for spec in specs:
-        *_, edges = create_graph_analyzer(spack.context.default()).possible_dependencies(
+        *_, edges = create_graph_analyzer(spack.context.current()).possible_dependencies(
             spec.name, expand_virtuals=True, allowed_deps=depflag
         )
 

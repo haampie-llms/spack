@@ -5,10 +5,8 @@
 import argparse
 import sys
 
-import spack.repo
-import spack.store
+import spack.context
 from spack import cmd
-from spack.active_environment import active_environment
 from spack.cmd.common import arguments
 from spack.util import tty
 from spack.util.tty.colify import colify
@@ -47,7 +45,7 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     )
 
 
-def extensions(parser, args):
+def extensions(parser, args, ctx: spack.context.SpackContext):
     if not args.spec:
         # If called without arguments, list all the extendable packages
         isatty = sys.stdout.isatty()
@@ -55,8 +53,8 @@ def extensions(parser, args):
             tty.info("Extendable packages:")
 
         extendable_pkgs = []
-        for name in spack.repo.PATH.all_package_names():
-            pkg_cls = spack.repo.PATH.get_pkg_class(name)
+        for name in ctx.repo.all_package_names():
+            pkg_cls = ctx.repo.get_pkg_class(name)
             if pkg_cls.extendable:
                 extendable_pkgs.append(name)
 
@@ -64,12 +62,11 @@ def extensions(parser, args):
         return
 
     # Checks
-    spec = cmd.parse_specs(args.spec)
+    spec = cmd.parse_specs(args.spec, ctx)
     if len(spec) > 1:
         args.subparser.error("can only list extensions for one package")
 
-    env = active_environment()
-    spec = cmd.disambiguate_spec(spec[0], env)
+    spec = cmd.disambiguate_spec(spec[0], ctx.environment, store=ctx.store)
 
     if not spec.package.extendable:
         tty.die("%s is not an extendable package." % spec.name)
@@ -79,17 +76,17 @@ def extensions(parser, args):
 
     if args.show in ("packages", "all"):
         # List package names of extensions
-        extensions = spack.repo.PATH.extensions_for(spec)
+        extensions = ctx.repo.extensions_for(spec)
         if not extensions:
             tty.msg("%s has no extensions." % spec.cshort_spec)
         else:
             tty.msg(spec.cshort_spec)
             tty.msg("%d extensions:" % len(extensions))
-            colify(ext.name for ext in extensions)
+            colify([ext.name for ext in extensions])
 
     if args.show in ("installed", "all"):
         # List specs of installed extensions.
-        installed = [s.spec for s in spack.store.STORE.db.installed_extensions_for(spec)]
+        installed = [s.spec for s in ctx.store.db.installed_extensions_for(spec)]
 
         if args.show == "all":
             print
@@ -97,4 +94,5 @@ def extensions(parser, args):
             tty.msg("None installed.")
         else:
             tty.msg("%d installed:" % len(installed))
-            cmd.display_specs(installed, args)
+            with ctx.store.db.read_transaction():
+                cmd.display_specs(installed, args)

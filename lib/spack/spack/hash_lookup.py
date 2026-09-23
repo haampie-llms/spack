@@ -77,7 +77,7 @@ def lookup_hash(
     if spec.concrete or not any(node.abstract_hash for node in spec.traverse()):
         return spec
 
-    context = context or spack.context.default()
+    context = context or spack.context.current()
 
     result = spec.copy(deps=False)
     if result.abstract_hash:

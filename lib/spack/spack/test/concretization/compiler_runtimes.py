@@ -24,8 +24,8 @@ from spack.version import Version
 
 def _concretize_with_reuse(*, root_str, reused_str):
     reused_spec = spack.concretize.concretize_one(reused_str)
-    external_specs = reusable_external_specs(spack.context.default())
-    setup = spack.solver.asp.SpackSolverSetup(tests=False, context=spack.context.default())
+    external_specs = reusable_external_specs(spack.context.current())
+    setup = spack.solver.asp.SpackSolverSetup(tests=False, context=spack.context.current())
     driver = spack.solver.asp.PyclingoDriver()
     result, _, _ = driver.solve(
         setup, [spack.spec.Spec(f"{root_str}")], reuse=[reused_spec] + external_specs

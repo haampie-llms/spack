@@ -12,6 +12,7 @@ import pytest
 import spack.binary_distribution
 import spack.cmd
 import spack.concretize
+import spack.context
 import spack.deptypes
 import spack.error
 import spack.hash_lookup
@@ -1336,10 +1337,10 @@ def test_parse_multiple_specs(text, tokens, expected_specs):
 def test_cli_spec_roundtrip(args, expected):
     if isinstance(expected, type) and issubclass(expected, BaseException):
         with pytest.raises(expected):
-            spack.cmd.parse_specs(args)
+            spack.cmd.parse_specs(args, spack.context.current())
         return
 
-    specs = spack.cmd.parse_specs(args)
+    specs = spack.cmd.parse_specs(args, spack.context.current())
     output_string = " ".join(str(spec) for spec in specs)
     assert expected == output_string
 
@@ -2107,7 +2108,7 @@ def test_parse_multiple_edge_attributes(input_args, expected):
 
     The input are strings as they would be parsed from argparse.REMAINDER
     """
-    s, *_ = spack.cmd.parse_specs(input_args)
+    s, *_ = spack.cmd.parse_specs(input_args, spack.context.current())
     for c in expected:
         assert s.satisfies(c)
 

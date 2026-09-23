@@ -54,20 +54,24 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
 
 
 def find_matching_specs(
-    specs: List[Union[str, spack.spec.Spec]], allow_multiple_matches: bool = False
+    specs: List[Union[str, spack.spec.Spec]],
+    allow_multiple_matches: bool = False,
+    *,
+    store: spack.store.Store,
 ) -> List[spack.spec.Spec]:
     """Returns a list of specs matching the not necessarily concretized specs given from cli
 
     Args:
         specs: list of specs to be matched against installed packages
         allow_multiple_matches: if True multiple matches are admitted
+        store: store to query
     """
     # List of specs that match expressions given via command line
     specs_from_cli = []
     has_errors = False
 
     for spec in specs:
-        matching = spack.store.STORE.db.query_local(spec, installed=InstallRecordStatus.INSTALLED)
+        matching = store.db.query_local(spec, installed=InstallRecordStatus.INSTALLED)
         # For each spec provided, make sure it refers to only one package.
         # Fail and ask user to be unambiguous if it doesn't
         if not allow_multiple_matches and len(matching) > 1:
@@ -90,26 +94,27 @@ def find_matching_specs(
     return specs_from_cli
 
 
-def do_mark(specs, explicit):
+def do_mark(specs, explicit, store):
     """Marks all the specs in a list.
 
     Args:
         specs (list): list of specs to be marked
         explicit (bool): whether to mark specs as explicitly installed
+        store: store holding the specs
     """
-    with spack.store.STORE.db.write_transaction():
+    with store.db.write_transaction():
         for spec in specs:
-            spack.store.STORE.db.mark(spec, "explicit", explicit)
+            store.db.mark(spec, "explicit", explicit)
 
 
-def mark_specs(args, specs):
-    mark_list = find_matching_specs(specs, args.all)
+def mark_specs(args, specs, ctx):
+    mark_list = find_matching_specs(specs, args.all, store=ctx.store)
 
     # Mark everything on the list
-    do_mark(mark_list, args.explicit)
+    do_mark(mark_list, args.explicit, ctx.store)
 
 
-def mark(parser, args):
+def mark(parser, args, ctx):
     if not args.specs and not args.all:
         tty.die(
             "mark requires at least one package argument.",
@@ -117,5 +122,5 @@ def mark(parser, args):
         )
 
     # [None] here handles the --all case by forcing all specs to be returned
-    specs = spack.cmd.parse_specs(args.specs) if args.specs else [None]
-    mark_specs(args, specs)
+    specs = spack.cmd.parse_specs(args.specs, ctx) if args.specs else [None]
+    mark_specs(args, specs, ctx)

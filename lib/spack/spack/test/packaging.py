@@ -19,6 +19,7 @@ import pytest
 import spack.binary_distribution
 import spack.cmd.mirror
 import spack.concretize
+import spack.context
 import spack.error
 import spack.fetch_strategy
 import spack.package_base
@@ -53,7 +54,7 @@ def test_buildcache(tmp_path: pathlib.Path, mutable_config: Configuration):
 
     # Create the build cache and put it directly into the mirror
     mirror_path = str(tmp_path / "test-mirror")
-    spack.cmd.mirror.create(mirror_path, specs=[])
+    spack.cmd.mirror.create(mirror_path, specs=[], repo=spack.context.current().repo)
 
     # register mirror with spack config
     mirrors = {"spack-mirror-test": url_util.path_to_file_url(mirror_path)}
@@ -75,9 +76,9 @@ def test_buildcache(tmp_path: pathlib.Path, mutable_config: Configuration):
         )
 
         args = parser.parse_args(create_args)
-        buildcache.buildcache(parser, args)
+        buildcache.buildcache(parser, args, spack.context.current())
         # trigger overwrite warning
-        buildcache.buildcache(parser, args)
+        buildcache.buildcache(parser, args, spack.context.current())
 
         # Uninstall the package
         spec.package.do_uninstall(force=True)
@@ -85,7 +86,7 @@ def test_buildcache(tmp_path: pathlib.Path, mutable_config: Configuration):
         install_args = ["install", "-f", pkghash]
         args = parser.parse_args(install_args)
         # Test install
-        buildcache.buildcache(parser, args)
+        buildcache.buildcache(parser, args, spack.context.current())
 
         files = os.listdir(spec.prefix)
 
@@ -98,28 +99,28 @@ def test_buildcache(tmp_path: pathlib.Path, mutable_config: Configuration):
         assert buildinfo["relocate_links"] == ["link_to_dummy.txt"]
 
         args = parser.parse_args(["keys"])
-        buildcache.buildcache(parser, args)
+        buildcache.buildcache(parser, args, spack.context.current())
 
         args = parser.parse_args(["list"])
-        buildcache.buildcache(parser, args)
+        buildcache.buildcache(parser, args, spack.context.current())
 
         args = parser.parse_args(["list"])
-        buildcache.buildcache(parser, args)
+        buildcache.buildcache(parser, args, spack.context.current())
 
         args = parser.parse_args(["list", "trivial"])
-        buildcache.buildcache(parser, args)
+        buildcache.buildcache(parser, args, spack.context.current())
 
         # Copy a key to the mirror to have something to download
         shutil.copyfile(mock_gpg_keys_path + "/external.key", mirror_path + "/external.key")
 
         args = parser.parse_args(["keys"])
-        buildcache.buildcache(parser, args)
+        buildcache.buildcache(parser, args, spack.context.current())
 
         args = parser.parse_args(["keys", "-f"])
-        buildcache.buildcache(parser, args)
+        buildcache.buildcache(parser, args, spack.context.current())
 
         args = parser.parse_args(["keys", "-y", "-i", "-t"])
-        buildcache.buildcache(parser, args)
+        buildcache.buildcache(parser, args, spack.context.current())
 
 
 def test_relocate_text(tmp_path: pathlib.Path):

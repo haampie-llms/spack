@@ -33,7 +33,7 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     arguments.add_common_arguments(subparser, ["specs"])
 
 
-def _update_config(specs_to_remove):
+def _update_config(config: spack.config.Configuration, specs_to_remove):
     def change_fn(dev_config):
         modified = False
         for spec in specs_to_remove:
@@ -43,25 +43,25 @@ def _update_config(specs_to_remove):
                 modified = True
         return modified
 
-    spack.config.CONFIG.update_all("develop", change_fn)
+    config.update_all("develop", change_fn)
 
 
-def undevelop(parser, args):
+def undevelop(parser, args, ctx):
     # TODO: when https://github.com/spack/spack/pull/35307 is merged,
     # an active env is not required if a scope is specified
-    env = spack.cmd.require_active_env(args.subparser)
+    env = spack.cmd.require_active_env(args.subparser, ctx.environment)
 
     if args.all:
         remove_specs = [spack.spec.Spec(s) for s in env.dev_specs]
     else:
-        remove_specs = spack.cmd.parse_specs(args.specs)
+        remove_specs = spack.cmd.parse_specs(args.specs, ctx)
 
     with env.write_transaction():
-        _update_config(remove_specs)
+        _update_config(ctx.config, remove_specs)
         if args.apply_changes:
             env.apply_develop(remove_specs, paths=None)
 
-    updated_all_dev_specs = set(spack.config.CONFIG.get("develop"))
+    updated_all_dev_specs = set(ctx.config.get("develop"))
 
     remove_spec_names = {x.name for x in remove_specs}
     not_fully_removed = updated_all_dev_specs & remove_spec_names

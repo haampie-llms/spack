@@ -5,6 +5,7 @@
 import argparse
 
 import spack.cmd
+import spack.context
 from spack.cmd.common import arguments
 from spack.util import tty
 
@@ -30,14 +31,14 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     arguments.add_common_arguments(subparser, ["specs"])
 
 
-def remove(parser, args):
-    env = spack.cmd.require_active_env(args.subparser)
+def remove(parser, args, ctx: spack.context.SpackContext):
+    env = spack.cmd.require_active_env(args.subparser, ctx.environment)
 
     with env.write_transaction():
         if args.all:
             env.clear()
         else:
-            for spec in spack.cmd.parse_specs(args.specs):
+            for spec in spack.cmd.parse_specs(args.specs, ctx):
                 env.remove(spec, args.list_name, force=args.force)
                 tty.msg(f"{spec} has been removed from {env.manifest}")
         env.write()

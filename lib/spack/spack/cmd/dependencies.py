@@ -7,8 +7,6 @@ import sys
 
 import spack.cmd
 import spack.context
-import spack.store
-from spack.active_environment import active_environment
 from spack.cmd.common import arguments
 from spack.solver.input_analysis import create_graph_analyzer
 from spack.util import tty
@@ -47,19 +45,18 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     arguments.add_common_arguments(subparser, ["spec"])
 
 
-def dependencies(parser, args):
-    specs = spack.cmd.parse_specs(args.spec)
+def dependencies(parser, args, ctx: spack.context.SpackContext):
+    specs = spack.cmd.parse_specs(args.spec, ctx)
     if len(specs) != 1:
         args.subparser.error("takes only one spec")
 
     if args.installed:
-        env = active_environment()
-        spec = spack.cmd.disambiguate_spec(specs[0], env)
+        spec = spack.cmd.disambiguate_spec(specs[0], ctx.environment, store=ctx.store)
 
         format_string = "{name}{@version}{/hash:7}{%compiler}"
         if sys.stdout.isatty():
             tty.msg("Dependencies of %s" % spec.format(format_string, color=True))
-        deps = spack.store.STORE.db.installed_relatives(
+        deps = ctx.store.db.installed_relatives(
             spec, "children", args.transitive, deptype=args.deptype
         )
         if deps:
@@ -69,9 +66,7 @@ def dependencies(parser, args):
 
     else:
         spec = specs[0]
-        dependencies, virtuals, _ = create_graph_analyzer(
-            spack.context.default()
-        ).possible_dependencies(
+        dependencies, virtuals, _ = create_graph_analyzer(ctx).possible_dependencies(
             spec,
             transitive=args.transitive,
             expand_virtuals=args.expand_virtuals,

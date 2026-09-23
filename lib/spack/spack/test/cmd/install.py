@@ -17,7 +17,7 @@ import spack
 import spack.cmd.common.arguments
 import spack.cmd.install
 import spack.concretize
-import spack.config
+import spack.context
 import spack.environment as ev
 import spack.error
 import spack.hooks.sbom_generate
@@ -121,7 +121,7 @@ def test_install_package_already_installed(
 @pytest.mark.parametrize(
     "arguments,expected",
     [
-        ([], spack.config.CONFIG.get("config:dirty")),  # default from config file
+        ([], None),  # default from config file, read when the command runs
         (["--clean"], False),
         (["--dirty"], True),
     ],
@@ -1021,7 +1021,7 @@ def test_report_filename_for_cdash(install_mockery, mock_fetch):
     args = parser.parse_args(
         ["--cdash-upload-url", "https://blahblah/submit.php?project=debugging", "pkg-a"]
     )
-    specs = spack.cmd.install.concrete_specs_from_cli(args, {})
+    specs = spack.cmd.install.concrete_specs_from_cli(args, {}, spack.context.current())
     filename = spack.cmd.install.report_filename(args, specs)
     assert filename != "https://blahblah/submit.php?project=debugging"
 

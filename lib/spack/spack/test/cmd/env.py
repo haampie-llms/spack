@@ -18,6 +18,7 @@ import pytest
 import spack.cmd.env
 import spack.concretize
 import spack.config
+import spack.context
 import spack.environment as ev
 import spack.error
 import spack.main
@@ -3835,7 +3836,7 @@ def test_activation_and_deactivation_ambiguities(method, env, no_env, env_dir, c
         shell="sh", env_name="a", env=env, no_env=no_env, env_dir=env_dir, keep_relative=False
     )
     with pytest.raises(SystemExit):
-        method(args)
+        method(args, spack.context.current())
     _, err = capfd.readouterr()
     assert "is ambiguous" in err
 

@@ -73,7 +73,7 @@ def _solver(*, factory: Optional["SpecFiltersFactory"] = None) -> "Solver":
     from spack.solver.asp import Solver
 
     ensure_compilers_in_configuration()
-    return Solver(context=spack.context.default(), specs_factory=factory)
+    return Solver(context=spack.context.current(), specs_factory=factory)
 
 
 def _concretize_specs_together(

@@ -9,6 +9,7 @@ import pytest
 import spack.cmd
 import spack.concretize
 import spack.config
+import spack.context
 import spack.deprecation
 import spack.environment as ev
 import spack.error
@@ -32,6 +33,7 @@ def job_parser():
 
 def test_setting_jobs_flag(job_parser):
     namespace = job_parser.parse_args(["-j", "24"])
+    arguments.apply_deferred_config(namespace, spack.context.current())
     assert namespace.jobs == 24
     assert spack.config.CONFIG.get("config:build_jobs", scope="command_line") == 24
 
@@ -61,7 +63,7 @@ def test_negative_integers_not_allowed_for_parallel_jobs(job_parser):
 )
 @pytest.mark.regression("12951")
 def test_parse_spec_flags_with_spaces(specs, cflags, propagation, negated_variants):
-    spec_list = spack.cmd.parse_specs(specs)
+    spec_list = spack.cmd.parse_specs(specs, spack.context.current())
     assert len(spec_list) == 1
 
     s = spec_list.pop()
@@ -84,14 +86,16 @@ def test_match_spec_env(mock_packages, mutable_mock_env_path):
     """
     # Initial sanity check: we are planning on choosing a non-default
     # value, so make sure that is in fact not the default.
-    check_defaults = spack.cmd.parse_specs(["pkg-a"], concretize=True)[0]
+    check_defaults = spack.cmd.parse_specs(["pkg-a"], spack.context.current(), concretize=True)[0]
     assert not check_defaults.satisfies("foobar=baz")
 
     e = ev.create("test")
     e.add("pkg-a foobar=baz")
     e.concretize()
     with e:
-        env_spec = spack.cmd.matching_spec_from_env(spack.cmd.parse_specs(["pkg-a"])[0])
+        env_spec = spack.cmd.matching_spec_from_env(
+            spack.cmd.parse_specs(["pkg-a"], spack.context.current())[0], spack.context.current()
+        )
         assert env_spec.satisfies("foobar=baz")
         assert env_spec.concrete
 
@@ -103,7 +107,10 @@ def test_multiple_env_match_raises_error(mock_packages, mutable_mock_env_path):
     e.concretize()
     with e:
         with pytest.raises(ev.SpackEnvironmentError) as exc_info:
-            spack.cmd.matching_spec_from_env(spack.cmd.parse_specs(["pkg-a"])[0])
+            spack.cmd.matching_spec_from_env(
+                spack.cmd.parse_specs(["pkg-a"], spack.context.current())[0],
+                spack.context.current(),
+            )
 
     assert "matches multiple specs" in exc_info.value.message
 
@@ -116,10 +123,15 @@ def test_root_and_dep_match_returns_root(mock_packages, mutable_mock_env_path):
     with e:
         # This query matches the root b and b as a dependency of a. In that
         # case the root instance should be preferred.
-        env_spec1 = spack.cmd.matching_spec_from_env(spack.cmd.parse_specs(["pkg-b"])[0])
+        env_spec1 = spack.cmd.matching_spec_from_env(
+            spack.cmd.parse_specs(["pkg-b"], spack.context.current())[0], spack.context.current()
+        )
         assert env_spec1.satisfies("@0.9")
 
-        env_spec2 = spack.cmd.matching_spec_from_env(spack.cmd.parse_specs(["pkg-b@1.0"])[0])
+        env_spec2 = spack.cmd.matching_spec_from_env(
+            spack.cmd.parse_specs(["pkg-b@1.0"], spack.context.current())[0],
+            spack.context.current(),
+        )
         assert env_spec2
 
 
@@ -167,26 +179,28 @@ def test_missing_config_scopes_are_valid_scope_arguments(mock_missing_dir_includ
     a.add_argument(
         "--scope",
         action=arguments.ConfigScope,
-        default=lambda: spack.config.CONFIG.default_modify_scope(),
+        default=lambda config: config.default_modify_scope(),
         help="configuration scope to modify",
     )
     namespace = a.parse_args(["--scope", "sub_base"])
+    arguments.apply_deferred_config(namespace, spack.context.current())
     assert namespace.scope == "sub_base"
 
 
 def test_missing_config_scopes_not_valid_read_scope(mock_missing_dir_include_scopes):
     """Ensures that if a missing include scope is the subject of a read
-    operation, we fail at the argparse level"""
+    operation, we fail before running the command"""
     a = argparse.ArgumentParser()
     a.add_argument(
         "--scope",
         action=arguments.ConfigScope,
         type=arguments.config_scope_readable_validator,
-        default=lambda: spack.config.CONFIG.default_modify_scope(),
+        default=lambda config: config.default_modify_scope(),
         help="configuration scope to modify",
     )
-    with pytest.raises(SystemExit):
-        a.parse_args(["--scope", "sub_base"])
+    namespace = a.parse_args(["--scope", "sub_base"])
+    with pytest.raises(ValueError, match="scope context does not exist"):
+        arguments.apply_deferred_config(namespace, spack.context.current())
 
 
 def test_deprecated_flag_allows_deprecations_on_packages_with_an_allow_list(
@@ -223,6 +237,7 @@ def test_deprecated_flag_is_honored_by_the_install_time_check(
 
     parser = argparse.ArgumentParser()
     arguments.add_concretizer_args(parser)
-    parser.parse_args(["--deprecated"])
+    namespace = parser.parse_args(["--deprecated"])
+    arguments.apply_deferred_config(namespace, spack.context.current())
 
     spack.deprecation.check_deprecations([concrete])  # must not raise

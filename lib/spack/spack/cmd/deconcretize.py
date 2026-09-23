@@ -7,6 +7,7 @@ import sys
 from typing import List
 
 import spack.cmd
+import spack.context
 import spack.environment as ev
 import spack.spec
 from spack.cmd.common import arguments, confirmation
@@ -72,8 +73,7 @@ def get_deconcretize_list(
     return to_deconcretize
 
 
-def deconcretize_specs(args, specs):
-    env = spack.cmd.require_active_env(args.subparser)
+def deconcretize_specs(args, specs, env: ev.Environment):
 
     if args.specs:
         deconcretize_list = get_deconcretize_list(args, specs, env)
@@ -89,12 +89,13 @@ def deconcretize_specs(args, specs):
         env.write()
 
 
-def deconcretize(parser, args):
+def deconcretize(parser, args, ctx: spack.context.SpackContext):
     if not args.specs and not args.all:
         args.subparser.error(
             "requires at least one spec argument\n"
             "  use `spack deconcretize --all` to deconcretize ALL specs"
         )
 
-    specs = spack.cmd.parse_specs(args.specs) if args.specs else [None]
-    deconcretize_specs(args, specs)
+    specs = spack.cmd.parse_specs(args.specs, ctx) if args.specs else [None]
+    env = spack.cmd.require_active_env(args.subparser, ctx.environment)
+    deconcretize_specs(args, specs, env)

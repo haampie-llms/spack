@@ -181,7 +181,7 @@ def test_bootstrap_mirror_metadata(
     expensive operation for a unit test.
     """
     old_create = spack.cmd.mirror.create
-    monkeypatch.setattr(spack.cmd.mirror, "create", lambda p, s: old_create(p, []))
+    monkeypatch.setattr(spack.cmd.mirror, "create", lambda p, s, r: old_create(p, [], r))
     monkeypatch.setattr(spack.concretize, "concretize_one", lambda p: spack.spec.Spec(p))
 
     # Create the mirror in a temporary folder

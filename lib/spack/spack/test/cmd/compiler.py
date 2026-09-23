@@ -8,6 +8,7 @@ import pytest
 
 import spack.cmd.compiler
 import spack.compilers.config
+import spack.context
 import spack.main
 import spack.repo
 import spack.util.pattern
@@ -90,7 +91,7 @@ def test_compiler_remove(mutable_config, mock_packages):
         for compiler in spack.compilers.config.all_compilers(mutable_config, repo=mock_packages)
     )
     args = spack.util.pattern.Bunch(all=True, compiler_spec="gcc@9.4.0", add_paths=[], scope=None)
-    spack.cmd.compiler.compiler_remove(args)
+    spack.cmd.compiler.compiler_remove(args, spack.context.current())
     assert not any(
         compiler.satisfies("gcc@=9.4.0")
         for compiler in spack.compilers.config.all_compilers(mutable_config, repo=mock_packages)
@@ -108,7 +109,7 @@ def test_removing_compilers_from_multiple_scopes(mutable_config: Configuration, 
         for compiler in spack.compilers.config.all_compilers(mutable_config, repo=mock_packages)
     )
     args = spack.util.pattern.Bunch(all=True, compiler_spec="gcc@9.4.0", add_paths=[], scope=None)
-    spack.cmd.compiler.compiler_remove(args)
+    spack.cmd.compiler.compiler_remove(args, spack.context.current())
     assert not any(
         compiler.satisfies("gcc@=9.4.0")
         for compiler in spack.compilers.config.all_compilers(mutable_config, repo=mock_packages)
@@ -143,7 +144,7 @@ done
         mixed_toolchain=False,
         jobs=1,
     )
-    spack.cmd.compiler.compiler_find(args)
+    spack.cmd.compiler.compiler_find(args, spack.context.current())
     compilers_after_find = set(
         spack.compilers.config.all_compilers(mutable_config, repo=mock_packages)
     )

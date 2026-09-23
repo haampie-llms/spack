@@ -45,7 +45,7 @@ def test_uninstall_older_readable_db_fails_before_removing(mutable_database, bum
     """Nothing is removed when the database needs an explicit reindex to be modified."""
     spec = mutable_database.query_local("libelf")[0]
     with pytest.raises(spack.error.ExplicitDatabaseUpgradeError):
-        spack.cmd.uninstall.do_uninstall([spec], force=True)
+        spack.cmd.uninstall.do_uninstall([spec], store=spack.store.STORE, force=True)
     assert os.path.isdir(spec.prefix)
     assert Database(mutable_database.root).query_local("libelf")
 
@@ -74,7 +74,7 @@ def test_correct_installed_dependents(mutable_database: Database):
 
     # Retrieve all dependent hashes (explicit and implicit, combined)
     explicit_dependents, implicit_dependents = spack.cmd.uninstall.installed_dependents(
-        dependencies
+        dependencies, store=spack.store.STORE
     )
     dependents = explicit_dependents + implicit_dependents
     assert dependents

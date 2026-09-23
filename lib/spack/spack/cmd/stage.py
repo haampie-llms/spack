@@ -6,12 +6,9 @@ import argparse
 import os
 
 import spack.cmd
-import spack.config
 import spack.environment as ev
 import spack.package_base
-import spack.store
 import spack.traverse
-from spack.active_environment import active_environment
 from spack.cmd.common import arguments
 from spack.util import tty
 
@@ -25,20 +22,22 @@ class StageFilter:
     Encapsulation of reasons to skip staging
     """
 
-    def __init__(self, exclusions, skip_installed):
+    def __init__(self, exclusions, skip_installed, store):
         """
         :param exclusions: A list of specs to skip if satisfied.
         :param skip_installed: A boolean indicating whether to skip already installed specs.
+        :param store: The store to check for installed specs.
         """
         self.exclusions = exclusions
         self.skip_installed = skip_installed
+        self.store = store
 
     def __call__(self, spec):
         """filter action, true means spec should be filtered"""
         if spec.external:
             return True
 
-        if self.skip_installed and spack.store.STORE.db.installed(spec):
+        if self.skip_installed and self.store.db.installed(spec):
             return True
 
         if any(spec.satisfies(exclude) for exclude in self.exclusions):
@@ -65,20 +64,20 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     arguments.add_concretizer_args(subparser)
 
 
-def stage(parser, args):
+def stage(parser, args, ctx):
     if args.no_checksum:
-        spack.config.CONFIG.set("config:checksum", False, scope="command_line")
+        ctx.config.set("config:checksum", False, scope="command_line")
 
-    exclusion_specs = spack.cmd.parse_specs(args.exclude, concretize=False)
-    filter = StageFilter(exclusion_specs, args.skip_installed)
+    exclusion_specs = spack.cmd.parse_specs(args.exclude, ctx, concretize=False)
+    filter = StageFilter(exclusion_specs, args.skip_installed, ctx.store)
 
     if not args.specs:
-        env = active_environment()
+        env = ctx.environment
         if not env:
             args.subparser.error("requires a spec or an active environment")
         return _stage_env(env, filter)
 
-    specs = spack.cmd.parse_specs(args.specs, concretize=False)
+    specs = spack.cmd.parse_specs(args.specs, ctx, concretize=False)
 
     # We temporarily modify the working directory when setting up a stage, so we need to
     # convert this to an absolute path here in order for it to remain valid later.
@@ -88,9 +87,9 @@ def stage(parser, args):
     if len(specs) > 1 and custom_path:
         args.subparser.error("--path requires a single spec, but multiple were provided")
 
-    specs = spack.cmd.matching_specs_from_env(specs)
+    specs = spack.cmd.matching_specs_from_env(specs, ctx)
     for spec in specs:
-        spec = spack.cmd.matching_spec_from_env(spec)
+        spec = spack.cmd.matching_spec_from_env(spec, ctx)
 
         if filter(spec):
             continue

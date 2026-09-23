@@ -10,10 +10,8 @@ import spack.build_environment
 import spack.cmd
 import spack.cmd.common.arguments
 import spack.concretize
-import spack.config
 import spack.installer_dispatch
 import spack.repo
-import spack.store
 from spack.cmd.common import arguments
 from spack.util import tty
 
@@ -91,16 +89,16 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     spack.cmd.common.arguments.add_concretizer_args(subparser)
 
 
-def dev_build(self, args):
+def dev_build(self, args, ctx):
     if not args.spec:
         args.subparser.error("requires a package spec argument")
 
-    specs = spack.cmd.parse_specs(args.spec)
+    specs = spack.cmd.parse_specs(args.spec, ctx)
     if len(specs) > 1:
         args.subparser.error("only takes one spec")
 
     spec = specs[0]
-    if not spack.repo.PATH.exists(spec.name):
+    if not ctx.repo.exists(spec.name):
         raise spack.repo.UnknownPackageError(spec.name)
 
     if not spec.versions.concrete_range_as_version:
@@ -117,14 +115,14 @@ def dev_build(self, args):
     spec.constrain(f'dev_path="{source_path}"')
     spec = spack.concretize.concretize_one(spec)
 
-    if spack.store.STORE.db.installed(spec):
+    if ctx.store.db.installed(spec):
         tty.error("Already installed in %s" % spec.prefix)
         tty.msg("Uninstall or try adding a version suffix for this dev build.")
         sys.exit(1)
 
     # disable checksumming if requested
     if args.no_checksum:
-        spack.config.CONFIG.set("config:checksum", False, scope="command_line")
+        ctx.config.set("config:checksum", False, scope="command_line")
 
     tests = False
     if args.test == "all":
@@ -138,7 +136,7 @@ def dev_build(self, args):
         keep_prefix=args.keep_prefix,
         install_deps=not args.ignore_deps,
         verbose=not args.quiet,
-        dirty=args.dirty,
+        dirty=args.dirty if args.dirty is not None else ctx.config.get("config:dirty"),
         stop_before=args.before,
         skip_patch=args.skip_patch,
         stop_at=args.until,

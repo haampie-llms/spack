@@ -8,7 +8,6 @@ import sys
 
 import spack.cmd
 import spack.cmd.common
-import spack.store
 import spack.user_environment as uenv
 from spack.cmd.common import arguments
 
@@ -64,7 +63,7 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     )
 
 
-def unload(parser, args):
+def unload(parser, args, ctx):
     """unload spack packages from the user environment"""
     if args.specs and args.all:
         args.subparser.error(
@@ -74,11 +73,11 @@ def unload(parser, args):
     hashes = os.environ.get(uenv.spack_loaded_hashes_var, "").split(os.pathsep)
     if args.specs:
         specs = [
-            spack.cmd.disambiguate_spec_from_hashes(spec, hashes)
-            for spec in spack.cmd.parse_specs(args.specs)
+            spack.cmd.disambiguate_spec_from_hashes(spec, hashes, store=ctx.store)
+            for spec in spack.cmd.parse_specs(args.specs, ctx)
         ]
     else:
-        specs = spack.store.STORE.db.query(hashes=hashes)
+        specs = ctx.store.db.query(hashes=hashes)
 
     if not args.shell:
         specs_str = " ".join(args.specs) or "SPECS"

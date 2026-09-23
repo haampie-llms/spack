@@ -7,6 +7,8 @@ import argparse
 import spack.binary_distribution
 import spack.cmd
 import spack.cmd.common.arguments
+import spack.concretize
+import spack.context
 import spack.environment as ev
 from spack.concretize_ui import TerminalUI
 from spack.util import tty
@@ -32,9 +34,10 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     spack.cmd.common.arguments.add_common_arguments(subparser, ["jobs", "show_non_defaults"])
 
 
-def concretize(parser, args):
-    env = spack.cmd.require_active_env(args.subparser)
+def concretize(parser, args, ctx: spack.context.SpackContext):
+    env = spack.cmd.require_active_env(args.subparser, ctx.environment)
 
+    tests: spack.concretize.TestsType
     if args.test == "all":
         tests = True
     elif args.test == "root":
@@ -48,7 +51,7 @@ def concretize(parser, args):
             if concretized_specs:
                 tty.msg(f"Concretized {plural(len(concretized_specs), 'spec')}:")
                 spack.binary_distribution.load_buildcache_index()
-                status_fn = spack.cmd.buildcache_status_fn(spack.binary_distribution.BINARY_INDEX)
+                status_fn = spack.cmd.buildcache_status_fn(ctx.binary_index, store=ctx.store)
                 ev.display_specs(
                     [concrete for _, concrete in concretized_specs],
                     highlight_non_defaults=args.non_defaults,

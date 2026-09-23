@@ -7,8 +7,6 @@ import re
 import sys
 from typing import Dict, Optional, Tuple
 
-import spack.config
-import spack.repo
 import spack.spec
 import spack.stage
 import spack.util.lang
@@ -84,11 +82,11 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     )
 
 
-def checksum(parser, args):
+def checksum(parser, args, ctx):
     spec = spack.spec.Spec(args.package)
 
     # Get the package we're going to generate checksums for
-    pkg: PackageBase = spack.repo.PATH.get_pkg_class(spec.name)(spec)
+    pkg: PackageBase = ctx.repo.get_pkg_class(spec.name)(spec)
 
     # Skip manually downloaded packages
     if pkg.manual_download:
@@ -159,7 +157,7 @@ def checksum(parser, args):
             pkg.versions,
             url_changes=url_changed_for_version,
             initial_verion_filter=spec.versions,
-            config=spack.config.CONFIG,
+            config=ctx.config,
         )
         if not filtered_url_dict:
             exit(0)
@@ -172,7 +170,7 @@ def checksum(parser, args):
         pkg.name,
         keep_stage=args.keep_stage,
         fetch_options=pkg.fetch_options,
-        config=spack.config.CONFIG,
+        config=ctx.config,
     )
 
     if args.verify:
@@ -186,7 +184,7 @@ def checksum(parser, args):
     print()
 
     if args.add_to_package:
-        path = spack.repo.PATH.filename_for_package_name(pkg.name)
+        path = ctx.repo.filename_for_package_name(pkg.name)
         num_versions_added = add_versions_to_pkg(path, version_lines)
         tty.msg(f"Added {num_versions_added} new versions to {pkg.name} in {path}")
         if not args.batch and sys.stdin.isatty():

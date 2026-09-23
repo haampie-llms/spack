@@ -5,6 +5,7 @@ import argparse
 import os
 
 import spack.cmd
+import spack.context
 import spack.deptypes as dt
 import spack.error
 import spack.store
@@ -38,7 +39,8 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
 
 
 class AreDepsInstalledVisitor:
-    def __init__(self, context: Context = Context.BUILD):
+    def __init__(self, store: spack.store.Store, context: Context = Context.BUILD):
+        self.store = store
         if context == Context.BUILD:
             # TODO: run deps shouldn't be required for build env.
             self.direct_deps = dt.BUILD | dt.LINK | dt.RUN
@@ -59,7 +61,7 @@ class AreDepsInstalledVisitor:
             return False
 
         spec = item.edge.spec
-        if not spec.external and not spack.store.STORE.db.installed(spec):
+        if not spec.external and not self.store.db.installed(spec):
             self.has_uninstalled_deps = True
             return False
 
@@ -72,7 +74,7 @@ class AreDepsInstalledVisitor:
         return item.edge.spec.edges_to_dependencies(depflag=depflag)
 
 
-def emulate_env_utility(cmd_name, context: Context, args):
+def emulate_env_utility(cmd_name, context: Context, args, ctx: spack.context.SpackContext):
     if not args.spec:
         tty.die("spack %s requires a spec." % cmd_name)
 
@@ -92,18 +94,18 @@ def emulate_env_utility(cmd_name, context: Context, args):
     if not spec:
         tty.die("spack %s requires a spec." % cmd_name)
 
-    specs = spack.cmd.parse_specs(spec, concretize=False)
+    specs = spack.cmd.parse_specs(spec, ctx, concretize=False)
     if len(specs) > 1:
         tty.die("spack %s only takes one spec." % cmd_name)
     spec = specs[0]
 
-    spec = spack.cmd.matching_spec_from_env(spec)
+    spec = spack.cmd.matching_spec_from_env(spec, ctx)
 
     # Require that dependencies are installed.
-    visitor = AreDepsInstalledVisitor(context=context)
+    visitor = AreDepsInstalledVisitor(ctx.store, context=context)
 
     # Mass install check needs read transaction.
-    with spack.store.STORE.db.read_transaction():
+    with ctx.store.db.read_transaction():
         traverse.traverse_breadth_first_with_visitor([spec], traverse.CoverNodesVisitor(visitor))
 
     if visitor.has_uninstalled_deps:
@@ -111,7 +113,7 @@ def emulate_env_utility(cmd_name, context: Context, args):
             f"Not all dependencies of {spec.name} are installed. "
             f"Cannot setup {context} environment:",
             spec.tree(
-                status_fn=spack.store.STORE.db.install_status,
+                status_fn=ctx.store.db.install_status,
                 hashlen=7,
                 hashes=True,
                 # This shows more than necessary, but we cannot dynamically change deptypes
@@ -120,7 +122,8 @@ def emulate_env_utility(cmd_name, context: Context, args):
             ),
         )
 
-    build_environment.setup_package(spec.package, args.dirty, context)
+    dirty = args.dirty if args.dirty is not None else ctx.config.get("config:dirty")
+    build_environment.setup_package(spec.package, dirty, context)
 
     if args.dump:
         # Dump a source-able environment to a text file.

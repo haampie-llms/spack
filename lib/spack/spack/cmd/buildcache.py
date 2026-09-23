@@ -27,8 +27,6 @@ import spack.util.parallel
 import spack.util.timer as timer_mod
 import spack.util.web as web_util
 from spack import traverse
-from spack.active_environment import active_environment
-from spack.binary_distribution import BINARY_INDEX
 from spack.cmd import display_specs
 from spack.cmd.common import arguments
 from spack.spec import Spec, save_dependency_specfiles
@@ -228,7 +226,7 @@ def setup_parser(subparser: argparse.ArgumentParser):
         "--scope",
         action=arguments.ConfigScope,
         type=arguments.config_scope_readable_validator,
-        default=lambda: spack.config.CONFIG.default_modify_scope(),
+        default=lambda config: config.default_modify_scope(),
         help="configuration scope containing mirrors to check",
     )
 
@@ -398,10 +396,12 @@ def setup_parser(subparser: argparse.ArgumentParser):
     migrate.set_defaults(func=migrate_fn, subparser=migrate)
 
 
-def _matching_specs(specs: List[Spec]) -> List[Spec]:
+def _matching_specs(
+    specs: List[Spec], env: Optional[ev.Environment], store: spack.store.Store
+) -> List[Spec]:
     """Disambiguate specs and return a list of matching specs"""
     return [
-        spack.cmd.disambiguate_spec(s, active_environment(), installed=InstallRecordStatus.ANY)
+        spack.cmd.disambiguate_spec(s, env, store=store, installed=InstallRecordStatus.ANY)
         for s in specs
     ]
 
@@ -489,13 +489,13 @@ def _specs_to_be_packaged(
     return specs
 
 
-def push_fn(args):
+def push_fn(args, ctx):
     """create a binary package and push it to a mirror"""
     if args.specs and args.groups:
         args.subparser.error("--group and explicit specs are mutually exclusive")
 
     if args.groups:
-        env = spack.cmd.require_active_env(args.subparser)
+        env = spack.cmd.require_active_env(args.subparser, ctx.environment)
         available_groups = env.manifest.groups()
         if any(g not in available_groups for g in args.groups):
             tty.die(
@@ -505,9 +505,9 @@ def push_fn(args):
 
         roots = [c for g in args.groups for _, c in env.concretized_specs_by(group=g)]
     elif args.specs:
-        roots = _matching_specs(spack.cmd.parse_specs(args.specs))
+        roots = _matching_specs(spack.cmd.parse_specs(args.specs, ctx), ctx.environment, ctx.store)
     else:
-        roots = spack.cmd.require_active_env(args.subparser).concrete_roots()
+        roots = spack.cmd.require_active_env(args.subparser, ctx.environment).concrete_roots()
 
     mirror = args.mirror
     assert isinstance(mirror, spack.mirrors.mirror.Mirror)
@@ -550,11 +550,9 @@ def push_fn(args):
     # Pushing not installed specs is an error. Either fail fast or populate the error list and
     # push installed package in best effort mode.
     failed: List[Tuple[Spec, BaseException]] = []
-    with spack.store.STORE.db.read_transaction():
-        if any(not spack.store.STORE.db.installed(s) for s in specs):
-            specs, not_installed = stable_partition(
-                specs, lambda s: spack.store.STORE.db.installed(s)
-            )
+    with ctx.store.db.read_transaction():
+        if any(not ctx.store.db.installed(s) for s in specs):
+            specs, not_installed = stable_partition(specs, lambda s: ctx.store.db.installed(s))
             if args.fail_fast and not args.allow_missing:
                 raise PackagesAreNotInstalledError(not_installed)
             elif args.allow_missing:
@@ -620,28 +618,30 @@ def push_fn(args):
             uploader.tag(args.tag, roots)
 
 
-def install_fn(args):
+def install_fn(args, ctx):
     """install from a binary package"""
     if not args.specs:
         args.subparser.error("a spec argument is required to install from a buildcache")
 
     query = spack.binary_distribution.BinaryCacheQuery(
-        all_architectures=args.otherarch, config=spack.config.CONFIG
+        all_architectures=args.otherarch, index=ctx.binary_index, config=ctx.config
     )
     matches = spack.store.find(args.specs, multiple=args.multiple, query_fn=query)
     if matches:
         # Fail before extracting anything if the database cannot be modified.
-        spack.store.STORE.db.ensure_latest_db_version()
+        ctx.store.db.ensure_latest_db_version()
     for match in matches:
         spack.binary_distribution.install_single_spec(
             match, unsigned=args.unsigned, force=args.force
         )
 
 
-def list_fn(args):
+def list_fn(args, ctx):
     """list binary packages available from mirrors"""
     try:
-        specs = spack.binary_distribution.update_cache_and_get_specs(config=spack.config.CONFIG)
+        specs = spack.binary_distribution.update_cache_and_get_specs(
+            ctx.binary_index, config=ctx.config
+        )
     except spack.binary_distribution.FetchCacheError as e:
         tty.die(e)
 
@@ -663,7 +663,7 @@ def list_fn(args):
     display_specs(specs, args, all_headers=True)
 
 
-def keys_fn(args):
+def keys_fn(args, ctx):
     """get public keys available on mirrors"""
     mirror_map: Optional[Mapping[str, spack.mirrors.mirror.Mirror]] = None
     if args.mirrors:
@@ -674,7 +674,7 @@ def keys_fn(args):
     )
 
 
-def check_fn(args: argparse.Namespace):
+def check_fn(args: argparse.Namespace, ctx):
     """check specs against remote binary mirror(s) to see if any need to be rebuilt
 
     this command uses the process exit code to indicate its result, specifically, if the
@@ -683,9 +683,9 @@ def check_fn(args: argparse.Namespace):
     specs_arg = args.specs
 
     if specs_arg:
-        specs = _matching_specs(spack.cmd.parse_specs(specs_arg))
+        specs = _matching_specs(spack.cmd.parse_specs(specs_arg, ctx), ctx.environment, ctx.store)
     else:
-        specs = spack.cmd.require_active_env(args.subparser).all_specs()
+        specs = spack.cmd.require_active_env(args.subparser, ctx.environment).all_specs()
 
     if not specs:
         tty.msg("No specs provided, exiting.")
@@ -694,7 +694,7 @@ def check_fn(args: argparse.Namespace):
     specs = [spack.concretize.concretize_one(s) for s in specs]
 
     # Next see if there are any configured binary mirrors
-    configured_mirrors = spack.config.CONFIG.get("mirrors", scope=args.scope)
+    configured_mirrors = ctx.config.get("mirrors", scope=args.scope)
 
     if args.mirror_url:
         configured_mirrors = {"additionalMirrorUrl": args.mirror_url}
@@ -712,14 +712,14 @@ def check_fn(args: argparse.Namespace):
         sys.exit(1)
 
 
-def download_fn(args):
+def download_fn(args, ctx):
     """download buildcache entry from a remote mirror to local folder
 
     this command uses the process exit code to indicate its result, specifically, a non-zero exit
     code indicates that the command failed to download at least one of the required buildcache
     components
     """
-    specs = _matching_specs(spack.cmd.parse_specs(args.spec))
+    specs = _matching_specs(spack.cmd.parse_specs(args.spec, ctx), ctx.environment, ctx.store)
 
     if len(specs) != 1:
         args.subparser.error("requires a single spec argument")
@@ -727,14 +727,14 @@ def download_fn(args):
     spack.binary_distribution.download_single_spec(specs[0], args.path)
 
 
-def save_specfile_fn(args):
+def save_specfile_fn(args, ctx):
     """get full spec for dependencies and write them to files in the specified output directory
 
     uses exit code to signal success or failure. an exit code of zero means the command was likely
     successful. if any errors or exceptions are encountered, or if expected command-line arguments
     are not provided, then the exit code will be non-zero
     """
-    specs = spack.cmd.parse_specs(args.root_spec)
+    specs = spack.cmd.parse_specs(args.root_spec, ctx)
 
     if len(specs) != 1:
         args.subparser.error("requires a single spec argument")
@@ -745,11 +745,13 @@ def save_specfile_fn(args):
         root = spack.concretize.concretize_one(root)
 
     save_dependency_specfiles(
-        root, args.specfile_dir, dependencies=spack.cmd.parse_specs(args.specs)
+        root, args.specfile_dir, dependencies=spack.cmd.parse_specs(args.specs, ctx)
     )
 
 
-def copy_buildcache_entry(cache_entry: URLBuildcacheEntry, destination_url: str):
+def copy_buildcache_entry(
+    cache_entry: URLBuildcacheEntry, destination_url: str, config: spack.config.Configuration
+):
     """Download buildcache entry and copy it to the destination_url"""
     try:
         spec_dict = cache_entry.fetch_metadata()
@@ -801,7 +803,7 @@ def copy_buildcache_entry(cache_entry: URLBuildcacheEntry, destination_url: str)
     manifest_src_url = cache_entry.remote_manifest_url
     manifest_dest_url = cache_entry.get_manifest_url(target_spec, destination_url)
 
-    manifest_stage = spack.stage.stage_from_config(manifest_src_url, config=spack.config.CONFIG)
+    manifest_stage = spack.stage.stage_from_config(manifest_src_url, config=config)
 
     try:
         manifest_stage.create()
@@ -823,7 +825,7 @@ def copy_buildcache_entry(cache_entry: URLBuildcacheEntry, destination_url: str)
     cache_entry.destroy()
 
 
-def sync_fn(args):
+def sync_fn(args, ctx):
     """sync binaries (and associated metadata) from one mirror to another
 
     requires an active environment in order to know which specs to sync
@@ -839,7 +841,7 @@ def sync_fn(args):
         if args.dest_mirror:
             tty.warn(f"Ignoring unused argument: {args.dest_mirror.name}")
 
-        manifest_copy(glob.glob(args.manifest_glob), args.src_mirror)
+        manifest_copy(glob.glob(args.manifest_glob), ctx.config, args.src_mirror)
         return 0
 
     if args.src_mirror is None or args.dest_mirror is None:
@@ -852,7 +854,7 @@ def sync_fn(args):
     dest_mirror_url = dest_mirror.push_url
 
     # Get the active environment
-    env = spack.cmd.require_active_env(args.subparser)
+    env = spack.cmd.require_active_env(args.subparser, ctx.environment)
 
     tty.msg(
         "Syncing environment buildcache files from {0} to {1}".format(
@@ -869,11 +871,13 @@ def sync_fn(args):
         )
         src_cache_entry = cache_class(src_mirror_url, s, allow_unsigned=True)
         src_cache_entry.read_manifest()
-        copy_buildcache_entry(src_cache_entry, dest_mirror_url)
+        copy_buildcache_entry(src_cache_entry, dest_mirror_url, ctx.config)
 
 
 def manifest_copy(
-    manifest_file_list: List[str], dest_mirror: Optional[spack.mirrors.mirror.Mirror] = None
+    manifest_file_list: List[str],
+    config: spack.config.Configuration,
+    dest_mirror: Optional[spack.mirrors.mirror.Mirror] = None,
 ):
     """Read manifest files containing information about specific specs to copy
     from source to destination, remove duplicates since any binary package for
@@ -901,11 +905,14 @@ def manifest_copy(
         else:
             destination_url = cache_class.get_base_url(copy_obj["dest"])
         tty.debug("copying {0} to {1}".format(copy_obj["src"], destination_url))
-        copy_buildcache_entry(src_cache_entry, destination_url)
+        copy_buildcache_entry(src_cache_entry, destination_url, config)
 
 
 def update_index(
-    mirror: spack.mirrors.mirror.Mirror, update_keys=False, timer=timer_mod.NULL_TIMER
+    mirror: spack.mirrors.mirror.Mirror,
+    config: spack.config.Configuration,
+    update_keys=False,
+    timer=timer_mod.NULL_TIMER,
 ):
     timer.start()
     # Special case OCI images for now.
@@ -916,7 +923,7 @@ def update_index(
 
     if image_ref:
         with tempfile.TemporaryDirectory(
-            dir=spack.stage.stage_root(spack.config.CONFIG)
+            dir=spack.stage.stage_root(config)
         ) as tmpdir, spack.util.parallel.make_concurrent_executor() as executor:
             spack.binary_distribution._oci_update_index(image_ref, tmpdir, executor, timer=timer)
         return
@@ -924,19 +931,17 @@ def update_index(
     # Otherwise, assume a normal mirror.
     url = mirror.push_url
 
-    with tempfile.TemporaryDirectory(dir=spack.stage.stage_root(spack.config.CONFIG)) as tmpdir:
+    with tempfile.TemporaryDirectory(dir=spack.stage.stage_root(config)) as tmpdir:
         spack.binary_distribution._url_generate_package_index(url, tmpdir, timer=timer)
 
     if update_keys:
-        mirror_update_keys(mirror)
+        mirror_update_keys(mirror, config)
 
 
-def mirror_update_keys(mirror: spack.mirrors.mirror.Mirror):
+def mirror_update_keys(mirror: spack.mirrors.mirror.Mirror, config: spack.config.Configuration):
     url = mirror.push_url
     try:
-        with tempfile.TemporaryDirectory(
-            dir=spack.stage.stage_root(spack.config.CONFIG)
-        ) as tmpdir:
+        with tempfile.TemporaryDirectory(dir=spack.stage.stage_root(config)) as tmpdir:
             spack.binary_distribution.generate_key_index(url, tmpdir)
     except spack.binary_distribution.CannotListKeys as e:
         # Do not error out if listing keys went wrong. This usually means that the _gpg path
@@ -952,6 +957,7 @@ def update_view(
     update_keys: bool = False,
     yes_to_all: bool = False,
     parser,
+    ctx,
 ):
     """update a buildcache view index"""
     # OCI images do not support views.
@@ -994,7 +1000,7 @@ def update_view(
     # local cache.
     index_exists = True
     try:
-        BINARY_INDEX._fetch_and_cache_index(mirror_metadata)
+        ctx.binary_index._fetch_and_cache_index(mirror_metadata)
     except spack.binary_distribution.BuildcacheIndexNotExists:
         index_exists = False
 
@@ -1011,34 +1017,34 @@ def update_view(
             hashes.extend(env.all_hashes())
     else:
         # Get hashes in the current active environment
-        hashes = spack.cmd.require_active_env(parser).all_hashes()
+        hashes = spack.cmd.require_active_env(parser, ctx.environment).all_hashes()
 
     if not hashes:
         tty.warn("No specs found for view, creating an empty index")
 
     filter_fn = lambda x: x in hashes
 
-    with tempfile.TemporaryDirectory(dir=spack.stage.stage_root(spack.config.CONFIG)) as tmpdir:
+    with tempfile.TemporaryDirectory(dir=spack.stage.stage_root(ctx.config)) as tmpdir:
         # Initialize a database
         db = spack.binary_distribution.BuildCacheDatabase(tmpdir)
         db._write()
 
         if update_mode == ViewUpdateMode.APPEND:
             # Load the current state of the view index from the cache into the database
-            cache_index = BINARY_INDEX._local_index_cache.get(str(mirror_metadata))
+            cache_index = ctx.binary_index._local_index_cache.get(str(mirror_metadata))
             if cache_index:
                 cache_key = cache_index["index_path"]
-                with BINARY_INDEX._index_file_cache.read_transaction(cache_key) as f:
+                with ctx.binary_index._index_file_cache.read_transaction(cache_key) as f:
                     if f is not None:
                         db._read_from_stream(f)
 
         spack.binary_distribution._url_generate_package_index(url, tmpdir, db, name, filter_fn)
 
     if update_keys:
-        mirror_update_keys(mirror)
+        mirror_update_keys(mirror, ctx.config)
 
 
-def check_index_fn(args):
+def check_index_fn(args, ctx):
     """Check if a build cache index, manifests, and blobs are consistent"""
     mirror = args.mirror
     verify = set(args.verify)
@@ -1063,7 +1069,7 @@ def check_index_fn(args):
     index_exists = True
     missing_index_blob = False
     try:
-        BINARY_INDEX._fetch_and_cache_index(mirror_metadata)
+        ctx.binary_index._fetch_and_cache_index(mirror_metadata)
     except spack.binary_distribution.BuildcacheIndexNotExists:
         index_exists = False
     except spack.binary_distribution.FetchIndexError:
@@ -1078,7 +1084,7 @@ def check_index_fn(args):
     cache_hash_list = []
     index_hash_list = []
     # List the manifests and verify
-    with tempfile.TemporaryDirectory(dir=spack.stage.stage_root(spack.config.CONFIG)) as tmpdir:
+    with tempfile.TemporaryDirectory(dir=spack.stage.stage_root(ctx.config)) as tmpdir:
         # Get listing of spec manifests in mirror
         manifest_files = []
         if "manifests" in verify or "blobs" in verify:
@@ -1088,9 +1094,9 @@ def check_index_fn(args):
         if "manifests" in verify and index_exists:
             # Read the index file
             db = spack.binary_distribution.BuildCacheDatabase(tmpdir)
-            cache_entry = BINARY_INDEX._local_index_cache[str(mirror_metadata)]
+            cache_entry = ctx.binary_index._local_index_cache[str(mirror_metadata)]
             cache_key = cache_entry["index_path"]
-            with BINARY_INDEX._index_file_cache.read_transaction(cache_key) as f:
+            with ctx.binary_index._index_file_cache.read_transaction(cache_key) as f:
                 if f is not None:
                     db._read_from_stream(f)
 
@@ -1167,7 +1173,7 @@ def check_index_fn(args):
     tty.info(summary_msg)
 
 
-def update_index_fn(args):
+def update_index_fn(args, ctx):
     """update a buildcache index or index view if extra arguments are provided."""
 
     t = timer_mod.Timer() if tty.is_verbose() else timer_mod.NullTimer()
@@ -1191,9 +1197,10 @@ def update_index_fn(args):
             update_keys=args.keys,
             yes_to_all=args.yes_to_all,
             parser=args.subparser,
+            ctx=ctx,
         )
     else:
-        update_index(args.mirror, update_keys=args.keys, timer=t)
+        update_index(args.mirror, ctx.config, update_keys=args.keys, timer=t)
 
     if tty.is_verbose():
         tty.msg("Timing summary:")
@@ -1201,7 +1208,7 @@ def update_index_fn(args):
         t.write_tty()
 
 
-def migrate_fn(args):
+def migrate_fn(args, ctx):
     """perform in-place binary mirror migration (2 to 3)
 
     A mirror can contain both layout version 2 and version 3 simultaneously without
@@ -1249,7 +1256,7 @@ def migrate_fn(args):
     migrate(target_mirror, unsigned=unsigned, delete_existing=delete_existing)
 
 
-def prune_fn(args):
+def prune_fn(args, ctx):
     """prune buildcache entries from the mirror
 
     If a keeplist file is provided, performs direct pruning (deletes packages not in keeplist)
@@ -1263,5 +1270,5 @@ def prune_fn(args):
     prune_buildcache(mirror=mirror, keeplist=keeplist, dry_run=dry_run)
 
 
-def buildcache(parser, args):
-    return args.func(args)
+def buildcache(parser, args, ctx):
+    return args.func(args, ctx)

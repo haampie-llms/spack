@@ -10,13 +10,13 @@ import tempfile
 from typing import Any, Dict, Generator, List, Optional, Tuple, Union
 
 import spack
-import spack.caches
 import spack.ci
 import spack.config
 import spack.package_base
 import spack.repo
 import spack.spec
 import spack.util.executable
+import spack.util.file_cache
 import spack.util.filesystem as fs
 import spack.util.git
 import spack.util.spack_json as sjson
@@ -103,7 +103,7 @@ def setup_parser(subparser: argparse.ArgumentParser):
     add_parser.add_argument(
         "--scope",
         action=arguments.ConfigScope,
-        default=lambda: spack.config.CONFIG.default_modify_scope(),
+        default=lambda config: config.default_modify_scope(),
         help="configuration scope to modify",
     )
 
@@ -125,7 +125,7 @@ def setup_parser(subparser: argparse.ArgumentParser):
     set_parser.add_argument(
         "--scope",
         action=arguments.ConfigScope,
-        default=lambda: spack.config.CONFIG.default_modify_scope(),
+        default=lambda config: config.default_modify_scope(),
         help="configuration scope to modify",
     )
 
@@ -183,7 +183,7 @@ def setup_parser(subparser: argparse.ArgumentParser):
     update_parser.add_argument(
         "--scope",
         action=arguments.ConfigScope,
-        default=lambda: spack.config.CONFIG.default_modify_scope(),
+        default=lambda config: config.default_modify_scope(),
         help="configuration scope to modify",
     )
     update_parser.add_argument(
@@ -220,7 +220,7 @@ def setup_parser(subparser: argparse.ArgumentParser):
     show_version_updates_parser.add_argument("to_ref", help="git ref to end looking at changes")
 
 
-def repo_create(args):
+def repo_create(args, ctx):
     """create a new package repository"""
     full_path, namespace = spack.repo.create_repo(args.directory, args.namespace, args.subdir)
     tty.msg("Created repo with namespace '%s'." % namespace)
@@ -233,10 +233,9 @@ def _add_repo(
     scope: Optional[str],
     paths: List[str],
     destination: Optional[str],
-    config: Optional[spack.config.Configuration] = None,
+    config: spack.config.Configuration,
+    cache: spack.util.file_cache.FileCache,
 ) -> str:
-    config = config or spack.config.CONFIG
-
     existing: Dict[str, Any] = config.get("repos", default={}, scope=scope)
 
     if name and name in existing:
@@ -262,11 +261,11 @@ def _add_repo(
         entry = spack.config.canonicalize_path(path_or_repo)
 
     descriptor = spack.repo.parse_config_descriptor(
-        name or "<unnamed>", entry, lock=spack.repo.package_repository_lock(spack.config.CONFIG)
+        name or "<unnamed>", entry, lock=spack.repo.package_repository_lock(config)
     )
     descriptor.initialize(git=spack.util.executable.which("git"))
 
-    packages_repos = descriptor.construct(cache=spack.caches.MISC_CACHE)
+    packages_repos = descriptor.construct(cache=cache)
 
     usable_repos: Dict[str, spack.repo.Repo] = {}
 
@@ -296,7 +295,7 @@ def _add_repo(
     return key
 
 
-def repo_add(args):
+def repo_add(args, ctx):
     """add package repositories to Spack's configuration"""
     name = _add_repo(
         path_or_repo=args.path_or_repo,
@@ -304,24 +303,33 @@ def repo_add(args):
         scope=args.scope,
         paths=args.path,
         destination=args.destination,
+        config=ctx.config,
+        cache=ctx.misc_cache,
     )
     tty.msg(f"Added repo to config with name '{name}'.")
 
 
-def repo_remove(args):
+def repo_remove(args, ctx):
     """remove a repository from Spack's configuration"""
-    scopes = [args.scope] if args.scope else reversed(list(spack.config.CONFIG.scopes.keys()))
+    scopes = [args.scope] if args.scope else reversed(list(ctx.config.scopes.keys()))
     found_and_removed = False
     for scope in scopes:
-        found_and_removed |= _remove_repo(args.namespace_or_path, scope)
+        found_and_removed |= _remove_repo(
+            ctx.config, ctx.misc_cache, args.namespace_or_path, scope
+        )
         if found_and_removed and not args.all_scopes:
             return
     if not found_and_removed:
         tty.die(f"No repository with path or namespace: {args.namespace_or_path}")
 
 
-def _remove_repo(namespace_or_path, scope):
-    repos: Dict[str, str] = spack.config.CONFIG.get("repos", scope=scope)
+def _remove_repo(
+    config: spack.config.Configuration,
+    cache: spack.util.file_cache.FileCache,
+    namespace_or_path: str,
+    scope: str,
+) -> bool:
+    repos: Dict[str, str] = config.get("repos", scope=scope)
 
     if namespace_or_path in repos:
         # delete by name (from config)
@@ -329,7 +337,7 @@ def _remove_repo(namespace_or_path, scope):
     else:
         # delete by namespace or path (requires constructing the repo)
         canon_path = spack.config.canonicalize_path(namespace_or_path)
-        descriptors = spack.repo.RepoDescriptors.from_config(spack.config.CONFIG, scope=scope)
+        descriptors = spack.repo.RepoDescriptors.from_config(config, scope=scope)
         for name, descriptor in descriptors.items():
             descriptor.initialize(fetch=False)
 
@@ -337,7 +345,7 @@ def _remove_repo(namespace_or_path, scope):
             # hence "all" and not "any". We can improve this later if needed.
             if all(
                 r.namespace == namespace_or_path or r.root == canon_path
-                for r in descriptor.construct(cache=spack.caches.MISC_CACHE).values()
+                for r in descriptor.construct(cache=cache).values()
                 if isinstance(r, spack.repo.Repo)
             ):
                 key = name
@@ -346,18 +354,18 @@ def _remove_repo(namespace_or_path, scope):
             return False
 
     del repos[key]
-    spack.config.CONFIG.set("repos", repos, scope)
+    config.set("repos", repos, scope)
     tty.msg(f"Removed repository '{namespace_or_path}' from scope '{scope}'.")
     return True
 
 
-def repo_list(args):
+def repo_list(args, ctx):
     """show registered repositories and their namespaces
 
     List all package repositories known to Spack. Repositories
     can be local directories or remote git repositories.
     """
-    descriptors = spack.repo.RepoDescriptors.from_config(spack.config.CONFIG, scope=args.scope)
+    descriptors = spack.repo.RepoDescriptors.from_config(ctx.config, scope=args.scope)
 
     # --names: just print config names
     if args.names:
@@ -367,7 +375,7 @@ def repo_list(args):
 
     # --namespaces: print all repo namespaces
     if args.namespaces:
-        for name, path, maybe_repo in _iter_repos_from_descriptors(descriptors):
+        for name, path, maybe_repo in _iter_repos_from_descriptors(descriptors, ctx.misc_cache):
             if isinstance(maybe_repo, spack.repo.Repo):
                 print(maybe_repo.namespace)
         return
@@ -375,7 +383,7 @@ def repo_list(args):
     # Collect all repository information
     repo_info = []
 
-    for name, path, maybe_repo in _iter_repos_from_descriptors(descriptors):
+    for name, path, maybe_repo in _iter_repos_from_descriptors(descriptors, ctx.misc_cache):
         if isinstance(maybe_repo, spack.repo.Repo):
             status = "installed"
             namespace = maybe_repo.namespace
@@ -433,16 +441,18 @@ def repo_list(args):
             )
 
 
-def _get_repo(name_or_path: str) -> Optional[spack.repo.Repo]:
+def _get_repo(
+    name_or_path: str, config: spack.config.Configuration, cache: spack.util.file_cache.FileCache
+) -> Optional[spack.repo.Repo]:
     """get a repo by path or namespace"""
     try:
         return spack.repo.from_path(name_or_path)
     except spack.repo.RepoError:
         pass
 
-    descriptors = spack.repo.RepoDescriptors.from_config(spack.config.CONFIG)
+    descriptors = spack.repo.RepoDescriptors.from_config(config)
 
-    repo_path, _ = descriptors.construct(cache=spack.caches.MISC_CACHE, fetch=False)
+    repo_path, _ = descriptors.construct(cache=cache, fetch=False)
 
     for repo in repo_path.repos:
         if repo.namespace == name_or_path:
@@ -451,11 +461,11 @@ def _get_repo(name_or_path: str) -> Optional[spack.repo.Repo]:
     return None
 
 
-def repo_migrate(args: Any) -> int:
+def repo_migrate(args: Any, ctx) -> int:
     """migrate a package repository to the latest Package API"""
     from spack.repo_migrate import migrate_v1_to_v2, migrate_v2_imports
 
-    repo = _get_repo(args.namespace_or_path)
+    repo = _get_repo(args.namespace_or_path, ctx.config, ctx.misc_cache)
 
     if repo is None:
         tty.die(f"No such repository: {args.namespace_or_path}")
@@ -520,12 +530,12 @@ def repo_migrate(args: Any) -> int:
     return exit_code
 
 
-def repo_set(args):
+def repo_set(args, ctx):
     """modify an existing repository configuration"""
     namespace = args.namespace
 
     # First, check if the repository exists across all scopes for validation
-    all_repos: Dict[str, Any] = spack.config.CONFIG.get("repos", default={})
+    all_repos: Dict[str, Any] = ctx.config.get("repos", default={})
 
     if namespace not in all_repos:
         raise SpackError(f"No repository with namespace '{namespace}' found in configuration.")
@@ -538,7 +548,7 @@ def repo_set(args):
         )
 
     # Now get the repos for the specific scope we're modifying
-    scope_repos: Dict[str, Any] = spack.config.CONFIG.get("repos", default={}, scope=args.scope)
+    scope_repos: Dict[str, Any] = ctx.config.get("repos", default={}, scope=args.scope)
 
     updated_entry = scope_repos[namespace] if namespace in scope_repos else {}
 
@@ -549,13 +559,13 @@ def repo_set(args):
         updated_entry["paths"] = args.path
 
     scope_repos[namespace] = updated_entry
-    spack.config.CONFIG.set("repos", scope_repos, args.scope)
+    ctx.config.set("repos", scope_repos, args.scope)
 
     tty.msg(f"Updated repo '{namespace}'")
 
 
 def _iter_repos_from_descriptors(
-    descriptors: spack.repo.RepoDescriptors,
+    descriptors: spack.repo.RepoDescriptors, cache: spack.util.file_cache.FileCache
 ) -> Generator[Tuple[str, str, Union[spack.repo.Repo, Exception, None]], None, None]:
     """Iterate through repository descriptors and yield (name, path, maybe_repo) tuples.
 
@@ -566,7 +576,7 @@ def _iter_repos_from_descriptors(
     """
     for name, descriptor in descriptors.items():
         descriptor.initialize(fetch=False)
-        repos_for_descriptor = descriptor.construct(cache=spack.caches.MISC_CACHE)
+        repos_for_descriptor = descriptor.construct(cache=cache)
 
         for path, maybe_repo in repos_for_descriptor.items():
             yield name, path, maybe_repo
@@ -576,9 +586,9 @@ def _iter_repos_from_descriptors(
             yield name, descriptor.repository, None  # None indicates remote descriptor
 
 
-def repo_update(args):
+def repo_update(args, ctx):
     """update one or more package repositories"""
-    descriptors = spack.repo.RepoDescriptors.from_config(spack.config.CONFIG)
+    descriptors = spack.repo.RepoDescriptors.from_config(ctx.config)
 
     git_flags = ["commit", "tag", "branch"]
     active_flag = next((attr for attr in git_flags if getattr(args, attr)), None)
@@ -599,7 +609,7 @@ def repo_update(args):
         )
 
     # Get the repos for the specific scope we're modifying
-    scope_repos: Dict[str, Any] = spack.config.CONFIG.get("repos", default={}, scope=args.scope)
+    scope_repos: Dict[str, Any] = ctx.config.get("repos", default={}, scope=args.scope)
 
     for name, descriptor in descriptors.items():
         if not isinstance(descriptor, spack.repo.RemoteRepoDescriptor):
@@ -630,7 +640,7 @@ def repo_update(args):
         else:
             fails = [
                 r
-                for r in descriptor.construct(cache=spack.caches.MISC_CACHE).values()
+                for r in descriptor.construct(cache=ctx.misc_cache).values()
                 if type(r) is spack.repo.BadRepoVersionError
             ]
             if fails:
@@ -647,13 +657,13 @@ def repo_update(args):
                 tty.msg(f"{name}: Updated successfully.")
 
     if active_flag:
-        spack.config.CONFIG.set("repos", scope_repos, args.scope)
+        ctx.config.set("repos", scope_repos, args.scope)
 
 
-def repo_show_version_updates(args):
+def repo_show_version_updates(args, ctx):
     """show version specs that were added between two commits"""
     # Get the repository by name or path
-    repo = _get_repo(args.repository)
+    repo = _get_repo(args.repository, ctx.config, ctx.misc_cache)
 
     if repo is None:
         tty.die(f"No such repository: {args.repository}")
@@ -733,7 +743,7 @@ def repo_show_version_updates(args):
         print(spec)
 
 
-def repo(parser, args):
+def repo(parser, args, ctx):
     return {
         "create": repo_create,
         "list": repo_list,
@@ -745,4 +755,4 @@ def repo(parser, args):
         "migrate": repo_migrate,
         "update": repo_update,
         "show-version-updates": repo_show_version_updates,
-    }[args.repo_command](args)
+    }[args.repo_command](args, ctx)

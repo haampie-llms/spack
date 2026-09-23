@@ -11,7 +11,6 @@ import pytest
 import spack.cmd.common.arguments
 import spack.cmd.test
 import spack.concretize
-import spack.config
 import spack.install_test
 import spack.paths
 from spack.install_test import TestStatus
@@ -35,7 +34,7 @@ def test_test_package_not_installed(
 @pytest.mark.parametrize(
     "arguments,expected",
     [
-        (["run"], spack.config.CONFIG.get("config:dirty")),  # default from config file
+        (["run"], None),  # default from config file, read when the command runs
         (["run", "--clean"], False),
         (["run", "--dirty"], True),
     ],

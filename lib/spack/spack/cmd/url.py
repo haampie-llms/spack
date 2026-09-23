@@ -8,7 +8,6 @@ from collections import defaultdict
 
 import spack.fetch_strategy as fs
 import spack.package_base
-import spack.repo
 import spack.spec
 import spack.url
 from spack.url import (
@@ -102,13 +101,13 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     )
 
 
-def url(parser, args):
+def url(parser, args, ctx):
     action = {"parse": url_parse, "list": url_list, "summary": url_summary, "stats": url_stats}
 
-    action[args.subcommand](args)
+    action[args.subcommand](args, ctx)
 
 
-def url_parse(args):
+def url_parse(args, ctx):
     url = args.url
 
     tty.msg("Parsing URL: {0}".format(url))
@@ -150,11 +149,11 @@ def url_parse(args):
             print("{0:{1}}  {2}".format(v, max_len, versions[v]))
 
 
-def url_list(args):
+def url_list(args, ctx):
     urls = set()
 
     # Gather set of URLs from all packages
-    for pkg_cls in spack.repo.PATH.all_package_classes():
+    for pkg_cls in ctx.repo.all_package_classes():
         url = getattr(pkg_cls, "url", None)
         urls = url_list_parsing(args, urls, url, pkg_cls)
 
@@ -173,7 +172,7 @@ def url_list(args):
     return len(urls)
 
 
-def url_summary(args):
+def url_summary(args, ctx):
     # Collect statistics on how many URLs were correctly parsed
     total_urls = 0
     correct_names = 0
@@ -191,7 +190,7 @@ def url_summary(args):
     tty.msg("Generating a summary of URL parsing in Spack...")
 
     # Loop through all packages
-    for pkg_cls in spack.repo.PATH.all_package_classes():
+    for pkg_cls in ctx.repo.all_package_classes():
         urls = set()
         pkg = pkg_cls(spack.spec.Spec(pkg_cls.name))
 
@@ -283,7 +282,7 @@ def url_summary(args):
     return (total_urls, correct_names, correct_versions, right_name_count, right_version_count)
 
 
-def url_stats(args):
+def url_stats(args, ctx):
     # dictionary of issue type -> package -> descriptions
     issues = defaultdict(lambda: defaultdict(lambda: []))
 
@@ -335,7 +334,7 @@ def url_stats(args):
     version_stats = UrlStats()
     resource_stats = UrlStats()
 
-    for pkg_cls in spack.repo.PATH.all_package_classes():
+    for pkg_cls in ctx.repo.all_package_classes():
         npkgs += 1
 
         for v in list(pkg_cls.versions):
