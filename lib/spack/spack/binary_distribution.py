@@ -7,18 +7,21 @@ import concurrent.futures
 import contextlib
 import copy
 import datetime
+import gzip
 import hashlib
 import io
 import itertools
 import json
 import os
 import pathlib
+import queue
 import re
 import shutil
 import sys
 import tarfile
 import tempfile
 import textwrap
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -32,12 +35,14 @@ from typing import (
     Callable,
     Dict,
     Iterable,
+    Iterator,
     List,
     Mapping,
     NamedTuple,
     Optional,
     Set,
     Tuple,
+    TypeVar,
     Union,
     cast,
 )
@@ -108,6 +113,8 @@ from .url_buildcache import (
     get_valid_spec_file,
 )
 from .vendor.typing_extensions import TypedDict
+
+T = TypeVar("T")
 
 
 class BuildCacheDatabase(spack.database.Database):
@@ -2014,38 +2021,361 @@ def relocate_package(spec: spack.spec.Spec) -> None:
             os.unlink(install_manifest)
 
 
-def _tar_strip_component(tar: tarfile.TarFile, prefix: str):
-    """Yield all members of tarfile that start with given prefix, and strip that prefix (including
-    symlinks)"""
-    # Including trailing /, otherwise we end up with absolute paths.
-    regex = re.compile(re.escape(prefix) + "/*")
+#: Bytes copied per write when extracting a file from a build cache tarball. Below glibc's mmap
+#: threshold, so that buffers are reused instead of freshly mapped and page faulted every time.
+_TARBALL_COPY_SIZE = 64 * 1024
 
-    # Only yield members in the package prefix.
-    # Note: when a tarfile is created, relative in-prefix symlinks are
-    # expanded to matching member names of tarfile entries. So, we have
-    # to ensure that those are updated too.
-    # Absolute symlinks are copied verbatim -- relocation should take care of
-    # them.
-    for m in tar.getmembers():
-        result = regex.match(m.name)
-        if not result:
-            continue
-        m.name = m.name[result.end() :]
-        if m.linkname:
-            result = regex.match(m.linkname)
-            if result:
-                m.linkname = m.linkname[result.end() :]
-        yield m
+
+class _ReadAhead(io.RawIOBase):
+    """Reads a stream in a background thread, so that decompression, which releases the GIL,
+    overlaps with parsing and writing in the reading thread. Only seeks forward, which is all
+    ``tarfile`` needs to read members in order."""
+
+    def __init__(
+        self, open_stream: Callable[[], io.BufferedIOBase], chunk_size: int = 1024 * 1024
+    ):
+        self._queue: "queue.Queue[Union[bytes, BaseException, None]]" = queue.Queue(maxsize=4)
+        self._stop = False
+        self._done = False
+        self._chunk = b""
+        self._offset = 0
+        self._position = 0
+        self._thread = threading.Thread(
+            target=self._produce, args=(open_stream, chunk_size), daemon=True
+        )
+        self._thread.start()
+
+    def _produce(self, open_stream: Callable[[], io.BufferedIOBase], chunk_size: int) -> None:
+        item: Union[BaseException, None] = None
+        try:
+            with open_stream() as stream:
+                while not self._stop:
+                    chunk = stream.read(chunk_size)
+                    if not chunk:
+                        break
+                    self._queue.put(chunk)
+        except BaseException as e:
+            item = e
+        self._queue.put(item)
+
+    def _next_chunk(self) -> bytes:
+        if self._done:
+            return b""
+        item = self._queue.get()
+        if isinstance(item, bytes):
+            return item
+        self._done = True
+        if item is not None:
+            raise item
+        return b""
+
+    def readable(self) -> bool:
+        return True
+
+    def read(self, size: Optional[int] = -1) -> bytes:
+        if size is None or size < 0:
+            parts = [self._chunk[self._offset :]]
+            parts.extend(iter(self._next_chunk, b""))
+            self._chunk, self._offset = b"", 0
+        else:
+            start, end = self._offset, self._offset + size
+            if end <= len(self._chunk):
+                self._offset = end
+                self._position += size
+                return self._chunk[start:end]
+            parts = [self._chunk[self._offset :]]
+            needed = end - len(self._chunk)
+            self._chunk, self._offset = b"", 0
+            while needed > 0:
+                chunk = self._next_chunk()
+                if not chunk:
+                    break
+                if len(chunk) > needed:
+                    self._chunk, self._offset = chunk, needed
+                    chunk = chunk[:needed]
+                parts.append(chunk)
+                needed -= len(chunk)
+        data = b"".join(parts)
+        self._position += len(data)
+        return data
+
+    def readinto(self, b) -> int:
+        data = self.read(len(b))
+        b[: len(data)] = data
+        return len(data)
+
+    def tell(self) -> int:
+        return self._position
+
+    def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
+        if whence == io.SEEK_CUR:
+            offset += self._position
+        elif whence != io.SEEK_SET or offset < self._position:
+            raise io.UnsupportedOperation("can only seek forward")
+        while self._position < offset:
+            if not self.read(min(offset - self._position, _TARBALL_COPY_SIZE)):
+                break
+        return self._position
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        self._stop = True
+        # Unblock the producer, which puts a final item once it sees the stop flag.
+        while not self._done:
+            try:
+                self._next_chunk()
+            except BaseException:
+                pass
+        self._thread.join()
+        super().close()
+
+
+def _open_decompressed(path: str) -> io.BufferedIOBase:
+    """Open a possibly compressed tarball for reading front to back."""
+    with open(path, "rb") as f:
+        magic = f.read(6)
+    if magic.startswith(b"\x1f\x8b"):
+        return gzip.open(path, "rb")
+    elif magic.startswith(b"BZh"):
+        import bz2
+
+        return bz2.open(path, "rb")
+    elif magic == b"\xfd7zXZ\x00":
+        import lzma
+
+        return lzma.open(path, "rb")
+    return open(path, "rb")
+
+
+def _tar_str(field: bytes) -> str:
+    return field.split(b"\0", 1)[0].decode("utf-8", "surrogateescape")
+
+
+def _tar_int(field: bytes) -> int:
+    """A numeric header field: NUL or space terminated octal, or base-256 (GNU)."""
+    if field[0] == 0o200:
+        return int.from_bytes(field[1:], "big")
+    elif field[0] == 0o377:
+        raise ValueError("Tarball contains a negative number")
+    digits = field.split(b"\0", 1)[0].strip()
+    return int(digits, 8) if digits else 0
+
+
+def _pax_records(data: bytes) -> Dict[str, str]:
+    """Parse ``<length> <key>=<value>\\n`` records of a pax extended header."""
+    records = {}
+    pos = 0
+    while pos < len(data) and data[pos] != 0:
+        space = data.index(b" ", pos)
+        end = pos + int(data[pos:space])
+        if end <= space or data[end - 1] != 0x0A:
+            raise ValueError("Tarball contains an invalid pax header")
+        key, _, value = data[space + 1 : end - 1].partition(b"=")
+        records[key.decode("utf-8", "surrogateescape")] = value.decode("utf-8", "surrogateescape")
+        pos = end
+    return records
+
+
+_TAR_BLOCK = 512
+_TAR_EOF = bytes(_TAR_BLOCK)
+_TAR_DATA_TYPES = (tarfile.REGTYPE, tarfile.AREGTYPE, tarfile.CONTTYPE)
+
+
+class _TarReader:
+    """Reads the members of a tar archive front to back, like ``tarfile`` in stream mode, but
+    only parses what extraction needs: ustar headers, pax extended headers and GNU long names.
+    Iterate for members, and read the data of the current regular file with ``chunks()``."""
+
+    def __init__(self, stream: IO[bytes]) -> None:
+        self.stream = stream
+        #: Unread data of the current member
+        self.remaining = 0
+        #: Padding after the data of the current member
+        self.padding = 0
+        self.members: List[tarfile.TarInfo] = []
+
+    def _read(self, size: int) -> bytes:
+        data = self.stream.read(size)
+        if len(data) != size:
+            raise ValueError("Tarball is truncated")
+        return data
+
+    def _read_block(self) -> Optional[bytes]:
+        header = self.stream.read(_TAR_BLOCK)
+        if not header or header == _TAR_EOF:
+            return None
+        elif len(header) != _TAR_BLOCK:
+            raise ValueError("Tarball is truncated")
+        elif _tar_int(header[148:156]) != sum(header[:148]) + sum(header[156:]) + 256:
+            raise ValueError("Tarball contains a header with an invalid checksum")
+        return header
+
+    def chunks(self, size: int = _TARBALL_COPY_SIZE) -> Iterator[bytes]:
+        while self.remaining:
+            chunk = self._read(min(size, self.remaining))
+            self.remaining -= len(chunk)
+            yield chunk
+
+    def __iter__(self) -> Iterator[tarfile.TarInfo]:
+        global_pax: Dict[str, str] = {}
+        while True:
+            # Skip whatever the consumer did not read of the previous member
+            for _ in self.chunks():
+                pass
+            self._read(self.padding)
+
+            pax = dict(global_pax)
+            long_name: Optional[str] = None
+            long_link: Optional[str] = None
+            while True:
+                header = self._read_block()
+                if header is None:
+                    return
+                type = header[156:157]
+                if type not in (tarfile.XHDTYPE, tarfile.XGLTYPE, b"L", b"K"):
+                    break
+                size = _tar_int(header[124:136])
+                data = self._read(size)
+                self._read(-size % _TAR_BLOCK)
+                if type == tarfile.XHDTYPE:
+                    pax.update(_pax_records(data))
+                elif type == tarfile.XGLTYPE:
+                    global_pax.update(_pax_records(data))
+                    pax.update(global_pax)
+                elif type == b"L":
+                    long_name = _tar_str(data)
+                else:
+                    long_link = _tar_str(data)
+
+            name = _tar_str(header[0:100])
+            if header[257:263] == b"ustar\0":
+                prefix = _tar_str(header[345:500])
+                if prefix:
+                    name = f"{prefix}/{name}"
+            if type == tarfile.AREGTYPE and name.endswith("/"):
+                type = tarfile.DIRTYPE
+            member = tarfile.TarInfo(pax.get("path", long_name or name))
+            member.type = type
+            member.mode = _tar_int(header[100:108])
+            member.size = int(pax["size"]) if "size" in pax else _tar_int(header[124:136])
+            member.linkname = pax.get("linkpath", long_link or _tar_str(header[157:257]))
+            if any(key.startswith("GNU.sparse.") for key in pax):
+                raise ValueError(f"Tarball contains unsupported sparse file {member.name}")
+            if type == tarfile.DIRTYPE:
+                member.name = member.name.rstrip("/")
+
+            # Like tarfile, only regular files have data
+            self.remaining = member.size if type in _TAR_DATA_TYPES else 0
+            self.padding = -self.remaining % _TAR_BLOCK
+            self.members.append(member)
+            yield member
+
+
+def _sanitize_member(member: tarfile.TarInfo) -> None:
+    """Reject members that could escape the extraction directory, and normalize modes.
+    Symlink targets are not restricted: absolute targets are legitimate, relocation fixes
+    them up, and nothing is ever written through a symlink (see ``_verify_parent_dir``)."""
+    if not (member.isreg() or member.isdir() or member.issym() or member.islnk()):
+        raise ValueError(f"Tarball contains unsupported member {member.name}")
+
+    # Tar names are posix paths; backslashes are separators on Windows.
+    paths = [member.name] + ([member.linkname] if member.islnk() else [])
+    for path in paths:
+        if "\\" in path or path.startswith("/") or path[1:2] == ":" or ".." in path.split("/"):
+            raise ValueError(f"Tarball contains unsafe path {path}")
+
+    # Spack tarballs only carry 0o755/0o644; other modes (setuid, private files) are dropped.
+    if member.isdir():
+        member.mode = 0o755
+    else:
+        member.mode = 0o755 if member.mode & 0o100 else 0o644
+
+
+def _verify_parent_dir(root: str, parent: str, verified: Set[str]) -> None:
+    """Refuse to write below ``root/parent`` if a component of it is a symlink created by an
+    earlier member. Verified directories are real directories that no member can replace."""
+    if not parent or parent in verified:
+        return
+    _verify_parent_dir(root, parent.rpartition("/")[0], verified)
+    if os.path.islink(os.path.join(root, parent)):
+        raise ValueError(f"Tarball writes through symlink {parent}")
+    verified.add(parent)
+
+
+def _create_with_parent(create: Callable[[], T], path: str) -> T:
+    """Call ``create``, creating the parent directory of ``path`` first if it is missing
+    (Spack <= 0.21 tarballs do not list the directories leading up to the prefix)."""
+    try:
+        return create()
+    except FileNotFoundError:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        return create()
 
 
 def extract_buildcache_tarball(tarfile_path: str, destination: str) -> None:
-    with closing(tarfile.open(tarfile_path, "r")) as tar:
-        # For consistent behavior across all supported Python versions
-        tar.extraction_filter = lambda member, path: member
-        # Remove common prefix from tarball entries and directly extract them to the install dir.
-        tar.extractall(
-            path=destination, members=_tar_strip_component(tar, prefix=_ensure_common_prefix(tar))
-        )
+    """Extract the package prefix contained in a buildcache tarball into ``destination``.
+
+    The tarball is read in a single pass into a temporary directory inside ``destination``,
+    validated, and moved into place. A tarball prepared in bad faith cannot write outside
+    ``destination`` or plant privileged files: escaping paths and special members are
+    rejected, nothing is written through or on top of an existing path, modes are
+    normalized, and ownership and timestamps are not restored.
+
+    Files are created with ``os.open`` instead of ``TarFile.extract`` so that a regular
+    file costs an open, writes and a close, like GNU tar: on network filesystems every
+    extra stat, chmod or utime per file is a round trip."""
+    fsys.mkdirp(destination)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    for optional in ("O_NOFOLLOW", "O_CLOEXEC", "O_BINARY"):
+        flags |= getattr(os, optional, 0)
+
+    with tempfile.TemporaryDirectory(dir=destination, prefix=".spack-extract-") as tmpdir:
+        # Mode bits the filesystem strips (umask, default ACLs) require a chmod afterwards.
+        os.mkdir(os.path.join(tmpdir, "probe"), 0o777)
+        stripped = 0o777 & ~os.stat(os.path.join(tmpdir, "probe")).st_mode
+        os.rmdir(os.path.join(tmpdir, "probe"))
+
+        verified: Set[str] = set()
+
+        with closing(_ReadAhead(lambda: _open_decompressed(tarfile_path))) as stream:
+            tar = _TarReader(cast(IO[bytes], stream))
+            for member in tar:
+                _sanitize_member(member)
+                _verify_parent_dir(tmpdir, member.name.rpartition("/")[0], verified)
+                path = os.path.join(tmpdir, member.name)
+
+                if member.isdir():
+                    _create_with_parent(lambda: os.mkdir(path, member.mode), path)
+                elif member.isreg():
+                    fd = _create_with_parent(lambda: os.open(path, flags, member.mode), path)
+                    try:
+                        for data in tar.chunks(_TARBALL_COPY_SIZE):
+                            chunk = memoryview(data)
+                            while chunk:
+                                chunk = chunk[os.write(fd, chunk) :]
+                    finally:
+                        os.close(fd)
+                elif member.issym():
+                    _create_with_parent(lambda: os.symlink(member.linkname, path), path)
+                else:
+                    _verify_parent_dir(tmpdir, member.linkname.rpartition("/")[0], verified)
+                    link_source = os.path.join(tmpdir, member.linkname)
+                    if os.path.islink(link_source):
+                        raise ValueError(f"Tarball hardlinks a symlink {member.linkname}")
+                    _create_with_parent(lambda: os.link(link_source, path), path)
+                    continue  # shares the inode of the source, which has its mode already
+
+                if member.mode & stripped and not member.issym():
+                    os.chmod(path, member.mode)
+
+            pkg_prefix = _common_prefix(tar.members)
+
+        pkg_dir = os.path.join(tmpdir, pkg_prefix)
+        if os.path.islink(pkg_dir) or not os.path.isdir(pkg_dir):
+            raise ValueError(f"Tarball package prefix {pkg_prefix} is not a directory")
+        for entry in os.listdir(pkg_dir):
+            fsys.rename(os.path.join(pkg_dir, entry), os.path.join(destination, entry))
 
 
 def extract_tarball(spec, tarball_stage: spack.stage.Stage, force=False, timer=timer.NULL_TIMER):
@@ -2092,13 +2422,13 @@ def extract_tarball(spec, tarball_stage: spack.stage.Stage, force=False, timer=t
 
 
 def _ensure_common_prefix(tar: tarfile.TarFile) -> str:
+    return _common_prefix(tar.getmembers())
+
+
+def _common_prefix(members: List[tarfile.TarInfo]) -> str:
     # Find the lowest `binary_distribution` file (hard-coded forward slash is on purpose).
     binary_distribution = min(
-        (
-            e.name
-            for e in tar.getmembers()
-            if e.isfile() and e.name.endswith(".spack/binary_distribution")
-        ),
+        (e.name for e in members if e.isfile() and e.name.endswith(".spack/binary_distribution")),
         key=len,
         default=None,
     )
@@ -2118,10 +2448,13 @@ def _ensure_common_prefix(tar: tarfile.TarFile) -> str:
     # Ensure all tar entries are in the pkg_prefix dir, and if they're not, they should be parent
     # dirs of it.
     has_prefix = False
-    for member in tar.getmembers():
+    for member in members:
         stripped = member.name.rstrip("/")
         if not (
-            stripped.startswith(pkg_prefix) or member.isdir() and pkg_prefix.startswith(stripped)
+            stripped == pkg_prefix
+            or stripped.startswith(pkg_prefix + "/")
+            or member.isdir()
+            and pkg_prefix.startswith(stripped + "/")
         ):
             raise ValueError(f"Tarball contains file {stripped} outside of prefix {pkg_prefix}")
         if member.isdir() and stripped == pkg_prefix:
