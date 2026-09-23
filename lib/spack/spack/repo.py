@@ -63,6 +63,7 @@ from spack.util.filesystem import working_dir
 from spack.util.lang import Singleton, ensure_unwrapped
 
 if TYPE_CHECKING:
+    import spack.context
     import spack.package_base
     import spack.spec
 
@@ -1372,7 +1373,8 @@ class Repo:
         # Install patch files needed by the (concrete) package.
         fs.mkdirp(path)
         if spec.concrete:
-            for patch in itertools.chain.from_iterable(spec.package.patches.values()):
+            pkg_cls = self.get_pkg_class(spec.name)
+            for patch in itertools.chain.from_iterable(pkg_cls.patches.values()):
                 if patch.path:
                     if os.path.exists(patch.path):
                         fs.install(patch.path, path)
@@ -2191,6 +2193,37 @@ def _provided_specs(
             continue
         provided.append(result)
     return tuple(provided)
+
+
+def attach_packages(
+    specs: Iterable["spack.spec.Spec"],
+    ctx: "spack.context.SpackContext",
+    *,
+    skip_unknown: bool = False,
+) -> None:
+    """Create the packages of the concrete nodes of ``specs`` (including the builds of spliced
+    nodes) that have none, from the repositories of ``ctx``. With ``skip_unknown``, nodes whose
+    package is not in the repositories are left without one instead of raising."""
+    stack = list(specs)
+    seen: Set[int] = set()
+    while stack:
+        root = stack.pop()
+        for node in spack.traverse.traverse_nodes([root], deptype="all", key=id):
+            if id(node) in seen:
+                continue
+            seen.add(id(node))
+            if node.build_spec is not node:
+                stack.append(node.build_spec)
+            if node._package is not None or not node.concrete:
+                continue
+            try:
+                pkg = ctx.repo.get(node)
+            except UnknownEntityError:
+                if skip_unknown:
+                    continue
+                raise
+            pkg.context = ctx
+            node._package = pkg
 
 
 def freeze_provided_virtuals(specs: Iterable["spack.spec.Spec"], *, repo: RepoPath) -> None:

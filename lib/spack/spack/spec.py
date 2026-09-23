@@ -2382,9 +2382,7 @@ class Spec:
             self.name
         )
         if not self._package:
-            ctx = spack.context.current()
-            self._package = ctx.repo.get(self)
-            self._package.context = ctx
+            raise PackageNotAttachedError(self)
         return self._package
 
     @property
@@ -2518,9 +2516,24 @@ class Spec:
             raise spack.error.SpecError(f"Spec is not concrete: {self}")
 
         if self._prefix is None:
-            spack.context.current().store.assign_prefix(self)
+            if self.external_path:
+                self.set_prefix(self.external_path)
+            elif self._package:
+                self._package.context.store.assign_prefix(self)
+            else:
+                raise spack.error.SpecError(f"{self} has no prefix assigned")
         assert self._prefix is not None
         return self._prefix
+
+    @property
+    def has_package(self) -> bool:
+        """Whether a package is attached to the spec."""
+        return self._package is not None
+
+    @property
+    def has_prefix(self) -> bool:
+        """Whether a prefix is assigned to the spec."""
+        return self._prefix is not None
 
     def set_prefix(self, value: str) -> None:
         self._prefix = spack.util.prefix.Prefix(spack.util.path.convert_to_platform_path(value))
@@ -6080,3 +6093,13 @@ class _CachedSpec(Spec):
 
 #: Immutable empty spec, for fast comparisons and reduced memory usage.
 EMPTY_SPEC = _CachedSpec()
+
+
+class PackageNotAttachedError(spack.error.SpecError):
+    """Raised when the package of a spec is read, but none was attached to it."""
+
+    def __init__(self, spec: Spec) -> None:
+        super().__init__(
+            f"{spec.name}/{spec.dag_hash(7)} has no package attached",
+            "Packages are attached with spack.repo.attach_packages",
+        )

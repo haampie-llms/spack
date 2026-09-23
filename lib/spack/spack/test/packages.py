@@ -277,6 +277,7 @@ def test_rpath_args(mutable_database):
     """Test a package's rpath_args property."""
 
     rec = mutable_database.get_record("mpich")
+    spack.repo.attach_packages([rec.spec], spack.context.current())
 
     rpath_args = rec.spec.package.rpath_args
     assert "-rpath" in rpath_args

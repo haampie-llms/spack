@@ -898,10 +898,11 @@ def _schedule(
 class TestScheduleBuilds:
     """Unit tests for the module-level schedule_builds() function."""
 
-    def _make_spec(self, name):
+    def _make_spec(self, name, store):
         """Return a minimal concrete spec suitable for locking and DB queries."""
         spec = spack.spec.Spec(name)
         spec._mark_concrete()
+        store.assign_prefix(spec)
         return spec
 
     def _mark_installed(self, spec, store):
@@ -911,7 +912,7 @@ class TestScheduleBuilds:
 
     def test_not_installed_no_running_starts_build(self, temporary_store, mock_packages):
         """A fresh spec with no running builds is added to to_start."""
-        spec = self._make_spec("trivial-install-test-package")
+        spec = self._make_spec("trivial-install-test-package", temporary_store)
         pending = [spec.dag_hash()]
         result = _schedule(pending, _FakeBuildGraph([spec]), temporary_store)
         assert not result.blocked
@@ -924,7 +925,7 @@ class TestScheduleBuilds:
 
     def test_already_installed_yields_newly_installed(self, temporary_store, mock_packages):
         """A spec already in the DB is returned in newly_installed, not in to_start."""
-        spec = self._make_spec("trivial-install-test-package")
+        spec = self._make_spec("trivial-install-test-package", temporary_store)
         self._mark_installed(spec, temporary_store)
         pending = [spec.dag_hash()]
         result = _schedule(pending, _FakeBuildGraph([spec]), temporary_store)
@@ -939,7 +940,7 @@ class TestScheduleBuilds:
     @pytest.mark.not_on_windows("Windows has no POSIX jobserver, only NoopJobServer")
     def test_no_jobserver_token_returns_empty(self, temporary_store, mock_packages):
         """When has_running_builds=True and no token is available, nothing is started."""
-        spec = self._make_spec("trivial-install-test-package")
+        spec = self._make_spec("trivial-install-test-package", temporary_store)
         pending = [spec.dag_hash()]
         # num_jobs=1 writes 0 tokens to the FIFO. Only the implicit token exists.
         jobserver = PosixJobServer(num_jobs=1, makeflags="")
@@ -960,7 +961,7 @@ class TestScheduleBuilds:
 
     def test_all_locked_returns_blocked(self, temporary_store, mock_packages, monkeypatch):
         """When all pending specs are locked externally, blocked_on_locks is True."""
-        spec = self._make_spec("trivial-install-test-package")
+        spec = self._make_spec("trivial-install-test-package", temporary_store)
         pending = [spec.dag_hash()]
         # Pre-register the lock in the prefix_locker cache, then patch try_acquire to fail.
         lock = temporary_store.prefix_locker.lock(spec)
@@ -974,7 +975,7 @@ class TestScheduleBuilds:
 
     def test_overwrite_installed_spec_is_started(self, temporary_store, mock_packages):
         """A spec in the overwrite set is scheduled even when already installed."""
-        spec = self._make_spec("trivial-install-test-package")
+        spec = self._make_spec("trivial-install-test-package", temporary_store)
         self._mark_installed(spec, temporary_store)
         pending = [spec.dag_hash()]
         result = _schedule(
@@ -993,8 +994,8 @@ class TestScheduleBuilds:
 
     def test_mixed_locked_unlocked(self, temporary_store, mock_packages, monkeypatch):
         """Only the unlocked spec enters to_start when one spec is externally locked."""
-        spec_a = self._make_spec("trivial-install-test-package")
-        spec_b = self._make_spec("trivial-smoke-test")
+        spec_a = self._make_spec("trivial-install-test-package", temporary_store)
+        spec_b = self._make_spec("trivial-smoke-test", temporary_store)
         pending = [spec_a.dag_hash(), spec_b.dag_hash()]
         # Patch spec_a's lock to always fail, simulating an external write lock.
         lock_a = temporary_store.prefix_locker.lock(spec_a)
@@ -1018,7 +1019,7 @@ class TestScheduleBuilds:
         to a read lock. The spec should appear in newly_installed. blocked remains True because no
         write lock was obtained, preventing the jobserver from firing unnecessarily.
         """
-        spec = self._make_spec("trivial-install-test-package")
+        spec = self._make_spec("trivial-install-test-package", temporary_store)
         self._mark_installed(spec, temporary_store)
         pending = [spec.dag_hash()]
         lock = temporary_store.prefix_locker.lock(spec)
@@ -1041,7 +1042,7 @@ class TestScheduleBuilds:
         Simulates the case where a concurrent process was killed mid-build. The read lock is
         released and the spec stays in pending; blocked should remain True.
         """
-        spec = self._make_spec("trivial-install-test-package")
+        spec = self._make_spec("trivial-install-test-package", temporary_store)
         pending = [spec.dag_hash()]
         lock = temporary_store.prefix_locker.lock(spec)
         monkeypatch.setattr(lock, "try_acquire_write", lambda: False)
@@ -1053,7 +1054,7 @@ class TestScheduleBuilds:
 
     def test_overwrite_handled_by_concurrent_process(self, temporary_store, mock_packages):
         """When a spec in overwrite was installed AFTER overwrite_time, another process did it."""
-        spec = self._make_spec("trivial-install-test-package")
+        spec = self._make_spec("trivial-install-test-package", temporary_store)
         self._mark_installed(spec, temporary_store)  # installation_time = now()
         pending = [spec.dag_hash()]
         # the default overwrite_time=0.0 is earlier than now()
@@ -1071,7 +1072,7 @@ class TestScheduleBuilds:
         self, temporary_store, mock_packages
     ):
         """An installed-implicit spec in explicit set produces a DbUpdate."""
-        spec = self._make_spec("trivial-install-test-package")
+        spec = self._make_spec("trivial-install-test-package", temporary_store)
         temporary_store.layout.create_install_directory(spec, spack.config.CONFIG)
         temporary_store.db.add(spec, explicit=False)
         pending = [spec.dag_hash()]
@@ -1090,7 +1091,8 @@ class TestScheduleBuilds:
         """A spec that is referenced but not installed in an upstream database is scheduled for
         a local build, with its prefix repointed to the local store."""
         upstream_db, downstream_db = upstream_and_downstream_db
-        dep = self._make_spec("dependency-install")
+        dep = spack.spec.Spec("dependency-install")
+        dep._mark_concrete()
         parent = spack.spec.Spec("dependent-install")
         parent._add_dependency(dep, depflag=dt.BUILD, virtuals=())
         parent._mark_concrete()
@@ -1122,7 +1124,7 @@ class TestScheduleBuilds:
 
     def test_overwrite_prefix_mismatch_raises(self, temporary_store, mock_packages):
         """An overwrite install cannot proceed when the spec prefix differs from the DB path."""
-        spec = self._make_spec("trivial-install-test-package")
+        spec = self._make_spec("trivial-install-test-package", temporary_store)
         self._mark_installed(spec, temporary_store)
         spec.set_prefix("/some/other/prefix")
         with pytest.raises(spack.error.InstallError, match="Prefix mismatch in overwrite"):
@@ -1136,9 +1138,9 @@ class TestScheduleBuilds:
 
     def test_prefix_collision_raises(self, temporary_store, mock_packages):
         """A spec cannot be scheduled into a prefix already occupied by another spec."""
-        installed = self._make_spec("trivial-install-test-package")
+        installed = self._make_spec("trivial-install-test-package", temporary_store)
         self._mark_installed(installed, temporary_store)
-        colliding = self._make_spec("trivial-smoke-test")
+        colliding = self._make_spec("trivial-smoke-test", temporary_store)
         colliding.set_prefix(temporary_store.layout.path_for_spec(installed))
         with pytest.raises(spack.error.InstallError, match="already exists"):
             _schedule([colliding.dag_hash()], _FakeBuildGraph([colliding]), temporary_store)

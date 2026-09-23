@@ -859,7 +859,11 @@ class TestSuite:
     ) -> None:
         # copy so that different test suites have different package objects
         # even if they contain the same spec
+        specs = list(specs)
         self.specs = [spec.copy() for spec in specs]
+        for spec, copy in zip(specs, self.specs):
+            if spec.has_package:
+                spack.repo.attach_packages([copy], spec.package.context)
         self.current_test_spec = None  # spec currently tested, can be virtual
         self.current_base_spec = None  # spec currently running do_test
 

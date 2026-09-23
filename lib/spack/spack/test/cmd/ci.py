@@ -887,9 +887,7 @@ spack:
 
             ctx = spack.context.current()
             for s in concrete_spec.traverse():
-                ci.push_to_build_cache(
-                    s, mirror_url, True, config=ctx.config, client=ctx.network, store=ctx.store
-                )
+                ci.push_to_build_cache(s, mirror_url, True, ctx=ctx)
 
             # Now test the --prune-dag (default) option of spack ci generate
             mirror_cmd("add", "test-ci", mirror_url)
@@ -972,9 +970,7 @@ def test_push_to_build_cache_exceptions(monkeypatch, tmp_path: pathlib.Path, cap
     # Input doesn't matter, as we are faking exceptional output
     url = tmp_path.as_uri()
     ctx = spack.context.current()
-    ci.push_to_build_cache(
-        spack.spec.Spec(), url, False, config=ctx.config, client=ctx.network, store=ctx.store
-    )
+    ci.push_to_build_cache(spack.spec.Spec(), url, False, ctx=ctx)
     assert f"Problem writing to {url}: Error: Access Denied" in capfd.readouterr().err
 
 

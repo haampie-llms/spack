@@ -87,7 +87,7 @@ def unload(parser, args, ctx):
         )
         return 1
 
-    env_mod = uenv.modifications_for_specs(*specs, config=ctx.config).reversed()
+    env_mod = uenv.modifications_for_specs(*specs, ctx=ctx).reversed()
     for spec in specs:
         env_mod.remove_path(uenv.spack_loaded_hashes_var, spec.dag_hash())
     cmds = env_mod.shell_modifications(args.shell)

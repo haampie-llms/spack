@@ -24,9 +24,7 @@ def test_build_tarball_overwrite(install_mockery, mock_fetch, monkeypatch, tmp_p
     ctx = spack.context.current()
 
     def make_uploader(mirror, force=False):
-        return bd.make_uploader(
-            mirror, force=force, config=ctx.config, client=ctx.network, store=ctx.store
-        )
+        return bd.make_uploader(mirror, force=force, ctx=ctx)
 
     # populate cache, everything is new
     mirror = spack.mirrors.mirror.Mirror.from_local_path(str(tmp_path))

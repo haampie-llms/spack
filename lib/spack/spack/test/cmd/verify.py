@@ -14,6 +14,7 @@ import spack.cmd.verify
 import spack.concretize
 import spack.context
 import spack.installer
+import spack.repo
 import spack.store
 import spack.util.executable
 import spack.util.filesystem as fs
@@ -160,6 +161,8 @@ def test_verify_versions(mock_packages):
     specs = [Spec(c) for c in strs] + [Spec(f"deprecated-client@=1.1.0^{c}") for c in strs]
     for spec in specs:
         spec._mark_concrete()
+        spec.set_prefix(f"/opt/{spec.name}")
+        spack.repo.attach_packages([spec], spack.context.current(), skip_unknown=True)
 
     msg_lines = spack.cmd.verify._verify_version(specs)
     assert "3 installed packages have unknown/deprecated" in msg_lines[0]

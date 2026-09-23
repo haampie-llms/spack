@@ -165,7 +165,9 @@ def test_views_can_handle_duplicate_runtime_nodes(
     nodes = list(root.traverse())
 
     view = ViewDescriptor(str(tmp_path), str(tmp_path), config=spack.config.CONFIG)
-    candidate_specs = view.specs_for_view(nodes, spack.context.current().store)
+    candidate_specs = view.specs_for_view(
+        nodes, spack.context.current().store, spack.context.current().repo
+    )
 
     for x in expected:
         assert any(node.satisfies(x) for node in candidate_specs)

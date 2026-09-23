@@ -736,7 +736,7 @@ def _write_yaml(data, str_or_file):
     syaml.dump_config(data, str_or_file, default_flow_style=False)
 
 
-def _is_dev_spec_and_has_changed(spec, store: spack.store.Store):
+def _is_dev_spec_and_has_changed(spec, ctx: "spack.context.SpackContext"):
     """Check if the passed spec is a dev build and whether it has changed since the
     last installation"""
     # First check if this is a dev build and in the process already try to get
@@ -745,13 +745,14 @@ def _is_dev_spec_and_has_changed(spec, store: spack.store.Store):
         return False
 
     # Now we can check whether the code changed since the last installation
-    if not store.db.installed(spec):
+    if not ctx.store.db.installed(spec):
         # Not installed -> nothing to compare against
         return False
 
     # hook so packages can use to write their own method for checking the dev_path
     # use package so attributes about concretization such as variant state can be
     # utilized
+    spack.repo.attach_packages([spec], ctx)
     return spec.package.detect_dev_src_change()
 
 
@@ -921,7 +922,8 @@ class ViewDescriptor:
     def get_projection_for_spec(self, spec, config: spack.config.Configuration):
         """Get projection for spec. This function does not require the view
         to exist on the filesystem."""
-        spec = spack.spec.Spec(spec)
+        if not isinstance(spec, spack.spec.Spec):
+            spec = spack.spec.Spec(spec)
         if spec.package.extendee_spec:
             spec = spec.package.extendee_spec
 
@@ -979,7 +981,9 @@ class ViewDescriptor:
 
         return True
 
-    def specs_for_view(self, concrete_roots: List[Spec], store: spack.store.Store) -> List[Spec]:
+    def specs_for_view(
+        self, concrete_roots: List[Spec], store: spack.store.Store, repo: spack.repo.RepoPath
+    ) -> List[Spec]:
         """Flatten the DAGs of the concrete roots, keep only unique, selected, and installed specs
         in topological order from root to leaf."""
         if self.link == "all":
@@ -997,7 +1001,7 @@ class ViewDescriptor:
         with store.db.read_transaction():
             result = [s for s in specs if s in self and store.db.installed(s)]
 
-        return self._exclude_duplicate_runtimes(result)
+        return self._exclude_duplicate_runtimes(result, repo)
 
     def regenerate(self, env: "Environment") -> None:
         if self.groups is None:
@@ -1006,7 +1010,8 @@ class ViewDescriptor:
             concrete_roots = [c for g in self.groups for _, c in env.concretized_specs_by(group=g)]
 
         store = env.ctx.store
-        specs = self.specs_for_view(concrete_roots, store)
+        specs = self.specs_for_view(concrete_roots, store, env.ctx.repo)
+        spack.repo.attach_packages(specs, env.ctx)
         content_hash = self.content_hash(specs)
 
         if self._is_up_to_date(content_hash):
@@ -1080,12 +1085,18 @@ class ViewDescriptor:
             except OSError as exc:
                 tty.warn(f"Failed to remove old view at {old_root}\n{exc}")
 
-    def _exclude_duplicate_runtimes(self, specs: List[Spec]) -> List[Spec]:
+    def _exclude_duplicate_runtimes(
+        self, specs: List[Spec], repo: spack.repo.RepoPath
+    ) -> List[Spec]:
         """Stably filter out duplicates of "runtime" tagged packages, keeping only latest."""
         # Maps packages tagged "runtime" to the spec with latest version.
         latest: Dict[str, Spec] = {}
         for s in specs:
-            if "runtime" not in getattr(s.package, "tags", ()):
+            try:
+                tags = getattr(repo.get_pkg_class(s.fullname), "tags", ())
+            except spack.repo.UnknownEntityError:
+                continue
+            if "runtime" not in tags:
                 continue
             elif s.name not in latest or latest[s.name].version < s.version:
                 latest[s.name] = s
@@ -1925,6 +1936,7 @@ class Environment:
         old_concretized_roots = self.concretized_roots
         self._read_lockfile_dict(self._to_lockfile_dict())
         self.concretized_roots = old_concretized_roots
+        spack.repo.attach_packages(self.concrete_roots(), self.ctx, skip_unknown=True)
 
     @property
     def default_view(self):
@@ -2014,6 +2026,7 @@ class Environment:
             # This is effectively a no-op, but it touches all packages in the
             # default view if they are installed.
             db = self.ctx.store.db
+            spack.repo.attach_packages(self.concrete_roots(), self.ctx)
             with db.read_transaction():
                 for view_name, view in self.views.items():
                     for spec in self.concrete_roots():
@@ -2035,9 +2048,7 @@ class Environment:
             db = self.ctx.store.db
             with db.read_transaction():
                 installed_roots = [s for s in self.concrete_roots() if db.installed(s)]
-            mods = uenv.modifications_for_specs(
-                *installed_roots, config=self.ctx.config, view=view
-            )
+            mods = uenv.modifications_for_specs(*installed_roots, ctx=self.ctx, view=view)
         except Exception as e:
             # Failing to setup spec-specific changes shouldn't be a hard error.
             tty.warn(
@@ -2126,7 +2137,7 @@ class Environment:
                 for s in traverse.traverse_nodes(
                     self.concrete_roots(), order="breadth", key=traverse.by_dag_hash
                 )
-                if _is_dev_spec_and_has_changed(s, store)
+                if _is_dev_spec_and_has_changed(s, self.ctx)
             ]
 
             # Collect their hashes, and the hashes of their installed parents.
@@ -2198,6 +2209,7 @@ class Environment:
                 reporter.build_report(report_file, [])
             return
 
+        spack.repo.attach_packages(specs, self.ctx)
         builder = spack.installer_dispatch.create_installer(
             [spec.package for spec in specs], create_reports=reporter is not None, **install_args
         )

@@ -2175,7 +2175,7 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
 
     @staticmethod
     def uninstall_by_spec(spec, store: spack.store.Store, force=False, deprecator=None):
-        if not os.path.isdir(spec.prefix):
+        if not os.path.isdir(store.prefix_of(spec)):
             # prefix may not exist, but DB may be inconsistent. Try to fix by
             # removing, but omit hooks.
             specs = store.db.query(spec, installed=True)
@@ -2200,7 +2200,7 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
         # Try to get the package for the spec
         try:
             pkg = spec.package
-        except spack.repo.UnknownEntityError:
+        except (spack.repo.UnknownEntityError, spack.spec.PackageNotAttachedError):
             pkg = None
 
         # Pre-uninstall hook runs first.

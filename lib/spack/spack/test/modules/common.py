@@ -193,7 +193,7 @@ def test_load_installed_package_not_in_repo(install_mockery, mock_fetch, monkeyp
     spec._package = None
     monkeypatch.setattr(spack.repo.PATH, "get", find_nothing)
     with pytest.raises(spack.repo.UnknownPackageError):
-        spec.package
+        spack.repo.attach_packages([spec], spack.context.current())
 
     ctx = spack.context.current()
     module_path = spack.modules.get_module(

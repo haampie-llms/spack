@@ -9,7 +9,7 @@ import shutil
 import stat
 import sys
 import tempfile
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Set
 
 from spack.vendor.typing_extensions import Literal
 
@@ -175,6 +175,8 @@ class FilesystemView:
         self._root = root
         self.layout = layout
         self.projections = {} if projections is None else projections
+        #: The specs of the view while specs are removed from it
+        self._all_specs: Optional[Set[spack.spec.Spec]] = None
         #: Environment of the configuration the projections are read from, for ``$env``
         self.env_path = env_path
 
@@ -440,7 +442,7 @@ class YamlFilesystemView(FilesystemView):
                 manifest = {}
             return test_path in manifest
 
-        specs = self.get_all_specs()
+        specs = self._all_specs if self._all_specs is not None else self.get_all_specs()
 
         for file in files:
             if not os.path.lexists(file):
@@ -517,9 +519,13 @@ class YamlFilesystemView(FilesystemView):
         # Ensure that the sorted list contains all the packages
         assert set(to_deactivate_sorted) == to_deactivate
 
-        # Remove the packages from the view
-        for spec in to_deactivate_sorted:
-            self.remove_standalone(spec)
+        # Remove the packages from the view; files are looked up among all specs of the view
+        self._all_specs = all_specs
+        try:
+            for spec in to_deactivate_sorted:
+                self.remove_standalone(spec)
+        finally:
+            self._all_specs = None
 
         self._purge_empty_directories()
 
@@ -543,7 +549,8 @@ class YamlFilesystemView(FilesystemView):
 
         Relies on the ordering of projections to avoid ambiguity.
         """
-        spec = spack.spec.Spec(spec)
+        if not isinstance(spec, spack.spec.Spec):
+            spec = spack.spec.Spec(spec)
         locator_spec = spec
 
         if spec.package.extendee_spec:
@@ -818,7 +825,8 @@ class SimpleFilesystemView(FilesystemView):
 
         Relies on the ordering of projections to avoid ambiguity.
         """
-        spec = spack.spec.Spec(spec)
+        if not isinstance(spec, spack.spec.Spec):
+            spec = spack.spec.Spec(spec)
 
         if spec.package.extendee_spec:
             spec = spec.package.extendee_spec

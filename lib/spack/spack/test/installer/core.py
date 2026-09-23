@@ -9,7 +9,9 @@ import sys
 import pytest
 
 import spack.config
+import spack.context
 import spack.error
+import spack.repo
 import spack.spec
 from spack.config import Configuration
 from spack.installer.base import ExitCode
@@ -34,6 +36,7 @@ class TestPackageInstallerConstructor:
         """Test that capacity is set correctly when concurrent_packages is explicitly provided."""
         spec = spack.spec.Spec("trivial-install-test-package")
         spec._mark_concrete()
+        spack.repo.attach_packages([spec], spack.context.current())
         assert PackageInstaller([spec.package], concurrent_packages=5).capacity == 5
         assert PackageInstaller([spec.package], concurrent_packages=1).capacity == 1
 
@@ -44,6 +47,7 @@ class TestPackageInstallerConstructor:
         mutable_config.set("config:concurrent_packages", 0)
         spec = spack.spec.Spec("trivial-install-test-package")
         spec._mark_concrete()
+        spack.repo.attach_packages([spec], spack.context.current())
         assert PackageInstaller([spec.package]).capacity == sys.maxsize
 
     def test_capacity_from_config_non_zero(self, temporary_store, mock_packages, mutable_config):
@@ -51,6 +55,7 @@ class TestPackageInstallerConstructor:
         mutable_config.set("config:concurrent_packages", 1)
         spec = spack.spec.Spec("trivial-install-test-package")
         spec._mark_concrete()
+        spack.repo.attach_packages([spec], spack.context.current())
         assert PackageInstaller([spec.package]).capacity == 1
 
     def test_no_binary_mirrors_forces_source_only(
@@ -60,6 +65,7 @@ class TestPackageInstallerConstructor:
         source_only at scheduling time."""
         spec = spack.spec.Spec("trivial-install-test-package")
         spec._mark_concrete()
+        spack.repo.attach_packages([spec], spack.context.current())
         installer = PackageInstaller([spec.package], root_policy="auto")
         assert not installer.has_mirrors
 
@@ -69,6 +75,7 @@ class TestPackageInstallerConstructor:
         """Without binary mirrors, an explicit cache_only shouldn't turn into source_only."""
         spec = spack.spec.Spec("trivial-install-test-package")
         spec._mark_concrete()
+        spack.repo.attach_packages([spec], spack.context.current())
         installer = PackageInstaller(
             [spec.package], root_policy="cache_only", dependencies_policy="cache_only"
         )
@@ -79,10 +86,12 @@ class TestPackageInstallerConstructor:
         """Nothing is built when the database needs an explicit reindex to be modified, but
         an installer with nothing to do does not complain."""
         installed = mutable_database.query_local("libelf")[0]
+        spack.repo.attach_packages([installed], spack.context.current())
         PackageInstaller([installed.package])
 
         spec = spack.spec.Spec("trivial-install-test-package")
         spec._mark_concrete()
+        spack.repo.attach_packages([spec], spack.context.current())
         with pytest.raises(spack.error.ExplicitDatabaseUpgradeError):
             PackageInstaller([spec.package])
 

@@ -9,6 +9,7 @@ import pytest
 
 import spack.concretize
 import spack.context
+import spack.repo
 from spack.directory_layout import DirectoryLayout
 from spack.filesystem_view import SimpleFilesystemView, YamlFilesystemView
 from spack.installer import PackageInstaller
@@ -25,7 +26,9 @@ def test_remove_extensions_ordered(install_mockery, mock_fetch, tmp_path: pathli
     view.add_specs(e2)
 
     e1 = e2["extension1"]
-    view.remove_specs(e1, e2)
+    all_specs = view.get_all_specs()
+    spack.repo.attach_packages(all_specs, spack.context.current())
+    view.remove_specs(e1, e2, all_specs=set(all_specs))
 
 
 @pytest.mark.regression("32456")
@@ -41,7 +44,9 @@ def test_view_with_spec_not_contributing_files(mock_packages, tmp_path: pathlib.
     a.set_prefix(str(tmp_path / "a"))
     b.set_prefix(str(tmp_path / "b"))
     a._mark_concrete()
+    spack.repo.attach_packages([a], spack.context.current())
     b._mark_concrete()
+    spack.repo.attach_packages([b], spack.context.current())
 
     # Create directory structure for a and b, and view
     os.makedirs(a.prefix.subdir)
@@ -84,7 +89,9 @@ def test_view_unique_subdir_becomes_dir_symlink(mock_packages, tmp_path: pathlib
     a.set_prefix(str(tmp_path / "a"))
     b.set_prefix(str(tmp_path / "b"))
     a._mark_concrete()
+    spack.repo.attach_packages([a], spack.context.current())
     b._mark_concrete()
+    spack.repo.attach_packages([b], spack.context.current())
 
     FsTree(
         tmp_path,
@@ -140,6 +147,7 @@ def test_view_no_dir_symlinks(mock_packages, tmp_path: pathlib.Path):
     a = Spec("pkg-a")
     a.set_prefix(str(tmp_path / "a"))
     a._mark_concrete()
+    spack.repo.attach_packages([a], spack.context.current())
 
     FsTree(tmp_path, {"a/.spack": FsTree.dir(), "a/include/a/a.h": FsTree.file("header")})
 

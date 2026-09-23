@@ -6,6 +6,7 @@ import argparse
 import sys
 
 import spack.context
+import spack.repo
 from spack import cmd
 from spack.cmd.common import arguments
 from spack.util import tty
@@ -67,6 +68,7 @@ def extensions(parser, args, ctx: spack.context.SpackContext):
         args.subparser.error("can only list extensions for one package")
 
     spec = cmd.disambiguate_spec(spec[0], ctx.environment, store=ctx.store)
+    spack.repo.attach_packages([spec], ctx)
 
     if not spec.package.extendable:
         tty.die("%s is not an extendable package." % spec.name)
@@ -86,7 +88,9 @@ def extensions(parser, args, ctx: spack.context.SpackContext):
 
     if args.show in ("installed", "all"):
         # List specs of installed extensions.
-        installed = [s.spec for s in ctx.store.db.installed_extensions_for(spec)]
+        candidates = ctx.store.db.query()
+        spack.repo.attach_packages(candidates, ctx)
+        installed = [s for s in candidates if s.has_package and s.package.extends(spec)]
 
         if args.show == "all":
             print

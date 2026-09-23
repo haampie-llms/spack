@@ -499,7 +499,7 @@ def test_ci_create_buildcache(working_env, config, monkeypatch):
     keys and types."""
     monkeypatch.setattr(ci, "push_to_build_cache", lambda a, b, c, **kwargs: True)
     ctx = spack.context.current()
-    resources = {"config": ctx.config, "client": ctx.network, "store": ctx.store}
+    resources = {"ctx": ctx}
 
     results = ci.create_buildcache(
         Spec(),

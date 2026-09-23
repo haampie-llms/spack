@@ -49,6 +49,7 @@ import spack.environment
 import spack.error
 import spack.paths
 import spack.projections as proj
+import spack.repo
 import spack.schema
 import spack.schema.environment
 import spack.spec
@@ -405,6 +406,7 @@ class BaseConfiguration:
         self.name = module_set_name
         self.explicit = explicit
         self.ctx = ctx
+        spack.repo.attach_packages([spec], ctx, skip_unknown=True)
         self._configuration_cache = {} if cache is None else cache
         self._cache: Dict[str, Any] = {}
         _modules_cfg = ctx.config.get_config("modules")
@@ -621,6 +623,7 @@ class BaseConfiguration:
             all_compilers = spack.compilers.config.all_compilers(
                 self.ctx.config, repo=self.ctx.repo, init_config=False
             )
+            spack.repo.attach_packages(all_compilers, self.ctx)
             compilers = [c for c in all_compilers if _has_system_driver(c)]
             if compilers:
                 _store_core_compilers(self.name, self.module_system, compilers, self.ctx.config)

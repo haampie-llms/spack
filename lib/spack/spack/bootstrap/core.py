@@ -437,7 +437,7 @@ def ensure_executables_in_path_or_raise(
     # Additional environment variables needed to run the command
     found.command.add_default_envmod(
         spack.user_environment.modifications_for_specs(
-            found.spec, config=spack.context.current().config, set_package_py_globals=False
+            found.spec, ctx=spack.context.current(), set_package_py_globals=False
         )
     )
     return found.command

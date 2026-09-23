@@ -7,8 +7,10 @@ import sys
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import spack.cmd
+import spack.context
 import spack.environment as ev
 import spack.package_base
+import spack.repo
 import spack.spec
 import spack.store
 from spack import traverse
@@ -217,12 +219,16 @@ def _remove_from_env(spec, env):
         pass  # ignore non-root specs
 
 
-def do_uninstall(specs: List[spack.spec.Spec], *, store: spack.store.Store, force: bool = False):
+def do_uninstall(
+    specs: List[spack.spec.Spec], ctx: spack.context.SpackContext, *, force: bool = False
+):
     if not specs:
         return
 
+    store = ctx.store
     # Fail before removing anything if the database cannot be modified.
     store.db.ensure_latest_db_version()
+    spack.repo.attach_packages(specs, ctx, skip_unknown=True)
 
     # TODO: get rid of the call-sites that use this function,
     # so that we don't have to do a dance of list -> set -> list -> set
@@ -335,7 +341,7 @@ def uninstall_specs(args, specs, ctx):
         confirmation.confirm_action(uninstall_list, "uninstalled", "uninstall")
 
     # Uninstall everything on the list
-    do_uninstall(uninstall_list, store=ctx.store, force=args.force)
+    do_uninstall(uninstall_list, ctx, force=args.force)
 
     if env:
         with env.write_transaction():

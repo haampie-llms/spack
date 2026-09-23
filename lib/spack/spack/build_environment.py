@@ -648,7 +648,7 @@ def set_package_py_globals(pkg, context: Context = Context.BUILD):
         compilers_config.find_compilers, config=ctx.config, repo=ctx.repo
     )
     module.environment_modifications_for_specs = functools.partial(
-        user_environment.modifications_for_specs, config=ctx.config
+        user_environment.modifications_for_specs, ctx=ctx
     )
 
     module.propagate_changes_to_mro()

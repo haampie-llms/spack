@@ -3715,6 +3715,7 @@ spack:
 """
     ) as e:
         specs = e.all_specs()
+        spack.repo.attach_packages(specs, e.ctx)
         for module_set in ("uses_view", "without_view"):
             modules = glob.glob(f"{e.path}/{module_set}/**/*/*")
             assert len(modules) == len(specs), "Not all modules were generated"
@@ -3970,7 +3971,9 @@ def test_env_view_backward_compat_old_symlink_format(
         add("libelf")
         install("--fake")
         view_desc = e.default_view
-        specs = view_desc.specs_for_view(e.concrete_roots(), spack.context.current().store)
+        specs = view_desc.specs_for_view(
+            e.concrete_roots(), spack.context.current().store, spack.context.current().repo
+        )
         content_hash = view_desc.content_hash(specs)
 
     # Simulate old format: remove the real view dir and replace with a symlink
