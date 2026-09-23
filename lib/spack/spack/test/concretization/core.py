@@ -57,7 +57,7 @@ from spack.concretize_ui import SolveKind
 from spack.config import Configuration
 from spack.database import Database
 from spack.externals import ExternalDependencyError
-from spack.old_installer import PackageInstaller
+from spack.installer import PackageInstaller
 from spack.repo import RepoPath
 from spack.solver.asp import Result
 from spack.solver.reuse import reusable_external_specs

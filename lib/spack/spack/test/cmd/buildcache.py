@@ -27,7 +27,7 @@ import spack.spec
 import spack.util.url as url_util
 import spack.util.web as web_util
 from spack.active_environment import active_environment
-from spack.old_installer import PackageInstaller
+from spack.installer import PackageInstaller
 from spack.paths import test_path
 from spack.url_buildcache import (
     BuildcacheComponent,
@@ -160,7 +160,7 @@ def test_update_key_index(
     s = spack.concretize.concretize_one("libdwarf")
 
     # Install a package
-    install("--fake", s.name)
+    install("--fake", "--include-build-deps", s.name)
 
     # Put installed package in the buildcache, which, because we're signing
     # it, should result in the public key getting pushed to the buildcache
@@ -580,7 +580,7 @@ def test_push_without_build_deps(
     mirror("add", "--unsigned", "my-mirror", str(tmp_path))
 
     s = spack.concretize.concretize_one("dtrun3")
-    PackageInstaller([s.package], explicit=True, fake=True).install()
+    PackageInstaller([s.package], explicit=True, fake=True, include_build_deps=True).install()
     s["dtbuild3"].package.do_uninstall()
 
     # fails when build deps are required
@@ -674,13 +674,12 @@ def test_install_v2_layout(
     # Trust original signing key (no-op if this is the unsigned pass)
     buildcache("keys", "-y", "--install", "--trust")
 
-    output = install("--fake", "--no-check-signature", "libdwarf")
+    output = install("--no-check-signature", "libdwarf")
 
-    assert "Extracting libelf" in output
-    assert "libelf: Successfully installed" in output
-    assert "Extracting libdwarf" in output
-    assert "libdwarf: Successfully installed" in output
-    assert "Installing a spec from a v2 binary mirror layout" in output
+    lines = output.splitlines()
+    for name in ("libelf", "libdwarf"):
+        assert any(f" {name}@" in ln and "from build cache" in ln for ln in lines)
+        assert any(ln.startswith("[+]") and f" {name}@" in ln for ln in lines)
     assert "Fetching an index from a v2 binary mirror layout" in output
     assert "deprecated" in output
 
@@ -1411,16 +1410,17 @@ spack:
     mirror_dir = tmp_path / "mirror"
     mirror_dir.mkdir()
 
-    uploader = _mock_uploader(mirror_dir)
-    monkeypatch.setattr(
-        spack.binary_distribution, "make_uploader", lambda *args, **kwargs: uploader
-    )
-
     with ev.Environment(env_dir) as e:
         e.concretize()
         e.write()
         for _, root in e.concretized_specs():
             PackageInstaller([root.package], explicit=True, fake=True).install()
+
+        # Patched after installing: build processes cannot unpickle the lambda
+        uploader = _mock_uploader(mirror_dir)
+        monkeypatch.setattr(
+            spack.binary_distribution, "make_uploader", lambda *args, **kwargs: uploader
+        )
 
         buildcache("push", "--unsigned", "--only", "package", "--group", "extra", str(mirror_dir))
 
@@ -1448,16 +1448,17 @@ spack:
     mirror_dir = tmp_path / "mirror"
     mirror_dir.mkdir()
 
-    uploader = _mock_uploader(mirror_dir)
-    monkeypatch.setattr(
-        spack.binary_distribution, "make_uploader", lambda *args, **kwargs: uploader
-    )
-
     with ev.Environment(env_dir) as e:
         e.concretize()
         e.write()
         for _, root in e.concretized_specs():
             PackageInstaller([root.package], explicit=True, fake=True).install()
+
+        # Patched after installing: build processes cannot unpickle the lambda
+        uploader = _mock_uploader(mirror_dir)
+        monkeypatch.setattr(
+            spack.binary_distribution, "make_uploader", lambda *args, **kwargs: uploader
+        )
 
         buildcache(
             "push",

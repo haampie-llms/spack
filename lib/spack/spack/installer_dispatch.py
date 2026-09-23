@@ -11,7 +11,6 @@ import spack.sandbox
 
 if TYPE_CHECKING:
     import spack.installer
-    import spack.old_installer
     import spack.package_base
 
 
@@ -41,27 +40,13 @@ def create_installer(
     root_policy: Literal["auto", "cache_only", "source_only"] = "auto",
     dependencies_policy: Literal["auto", "cache_only", "source_only"] = "auto",
     create_reports: bool = False,
-) -> Union["spack.old_installer.PackageInstaller", "spack.installer.PackageInstaller"]:
+) -> "spack.installer.PackageInstaller":
     """Create an installer based on the current configuration and feature support."""
-    use_old_installer = spack.config.CONFIG.get("config:installer", "new") == "old"
-
     if spack.config.CONFIG.get("config:sandbox:enable", False):
-        if use_old_installer:
-            raise spack.sandbox.SandboxError(
-                "config:sandbox:enable is only supported with config:installer:new"
-            )
         # Probe sandbox support now so builds don't fail later inside a subprocess.
         spack.sandbox.get_sandbox()
 
-    # The old installer dumps the full log from the command layer instead.
-    if use_old_installer:
-        from spack.old_installer import PackageInstaller  # type: ignore
-
-        extra = {}
-    else:
-        from spack.installer import PackageInstaller  # type: ignore
-
-        extra = {"show_log_on_error": show_log_on_error}
+    from spack.installer import PackageInstaller
 
     return PackageInstaller(
         packages,
@@ -83,9 +68,9 @@ def create_installer(
         tests=tests,
         unsigned=unsigned,
         verbose=verbose,
+        show_log_on_error=show_log_on_error,
         concurrent_packages=concurrent_packages,
         root_policy=root_policy,
         dependencies_policy=dependencies_policy,
         create_reports=create_reports,
-        **extra,
     )

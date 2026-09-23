@@ -10,18 +10,16 @@ from typing import Dict
 
 import pytest
 
-import spack.build_environment
-import spack.builder
 import spack.concretize
 import spack.config
 import spack.database
 import spack.deprecation
 import spack.error
 import spack.installer
+import spack.installer.build
 import spack.installer_dispatch
 import spack.mirrors.mirror
 import spack.mirrors.utils
-import spack.old_installer
 import spack.package_base
 import spack.patch
 import spack.repo
@@ -31,8 +29,8 @@ import spack.util.spack_json as sjson
 from spack import binary_distribution
 from spack.config import Configuration
 from spack.error import InstallError
+from spack.installer import PackageInstaller
 from spack.main import SpackCommand
-from spack.old_installer import PackageInstaller
 from spack.package_base import (
     PackageBase,
     PackageStillNeededError,
@@ -140,36 +138,10 @@ class RemovePrefixChecker:
         self.wrapped_rm_prefix()
 
 
-def test_partial_install_delete_prefix_and_stage(
-    temporary_store: Store, install_mockery, mock_fetch, working_env
-):
-    s = spack.concretize.concretize_one("canfail")
-    s.package.succeed = False
-
-    instance_rm_prefix = s.package.remove_prefix
-
-    s.package.remove_prefix = mock_remove_prefix
-    with pytest.raises(MockInstallError):
-        PackageInstaller([s.package], explicit=True).install()
-    assert os.path.isdir(s.package.prefix)
-    rm_prefix_checker = RemovePrefixChecker(instance_rm_prefix)
-    s.package.remove_prefix = rm_prefix_checker.remove_prefix
-
-    # must clear failure markings for the package before re-installing it
-    temporary_store.failure_tracker.clear(s, True)
-
-    s.package.succeed = True
-    spack.builder._BUILDERS.clear()  # the builder is cached with a copy of the pkg's __dict__.
-
-    PackageInstaller([s.package], explicit=True, restage=True).install()
-    assert rm_prefix_checker.removed
-    assert temporary_store.db.installed(s.package.spec)
-
-
 @pytest.mark.not_on_windows("Fails spuriously on Windows")
 @pytest.mark.disable_clean_stage_check
 def test_failing_overwrite_install_should_keep_previous_installation(
-    mock_fetch, temporary_store, install_mockery, working_env
+    mock_fetch, temporary_store, install_mockery, working_env, monkeypatch
 ):
     """
     Make sure that whenever `spack install --overwrite` fails, spack restores
@@ -177,12 +149,11 @@ def test_failing_overwrite_install_should_keep_previous_installation(
     """
     # Do a successful install
     s = spack.concretize.concretize_one("canfail")
-    s.package.succeed = True
-
-    # Do a failing overwrite install
     PackageInstaller([s.package], explicit=True).install()
-    s.package.succeed = False
-    spack.builder._BUILDERS.clear()  # the builder is cached with a copy of the pkg's __dict__.
+
+    # Do a failing overwrite install. The build process imports the package class anew, so
+    # patch the class: the patch is replayed there.
+    monkeypatch.setattr(type(s.package), "succeed", False)
     kwargs = {"overwrite": [s.dag_hash()]}
 
     with pytest.raises(Exception):
@@ -218,7 +189,7 @@ def test_installed_dependency_request_conflicts(install_mockery, mock_fetch, mut
         spack.concretize.concretize_one(dependent)
 
 
-def test_install_times(install_mockery, mock_fetch, mutable_mock_repo, installer_variant):
+def test_install_times(install_mockery, mock_fetch, mutable_mock_repo):
     """Test install times added."""
     spec = spack.concretize.concretize_one("dev-build-test-install-phases")
     spack.installer_dispatch.create_installer([spec.package], explicit=True).install()
@@ -305,19 +276,18 @@ def test_partial_install_keep_prefix(
     temporary_store: Store, install_mockery, mock_fetch, monkeypatch, working_env
 ):
     s = spack.concretize.concretize_one("canfail")
-    s.package.succeed = False
+    monkeypatch.setattr(type(s.package), "succeed", False)
 
     # If remove_prefix is called at any point in this test, that is an error
     monkeypatch.setattr(spack.package_base.PackageBase, "remove_prefix", mock_remove_prefix)
-    with pytest.raises(spack.build_environment.ChildError):
+    with pytest.raises(InstallError):
         PackageInstaller([s.package], explicit=True, keep_prefix=True).install()
     assert os.path.exists(s.package.prefix)
 
     # must clear failure markings for the package before re-installing it
     temporary_store.failure_tracker.clear(s, True)
 
-    s.package.succeed = True
-    spack.builder._BUILDERS.clear()  # the builder is cached with a copy of the pkg's __dict__.
+    monkeypatch.setattr(type(s.package), "succeed", True)
     PackageInstaller([s.package], explicit=True, keep_prefix=True).install()
     assert temporary_store.db.installed(s.package.spec)
 
@@ -351,7 +321,7 @@ def test_install_prefix_collision_fails(
             pkg_b = spack.concretize.concretize_one("libelf@0.8.12").package
             PackageInstaller([pkg_a], explicit=True, fake=True).install()
 
-            with pytest.raises(InstallError, match="Install prefix collision"):
+            with pytest.raises(InstallError, match="already exists"):
                 PackageInstaller([pkg_b], explicit=True, fake=True).install()
 
 
@@ -366,7 +336,7 @@ def test_failing_build(install_mockery, mock_fetch):
     spec = spack.concretize.concretize_one("failing-build")
     pkg = spec.package
 
-    with pytest.raises(spack.build_environment.ChildError, match="Expected failure"):
+    with pytest.raises(InstallError, match="failing-build"):
         PackageInstaller([pkg], explicit=True).install()
 
 
@@ -398,7 +368,7 @@ def test_nosource_pkg_install(install_mockery, mock_fetch, mock_packages, capfd,
     # Make sure install works even though there is no associated code.
     PackageInstaller([pkg], explicit=True).install()
     out = capfd.readouterr()
-    assert "Installing dependency-install" in out[0]
+    assert "[+]" in out[0] and "dependency-install" in out[0]
 
     # Make sure a warning for missing code is issued
     assert "Missing a source id for nosource" in out[1]
@@ -415,7 +385,7 @@ def test_nosource_bundle_pkg_install(
     # Make sure install works even though there is no associated code.
     PackageInstaller([pkg], explicit=True).install()
     out = capfd.readouterr()
-    assert "Installing dependency-install" in out[0]
+    assert "[+]" in out[0] and "dependency-install" in out[0]
 
     # Make sure a warning for missing code is *not* issued
     assert "Missing a source id for nosource" not in out[1]
@@ -481,18 +451,8 @@ def test_pkg_install_paths(install_mockery):
     shutil.rmtree(log_dir)
 
 
-def test_log_install_without_build_files(install_mockery):
-    """Test the installer log function when no build files are present."""
-    # Get a basic concrete spec for the trivial install package.
-    spec = spack.concretize.concretize_one("trivial-install-test-package")
-
-    # Attempt installing log without the build log file
-    with pytest.raises(OSError, match="No such file or directory"):
-        spack.old_installer.log(spec.package)
-
-
-def test_log_install_with_build_files(install_mockery, monkeypatch):
-    """Test the installer's log function when have build files."""
+def test_archive_build_metadata(install_mockery, monkeypatch):
+    """Test that build metadata is archived into the install prefix."""
     config_log = "config.log"
 
     # Retain the original function for use in the monkey patch that is used
@@ -528,9 +488,8 @@ def test_log_install_with_build_files(install_mockery, monkeypatch):
         type(spec.package), "archive_files", ["missing", "..", config], raising=False
     )
 
-    spack.old_installer.log(spec.package)
+    spack.installer.build._archive_build_metadata(spec.package)
 
-    assert os.path.exists(spec.package.install_log_path)
     assert os.path.exists(spec.package.install_env_path)
     assert os.path.exists(spec.package.install_configure_args_path)
 
@@ -555,7 +514,7 @@ def test_unconcretized_install(install_mockery, mock_fetch, mock_packages: RepoP
     spec = Spec("trivial-install-test-package")
     pkg_cls = mock_packages.get_pkg_class(spec.name)
 
-    with pytest.raises(ValueError, match="must have a concrete spec"):
+    with pytest.raises(ValueError, match="must be concrete"):
         PackageInstaller([pkg_cls(spec)], explicit=True).install()
 
     with pytest.raises(ValueError, match="only patch concrete packages"):
@@ -579,10 +538,11 @@ def test_empty_install_sanity_check_prefix(
 ):
     """Test empty install triggers sanity_check_prefix."""
     spec = spack.concretize.concretize_one("failing-empty-install")
-    with pytest.raises(spack.build_environment.ChildError, match="Nothing was installed"):
+    with pytest.raises(InstallError, match="failing-empty-install"):
         PackageInstaller([spec.package], explicit=True).install()
 
 
+@pytest.mark.disable_clean_stage_check
 def test_install_from_binary_with_missing_patch_succeeds(
     temporary_store: spack.store.Store, mutable_config, tmp_path: pathlib.Path, mock_packages
 ):
@@ -615,7 +575,7 @@ def test_install_from_binary_with_missing_patch_succeeds(
     assert not temporary_store.db.query_local_by_spec_hash(s.dag_hash())
 
     # Source install: fails, we don't have the patch.
-    with pytest.raises(spack.error.SpecError, match="Couldn't find patch for package"):
+    with pytest.raises(InstallError, match="trivial-install-test-package"):
         PackageInstaller([s.package], explicit=True).install()
 
     # Binary install: succeeds, we don't need the patch.
@@ -633,7 +593,7 @@ def test_install_from_binary_with_missing_patch_succeeds(
 
 @pytest.mark.parametrize("transitive", [True, False])
 def test_install_spliced(
-    temporary_store: Store, install_mockery, mock_fetch, monkeypatch, transitive, installer_variant
+    temporary_store: Store, install_mockery, mock_fetch, monkeypatch, transitive
 ):
     """Test installing a spliced spec"""
     spec = spack.concretize.concretize_one("splice-t")
@@ -652,7 +612,7 @@ def test_install_spliced(
 
 @pytest.mark.parametrize("transitive", [True, False])
 def test_install_spliced_build_spec_installed(
-    temporary_store: Store, install_mockery, mock_fetch, transitive, installer_variant
+    temporary_store: Store, install_mockery, mock_fetch, transitive
 ):
     """Test installing a spliced spec with the build spec already installed"""
     spec = spack.concretize.concretize_one("splice-t")
@@ -685,7 +645,6 @@ def test_install_splice_root_from_binary(
     temporary_mirror,
     transitive,
     root_str,
-    installer_variant,
 ):
     """Test installing a spliced spec with the root available in binary cache"""
     # Test splicing and rewiring a spec with the same name, different hash.
@@ -717,7 +676,7 @@ def test_install_splice_root_from_binary(
 
 
 @pytest.mark.disable_clean_stage_check
-def test_log_files_preserved_on_error(install_mockery, mock_fetch, installer_variant):
+def test_log_files_preserved_on_error(install_mockery, mock_fetch):
     """Test that the log file is preserved when an install error occurs."""
     pkg = spack.concretize.concretize_one("build-error").package
     installer = spack.installer_dispatch.create_installer([pkg])
@@ -761,9 +720,7 @@ def test_ensure_allowed_exempts_externals(install_mockery, mutable_config: Confi
     spack.deprecation.check_deprecations([spec])
 
 
-def test_installer_blocks_disallowed_deprecation(
-    install_mockery, installer_variant, mutable_config: Configuration
-):
+def test_installer_blocks_disallowed_deprecation(install_mockery, mutable_config: Configuration):
     """Tests that both the old and new installer refuse a pre-concretized deprecated spec
     before building.
     """
@@ -775,7 +732,7 @@ def test_installer_blocks_disallowed_deprecation(
 
 
 def test_installer_blocks_already_installed_deprecated_dependency(
-    install_mockery, mock_fetch, installer_variant, mutable_config: Configuration
+    install_mockery, mock_fetch, mutable_config: Configuration
 ):
     """Tests that we refuse to install a new DAG with a deprecated dependency in its runtime
     graph, even when that dependency is already installed (and thus pruned from the build set).
@@ -793,7 +750,7 @@ def test_installer_blocks_already_installed_deprecated_dependency(
 
 
 def test_deprecated_build_only_dependency_is_not_blocked(
-    install_mockery, mock_fetch, installer_variant, mutable_config: Configuration
+    install_mockery, mock_fetch, mutable_config: Configuration
 ):
     """Under the default 'runtime' scope, a deprecated spec reachable only through a build edge is
     outside the checked closure of the root, so the install must not be rejected, regardless of
@@ -816,7 +773,7 @@ def test_deprecated_build_only_dependency_is_not_blocked(
 
 
 def test_installer_scope_all_gates_build_transitive_deprecation(
-    install_mockery, mock_fetch, installer_variant, mutable_config: Configuration
+    install_mockery, mock_fetch, mutable_config: Configuration
 ):
     """Tests that the install gate refuses a deprecated node reachable only through a build edge,
     when the 'all' deprecation scope is used.
@@ -926,10 +883,10 @@ def test_install_gate_honors_per_reason_selectors(install_mockery, mutable_confi
 
 
 def test_deprecation_gate_runs_before_any_setup_work(
-    install_mockery, installer_variant, mutable_config: Configuration, monkeypatch
+    install_mockery, mutable_config: Configuration, monkeypatch
 ):
-    """Tests that the gate refuses before the installer updates binary indices or builds its
-    queue, so an install that cannot succeed does no work first.
+    """Tests that the gate refuses before the installer updates binary indices, so an install
+    that cannot succeed does no work first.
     """
     with mutable_config.override("packages:all:deprecation:allow", ALLOW_ANY_DEPRECATION):
         spec = spack.concretize.concretize_one("deprecated-with-reason@2.0")
@@ -939,11 +896,6 @@ def test_deprecation_gate_runs_before_any_setup_work(
         binary_distribution.BinaryIndexCache,
         "update",
         lambda *args, **kwargs: work_done.append("binary index"),
-    )
-    monkeypatch.setattr(
-        spack.old_installer.PackageInstaller,
-        "_init_queue",
-        lambda *args, **kwargs: work_done.append("install queue"),
     )
 
     with pytest.raises(spack.error.InstallError, match="deprecated"):

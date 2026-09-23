@@ -39,8 +39,8 @@ from spack.cmd.env import _env_create
 from spack.concretize_ui import SolveKind
 from spack.config import Configuration, substitute_path_variables
 from spack.environment import depfile
+from spack.installer import PackageInstaller
 from spack.main import SpackCommand, SpackCommandError
-from spack.old_installer import PackageInstaller
 from spack.repo import RepoPath
 from spack.spec import Spec
 from spack.stage import stage_prefix
@@ -526,7 +526,7 @@ def test_env_install_all(temporary_store: Store, install_mockery, mock_fetch):
     assert temporary_store.db.installed(spec)
 
 
-def test_env_install_single_spec(install_mockery, mock_fetch, installer_variant):
+def test_env_install_single_spec(install_mockery, mock_fetch):
     env("create", "test")
     install = SpackCommand("install")
 
@@ -589,9 +589,7 @@ def test_env_install_include_concrete_env(
         assert mpileaks["libelf"].dag_hash() in test2_user_spec_hashes
 
 
-def test_env_roots_marked_explicit(
-    temporary_store: Store, install_mockery, mock_fetch, installer_variant
-):
+def test_env_roots_marked_explicit(temporary_store: Store, install_mockery, mock_fetch):
     install = SpackCommand("install")
     install("--fake", "dependent-install")
 
@@ -694,8 +692,9 @@ spack:
 
     # Ensure both packages reach install phase processing and are installed
     out = str(out)
-    assert "depb: Successfully installed" in out
-    assert "pkg-a: Successfully installed" in out
+    lines = out.splitlines()
+    assert any(ln.startswith("[+]") and " depb@" in ln for ln in lines)
+    assert any(ln.startswith("[+]") and " pkg-a@" in ln for ln in lines)
 
     depb = temporary_store.db.query_one("depb", installed=True)
     assert depb, "Expected depb to be installed"
@@ -3744,8 +3743,8 @@ spack:
         (mpileaks_spec,) = e.all_matching_specs("mpileaks")
         assert not os.path.exists(libelf_spec.package.stage.path)
         assert not os.path.exists(mpileaks_spec.package.stage.path)
+        # DevelopStage.destroy raises, so the install fails if it removes the develop stage
         install("--fake")
-        assert os.path.exists(libelf_spec.package.stage.path)
         assert not os.path.exists(mpileaks_spec.package.stage.path)
 
 

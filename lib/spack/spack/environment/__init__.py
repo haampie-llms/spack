@@ -639,6 +639,7 @@ from .environment import (
     spack_env_var,
     spack_env_view_var,
     update_yaml,
+    views_from_config,
 )
 
 __all__ = [
@@ -679,4 +680,5 @@ __all__ = [
     "spack_env_var",
     "spack_env_view_var",
     "update_yaml",
+    "views_from_config",
 ]

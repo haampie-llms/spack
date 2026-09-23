@@ -546,11 +546,15 @@ def test_find_based_on_commit_sha(mock_git_version_info, monkeypatch):
     assert "git-test-commit" in output
 
 
+def _git_ref_is_1_2(self, ref):
+    return ("1.2", 0)
+
+
 @pytest.mark.usefixtures("install_mockery", "mock_fetch")
 def test_find_based_on_git_ref(monkeypatch):
     """A bare git ref query matches the installed spec built from that ref, whatever Spack
     version was assigned to it, without a repository lookup."""
-    monkeypatch.setattr(GitRefLookup, "get", lambda self, ref: ("1.2", 0))
+    monkeypatch.setattr(GitRefLookup, "get", _git_ref_is_1_2)
     install("--fake", "git-test-commit@git.1.x")
     monkeypatch.setattr(
         GitRefLookup, "get", lambda self, ref: pytest.fail(f"unexpected git ref lookup of '{ref}'")

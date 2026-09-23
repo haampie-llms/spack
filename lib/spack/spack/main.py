@@ -1124,11 +1124,7 @@ def main(argv=None):
             the executable name. If None, parses from sys.argv.
 
     """
-    if (
-        sys.platform == "darwin"
-        and multiprocessing.get_start_method(allow_none=True) is None
-        and spack.config.CONFIG.get("config:installer") == "new"
-    ):
+    if sys.platform == "darwin" and multiprocessing.get_start_method(allow_none=True) is None:
         # Forkserver is significantly faster than spawn. This has to be configured once and early
         # in the process.
         multiprocessing.set_start_method("forkserver")

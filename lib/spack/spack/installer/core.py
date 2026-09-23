@@ -290,7 +290,7 @@ class PackageInstaller:
         else:
             self.capacity = concurrent_packages
 
-        # The reports property is what the old installer has and used as public interface.
+        # The reports property is the public interface used by the reporters.
         if create_reports:
             self.reports = {spec.dag_hash(): spack.report.RequestRecord(spec) for spec in specs}
             self.report_data = ReportData(specs)
