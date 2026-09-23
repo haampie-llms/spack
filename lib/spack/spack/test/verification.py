@@ -12,10 +12,10 @@ import stat
 import pytest
 
 import spack.spec
-import spack.test.harness
 import spack.util.filesystem as fs
 import spack.util.spack_json as sjson
 import spack.verify
+from spack.context import SpackContext
 from spack.util.filesystem import symlink
 
 pytestmark = pytest.mark.not_on_windows("Tests fail on Win")
@@ -127,7 +127,7 @@ def test_check_chmod_manifest_entry(tmp_path: pathlib.Path):
     assert results.errors[file] == ["mode"]
 
 
-def test_check_prefix_manifest(tmp_path: pathlib.Path):
+def test_check_prefix_manifest(tmp_path: pathlib.Path, ctx: SpackContext):
     # Test the verification of an entire prefix and its contents
     prefix_path = tmp_path / "prefix"
     prefix = str(prefix_path)
@@ -155,7 +155,7 @@ def test_check_prefix_manifest(tmp_path: pathlib.Path):
     link = os.path.join(bin_dir, "run")
     symlink(file, link)
 
-    spack.verify.write_manifest(spec, spack.test.harness.current().config)
+    spack.verify.write_manifest(spec, ctx.config)
     results = spack.verify.check_spec_manifest(spec)
     assert not results.has_errors()
 
@@ -173,9 +173,7 @@ def test_check_prefix_manifest(tmp_path: pathlib.Path):
     assert results.errors[malware] == ["added"]
 
     manifest_file = os.path.join(
-        spec.prefix,
-        spack.test.harness.current().store.layout.metadata_dir,
-        spack.test.harness.current().store.layout.manifest_file_name,
+        spec.prefix, ctx.store.layout.metadata_dir, ctx.store.layout.manifest_file_name
     )
     with open(manifest_file, "w", encoding="utf-8") as f:
         f.write("{This) string is not proper json")
@@ -185,12 +183,12 @@ def test_check_prefix_manifest(tmp_path: pathlib.Path):
     assert results.errors[spec.prefix] == ["manifest corrupted"]
 
 
-def test_single_file_verification(tmp_path: pathlib.Path):
+def test_single_file_verification(tmp_path: pathlib.Path, ctx: SpackContext):
     # Test the API to verify a single file, including finding the package
     # to which it belongs
     filedir = tmp_path / "a" / "b" / "c" / "d"
     filepath = filedir / "file"
-    metadir = tmp_path / spack.test.harness.current().store.layout.metadata_dir
+    metadir = tmp_path / ctx.store.layout.metadata_dir
 
     fs.mkdirp(str(filedir))
     fs.mkdirp(str(metadir))
@@ -200,9 +198,7 @@ def test_single_file_verification(tmp_path: pathlib.Path):
 
     data = spack.verify.create_manifest_entry(str(filepath))
 
-    manifest_file = os.path.join(
-        metadir, spack.test.harness.current().store.layout.manifest_file_name
-    )
+    manifest_file = os.path.join(metadir, ctx.store.layout.manifest_file_name)
 
     with open(manifest_file, "w", encoding="utf-8") as f:
         sjson.dump({str(filepath): data}, f)

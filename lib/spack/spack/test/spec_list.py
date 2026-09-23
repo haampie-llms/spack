@@ -6,7 +6,7 @@ import itertools
 import pytest
 
 import spack.concretize
-import spack.test.harness
+from spack.context import SpackContext
 from spack.environment.list import SpecListParser
 from spack.installer import PackageInstaller
 from spack.spec import Spec
@@ -39,9 +39,9 @@ DEFAULT_SPECS = [
 
 
 @pytest.fixture()
-def parser_and_speclist():
+def parser_and_speclist(ctx: SpackContext):
     """Default configuration of parser and user spec list for tests"""
-    parser = SpecListParser(ctx=spack.test.harness.current())
+    parser = SpecListParser(ctx=ctx)
     parser.parse_definitions(
         data=[
             {"gccs": ["%gcc@4.5.0"]},
@@ -90,10 +90,8 @@ class TestSpecList:
             ),
         ],
     )
-    def test_spec_list_constraint_ordering(self, specs, expected):
-        result = SpecListParser(ctx=spack.test.harness.current()).parse_user_specs(
-            name="specs", yaml_list=specs
-        )
+    def test_spec_list_constraint_ordering(self, specs, expected, ctx: SpackContext):
+        result = SpecListParser(ctx=ctx).parse_user_specs(name="specs", yaml_list=specs)
         assert result.specs == [Spec(x) for x in expected]
 
     def test_mock_spec_list(self, parser_and_speclist):
@@ -151,7 +149,7 @@ class TestSpecList:
         assert set(result.specs) == set(expected)
 
     @pytest.mark.regression("16897")
-    def test_spec_list_recursion_specs_as_constraints(self):
+    def test_spec_list_recursion_specs_as_constraints(self, ctx: SpackContext):
         input = ["mpileaks", "$mpis", {"matrix": [["hypre"], ["$%gccs", "$%clangs"]]}, "libelf"]
 
         definitions = [
@@ -160,7 +158,7 @@ class TestSpecList:
             {"mpis": ["zmpi@1.0", "mpich@3.0"]},
         ]
 
-        parser = SpecListParser(ctx=spack.test.harness.current())
+        parser = SpecListParser(ctx=ctx)
         parser.parse_definitions(data=definitions)
         result = parser.parse_user_specs(name="specs", yaml_list=input)
 
@@ -169,8 +167,8 @@ class TestSpecList:
         assert result.specs == DEFAULT_SPECS
 
     @pytest.mark.regression("16841")
-    def test_spec_list_matrix_exclude(self):
-        parser = SpecListParser(ctx=spack.test.harness.current())
+    def test_spec_list_matrix_exclude(self, ctx: SpackContext):
+        parser = SpecListParser(ctx=ctx)
         result = parser.parse_user_specs(
             name="specs",
             yaml_list=[
@@ -182,15 +180,15 @@ class TestSpecList:
         )
         assert len(result.specs) == 1
 
-    def test_spec_list_exclude_with_abstract_hashes(self, install_mockery):
+    def test_spec_list_exclude_with_abstract_hashes(self, install_mockery, ctx: SpackContext):
         # Put mpich in the database so it can be referred to by hash.
-        mpich_1 = spack.concretize.concretize_one("mpich+debug", spack.test.harness.current())
-        mpich_2 = spack.concretize.concretize_one("mpich~debug", spack.test.harness.current())
+        mpich_1 = spack.concretize.concretize_one("mpich+debug", ctx)
+        mpich_2 = spack.concretize.concretize_one("mpich~debug", ctx)
         PackageInstaller([mpich_1.package, mpich_2.package], explicit=True, fake=True).install()
 
         # Create matrix and exclude +debug, which excludes the first mpich after its abstract hash
         # is resolved.
-        parser = SpecListParser(ctx=spack.test.harness.current())
+        parser = SpecListParser(ctx=ctx)
         result = parser.parse_user_specs(
             name="specs",
             yaml_list=[
@@ -210,9 +208,9 @@ class TestSpecList:
         assert result.specs[0] == Spec(f"mpileaks ^callpath ^mpich/{mpich_2.dag_hash(5)}")
 
     @pytest.mark.regression("51703")
-    def test_exclusion_with_conditional_dependencies(self):
+    def test_exclusion_with_conditional_dependencies(self, ctx: SpackContext):
         """Tests that we can exclude some spec using conditional dependencies in the exclusion."""
-        parser = SpecListParser(ctx=spack.test.harness.current())
+        parser = SpecListParser(ctx=ctx)
         result = parser.parse_user_specs(
             name="specs",
             yaml_list=[

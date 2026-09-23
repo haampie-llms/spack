@@ -14,9 +14,9 @@ import spack.error
 import spack.fetch_strategy
 import spack.package_base
 import spack.platforms
-import spack.test.harness
 import spack.util.git
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.fetch_strategy import GitFetchStrategy
 from spack.package_base import PackageBase
 from spack.repo import RepoPath
@@ -93,6 +93,7 @@ def test_fetch(
     mutable_mock_repo: RepoPath,
     git_version,
     monkeypatch,
+    ctx: SpackContext,
 ):
     """Tries to:
 
@@ -113,7 +114,7 @@ def test_fetch(
     monkeypatch.delattr(pkg_class, "git")
 
     # Construct the package under test
-    s = spack.concretize.concretize_one("git-test", spack.test.harness.current())
+    s = spack.concretize.concretize_one("git-test", ctx)
     monkeypatch.setitem(s.package.versions, Version("git"), t.args)
 
     if type_of_test == "commit":
@@ -148,7 +149,12 @@ def test_fetch(
 
 @pytest.mark.disable_clean_stage_check
 def test_fetch_pkg_attr_submodule_init(
-    mock_git_repository, config, mutable_mock_repo: RepoPath, monkeypatch, mock_stage
+    mock_git_repository,
+    config,
+    mutable_mock_repo: RepoPath,
+    monkeypatch,
+    mock_stage,
+    ctx: SpackContext,
 ):
     """In this case the version() args do not contain a 'git' URL, so
     the fetcher must be assembled using the Package-level 'git' attribute.
@@ -163,7 +169,7 @@ def test_fetch_pkg_attr_submodule_init(
     monkeypatch.setattr(pkg_class, "git", mock_git_repository.url)
 
     # Construct the package under test
-    s = spack.concretize.concretize_one("git-test", spack.test.harness.current())
+    s = spack.concretize.concretize_one("git-test", ctx)
     monkeypatch.setitem(s.package.versions, Version("git"), t.args)
 
     s.package.do_stage()
@@ -191,6 +197,7 @@ def test_adhoc_version_submodules(
     monkeypatch,
     mock_stage,
     override_git_repos_cache_path,
+    ctx: SpackContext,
 ):
     t = mock_git_repository.checks["tag"]
     # Construct the package under test
@@ -199,8 +206,7 @@ def test_adhoc_version_submodules(
     monkeypatch.setattr(pkg_class, "git", mock_git_repository.url, raising=False)
 
     spec = spack.concretize.concretize_one(
-        Spec("git-test@{0}".format(mock_git_repository.unversioned_commit)),
-        spack.test.harness.current(),
+        Spec("git-test@{0}".format(mock_git_repository.unversioned_commit)), ctx
     )
     spec.package.do_stage()
     collected_fnames = set()
@@ -212,14 +218,19 @@ def test_adhoc_version_submodules(
 
 @pytest.mark.parametrize("type_of_test", ["branch", "commit"])
 def test_debug_fetch(
-    mock_packages, type_of_test, mock_git_repository, config: Configuration, monkeypatch
+    mock_packages,
+    type_of_test,
+    mock_git_repository,
+    config: Configuration,
+    monkeypatch,
+    ctx: SpackContext,
 ):
     """Fetch the repo with debug enabled."""
     # Retrieve the right test parameters
     t = mock_git_repository.checks[type_of_test]
 
     # Construct the package under test
-    s = spack.concretize.concretize_one("git-test", spack.test.harness.current())
+    s = spack.concretize.concretize_one("git-test", ctx)
     monkeypatch.setitem(s.package.versions, Version("git"), t.args)
 
     # Fetch then ensure source path exists
@@ -261,6 +272,7 @@ def test_get_full_repo(
     config: Configuration,
     mutable_mock_repo,
     monkeypatch,
+    ctx: SpackContext,
 ):
     """Ensure that we can clone a full repository."""
 
@@ -277,7 +289,7 @@ def test_get_full_repo(
 
     spec_string = "git-test"
 
-    s = spack.concretize.concretize_one(spec_string, spack.test.harness.current())
+    s = spack.concretize.concretize_one(spec_string, ctx)
 
     args = copy.copy(t.args)
     args["get_full_repo"] = get_full_repo
@@ -333,7 +345,9 @@ def test_get_full_repo(
 
 @pytest.mark.disable_clean_stage_check
 @pytest.mark.parametrize("submodules", [True, False])
-def test_gitsubmodule(submodules, mock_git_repository, config, mutable_mock_repo, monkeypatch):
+def test_gitsubmodule(
+    submodules, mock_git_repository, config, mutable_mock_repo, monkeypatch, ctx: SpackContext
+):
     """
     Test GitFetchStrategy behavior with submodules. This package
     has a `submodules` property which is always True: when a specific
@@ -346,7 +360,7 @@ def test_gitsubmodule(submodules, mock_git_repository, config, mutable_mock_repo
     t = mock_git_repository.checks[type_of_test]
 
     # Construct the package under test
-    s = spack.concretize.concretize_one("git-test", spack.test.harness.current())
+    s = spack.concretize.concretize_one("git-test", ctx)
     args = copy.copy(t.args)
     args["submodules"] = submodules
     monkeypatch.setitem(s.package.versions, Version("git"), args)
@@ -364,7 +378,9 @@ def test_gitsubmodule(submodules, mock_git_repository, config, mutable_mock_repo
 
 
 @pytest.mark.disable_clean_stage_check
-def test_gitsubmodules_callable(mock_git_repository, config, mutable_mock_repo, monkeypatch):
+def test_gitsubmodules_callable(
+    mock_git_repository, config, mutable_mock_repo, monkeypatch, ctx: SpackContext
+):
     """
     Test GitFetchStrategy behavior with submodules selected after concretization
     """
@@ -378,7 +394,7 @@ def test_gitsubmodules_callable(mock_git_repository, config, mutable_mock_repo, 
     t = mock_git_repository.checks[type_of_test]
 
     # Construct the package under test
-    s = spack.concretize.concretize_one("git-test", spack.test.harness.current())
+    s = spack.concretize.concretize_one("git-test", ctx)
     args = copy.copy(t.args)
     args["submodules"] = submodules_callback
     monkeypatch.setitem(s.package.versions, Version("git"), args)
@@ -391,7 +407,9 @@ def test_gitsubmodules_callable(mock_git_repository, config, mutable_mock_repo, 
 
 
 @pytest.mark.disable_clean_stage_check
-def test_gitsubmodules_delete(mock_git_repository, config, mutable_mock_repo, monkeypatch):
+def test_gitsubmodules_delete(
+    mock_git_repository, config, mutable_mock_repo, monkeypatch, ctx: SpackContext
+):
     """
     Test GitFetchStrategy behavior with submodules_delete
     """
@@ -399,7 +417,7 @@ def test_gitsubmodules_delete(mock_git_repository, config, mutable_mock_repo, mo
     t = mock_git_repository.checks[type_of_test]
 
     # Construct the package under test
-    s = spack.concretize.concretize_one("git-test", spack.test.harness.current())
+    s = spack.concretize.concretize_one("git-test", ctx)
     args = copy.copy(t.args)
     args["submodules"] = True
     args["submodules_delete"] = ["third_party/submodule0", "third_party/submodule1"]
@@ -413,7 +431,9 @@ def test_gitsubmodules_delete(mock_git_repository, config, mutable_mock_repo, mo
 
 
 @pytest.mark.disable_clean_stage_check
-def test_gitsubmodules_falsey(mock_git_repository, config, mutable_mock_repo, monkeypatch):
+def test_gitsubmodules_falsey(
+    mock_git_repository, config, mutable_mock_repo, monkeypatch, ctx: SpackContext
+):
     """
     Test GitFetchStrategy behavior when callable submodules returns Falsey
     """
@@ -426,7 +446,7 @@ def test_gitsubmodules_falsey(mock_git_repository, config, mutable_mock_repo, mo
     t = mock_git_repository.checks[type_of_test]
 
     # Construct the package under test
-    s = spack.concretize.concretize_one("git-test", spack.test.harness.current())
+    s = spack.concretize.concretize_one("git-test", ctx)
     args = copy.copy(t.args)
     args["submodules"] = submodules_callback
     monkeypatch.setitem(s.package.versions, Version("git"), args)
@@ -440,7 +460,7 @@ def test_gitsubmodules_falsey(mock_git_repository, config, mutable_mock_repo, mo
 
 @pytest.mark.disable_clean_stage_check
 def test_git_sparse_paths_partial_clone(
-    mock_git_repository, git_version, config, mutable_mock_repo, monkeypatch
+    mock_git_repository, git_version, config, mutable_mock_repo, monkeypatch, ctx: SpackContext
 ):
     """
     Test partial clone of repository when using git_sparse_paths property
@@ -451,7 +471,7 @@ def test_git_sparse_paths_partial_clone(
     t = mock_git_repository.checks[type_of_test]
     args = copy.copy(t.args)
     args["git_sparse_paths"] = sparse_paths
-    s = spack.concretize.concretize_one("git-test", spack.test.harness.current())
+    s = spack.concretize.concretize_one("git-test", ctx)
     monkeypatch.setitem(s.package.versions, Version("git"), args)
     s.package.do_stage()
     with working_dir(s.package.stage.source_path):
@@ -475,7 +495,7 @@ def test_git_sparse_paths_partial_clone(
 
 @pytest.mark.regression("50699")
 def test_git_sparse_path_have_unique_mirror_projections(
-    git, mock_git_repository, mutable_mock_repo, monkeypatch, mutable_config
+    git, mock_git_repository, mutable_mock_repo, monkeypatch, mutable_config, ctx: SpackContext
 ):
     """
     Confirm two packages with different sparse paths but the same git commit
@@ -487,21 +507,19 @@ def test_git_sparse_path_have_unique_mirror_projections(
         spack.package_base.PackageBase, "git", pathlib.Path(repo_path).as_uri(), raising=False
     )
     gold_commit = git("-C", repo_path, "rev-parse", "many_dirs", output=str).strip()
-    s_a = spack.concretize.concretize_one(
-        f"git-sparse-a commit={gold_commit}", spack.test.harness.current()
-    )
-    s_b = spack.concretize.concretize_one(
-        f"git-sparse-b commit={gold_commit}", spack.test.harness.current()
-    )
+    s_a = spack.concretize.concretize_one(f"git-sparse-a commit={gold_commit}", ctx)
+    s_b = spack.concretize.concretize_one(f"git-sparse-b commit={gold_commit}", ctx)
     assert s_a.package.stage[0].mirror_layout.path != s_b.package.stage[0].mirror_layout.path
 
 
 @pytest.mark.disable_clean_stage_check
-def test_commit_variant_clone(git, config, mutable_mock_repo, mock_git_version_info, monkeypatch):
+def test_commit_variant_clone(
+    git, config, mutable_mock_repo, mock_git_version_info, monkeypatch, ctx: SpackContext
+):
 
     repo_path, filename, commits = mock_git_version_info
     test_commit = commits[-2]
-    s = spack.concretize.concretize_one("git-test", spack.test.harness.current())
+    s = spack.concretize.concretize_one("git-test", ctx)
     args = {"git": pathlib.Path(repo_path).as_uri()}
     monkeypatch.setitem(s.package.versions, Version("git"), args)
     s.variants["commit"] = SingleValuedVariant("commit", test_commit)

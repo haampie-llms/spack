@@ -9,10 +9,10 @@ from spack.vendor.archspec.cpu import TARGETS
 
 import spack.archspec
 import spack.concretize
-import spack.test.harness
 import spack.traverse
 from spack.compilers.config import all_compilers_from
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.externals import (
     DuplicateExternalError,
     ExternalDict,
@@ -468,7 +468,9 @@ def test_external_completion_skips_unavailable_default_values(
 
 
 @pytest.mark.regression("52943")
-def test_external_with_unavailable_default_value_is_usable(mutable_config: Configuration):
+def test_external_with_unavailable_default_value_is_usable(
+    mutable_config: Configuration, ctx: SpackContext
+):
     """Tests that an external can be used when the default value of one of its variants is
     conditional on a version the external doesn't have.
     """
@@ -479,9 +481,7 @@ def test_external_with_unavailable_default_value_is_usable(mutable_config: Confi
         }
     }
     with mutable_config.override("packages", packages_config):
-        s = spack.concretize.concretize_one(
-            "conditional-build-system@1.0", spack.test.harness.current()
-        )
+        s = spack.concretize.concretize_one("conditional-build-system@1.0", ctx)
 
     assert s.external
     assert s.satisfies("build_system=mock_autotools")
@@ -489,7 +489,9 @@ def test_external_with_unavailable_default_value_is_usable(mutable_config: Confi
 
 
 @pytest.mark.regression("52943")
-def test_external_with_value_conditional_on_another_version(mutable_config: Configuration):
+def test_external_with_value_conditional_on_another_version(
+    mutable_config: Configuration, ctx: SpackContext
+):
     """Tests that an external declared with a variant value that is conditional on a version the
     external doesn't have is still used, since the external spec is concrete.
     """
@@ -501,9 +503,7 @@ def test_external_with_value_conditional_on_another_version(mutable_config: Conf
         }
     }
     with mutable_config.override("packages", packages_config):
-        s = spack.concretize.concretize_one(
-            "conditional-build-system@1.0", spack.test.harness.current()
-        )
+        s = spack.concretize.concretize_one("conditional-build-system@1.0", ctx)
 
     assert s.external
     assert s.satisfies("flavor=new")

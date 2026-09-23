@@ -5,7 +5,7 @@
 import pytest
 
 import spack.environment as ev
-import spack.test.harness
+from spack.context import SpackContext
 from spack.main import SpackCommandError
 from spack.test.harness import SpackCommand
 
@@ -13,17 +13,17 @@ deconcretize = SpackCommand("deconcretize")
 
 
 @pytest.fixture(scope="function")
-def test_env(mutable_mock_env_path, mock_packages):
-    ev.create("test", ctx=spack.test.harness.current())
-    with ev.read("test", ctx=spack.test.harness.current()) as e:
+def test_env(mutable_mock_env_path, mock_packages, ctx: SpackContext):
+    ev.create("test", ctx=ctx)
+    with ev.read("test", ctx=ctx) as e:
         e.add("pkg-a@2.0 foobar=bar ^pkg-b@1.0")
         e.add("pkg-a@1.0 foobar=bar ^pkg-b@0.9")
         e.concretize()
         e.write()
 
 
-def test_deconcretize_dep(test_env):
-    with ev.read("test", ctx=spack.test.harness.current()) as e:
+def test_deconcretize_dep(test_env, ctx: SpackContext):
+    with ev.read("test", ctx=ctx) as e:
         deconcretize("-y", "pkg-b@1.0")
         specs = [s for s, _ in e.concretized_specs()]
 
@@ -31,8 +31,8 @@ def test_deconcretize_dep(test_env):
     assert specs[0].satisfies("pkg-a@1.0")
 
 
-def test_deconcretize_all_dep(test_env):
-    with ev.read("test", ctx=spack.test.harness.current()) as e:
+def test_deconcretize_all_dep(test_env, ctx: SpackContext):
+    with ev.read("test", ctx=ctx) as e:
         with pytest.raises(SpackCommandError):
             deconcretize("-y", "pkg-b")
         deconcretize("-y", "--all", "pkg-b")
@@ -41,8 +41,8 @@ def test_deconcretize_all_dep(test_env):
     assert len(specs) == 0
 
 
-def test_deconcretize_root(test_env):
-    with ev.read("test", ctx=spack.test.harness.current()) as e:
+def test_deconcretize_root(test_env, ctx: SpackContext):
+    with ev.read("test", ctx=ctx) as e:
         output = deconcretize("-y", "--root", "pkg-b@1.0")
         assert "No matching specs to deconcretize" in output
         assert len(e.concretized_roots) == 2
@@ -54,8 +54,8 @@ def test_deconcretize_root(test_env):
     assert specs[0].satisfies("pkg-a@1.0")
 
 
-def test_deconcretize_all_root(test_env):
-    with ev.read("test", ctx=spack.test.harness.current()) as e:
+def test_deconcretize_all_root(test_env, ctx: SpackContext):
+    with ev.read("test", ctx=ctx) as e:
         with pytest.raises(SpackCommandError):
             deconcretize("-y", "--root", "pkg-a")
 
@@ -69,8 +69,8 @@ def test_deconcretize_all_root(test_env):
     assert len(specs) == 0
 
 
-def test_deconcretize_all(test_env):
-    with ev.read("test", ctx=spack.test.harness.current()) as e:
+def test_deconcretize_all(test_env, ctx: SpackContext):
+    with ev.read("test", ctx=ctx) as e:
         with pytest.raises(SpackCommandError):
             deconcretize()
         deconcretize("-y", "--all")

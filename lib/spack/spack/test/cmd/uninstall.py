@@ -11,7 +11,7 @@ import spack.cmd.uninstall
 import spack.environment
 import spack.error
 import spack.repo
-import spack.test.harness
+from spack.context import SpackContext
 from spack.database import Database
 from spack.enums import InstallRecordStatus
 from spack.main import SpackCommandError
@@ -43,24 +43,26 @@ def test_multiple_matches(mutable_database):
 
 
 @pytest.mark.db
-def test_uninstall_package_not_in_repo(mutable_database, monkeypatch):
+def test_uninstall_package_not_in_repo(mutable_database, monkeypatch, ctx: SpackContext):
     """Installed specs whose package was removed from the repo can still be uninstalled."""
 
     def find_nothing(*args):
         raise spack.repo.UnknownPackageError("Repo package access is disabled for test")
 
-    monkeypatch.setattr(spack.test.harness.current().repo, "get", find_nothing)
+    monkeypatch.setattr(ctx.repo, "get", find_nothing)
     spec = mutable_database.query_local("libelf")[0]
-    spack.cmd.uninstall.do_uninstall([spec], spack.test.harness.current(), force=True)
+    spack.cmd.uninstall.do_uninstall([spec], ctx, force=True)
     assert not mutable_database.query_local("libelf")
 
 
 @pytest.mark.db
-def test_uninstall_older_readable_db_fails_before_removing(mutable_database, bumped_db_version):
+def test_uninstall_older_readable_db_fails_before_removing(
+    mutable_database, bumped_db_version, ctx: SpackContext
+):
     """Nothing is removed when the database needs an explicit reindex to be modified."""
     spec = mutable_database.query_local("libelf")[0]
     with pytest.raises(spack.error.ExplicitDatabaseUpgradeError):
-        spack.cmd.uninstall.do_uninstall([spec], spack.test.harness.current(), force=True)
+        spack.cmd.uninstall.do_uninstall([spec], ctx, force=True)
     assert os.path.isdir(spec.prefix)
     assert Database(mutable_database.root).query_local("libelf")
 
@@ -73,7 +75,7 @@ def test_installed_dependents(mutable_database):
 
 
 @pytest.mark.db
-def test_correct_installed_dependents(mutable_database: Database):
+def test_correct_installed_dependents(mutable_database: Database, ctx: SpackContext):
     # Test whether we return the right dependents.
 
     # Take callpath from the database
@@ -85,12 +87,12 @@ def test_correct_installed_dependents(mutable_database: Database):
     assert dependents and dependencies
 
     # Uninstall it, so it's missing.
-    spack.repo.attach_packages([callpath], spack.test.harness.current())
+    spack.repo.attach_packages([callpath], ctx)
     callpath.package.do_uninstall(force=True)
 
     # Retrieve all dependent hashes (explicit and implicit, combined)
     explicit_dependents, implicit_dependents = spack.cmd.uninstall.installed_dependents(
-        dependencies, store=spack.test.harness.current().store
+        dependencies, store=ctx.store
     )
     dependents = explicit_dependents + implicit_dependents
     assert dependents
@@ -125,7 +127,7 @@ def test_recursive_uninstall(mutable_database_store: Store):
 
 
 @pytest.mark.db
-def test_uninstall_implicit_dependents_blocks_on_explicit(mutable_database):
+def test_uninstall_implicit_dependents_blocks_on_explicit(mutable_database, ctx: SpackContext):
     """`-r/--implicit-dependents` must refuse when an explicitly installed dependent exists.
 
     In the mock DB, ``mpileaks`` (explicit) transitively depends on ``libelf``, so uninstalling
@@ -135,24 +137,24 @@ def test_uninstall_implicit_dependents_blocks_on_explicit(mutable_database):
         uninstall("-y", "-r", "libelf")
 
     # Nothing was removed.
-    assert len(spack.test.harness.current().store.db.query("libelf", installed=True)) == 1
-    assert len(spack.test.harness.current().store.db.query("mpileaks", installed=True)) == 3
+    assert len(ctx.store.db.query("libelf", installed=True)) == 1
+    assert len(ctx.store.db.query("mpileaks", installed=True)) == 3
 
 
 @pytest.mark.db
-def test_uninstall_implicit_dependents_removes_implicit_chain(mutable_database):
+def test_uninstall_implicit_dependents_removes_implicit_chain(mutable_database, ctx: SpackContext):
     """`-r/--implicit-dependents` recursively uninstalls implicitly installed dependents.
 
     After marking ``mpileaks`` implicit, every dependent of ``libelf`` is implicit, so ``-r``
     should remove the whole chain."""
-    with spack.test.harness.current().store.db.write_transaction():
-        for spec in spack.test.harness.current().store.db.query("mpileaks"):
-            spack.test.harness.current().store.db.mark(spec, "explicit", False)
+    with ctx.store.db.write_transaction():
+        for spec in ctx.store.db.query("mpileaks"):
+            ctx.store.db.mark(spec, "explicit", False)
 
     uninstall("-y", "-r", "libelf")
 
     for name in ("libelf", "callpath", "dyninst", "mpileaks", "libdwarf"):
-        assert len(spack.test.harness.current().store.db.query(name, installed=True)) == 0
+        assert len(ctx.store.db.query(name, installed=True)) == 0
 
 
 @pytest.mark.db
@@ -292,9 +294,11 @@ class TestUninstallFromEnv:
     find = SpackCommand("find")
 
     @pytest.fixture(scope="function")
-    def environment_setup(self, mock_packages, mutable_database, install_mockery):
+    def environment_setup(
+        self, mock_packages, mutable_database, install_mockery, ctx: SpackContext
+    ):
         TestUninstallFromEnv.env("create", "e1")
-        e1 = spack.environment.read("e1", ctx=spack.test.harness.current())
+        e1 = spack.environment.read("e1", ctx=ctx)
         with e1:
             TestUninstallFromEnv.add("diamond-link-left")
             TestUninstallFromEnv.add("diamond-link-bottom")
@@ -302,7 +306,7 @@ class TestUninstallFromEnv:
             install("--fake")
 
         TestUninstallFromEnv.env("create", "e2")
-        e2 = spack.environment.read("e2", ctx=spack.test.harness.current())
+        e2 = spack.environment.read("e2", ctx=ctx)
         with e2:
             TestUninstallFromEnv.add("diamond-link-right")
             TestUninstallFromEnv.add("diamond-link-bottom")
@@ -312,19 +316,21 @@ class TestUninstallFromEnv:
         TestUninstallFromEnv.env("rm", "e1", "-y")
         TestUninstallFromEnv.env("rm", "e2", "-y")
 
-    def test_basic_env_sanity(self, environment_setup):
+    def test_basic_env_sanity(self, environment_setup, ctx: SpackContext):
         for env_name in ["e1", "e2"]:
-            e = spack.environment.read(env_name, ctx=spack.test.harness.current())
+            e = spack.environment.read(env_name, ctx=ctx)
             with e:
                 for _, concretized_spec in e.concretized_specs():
-                    assert spack.test.harness.current().store.db.installed(concretized_spec)
+                    assert ctx.store.db.installed(concretized_spec)
 
-    def test_uninstall_force_dependency_shared_between_envs(self, environment_setup):
+    def test_uninstall_force_dependency_shared_between_envs(
+        self, environment_setup, ctx: SpackContext
+    ):
         """If you "spack uninstall -f --dependents diamond-link-bottom" from
         e1, then all packages should be uninstalled (but not removed) from
         both e1 and e2.
         """
-        e1 = spack.environment.read("e1", ctx=spack.test.harness.current())
+        e1 = spack.environment.read("e1", ctx=ctx)
         with e1:
             uninstall("-f", "-y", "--dependents", "diamond-link-bottom")
 
@@ -335,25 +341,27 @@ class TestUninstallFromEnv:
             )
 
             for _, concretized_spec in e1.concretized_specs():
-                assert not spack.test.harness.current().store.db.installed(concretized_spec)
+                assert not ctx.store.db.installed(concretized_spec)
 
         # Everything in e2 depended on diamond-link-bottom, so should also
         # have been uninstalled. The roots should be unchanged though.
-        e2 = spack.environment.read("e2", ctx=spack.test.harness.current())
+        e2 = spack.environment.read("e2", ctx=ctx)
         with e2:
             assert {root.name for (root, _) in e2.concretized_specs()} == set(
                 ["diamond-link-right", "diamond-link-bottom"]
             )
             for _, concretized_spec in e2.concretized_specs():
-                assert not spack.test.harness.current().store.db.installed(concretized_spec)
+                assert not ctx.store.db.installed(concretized_spec)
 
-    def test_uninstall_remove_dependency_shared_between_envs(self, environment_setup):
+    def test_uninstall_remove_dependency_shared_between_envs(
+        self, environment_setup, ctx: SpackContext
+    ):
         """If you "spack uninstall --dependents --remove diamond-link-bottom" from
         e1, then all packages are removed from e1 (it is now empty);
         diamond-link-left is also uninstalled (since only e1 needs it) but
         diamond-link-bottom is not uninstalled (since e2 needs it).
         """
-        e1 = spack.environment.read("e1", ctx=spack.test.harness.current())
+        e1 = spack.environment.read("e1", ctx=ctx)
         with e1:
             dtdiamondleft = next(
                 concrete
@@ -363,24 +371,26 @@ class TestUninstallFromEnv:
             output = uninstall("-y", "--dependents", "--remove", "diamond-link-bottom")
             assert "The following specs will be removed but not uninstalled" in output
             assert not list(e1.roots())
-            assert not spack.test.harness.current().store.db.installed(dtdiamondleft)
+            assert not ctx.store.db.installed(dtdiamondleft)
 
         # Since -f was not specified, all specs in e2 should still be installed
         # (and e2 should be unchanged)
-        e2 = spack.environment.read("e2", ctx=spack.test.harness.current())
+        e2 = spack.environment.read("e2", ctx=ctx)
         with e2:
             assert {root.name for (root, _) in e2.concretized_specs()} == set(
                 ["diamond-link-right", "diamond-link-bottom"]
             )
             for _, concretized_spec in e2.concretized_specs():
-                assert spack.test.harness.current().store.db.installed(concretized_spec)
+                assert ctx.store.db.installed(concretized_spec)
 
-    def test_uninstall_dependency_shared_between_envs_fail(self, environment_setup):
+    def test_uninstall_dependency_shared_between_envs_fail(
+        self, environment_setup, ctx: SpackContext
+    ):
         """If you "spack uninstall --dependents diamond-link-bottom" from
         e1 (without --remove or -f), then this should fail (this is needed by
         e2).
         """
-        e1 = spack.environment.read("e1", ctx=spack.test.harness.current())
+        e1 = spack.environment.read("e1", ctx=ctx)
         with e1:
             output = uninstall("-y", "--dependents", "diamond-link-bottom", fail_on_error=False)
             assert "There are still dependents." in output
@@ -392,15 +402,17 @@ class TestUninstallFromEnv:
             ["diamond-link-left", "diamond-link-bottom"]
         )
         for _, concretized_spec in e1.concretized_specs():
-            assert spack.test.harness.current().store.db.installed(concretized_spec)
+            assert ctx.store.db.installed(concretized_spec)
 
-    def test_uninstall_force_and_remove_dependency_shared_between_envs(self, environment_setup):
+    def test_uninstall_force_and_remove_dependency_shared_between_envs(
+        self, environment_setup, ctx: SpackContext
+    ):
         """If you "spack uninstall -f --dependents --remove diamond-link-bottom" from
         e1, then all packages should be uninstalled and removed from e1.
         All packages will also be uninstalled from e2, but the roots will
         remain unchanged.
         """
-        e1 = spack.environment.read("e1", ctx=spack.test.harness.current())
+        e1 = spack.environment.read("e1", ctx=ctx)
         with e1:
             dtdiamondleft = next(
                 concrete
@@ -409,23 +421,25 @@ class TestUninstallFromEnv:
             )
             uninstall("-f", "-y", "--dependents", "--remove", "diamond-link-bottom")
             assert not list(e1.roots())
-            assert not spack.test.harness.current().store.db.installed(dtdiamondleft)
+            assert not ctx.store.db.installed(dtdiamondleft)
 
-        e2 = spack.environment.read("e2", ctx=spack.test.harness.current())
+        e2 = spack.environment.read("e2", ctx=ctx)
         with e2:
             assert {root.name for (root, _) in e2.concretized_specs()} == set(
                 ["diamond-link-right", "diamond-link-bottom"]
             )
             for _, concretized_spec in e2.concretized_specs():
-                assert not spack.test.harness.current().store.db.installed(concretized_spec)
+                assert not ctx.store.db.installed(concretized_spec)
 
-    def test_uninstall_keep_dependents_dependency_shared_between_envs(self, environment_setup):
+    def test_uninstall_keep_dependents_dependency_shared_between_envs(
+        self, environment_setup, ctx: SpackContext
+    ):
         """If you "spack uninstall -f --remove diamond-link-bottom" from
         e1, then diamond-link-bottom should be uninstalled, which leaves
         "dangling" references in both environments, since
         diamond-link-left and diamond-link-right both need it.
         """
-        e1 = spack.environment.read("e1", ctx=spack.test.harness.current())
+        e1 = spack.environment.read("e1", ctx=ctx)
         with e1:
             dtdiamondleft = next(
                 concrete
@@ -436,9 +450,9 @@ class TestUninstallFromEnv:
             # diamond-link-bottom was removed from the list of roots (note that
             # it would still be installed since diamond-link-left depends on it)
             assert {x.name for x in e1.roots()} == set(["diamond-link-left"])
-            assert spack.test.harness.current().store.db.installed(dtdiamondleft)
+            assert ctx.store.db.installed(dtdiamondleft)
 
-        e2 = spack.environment.read("e2", ctx=spack.test.harness.current())
+        e2 = spack.environment.read("e2", ctx=ctx)
         with e2:
             assert {root.name for (root, _) in e2.concretized_specs()} == set(
                 ["diamond-link-right", "diamond-link-bottom"]
@@ -448,10 +462,10 @@ class TestUninstallFromEnv:
                 for (_, concrete) in e2.concretized_specs()
                 if concrete.name == "diamond-link-right"
             )
-            assert spack.test.harness.current().store.db.installed(dtdiamondright)
+            assert ctx.store.db.installed(dtdiamondright)
             dtdiamondbottom = next(
                 concrete
                 for (_, concrete) in e2.concretized_specs()
                 if concrete.name == "diamond-link-bottom"
             )
-            assert not spack.test.harness.current().store.db.installed(dtdiamondbottom)
+            assert not ctx.store.db.installed(dtdiamondbottom)

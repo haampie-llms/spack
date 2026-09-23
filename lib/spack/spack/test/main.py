@@ -16,11 +16,11 @@ import spack.error
 import spack.main
 import spack.paths
 import spack.platforms
-import spack.test.harness
 import spack.util.executable as exe
 import spack.util.filesystem as fs
 import spack.util.git
 import spack.util.spack_yaml as syaml
+from spack.context import SpackContext
 
 pytestmark = pytest.mark.not_on_windows(
     "Test functionality supported but tests are failing on Win"
@@ -147,9 +147,11 @@ config:
     assert mutable_config.get("config:dirty") is False
 
 
-def test_add_command_line_scope_env(tmp_path: pathlib.Path, mutable_mock_env_path):
+def test_add_command_line_scope_env(
+    tmp_path: pathlib.Path, mutable_mock_env_path, ctx: SpackContext
+):
     """Test whether --config-scope <env> works, either by name or path."""
-    managed_env = ev.create("example", ctx=spack.test.harness.current()).manifest_path
+    managed_env = ev.create("example", ctx=ctx).manifest_path
 
     with open(managed_env, "w", encoding="utf-8") as f:
         f.write(
@@ -181,9 +183,7 @@ spack:
     assert len(config.scopes) == 2
     assert config.get("config:install_tree:root") == "/tmp/first"
 
-    assert (
-        spack.test.harness.current().environment is None
-    )  # shouldn't cause an environment to be activated
+    assert ctx.environment is None  # shouldn't cause an environment to be activated
 
 
 def test_include_cfg(mock_low_high_config, write_config_file, tmp_path: pathlib.Path):

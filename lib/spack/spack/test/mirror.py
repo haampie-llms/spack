@@ -22,6 +22,7 @@ import spack.test.harness
 import spack.util.url as url_util
 from spack.cmd.common.arguments import mirror_name_or_url
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.spec import Spec
 from spack.util.executable import which
 from spack.util.filesystem import resolve_link_target_relative_to_the_link, working_dir
@@ -173,9 +174,9 @@ def test_invalid_yaml_mirror(invalid_yaml):
     assert invalid_yaml in str(e.value)
 
 
-def test_mirror_archive_paths_no_version(mock_packages, mock_archive):
+def test_mirror_archive_paths_no_version(mock_packages, mock_archive, ctx: SpackContext):
     spec = spack.concretize.concretize_one(
-        Spec("trivial-install-test-package@=nonexistingversion"), spack.test.harness.current()
+        Spec("trivial-install-test-package@=nonexistingversion"), ctx
     )
     fetcher = spack.fetch_strategy.URLFetchStrategy(url=mock_archive.url)
     spack.mirrors.layout.default_mirror_layout(
@@ -183,10 +184,10 @@ def test_mirror_archive_paths_no_version(mock_packages, mock_archive):
     )
 
 
-def test_mirror_with_url_patches(mock_packages, monkeypatch, mutable_config: Configuration):
-    spec = spack.concretize.concretize_one(
-        "patch-several-dependencies", spack.test.harness.current()
-    )
+def test_mirror_with_url_patches(
+    mock_packages, monkeypatch, mutable_config: Configuration, ctx: SpackContext
+):
+    spec = spack.concretize.concretize_one("patch-several-dependencies", ctx)
     files_cached_in_mirror = set()
 
     def record_store(_class, fetcher, relative_dst, cosmetic_path=None):
@@ -209,7 +210,7 @@ def test_mirror_with_url_patches(mock_packages, monkeypatch, mutable_config: Con
         pass
 
     with spack.stage.stage_from_config(
-        "spack-mirror-test", config=mutable_config, client=spack.test.harness.current().network
+        "spack-mirror-test", config=mutable_config, client=ctx.network
     ) as stage:
         mirror_root = os.path.join(stage.path, "test-mirror")
 
@@ -222,9 +223,7 @@ def test_mirror_with_url_patches(mock_packages, monkeypatch, mutable_config: Con
         )
 
         with mutable_config.override("config:checksum", False):
-            spack.cmd.mirror.create(
-                mirror_root, list(spec.traverse()), spack.test.harness.current()
-            )
+            spack.cmd.mirror.create(mirror_root, list(spec.traverse()), ctx)
 
         assert {
             "abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234",
@@ -290,11 +289,9 @@ def test_mirror_layout_make_alias(tmp_path: pathlib.Path):
         (["pkg-a", "brillig"], ["pkg-a@=1.0", "pkg-a@=2.0", "brillig@=1.0.0", "brillig@=2.0.0"]),
     ],
 )
-def test_get_all_versions(specs, expected_specs):
+def test_get_all_versions(specs, expected_specs, ctx: SpackContext):
     specs = [Spec(s) for s in specs]
-    output_list = spack.mirrors.utils.get_all_versions(
-        specs, repo=spack.test.harness.current().repo
-    )
+    output_list = spack.mirrors.utils.get_all_versions(specs, repo=ctx.repo)
     output_list = [str(x) for x in output_list]
     # Compare sets since order is not important
     assert set(output_list) == set(expected_specs)
@@ -443,15 +440,17 @@ def test_mirror_name_or_url_dir_parsing(tmp_path: pathlib.Path):
         (["brillig", "canfail"], ["canfail"], "canfail", False),
     ],
 )
-def test_spec_matches_filters(mock_packages, mutable_config, select, exclude, spec_str, expected):
+def test_spec_matches_filters(
+    mock_packages, mutable_config, select, exclude, spec_str, expected, ctx: SpackContext
+):
     """Test the spec_matches_filters standalone function."""
-    spec = spack.concretize.concretize_one(spec_str, spack.test.harness.current())
+    spec = spack.concretize.concretize_one(spec_str, ctx)
     assert spack.mirrors.mirror._spec_matches_filters(spec, select, exclude) is expected
 
 
-def test_mirror_matches(mock_packages, mutable_config):
+def test_mirror_matches(mock_packages, mutable_config, ctx: SpackContext):
     """Test that Mirror.matches_binary() correctly applies select/exclude filters."""
-    spec = spack.concretize.concretize_one("brillig", spack.test.harness.current())
+    spec = spack.concretize.concretize_one("brillig", ctx)
 
     # No filters: everything matches
     m = spack.mirrors.mirror.Mirror({"url": "https://example.com"})

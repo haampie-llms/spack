@@ -21,8 +21,8 @@ import spack.error
 import spack.main
 import spack.solver.asp
 import spack.spec
-import spack.test.harness
 from spack.config import Configuration
+from spack.context import SpackContext
 
 version_error_messages = [
     "Cannot satisfy",
@@ -60,13 +60,18 @@ external_config = {
     ],
 )
 def test_error_messages(
-    error_messages, config_set, spec, mock_packages, mutable_config: Configuration
+    error_messages,
+    config_set,
+    spec,
+    mock_packages,
+    mutable_config: Configuration,
+    ctx: SpackContext,
 ):
     for path, conf in config_set.items():
         mutable_config.set(path, conf)
 
     with pytest.raises(spack.solver.asp.UnsatisfiableSpecError) as e:
-        _ = spack.concretize.concretize_one(spec, spack.test.harness.current())
+        _ = spack.concretize.concretize_one(spec, ctx)
 
     for em in error_messages:
         assert em in str(e.value), str(e.value)
@@ -75,20 +80,22 @@ def test_error_messages(
 @pytest.mark.parametrize(
     "spec", ["deprecated-versions@1.1.0", "deprecated-client ^deprecated-versions@1.1.0"]
 )
-def test_deprecated_version_error(spec, mock_packages, mutable_config: Configuration):
+def test_deprecated_version_error(
+    spec, mock_packages, mutable_config: Configuration, ctx: SpackContext
+):
     with pytest.raises(spack.solver.asp.UnsatisfiableSpecError, match="deprecated"):
-        _ = spack.concretize.concretize_one(spec, spack.test.harness.current())
+        _ = spack.concretize.concretize_one(spec, ctx)
 
     mutable_config.set("packages:all:deprecation:allow", [{"severity": "critical"}])
-    spack.concretize.concretize_one(spec, spack.test.harness.current())
+    spack.concretize.concretize_one(spec, ctx)
 
 
 @pytest.mark.parametrize(
     "spec", ["deprecated-versions@99.9", "deprecated-client ^deprecated-versions@99.9"]
 )
-def test_nonexistent_version_error(spec, mock_packages, mutable_config):
+def test_nonexistent_version_error(spec, mock_packages, mutable_config, ctx: SpackContext):
     with pytest.raises(spack.solver.asp.InvalidVersionError, match="deprecated-versions@99.9"):
-        _ = spack.concretize.concretize_one(spec, spack.test.harness.current())
+        _ = spack.concretize.concretize_one(spec, ctx)
 
 
 @pytest.mark.parametrize(
@@ -100,14 +107,16 @@ def test_nonexistent_version_error(spec, mock_packages, mutable_config):
         "mpi cflags=-O2",
     ],
 )
-def test_virtual_constrained_beyond_versions_error(spec, mock_packages, mutable_config):
+def test_virtual_constrained_beyond_versions_error(
+    spec, mock_packages, mutable_config, ctx: SpackContext
+):
     # Virtual specs support only version constraints: anything else is reserved, since it could
     # denote a property of the virtual or of its provider.
     with pytest.raises(
         spack.solver.asp.UnsatisfiableSpecError,
         match="the virtual package 'mpi' supports only version constraints",
     ) as e:
-        _ = spack.concretize.concretize_one(spec, spack.test.harness.current())
+        _ = spack.concretize.concretize_one(spec, ctx)
 
     assert "cannot concretize" in str(e.value)
 
@@ -220,23 +229,25 @@ def assert_actionable_error(exc_info, *required_part: str) -> None:
     ],
 )
 def test_input_spec_driven_errors(
-    input_spec: str, expected_parts: List[str], mock_packages, mutable_config
+    input_spec: str, expected_parts: List[str], mock_packages, mutable_config, ctx: SpackContext
 ) -> None:
     """Tests errors caused by a token in the CLI input spec. The message must name both the
     affected package and the specific token (variant, version, flag, dep) the user supplied.
     """
     with pytest.raises(spack.error.SpackError) as exc_info:
-        spack.concretize.concretize_one(input_spec, spack.test.harness.current())
+        spack.concretize.concretize_one(input_spec, ctx)
     assert_actionable_error(exc_info, *expected_parts)
 
 
-def test_target_not_compatible_with_host_error(mock_packages, mutable_config: Configuration):
+def test_target_not_compatible_with_host_error(
+    mock_packages, mutable_config: Configuration, ctx: SpackContext
+):
     """With host-compatible targets only, requesting a target from another family must name the
     spec and say the machine cannot build for it, without a generic "conflicting values" message.
     """
     mutable_config.set("concretizer:targets:host_compatible", True)
     with pytest.raises(spack.error.SpackError) as exc_info:
-        spack.concretize.concretize_one("libelf target=ppc64le", spack.test.harness.current())
+        spack.concretize.concretize_one("libelf target=ppc64le", ctx)
     assert_actionable_error(
         exc_info, "'libelf target=ppc64le' is not compatible with this machine"
     )
@@ -305,6 +316,7 @@ def test_config_driven_errors(
     expected_parts: List[str],
     mock_packages,
     mutable_config: Configuration,
+    ctx: SpackContext,
 ) -> None:
     """Tests errors caused by user configuration, e,g, a setting in packages.yaml. The message must
     identify the package and the config value to fix.
@@ -313,7 +325,7 @@ def test_config_driven_errors(
         mutable_config.set(path, conf)
 
     with pytest.raises(spack.error.SpackError) as exc_info:
-        spack.concretize.concretize_one(input_spec, spack.test.harness.current())
+        spack.concretize.concretize_one(input_spec, ctx)
     assert_actionable_error(exc_info, *expected_parts)
 
 
@@ -334,11 +346,11 @@ def test_config_driven_errors(
     ],
 )
 def test_package_py_driven_errors(
-    input_spec: str, expected_handles: List[str], mock_packages, mutable_config
+    input_spec: str, expected_handles: List[str], mock_packages, mutable_config, ctx: SpackContext
 ) -> None:
     """Tests errors involving directives in package.py recipes. The error message must name the
     package whose directive caused the failure.
     """
     with pytest.raises(spack.error.SpackError) as exc_info:
-        spack.concretize.concretize_one(input_spec, spack.test.harness.current())
+        spack.concretize.concretize_one(input_spec, ctx)
     assert_actionable_error(exc_info, *expected_handles)

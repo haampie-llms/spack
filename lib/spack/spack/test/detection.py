@@ -11,8 +11,8 @@ import spack.detection
 import spack.detection.common
 import spack.detection.path
 import spack.spec
-import spack.test.harness
 from spack.config import Configuration
+from spack.context import SpackContext
 
 
 def test_detection_update_config(mutable_config: Configuration):
@@ -58,7 +58,9 @@ def test_dedupe_paths(tmp_path: pathlib.Path):
     assert spack.detection.path.dedupe_paths([str(y), str(z), str(x)]) == [str(y), str(x)]
 
 
-def test_detect_specs_deduplicates_across_prefixes(tmp_path, monkeypatch, mock_packages):
+def test_detect_specs_deduplicates_across_prefixes(
+    tmp_path, monkeypatch, mock_packages, ctx: SpackContext
+):
     """Tests that the same spec detected at two different prefixes should yield only one result.
 
     Returning both causes duplicate externals in packages.yaml and non-deterministic hashes
@@ -85,10 +87,7 @@ def test_detect_specs_deduplicates_across_prefixes(tmp_path, monkeypatch, mock_p
 
     finder = spack.detection.path.ExecutablesFinder()
     detected = finder.detect_specs(
-        pkg=cmake_cls,
-        paths=[str(exe_a), str(exe_b)],
-        repo_path=mock_packages,
-        config=spack.test.harness.current().config,
+        pkg=cmake_cls, paths=[str(exe_a), str(exe_b)], repo_path=mock_packages, config=ctx.config
     )
 
     # Both prefixes produce cmake@3.17.1; only the first should be kept.
@@ -150,7 +149,9 @@ def test_library_prefix_cuts_at_bin_on_windows(tmp_path: pathlib.Path):
     assert spack.detection.common.library_prefix(str(nested_win_bin)) == expected_win_bin
 
 
-def test_detect_specs_validates_variants_with_injected_repo(tmp_path, monkeypatch, mock_packages):
+def test_detect_specs_validates_variants_with_injected_repo(
+    tmp_path, monkeypatch, mock_packages, ctx: SpackContext
+):
     """Tests that the variants of the specs returned by determine_spec_details are validated
     against the repository passed to detect_specs, and that invalid specs are discarded.
     """
@@ -174,7 +175,7 @@ def test_detect_specs_validates_variants_with_injected_repo(tmp_path, monkeypatc
         pkg=gcc_cls,
         paths=[str(p / "bin" / "gcc") for p in prefixes.values()],
         repo_path=mock_packages,
-        config=spack.test.harness.current().config,
+        config=ctx.config,
     )
 
     assert len(detected) == 1

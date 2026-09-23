@@ -21,6 +21,7 @@ import spack.util.git
 import spack.util.url as url_util
 import spack.version
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.main import SpackCommandError
 from spack.mirrors.utils import MirrorStatsForAllSpecs, MirrorStatsForOneSpec
 from spack.test.harness import SpackCommand
@@ -53,19 +54,20 @@ def test_mirror_from_env(
     mock_packages,
     mock_fetch,
     mutable_config: Configuration,
+    ctx: SpackContext,
 ):
     mirror_dir = str(tmp_path / "mirror")
     env_name = "test"
 
     env("create", env_name)
-    with ev.read(env_name, ctx=spack.test.harness.current()):
+    with ev.read(env_name, ctx=ctx):
         add("trivial-install-test-package")
         add("git-test")
         concretize()
         with mutable_config.override("config:checksum", False):
             mirror("create", "-d", mirror_dir, "--all")
 
-    e = ev.read(env_name, ctx=spack.test.harness.current())
+    e = ev.read(env_name, ctx=ctx)
     assert set(os.listdir(mirror_dir)) == set([s.name for s in e.user_specs])
     for spec in e.specs_by_hash.values():
         mirror_res = os.listdir(os.path.join(mirror_dir, spec.name))
@@ -103,24 +105,29 @@ def test_mirror_cli_parallel_args(
 
 
 def test_mirror_from_env_parallel(
-    tmp_path, mock_packages, mock_fetch, mutable_mock_env_path, mutable_config: Configuration
+    tmp_path,
+    mock_packages,
+    mock_fetch,
+    mutable_mock_env_path,
+    mutable_config: Configuration,
+    ctx: SpackContext,
 ):
     """Directly test create_mirror_for_all_specs with parallel option"""
     mirror_dir = str(tmp_path / "mirror")
     env_name = "test-parallel"
 
     env("create", env_name)
-    with ev.read(env_name, ctx=spack.test.harness.current()):
+    with ev.read(env_name, ctx=ctx):
         add("trivial-install-test-package")
         add("git-test")
         concretize()
 
-    e = ev.read(env_name, ctx=spack.test.harness.current())
+    e = ev.read(env_name, ctx=ctx)
     specs = list(e.specs_by_hash.values())
 
     with mutable_config.override("config:checksum", False):
         mirror_stats = spack.cmd.mirror.create_mirror_for_all_specs(
-            specs, mirror_dir, False, workers=2, ctx=spack.test.harness.current()
+            specs, mirror_dir, False, workers=2, ctx=ctx
         )
 
     assert len(mirror_stats.errors) == 0
@@ -188,18 +195,19 @@ def test_mirror_spec_from_env(
     mock_packages,
     mock_fetch,
     mutable_config: Configuration,
+    ctx: SpackContext,
 ):
     mirror_dir = str(tmp_path / "mirror-B")
     env_name = "test"
 
     env("create", env_name)
-    with ev.read(env_name, ctx=spack.test.harness.current()):
+    with ev.read(env_name, ctx=ctx):
         add("simple-standalone-test@0.9")
         concretize()
         with mutable_config.override("config:checksum", False):
             mirror("create", "-d", mirror_dir, "simple-standalone-test")
 
-    e = ev.read(env_name, ctx=spack.test.harness.current())
+    e = ev.read(env_name, ctx=ctx)
     assert set(os.listdir(mirror_dir)) == set([s.name for s in e.user_specs])
     spec = e.concrete_roots()[0]
     mirror_res = os.listdir(os.path.join(mirror_dir, spec.name))
@@ -208,10 +216,8 @@ def test_mirror_spec_from_env(
 
 
 @pytest.fixture
-def source_for_pkg_with_hash(mock_packages, tmp_path: pathlib.Path):
-    s = spack.concretize.concretize_one(
-        "trivial-pkg-with-valid-hash", spack.test.harness.current()
-    )
+def source_for_pkg_with_hash(mock_packages, tmp_path: pathlib.Path, ctx: SpackContext):
+    s = spack.concretize.concretize_one("trivial-pkg-with-valid-hash", ctx)
     local_url_basename = os.path.basename(s.package.url)
     local_path = tmp_path / local_url_basename
     local_path.write_text(s.package.hashed_content, encoding="utf-8")
@@ -220,17 +226,19 @@ def source_for_pkg_with_hash(mock_packages, tmp_path: pathlib.Path):
 
 
 def test_mirror_skip_unstable(
-    tmp_path_factory: pytest.TempPathFactory, mock_packages, config, source_for_pkg_with_hash
+    tmp_path_factory: pytest.TempPathFactory,
+    mock_packages,
+    config,
+    source_for_pkg_with_hash,
+    ctx: SpackContext,
 ):
     mirror_dir = str(tmp_path_factory.mktemp("mirror-dir"))
 
     specs = [
-        spack.concretize.concretize_one(x, spack.test.harness.current())
+        spack.concretize.concretize_one(x, ctx)
         for x in ["git-test", "trivial-pkg-with-valid-hash"]
     ]
-    spack.cmd.mirror.create(
-        mirror_dir, specs, spack.test.harness.current(), skip_unstable_versions=True
-    )
+    spack.cmd.mirror.create(mirror_dir, specs, ctx, skip_unstable_versions=True)
 
     assert set(os.listdir(mirror_dir)) - set(["_source-cache"]) == set(
         ["trivial-pkg-with-valid-hash"]
@@ -261,14 +269,14 @@ class MockMirrorArgs:
         self.directory = directory
 
 
-def test_exclude_specs(mock_packages, config):
+def test_exclude_specs(mock_packages, config, ctx: SpackContext):
     args = MockMirrorArgs(
         specs=["mpich"], versions_per_spec="all", exclude_specs="mpich@3.0.1:3.0.2 mpich@1.0"
     )
 
-    mirror_specs = spack.cmd.mirror._specs_to_mirror(args, spack.test.harness.current())
+    mirror_specs = spack.cmd.mirror._specs_to_mirror(args, ctx)
     expected_include = {
-        spack.concretize.concretize_one(x, spack.test.harness.current())
+        spack.concretize.concretize_one(x, ctx)
         for x in ["mpich@3.0.3", "mpich@3.0.4", "mpich@3.0"]
     }
     expected_exclude = {spack.spec.Spec(x) for x in ["mpich@3.0.1", "mpich@3.0.2", "mpich@1.0"]}
@@ -276,7 +284,7 @@ def test_exclude_specs(mock_packages, config):
     assert not any(spec.satisfies(y) for spec in mirror_specs for y in expected_exclude)
 
 
-def test_exclude_specs_public_mirror(mock_packages, config):
+def test_exclude_specs_public_mirror(mock_packages, config, ctx: SpackContext):
     args = MockMirrorArgs(
         specs=["no-redistribute-dependent"],
         versions_per_spec="all",
@@ -284,12 +292,12 @@ def test_exclude_specs_public_mirror(mock_packages, config):
         private=False,
     )
 
-    mirror_specs = spack.cmd.mirror._specs_to_mirror(args, spack.test.harness.current())
+    mirror_specs = spack.cmd.mirror._specs_to_mirror(args, ctx)
     assert not any(s.name == "no-redistribute" for s in mirror_specs)
     assert any(s.name == "no-redistribute-dependent" for s in mirror_specs)
 
 
-def test_exclude_file(mock_packages, tmp_path: pathlib.Path, config):
+def test_exclude_file(mock_packages, tmp_path: pathlib.Path, config, ctx: SpackContext):
     exclude_path = tmp_path / "test-exclude.txt"
     exclude_path.write_text(
         """\
@@ -301,9 +309,9 @@ mpich@1.0
 
     args = MockMirrorArgs(specs=["mpich"], versions_per_spec="all", exclude_file=str(exclude_path))
 
-    mirror_specs = spack.cmd.mirror._specs_to_mirror(args, spack.test.harness.current())
+    mirror_specs = spack.cmd.mirror._specs_to_mirror(args, ctx)
     expected_include = {
-        spack.concretize.concretize_one(x, spack.test.harness.current())
+        spack.concretize.concretize_one(x, ctx)
         for x in ["mpich@3.0.3", "mpich@3.0.4", "mpich@3.0"]
     }
     expected_exclude = {spack.spec.Spec(x) for x in ["mpich@3.0.1", "mpich@3.0.2", "mpich@1.0"]}
@@ -568,9 +576,9 @@ def test_mirror_destroy(
 @pytest.mark.usefixtures("mock_packages")
 class TestMirrorCreate:
     @pytest.mark.regression("31736", "31985")
-    def test_all_specs_with_all_versions_dont_concretize(self):
+    def test_all_specs_with_all_versions_dont_concretize(self, ctx: SpackContext):
         args = MockMirrorArgs(all=True, exclude_file=None, exclude_specs=None)
-        mirror_specs = spack.cmd.mirror._specs_to_mirror(args, spack.test.harness.current())
+        mirror_specs = spack.cmd.mirror._specs_to_mirror(args, ctx)
         assert all(not s.concrete for s in mirror_specs)
 
     @pytest.mark.parametrize(
@@ -619,27 +627,21 @@ class TestMirrorCreate:
             ),
         ],
     )
-    def test_exclude_specs_from_user(self, cli_args, not_expected, config):
-        mirror_specs = spack.cmd.mirror._specs_to_mirror(
-            MockMirrorArgs(**cli_args), spack.test.harness.current()
-        )
+    def test_exclude_specs_from_user(self, cli_args, not_expected, config, ctx: SpackContext):
+        mirror_specs = spack.cmd.mirror._specs_to_mirror(MockMirrorArgs(**cli_args), ctx)
         assert not any(s.satisfies(y) for s in mirror_specs for y in not_expected)
 
     @pytest.mark.parametrize("abstract_specs", [("bowtie", "callpath")])
     def test_specs_from_cli_are_the_same_as_from_file(
-        self, abstract_specs, config, tmp_path: pathlib.Path
+        self, abstract_specs, config, tmp_path: pathlib.Path, ctx: SpackContext
     ):
         args = MockMirrorArgs(specs=" ".join(abstract_specs))
-        specs_from_cli = spack.cmd.mirror.concrete_specs_from_user(
-            args, spack.test.harness.current()
-        )
+        specs_from_cli = spack.cmd.mirror.concrete_specs_from_user(args, ctx)
 
         input_file = tmp_path / "input.txt"
         input_file.write_text("\n".join(abstract_specs))
         args = MockMirrorArgs(file=str(input_file))
-        specs_from_file = spack.cmd.mirror.concrete_specs_from_user(
-            args, spack.test.harness.current()
-        )
+        specs_from_file = spack.cmd.mirror.concrete_specs_from_user(args, ctx)
 
         assert specs_from_cli == specs_from_file
 
@@ -647,9 +649,11 @@ class TestMirrorCreate:
         "input_specs,nversions",
         [("callpath", 1), ("mpich", 4), ("callpath mpich", 3), ("callpath mpich", "all")],
     )
-    def test_versions_per_spec_produces_concrete_specs(self, input_specs, nversions, config):
+    def test_versions_per_spec_produces_concrete_specs(
+        self, input_specs, nversions, config, ctx: SpackContext
+    ):
         args = MockMirrorArgs(specs=input_specs, versions_per_spec=nversions)
-        specs = spack.cmd.mirror.concrete_specs_from_user(args, spack.test.harness.current())
+        specs = spack.cmd.mirror.concrete_specs_from_user(args, ctx)
         assert all(s.concrete for s in specs)
 
 
@@ -760,6 +764,7 @@ def test_git_provenance_url_fails_mirror_resolves_commit(
     tmp_path: pathlib.Path,
     mutable_config,
     mirror_knows_commit,
+    ctx: SpackContext,
 ):
     """Extract git commit from a source mirror since other methods failed"""
     repo_path = mock_git_repository.path
@@ -777,7 +782,7 @@ def test_git_provenance_url_fails_mirror_resolves_commit(
         mirror("create", "-d", mirror_path, "git-test-commit@main")
     mirror("add", "--type", "source", "test-mirror", mirror_path)
 
-    spec = spack.concretize.concretize_one("git-test-commit@main", spack.test.harness.current())
+    spec = spack.concretize.concretize_one("git-test-commit@main", ctx)
 
     assert spec.package.fetcher.source_id() == gold_commit
     assert "commit" in spec.variants
@@ -787,7 +792,13 @@ def test_git_provenance_url_fails_mirror_resolves_commit(
 @pytest.mark.require_provenance
 @pytest.mark.disable_clean_stage_check
 def test_git_provenance_relative_to_mirror(
-    git, mock_git_version_info, mock_packages, monkeypatch, tmp_path: pathlib.Path, mutable_config
+    git,
+    mock_git_version_info,
+    mock_packages,
+    monkeypatch,
+    tmp_path: pathlib.Path,
+    mutable_config,
+    ctx: SpackContext,
 ):
     """Integration test to evaluate how commit resolution should behave with a mirror
 
@@ -811,27 +822,23 @@ def test_git_provenance_relative_to_mirror(
     git("-C", repo_path, "commit", "--no-gpg-sign", "--allow-empty", "-m", "bump sha")
     head_commit = git("-C", repo_path, "rev-parse", "main", output=str).strip()
 
-    spec_mirror = spack.concretize.concretize_one(
-        "git-test-commit@main", spack.test.harness.current()
-    )
+    spec_mirror = spack.concretize.concretize_one("git-test-commit@main", ctx)
     assert spec_mirror.variants["commit"].value == mirror_commit
 
-    spec_head = spack.concretize.concretize_one(
-        f"git-test-commit@main commit={head_commit}", spack.test.harness.current()
-    )
+    spec_head = spack.concretize.concretize_one(f"git-test-commit@main commit={head_commit}", ctx)
     assert spec_head.variants["commit"].value == head_commit
 
 
 @pytest.mark.usefixtures("mock_packages")
-def test_mirror_skip_placeholder_pkg(tmp_path: pathlib.Path):
+def test_mirror_skip_placeholder_pkg(tmp_path: pathlib.Path, ctx: SpackContext):
     """Test a placeholder package which should skip during mirror all"""
     spec = spack.spec.Spec("placeholder@1.5")
-    pkg_cls = spack.test.harness.current().repo.get_pkg_class(spec.name)
+    pkg_cls = ctx.repo.get_pkg_class(spec.name)
     pkg_obj = pkg_cls(spec)
     mirror_cache = spack.mirrors.utils.get_mirror_cache(str(tmp_path))
     mirror_stats = spack.mirrors.utils.MirrorStatsForOneSpec(spec)
     result = spack.mirrors.utils.create_mirror_from_package_object(
-        pkg_obj, mirror_cache, mirror_stats, config=spack.test.harness.current().config
+        pkg_obj, mirror_cache, mirror_stats, config=ctx.config
     )
     assert result is False
     assert not mirror_stats.errors

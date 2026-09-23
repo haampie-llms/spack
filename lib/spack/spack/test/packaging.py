@@ -23,11 +23,11 @@ import spack.error
 import spack.fetch_strategy
 import spack.package_base
 import spack.stage
-import spack.test.harness
 import spack.util.gpg
 import spack.util.url as url_util
 from spack.cmd import buildcache
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.installer import PackageInstaller
 from spack.paths import mock_gpg_keys_path
 from spack.relocate import _macho_find_paths, relocate_links, relocate_text
@@ -38,11 +38,9 @@ pytestmark = pytest.mark.not_on_windows("does not run on windows")
 
 
 @pytest.mark.usefixtures("install_mockery", "mock_gnupghome", "mock_fetch")
-def test_buildcache(tmp_path: pathlib.Path, mutable_config: Configuration):
+def test_buildcache(tmp_path: pathlib.Path, mutable_config: Configuration, ctx: SpackContext):
     # Install a test package
-    spec = spack.concretize.concretize_one(
-        "trivial-install-test-package", spack.test.harness.current()
-    )
+    spec = spack.concretize.concretize_one("trivial-install-test-package", ctx)
     PackageInstaller([spec.package], explicit=True).install()
     pkghash = "/" + str(spec.dag_hash(7))
 
@@ -56,7 +54,7 @@ def test_buildcache(tmp_path: pathlib.Path, mutable_config: Configuration):
 
     # Create the build cache and put it directly into the mirror
     mirror_path = str(tmp_path / "test-mirror")
-    spack.cmd.mirror.create(mirror_path, specs=[], ctx=spack.test.harness.current())
+    spack.cmd.mirror.create(mirror_path, specs=[], ctx=ctx)
 
     # register mirror with spack config
     mirrors = {"spack-mirror-test": url_util.path_to_file_url(mirror_path)}
@@ -67,7 +65,7 @@ def test_buildcache(tmp_path: pathlib.Path, mutable_config: Configuration):
         name="build_cache",
         keep=True,
         config=mutable_config,
-        client=spack.test.harness.current().network,
+        client=ctx.network,
     ):
         parser = argparse.ArgumentParser()
         buildcache.setup_parser(parser)
@@ -75,7 +73,7 @@ def test_buildcache(tmp_path: pathlib.Path, mutable_config: Configuration):
         create_args = ["create", "-f", "--rebuild-index", mirror_path, pkghash]
         # Create a private key to sign package with if gpg2 available
         spack.util.gpg.create(
-            spack.test.harness.current().gpg,
+            ctx.gpg,
             name="test key 1",
             expires="0",
             email="spack@googlegroups.com",
@@ -83,9 +81,9 @@ def test_buildcache(tmp_path: pathlib.Path, mutable_config: Configuration):
         )
 
         args = parser.parse_args(create_args)
-        buildcache.buildcache(parser, args, spack.test.harness.current())
+        buildcache.buildcache(parser, args, ctx)
         # trigger overwrite warning
-        buildcache.buildcache(parser, args, spack.test.harness.current())
+        buildcache.buildcache(parser, args, ctx)
 
         # Uninstall the package
         spec.package.do_uninstall(force=True)
@@ -93,7 +91,7 @@ def test_buildcache(tmp_path: pathlib.Path, mutable_config: Configuration):
         install_args = ["install", "-f", pkghash]
         args = parser.parse_args(install_args)
         # Test install
-        buildcache.buildcache(parser, args, spack.test.harness.current())
+        buildcache.buildcache(parser, args, ctx)
 
         files = os.listdir(spec.prefix)
 
@@ -106,28 +104,28 @@ def test_buildcache(tmp_path: pathlib.Path, mutable_config: Configuration):
         assert buildinfo["relocate_links"] == ["link_to_dummy.txt"]
 
         args = parser.parse_args(["keys"])
-        buildcache.buildcache(parser, args, spack.test.harness.current())
+        buildcache.buildcache(parser, args, ctx)
 
         args = parser.parse_args(["list"])
-        buildcache.buildcache(parser, args, spack.test.harness.current())
+        buildcache.buildcache(parser, args, ctx)
 
         args = parser.parse_args(["list"])
-        buildcache.buildcache(parser, args, spack.test.harness.current())
+        buildcache.buildcache(parser, args, ctx)
 
         args = parser.parse_args(["list", "trivial"])
-        buildcache.buildcache(parser, args, spack.test.harness.current())
+        buildcache.buildcache(parser, args, ctx)
 
         # Copy a key to the mirror to have something to download
         shutil.copyfile(mock_gpg_keys_path + "/external.key", mirror_path + "/external.key")
 
         args = parser.parse_args(["keys"])
-        buildcache.buildcache(parser, args, spack.test.harness.current())
+        buildcache.buildcache(parser, args, ctx)
 
         args = parser.parse_args(["keys", "-f"])
-        buildcache.buildcache(parser, args, spack.test.harness.current())
+        buildcache.buildcache(parser, args, ctx)
 
         args = parser.parse_args(["keys", "-y", "-i", "-t"])
-        buildcache.buildcache(parser, args, spack.test.harness.current())
+        buildcache.buildcache(parser, args, ctx)
 
 
 def test_relocate_text(tmp_path: pathlib.Path):
@@ -405,7 +403,9 @@ def mock_download(monkeypatch):
     "manual,instr", [(False, False), (False, True), (True, False), (True, True)]
 )
 @pytest.mark.disable_clean_stage_check
-def test_manual_download(mock_download, config, mock_packages, monkeypatch, manual, instr):
+def test_manual_download(
+    mock_download, config, mock_packages, monkeypatch, manual, instr, ctx: SpackContext
+):
     """
     Ensure expected fetcher fail message based on manual download and instr.
     """
@@ -414,7 +414,7 @@ def test_manual_download(mock_download, config, mock_packages, monkeypatch, manu
     def _instr(pkg):
         return f"Download instructions for {pkg.spec.name}"
 
-    spec = spack.concretize.concretize_one("pkg-a", spack.test.harness.current())
+    spec = spack.concretize.concretize_one("pkg-a", ctx)
     spec.package.manual_download = manual
     if instr:
         monkeypatch.setattr(spack.package_base.PackageBase, "download_instr", _instr)
@@ -436,16 +436,20 @@ def fetching_not_allowed(monkeypatch):
     monkeypatch.setattr(spack.package_base.PackageBase, "fetcher", FetchingNotAllowed())
 
 
-def test_fetch_without_code_is_noop(config, mock_packages, fetching_not_allowed):
+def test_fetch_without_code_is_noop(
+    config, mock_packages, fetching_not_allowed, ctx: SpackContext
+):
     """do_fetch for packages without code should be a no-op"""
-    pkg = spack.concretize.concretize_one("pkg-a", spack.test.harness.current()).package
+    pkg = spack.concretize.concretize_one("pkg-a", ctx).package
     pkg.has_code = False
     pkg.do_fetch()
 
 
-def test_fetch_external_package_is_noop(config, mock_packages, fetching_not_allowed):
+def test_fetch_external_package_is_noop(
+    config, mock_packages, fetching_not_allowed, ctx: SpackContext
+):
     """do_fetch for packages without code should be a no-op"""
-    spec = spack.concretize.concretize_one("pkg-a", spack.test.harness.current())
+    spec = spack.concretize.concretize_one("pkg-a", ctx)
     spec.external_path = "/some/where"
     assert spec.external
     spec.package.do_fetch()

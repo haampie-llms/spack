@@ -16,6 +16,7 @@ import spack.solver.asp
 import spack.test.harness
 import spack.util.hash as hashutil
 import spack.version
+from spack.context import SpackContext
 from spack.dependency import Dependency
 from spack.spec import Spec
 from spack.test.conftest import RepoBuilder
@@ -42,7 +43,7 @@ def saved_deps():
 
 
 @pytest.fixture()
-def set_dependency(saved_deps, monkeypatch):
+def set_dependency(saved_deps, monkeypatch, ctx: SpackContext):
     """Returns a function that alters the dependency information
     for a package in the ``saved_deps`` fixture.
     """
@@ -54,7 +55,7 @@ def set_dependency(saved_deps, monkeypatch):
         """
         spec = Spec(spec)
         # Save original dependencies before making any changes.
-        pkg_cls = spack.test.harness.current().repo.get_pkg_class(pkg_name)
+        pkg_cls = ctx.repo.get_pkg_class(pkg_name)
         if pkg_name not in saved_deps:
             saved_deps[pkg_name] = (pkg_cls, pkg_cls.dependencies.copy())
 
@@ -66,7 +67,7 @@ def set_dependency(saved_deps, monkeypatch):
 
 
 @pytest.mark.usefixtures("config")
-def test_test_deptype(repo_builder: RepoBuilder):
+def test_test_deptype(repo_builder: RepoBuilder, ctx: SpackContext):
     """Ensure that test-only dependencies are only included for specified
     packages in the following spec DAG::
 
@@ -83,13 +84,13 @@ def test_test_deptype(repo_builder: RepoBuilder):
     repo_builder.add_package("y", dependencies=[("z", "test", None)])
     repo_builder.add_package("w", dependencies=[("x", "test", None), ("y", None, None)])
 
-    with spack.test.harness.use_repositories(repo_builder.root):
-        spec = spack.concretize.concretize_one("w", spack.test.harness.current(), tests=("w",))
+    with spack.test.harness.use_repositories(ctx, repo_builder.root):
+        spec = spack.concretize.concretize_one("w", ctx, tests=("w",))
         assert "x" in spec
         assert "z" not in spec
 
 
-def test_installed_deps(monkeypatch, install_mockery):
+def test_installed_deps(monkeypatch, install_mockery, ctx: SpackContext):
     """Ensure that concrete specs and their build deps don't constrain solves.
 
     Preinstall a package ``c`` that has a constrained build dependency on ``d``, then
@@ -115,7 +116,7 @@ def test_installed_deps(monkeypatch, install_mockery):
     # BUT d is only a build dependency of C, so it won't constrain
     # link/run dependents of C when C is depended on as an existing
     # (concrete) installation.
-    c_spec = spack.concretize.concretize_one(c, spack.test.harness.current())
+    c_spec = spack.concretize.concretize_one(c, ctx)
     assert c_spec[d].version == spack.version.Version("2")
 
     spack.installer.PackageInstaller([c_spec.package], fake=True, explicit=True).install()
@@ -123,9 +124,7 @@ def test_installed_deps(monkeypatch, install_mockery):
     # install A, which depends on B, C, D, and E, and force A to
     # use the installed C.  It should *not* force A to use the installed D
     # *if* we're doing a fresh installation.
-    a_spec = spack.concretize.concretize_one(
-        f"{a} ^/{c_spec.dag_hash()}", spack.test.harness.current()
-    )
+    a_spec = spack.concretize.concretize_one(f"{a} ^/{c_spec.dag_hash()}", ctx)
     assert spack.version.Version("2") == a_spec[c][d].version
     assert spack.version.Version("2") == a_spec[e].version
     assert spack.version.Version("3") == a_spec[b][d].version
@@ -133,7 +132,7 @@ def test_installed_deps(monkeypatch, install_mockery):
 
 
 @pytest.mark.usefixtures("config")
-def test_specify_preinstalled_dep(monkeypatch, repo_builder: RepoBuilder):
+def test_specify_preinstalled_dep(monkeypatch, repo_builder: RepoBuilder, ctx: SpackContext):
     """Specify the use of a preinstalled package during concretization with a
     transitive dependency that is only supplied by the preinstalled package.
     """
@@ -141,15 +140,15 @@ def test_specify_preinstalled_dep(monkeypatch, repo_builder: RepoBuilder):
     repo_builder.add_package("pkg-b", dependencies=[("pkg-c", None, None)])
     repo_builder.add_package("pkg-a", dependencies=[("pkg-b", None, None)])
 
-    with spack.test.harness.use_repositories(repo_builder.root):
-        b_spec = spack.concretize.concretize_one("pkg-b", spack.test.harness.current())
+    with spack.test.harness.use_repositories(ctx, repo_builder.root):
+        b_spec = spack.concretize.concretize_one("pkg-b", ctx)
         monkeypatch.setattr(
             spack.database.Database, "installed", lambda self, spec: spec.name != "pkg-a"
         )
 
         a_spec = Spec("pkg-a")
         a_spec._add_dependency(b_spec, depflag=dt.BUILD | dt.LINK, virtuals=())
-        a_spec = spack.concretize.concretize_one(a_spec, spack.test.harness.current())
+        a_spec = spack.concretize.concretize_one(a_spec, ctx)
 
         assert {x.name for x in a_spec.traverse()} == {"pkg-a", "pkg-b", "pkg-c"}
 
@@ -160,7 +159,7 @@ def test_specify_preinstalled_dep(monkeypatch, repo_builder: RepoBuilder):
     [("x ^y@2", "y@2", True), ("x@1", "y", False), ("x", "y@3", True)],
 )
 def test_conditional_dep_with_user_constraints(
-    spec_str, expr_str, expected, repo_builder: RepoBuilder
+    spec_str, expr_str, expected, repo_builder: RepoBuilder, ctx: SpackContext
 ):
     """This sets up packages X->Y such that X depends on Y conditionally. It
     then constructs a Spec with X but with no constraints on X, so that the
@@ -171,22 +170,22 @@ def test_conditional_dep_with_user_constraints(
     repo_builder.add_package("y")
     repo_builder.add_package("x", dependencies=[("y", None, "x@2:")])
 
-    with spack.test.harness.use_repositories(repo_builder.root):
-        spec = spack.concretize.concretize_one(spec_str, spack.test.harness.current())
+    with spack.test.harness.use_repositories(ctx, repo_builder.root):
+        spec = spack.concretize.concretize_one(spec_str, ctx)
         result = expr_str in spec
         assert result is expected, "{0} in {1}".format(expr_str, spec)
 
 
 @pytest.mark.usefixtures("mutable_mock_repo", "config")
 class TestSpecDag:
-    def test_conflicting_package_constraints(self, set_dependency):
+    def test_conflicting_package_constraints(self, set_dependency, ctx: SpackContext):
         set_dependency("mpileaks", "mpich@1.0")
         set_dependency("callpath", "mpich@2.0")
 
         spec = Spec("mpileaks ^mpich ^callpath ^dyninst ^libelf ^libdwarf")
 
         with pytest.raises(spack.error.UnsatisfiableSpecError):
-            spack.concretize.concretize_one(spec, spack.test.harness.current())
+            spack.concretize.concretize_one(spec, ctx)
 
     @pytest.mark.parametrize(
         "pairs,traverse_kwargs",
@@ -389,7 +388,7 @@ class TestSpecDag:
             ),
         ],
     )
-    def test_traversal(self, pairs, traverse_kwargs):
+    def test_traversal(self, pairs, traverse_kwargs, ctx: SpackContext):
         r"""Tests different traversals of the following graph
 
         o mpileaks@2.3/3qeg7jx
@@ -440,7 +439,7 @@ class TestSpecDag:
         |
         o glibc@2.31/tbyn33w
         """
-        dag = spack.concretize.concretize_one("mpileaks ^zmpi", spack.test.harness.current())
+        dag = spack.concretize.concretize_one("mpileaks ^zmpi", ctx)
         names = [x for _, x in pairs]
 
         traversal = dag.traverse(**traverse_kwargs, depth=True)
@@ -449,7 +448,7 @@ class TestSpecDag:
         traversal = dag.traverse(**traverse_kwargs)
         assert [x.name for x in traversal] == names
 
-    def test_dependents_and_dependencies_are_correct(self):
+    def test_dependents_and_dependencies_are_correct(self, ctx: SpackContext):
         spec = Spec.from_literal(
             {
                 "mpileaks": {
@@ -462,7 +461,7 @@ class TestSpecDag:
             }
         )
         check_links(spec)
-        concrete = spack.concretize.concretize_one(spec, spack.test.harness.current())
+        concrete = spack.concretize.concretize_one(spec, ctx)
         check_links(concrete)
 
     @pytest.mark.parametrize(
@@ -473,21 +472,23 @@ class TestSpecDag:
             ("mpich%gcc@2.0", "mpileaks ^mpich%gcc@3.0"),
         ],
     )
-    def test_unsatisfiable_cases(self, set_dependency, constraint_str, spec_str):
+    def test_unsatisfiable_cases(
+        self, set_dependency, constraint_str, spec_str, ctx: SpackContext
+    ):
         """Tests that synthetic cases of conflicting requirements raise an UnsatisfiableSpecError
         when concretizing.
         """
         set_dependency("mpileaks", constraint_str)
         with pytest.raises(spack.error.UnsatisfiableSpecError):
-            spack.concretize.concretize_one(spec_str, spack.test.harness.current())
+            spack.concretize.concretize_one(spec_str, ctx)
 
     @pytest.mark.parametrize(
         "spec_str", ["libelf ^mpich", "libelf ^libdwarf", "mpich ^dyninst ^libelf"]
     )
-    def test_invalid_dep(self, spec_str):
+    def test_invalid_dep(self, spec_str, ctx: SpackContext):
         spec = Spec(spec_str)
         with pytest.raises(spack.solver.asp.InvalidDependencyError):
-            spack.concretize.concretize_one(spec, spack.test.harness.current())
+            spack.concretize.concretize_one(spec, ctx)
 
     def test_equal(self):
         # Different spec structures to test for equality
@@ -548,8 +549,8 @@ class TestSpecDag:
         copy_ids = {id(s) for s in copy.traverse()}
         assert not orig_ids.intersection(copy_ids)
 
-    def test_copy_concretized(self):
-        orig = spack.concretize.concretize_one("mpileaks", spack.test.harness.current())
+    def test_copy_concretized(self, ctx: SpackContext):
+        orig = spack.concretize.concretize_one("mpileaks", ctx)
         copy = orig.copy()
 
         check_links(copy)
@@ -563,11 +564,11 @@ class TestSpecDag:
         copy_ids = {id(s) for s in copy.traverse()}
         assert not orig_ids.intersection(copy_ids)
 
-    def test_copy_through_spec_build_interface(self):
+    def test_copy_through_spec_build_interface(self, ctx: SpackContext):
         """Check that copying dependencies using id(node) as a fast identifier of the
         node works when the spec is wrapped in a SpecBuildInterface object.
         """
-        s = spack.concretize.concretize_one("mpileaks", spack.test.harness.current())
+        s = spack.concretize.concretize_one("mpileaks", ctx)
 
         c0 = s.copy()
         assert c0 == s
@@ -647,8 +648,8 @@ class TestSpecDag:
             ("dttop", "run", ["dttop", "dtrun1", "dtrun3"]),
         ],
     )
-    def test_deptype_traversal(self, spec_str, deptypes, expected):
-        dag = spack.concretize.concretize_one(spec_str, spack.test.harness.current())
+    def test_deptype_traversal(self, spec_str, deptypes, expected, ctx: SpackContext):
+        dag = spack.concretize.concretize_one(spec_str, ctx)
         traversal = dag.traverse(deptype=deptypes)
         assert [x.name for x in traversal] == expected
 
@@ -767,14 +768,14 @@ class TestSpecDag:
             == dt.BUILD | dt.LINK | dt.RUN
         )
 
-    def test_concretize_deptypes(self):
+    def test_concretize_deptypes(self, ctx: SpackContext):
         """Ensure that dependency types are preserved after concretization."""
-        s = spack.concretize.concretize_one("dt-diamond", spack.test.harness.current())
+        s = spack.concretize.concretize_one("dt-diamond", ctx)
         self.check_diamond_deptypes(s)
 
-    def test_copy_deptypes(self):
+    def test_copy_deptypes(self, ctx: SpackContext):
         """Ensure that dependency types are preserved by spec copy."""
-        s1 = spack.concretize.concretize_one("dt-diamond", spack.test.harness.current())
+        s1 = spack.concretize.concretize_one("dt-diamond", ctx)
         self.check_diamond_deptypes(s1)
         s2 = s1.copy()
         self.check_diamond_deptypes(s2)
@@ -791,8 +792,8 @@ class TestSpecDag:
         assert {e.depflag for e in edges} == {dt.BUILD, dt.LINK}
         assert copied.to_dict() == original.to_dict()
 
-    def test_getitem_query(self):
-        s = spack.concretize.concretize_one("mpileaks", spack.test.harness.current())
+    def test_getitem_query(self, ctx: SpackContext):
+        s = spack.concretize.concretize_one("mpileaks", ctx)
 
         # Check a query to a non-virtual package
         a = s["callpath"]
@@ -821,8 +822,8 @@ class TestSpecDag:
         assert "fortran" in query.extra_parameters
         assert query.isvirtual
 
-    def test_getitem_exceptional_paths(self):
-        s = spack.concretize.concretize_one("mpileaks", spack.test.harness.current())
+    def test_getitem_exceptional_paths(self, ctx: SpackContext):
+        s = spack.concretize.concretize_one("mpileaks", ctx)
         # Needed to get a proxy object
         q = s["mpileaks"]
 
@@ -891,9 +892,9 @@ class TestSpecDag:
         with pytest.raises(KeyError):
             Spec.from_literal({"foo": {"bar:build:link": None}})
 
-    def test_spec_tree_respect_deptypes(self):
+    def test_spec_tree_respect_deptypes(self, ctx: SpackContext):
         # Version-test-root uses version-test-pkg as a build dependency
-        s = spack.concretize.concretize_one("version-test-root", spack.test.harness.current())
+        s = spack.concretize.concretize_one("version-test-root", ctx)
         out = s.tree(deptypes="all")
         assert "version-test-pkg" in out
         out = s.tree(deptypes=("link", "run"))
@@ -910,7 +911,9 @@ class TestSpecDag:
             ({"virtuals": ["lapack"]}, 0, []),
         ],
     )
-    def test_query_dependency_edges(self, query, expected_length, expected_satisfies):
+    def test_query_dependency_edges(
+        self, query, expected_length, expected_satisfies, ctx: SpackContext
+    ):
         """Tests querying edges to dependencies on the following DAG:
 
          -   [    ]  mpileaks@2.3
@@ -922,15 +925,15 @@ class TestSpecDag:
          -   [ l  ]      ^gcc-runtime@10.1.0
          -   [bl  ]      ^mpich@3.0.4~debug
         """
-        mpileaks = spack.concretize.concretize_one("mpileaks", spack.test.harness.current())
+        mpileaks = spack.concretize.concretize_one("mpileaks", ctx)
         edges = mpileaks.edges_to_dependencies(**query)
         assert len(edges) == expected_length
         for constraint in expected_satisfies:
             assert any(x.spec.satisfies(constraint) for x in edges)
 
-    def test_query_dependents_edges(self):
+    def test_query_dependents_edges(self, ctx: SpackContext):
         """Tests querying edges from dependents"""
-        mpileaks = spack.concretize.concretize_one("mpileaks", spack.test.harness.current())
+        mpileaks = spack.concretize.concretize_one("mpileaks", ctx)
         mpich = mpileaks["mpich"]
 
         # Recover the root with 2 different queries
@@ -986,7 +989,9 @@ def test_tree_cover_nodes_reduce_deptype():
     )
 
 
-def test_synthetic_construction_of_split_dependencies_from_same_package(mock_packages, config):
+def test_synthetic_construction_of_split_dependencies_from_same_package(
+    mock_packages, config, ctx: SpackContext
+):
     # Construct in a synthetic way (i.e. without using the solver)
     # the following spec:
     #
@@ -996,9 +1001,9 @@ def test_synthetic_construction_of_split_dependencies_from_same_package(mock_pac
     #
     # To demonstrate that a spec can now hold two direct
     # dependencies from the same package
-    root = spack.concretize.concretize_one("pkg-b", spack.test.harness.current())
-    link_run_spec = spack.concretize.concretize_one("pkg-c@=1.0", spack.test.harness.current())
-    build_spec = spack.concretize.concretize_one("pkg-c@=2.0", spack.test.harness.current())
+    root = spack.concretize.concretize_one("pkg-b", ctx)
+    link_run_spec = spack.concretize.concretize_one("pkg-c@=1.0", ctx)
+    build_spec = spack.concretize.concretize_one("pkg-c@=2.0", ctx)
 
     root.add_dependency_edge(link_run_spec, depflag=dt.LINK, virtuals=())
     root.add_dependency_edge(link_run_spec, depflag=dt.RUN, virtuals=())
@@ -1018,15 +1023,15 @@ def test_synthetic_construction_of_split_dependencies_from_same_package(mock_pac
     assert build_spec != link_run_spec
 
 
-def test_synthetic_construction_bootstrapping(mock_packages, config):
+def test_synthetic_construction_bootstrapping(mock_packages, config, ctx: SpackContext):
     # Construct the following spec:
     #
     #  pkg-b@2.0
     #    | build
     #  pkg-b@1.0
     #
-    root = spack.concretize.concretize_one("pkg-b@=2.0", spack.test.harness.current())
-    bootstrap = spack.concretize.concretize_one("pkg-b@=1.0", spack.test.harness.current())
+    root = spack.concretize.concretize_one("pkg-b@=2.0", ctx)
+    bootstrap = spack.concretize.concretize_one("pkg-b@=1.0", ctx)
 
     root.add_dependency_edge(bootstrap, depflag=dt.BUILD, virtuals=())
 
@@ -1034,7 +1039,9 @@ def test_synthetic_construction_bootstrapping(mock_packages, config):
     assert root.name == "pkg-b"
 
 
-def test_addition_of_different_deptypes_in_multiple_calls(mock_packages, config):
+def test_addition_of_different_deptypes_in_multiple_calls(
+    mock_packages, config, ctx: SpackContext
+):
     # Construct the following spec:
     #
     #  pkg-b@2.0
@@ -1042,8 +1049,8 @@ def test_addition_of_different_deptypes_in_multiple_calls(mock_packages, config)
     #  pkg-b@1.0
     #
     # with three calls and check we always have a single edge
-    root = spack.concretize.concretize_one("pkg-b@=2.0", spack.test.harness.current())
-    bootstrap = spack.concretize.concretize_one("pkg-b@=1.0", spack.test.harness.current())
+    root = spack.concretize.concretize_one("pkg-b@=2.0", ctx)
+    bootstrap = spack.concretize.concretize_one("pkg-b@=1.0", ctx)
 
     for current_depflag in (dt.BUILD, dt.LINK, dt.RUN):
         root.add_dependency_edge(bootstrap, depflag=current_depflag, virtuals=())
@@ -1068,13 +1075,13 @@ def test_addition_of_different_deptypes_in_multiple_calls(mock_packages, config)
     [(dt.LINK, dt.BUILD | dt.LINK), (dt.LINK | dt.RUN, dt.BUILD | dt.LINK)],
 )
 def test_adding_overlapping_deptypes_to_different_versions_stays_parallel(
-    mock_packages, config, c1_depflag, c2_depflag
+    mock_packages, config, c1_depflag, c2_depflag, ctx: SpackContext
 ):
     """c1 and c2 are different concrete versions of one package, so neither edge satisfies the
     other even though their depflags overlap, and both stay as parallel edges to pkg-b."""
-    p = spack.concretize.concretize_one("pkg-b@=2.0", spack.test.harness.current())
-    c1 = spack.concretize.concretize_one("pkg-b@=1.0", spack.test.harness.current())
-    c2 = spack.concretize.concretize_one("pkg-b@=2.0", spack.test.harness.current())
+    p = spack.concretize.concretize_one("pkg-b@=2.0", ctx)
+    c1 = spack.concretize.concretize_one("pkg-b@=1.0", ctx)
+    c2 = spack.concretize.concretize_one("pkg-b@=2.0", ctx)
 
     p.add_dependency_edge(c1, depflag=c1_depflag, virtuals=())
     p.add_dependency_edge(c2, depflag=c2_depflag, virtuals=())
@@ -1188,12 +1195,14 @@ def test_assigning_a_name_to_an_anonymous_spec_rekeys_dependents(mock_packages):
     assert list(t["pkg-b"]._dependents.keys()) == ["pkg-a"]
 
 
-def test_merging_a_concrete_direct_dep_keeps_its_dependent_edges(mock_packages, config):
+def test_merging_a_concrete_direct_dep_keeps_its_dependent_edges(
+    mock_packages, config, ctx: SpackContext
+):
     """A concrete node merged into an abstract direct dep replaces it in place; the node
     keeps its dependent edges, so a later name assignment on the parent rekeys them."""
     s = Spec("%pkg-b")
     t = Spec("")
-    concrete = spack.concretize.concretize_one("pkg-b@=1.0", spack.test.harness.current())
+    concrete = spack.concretize.concretize_one("pkg-b@=1.0", ctx)
     t.add_dependency_edge(concrete, depflag=dt.BUILD, virtuals=(), direct=True)
     assert s.constrain(t)
     child = s.edges_to_dependencies(name="pkg-b")[0].spec
@@ -1205,10 +1214,12 @@ def test_merging_a_concrete_direct_dep_keeps_its_dependent_edges(mock_packages, 
     check_links(s)
 
 
-def test_constraining_and_intersecting_concrete_dep_of_abstract_root(mock_packages, config):
+def test_constraining_and_intersecting_concrete_dep_of_abstract_root(
+    mock_packages, config, ctx: SpackContext
+):
     """Constraining a concrete dep of an abstract spec is either a no-op or an error."""
     abstract = Spec("pkg-a")
-    concrete = spack.concretize.concretize_one("pkg-b@=1.0", spack.test.harness.current())
+    concrete = spack.concretize.concretize_one("pkg-b@=1.0", ctx)
     abstract.add_dependency_edge(concrete, depflag=dt.BUILD, virtuals=(), direct=True)
     compatible, conflicting = Spec("pkg-a %pkg-b@1"), Spec("pkg-a %pkg-b@2")
     assert abstract.intersects(compatible) and compatible.intersects(abstract)

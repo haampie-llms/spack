@@ -21,6 +21,7 @@ import spack.spec
 import spack.stage
 import spack.test.harness
 import spack.util.url as url_util
+from spack.context import SpackContext
 from spack.repo import RepoPath
 from spack.spec import Spec
 from spack.stage import stage_from_config
@@ -93,10 +94,12 @@ data_path = os.path.join(spack.paths.test_path, "data", "patch")
         (os.path.join(data_path, "foo.patch"), platform_url_sha, None),
     ],
 )
-def test_url_patch(mock_packages, mock_patch_stage, filename, sha256, archive_sha256, config):
+def test_url_patch(
+    mock_packages, mock_patch_stage, filename, sha256, archive_sha256, config, ctx: SpackContext
+):
     # Make a patch object
     url = url_util.path_to_file_url(filename)
-    s = spack.concretize.concretize_one("patch", spack.test.harness.current())
+    s = spack.concretize.concretize_one("patch", ctx)
 
     # make a stage
     client = NetworkClient.from_config(config)
@@ -165,9 +168,9 @@ third line
             assert filecmp.cmp("foo.txt", "foo-original.txt")
 
 
-def test_patch_in_spec(mock_packages, config):
+def test_patch_in_spec(mock_packages, config, ctx: SpackContext):
     """Test whether patches in a package appear in the spec."""
-    spec = spack.concretize.concretize_one("patch", spack.test.harness.current())
+    spec = spack.concretize.concretize_one("patch", ctx)
     assert "patches" in list(spec.variants.keys())
 
     # Here the order is bar, foo, baz. Note that MV variants order
@@ -180,9 +183,9 @@ def test_patch_in_spec(mock_packages, config):
     )
 
 
-def test_stale_patch_cache_falls_back_to_fresh(mock_packages: RepoPath, config):
+def test_stale_patch_cache_falls_back_to_fresh(mock_packages: RepoPath, config, ctx: SpackContext):
     """spec.patches returns correct patches even when the stale in-memory cache is wrong."""
-    spec = spack.concretize.concretize_one("patch@=1.0", spack.test.harness.current())
+    spec = spack.concretize.concretize_one("patch@=1.0", ctx)
     pkg_cls = mock_packages.get_pkg_class("patch")
 
     # Inject a stale PatchCache: foo_sha256 points to a non-existent patch file
@@ -201,7 +204,7 @@ def test_stale_patch_cache_falls_back_to_fresh(mock_packages: RepoPath, config):
     mock_packages._patch_index = stale_cache
     mock_packages._index_is_fresh = False
 
-    patches = spec.patches_from(spack.test.harness.current().repo)
+    patches = spec.patches_from(ctx.repo)
 
     assert len(patches) == 2
     file_patches = [p for p in patches if isinstance(p, spack.patch.FilePatch)]
@@ -209,20 +212,20 @@ def test_stale_patch_cache_falls_back_to_fresh(mock_packages: RepoPath, config):
     assert {p.relative_path for p in file_patches} == {"foo.patch", "baz.patch"}
 
 
-def test_patch_mixed_versions_subset_constraint(mock_packages, config):
+def test_patch_mixed_versions_subset_constraint(mock_packages, config, ctx: SpackContext):
     """If we have a package with mixed x.y and x.y.z versions, make sure that
     a patch applied to a version range of x.y.z versions is not applied to
     an x.y version.
     """
-    spec1 = spack.concretize.concretize_one("patch@1.0.1", spack.test.harness.current())
+    spec1 = spack.concretize.concretize_one("patch@1.0.1", ctx)
     assert biz_sha256 in spec1.variants["patches"].value
 
-    spec2 = spack.concretize.concretize_one("patch@=1.0", spack.test.harness.current())
+    spec2 = spack.concretize.concretize_one("patch@=1.0", ctx)
     assert biz_sha256 not in spec2.variants["patches"].value
 
 
-def test_patch_order(mock_packages, config):
-    spec = spack.concretize.concretize_one("dep-diamond-patch-top", spack.test.harness.current())
+def test_patch_order(mock_packages, config, ctx: SpackContext):
+    spec = spack.concretize.concretize_one("dep-diamond-patch-top", ctx)
 
     mid2_sha256 = (
         "mid21234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234"
@@ -303,9 +306,9 @@ def test_nested_directives(mock_packages: RepoPath):
 
 
 @pytest.mark.not_on_windows("Test requires Autotools")
-def test_patched_dependency(mock_packages, install_mockery, mock_fetch):
+def test_patched_dependency(mock_packages, install_mockery, mock_fetch, ctx: SpackContext):
     """Test whether patched dependencies work."""
-    spec = spack.concretize.concretize_one("patch-a-dependency", spack.test.harness.current())
+    spec = spack.concretize.concretize_one("patch-a-dependency", ctx)
     assert "patches" in list(spec["libelf"].variants.keys())
 
     # make sure the patch makes it into the dependency spec
@@ -341,13 +344,16 @@ def trigger_bad_patch(pkg):
 
 
 def test_patch_failure_develop_spec_exits_gracefully(
-    mock_packages, install_mockery, mock_fetch, tmp_path: pathlib.Path, mock_stage
+    mock_packages,
+    install_mockery,
+    mock_fetch,
+    tmp_path: pathlib.Path,
+    mock_stage,
+    ctx: SpackContext,
 ):
     """ensure that a failing patch does not trigger exceptions for develop specs"""
 
-    spec = spack.concretize.concretize_one(
-        f"patch-a-dependency ^libelf dev_path={tmp_path}", spack.test.harness.current()
-    )
+    spec = spack.concretize.concretize_one(f"patch-a-dependency ^libelf dev_path={tmp_path}", ctx)
     libelf = spec["libelf"]
     assert "patches" in list(libelf.variants.keys())
     pkg = libelf.package
@@ -358,12 +364,12 @@ def test_patch_failure_develop_spec_exits_gracefully(
     # success if no exceptions raised
 
 
-def test_patch_failure_restages(mock_packages, install_mockery, mock_fetch):
+def test_patch_failure_restages(mock_packages, install_mockery, mock_fetch, ctx: SpackContext):
     """
     ensure that a failing patch does not trigger exceptions
     for non-develop specs and the source gets restaged
     """
-    spec = spack.concretize.concretize_one("patch-a-dependency", spack.test.harness.current())
+    spec = spack.concretize.concretize_one("patch-a-dependency", ctx)
     pkg = spec["libelf"].package
     with pkg.stage:
         bad_patch_indicator = trigger_bad_patch(pkg)
@@ -372,11 +378,9 @@ def test_patch_failure_restages(mock_packages, install_mockery, mock_fetch):
         assert not os.path.isfile(bad_patch_indicator)
 
 
-def test_multiple_patched_dependencies(mock_packages, config):
+def test_multiple_patched_dependencies(mock_packages, config, ctx: SpackContext):
     """Test whether multiple patched dependencies work."""
-    spec = spack.concretize.concretize_one(
-        "patch-several-dependencies", spack.test.harness.current()
-    )
+    spec = spack.concretize.concretize_one("patch-several-dependencies", ctx)
 
     # basic patch on libelf
     assert "patches" in list(spec["libelf"].variants.keys())
@@ -389,11 +393,9 @@ def test_multiple_patched_dependencies(mock_packages, config):
     assert (url2_sha256, url1_sha256) == spec["fake"].variants["patches"].value
 
 
-def test_conditional_patched_dependencies(mock_packages, config):
+def test_conditional_patched_dependencies(mock_packages, config, ctx: SpackContext):
     """Test whether conditional patched dependencies work."""
-    spec = spack.concretize.concretize_one(
-        "patch-several-dependencies @1.0", spack.test.harness.current()
-    )
+    spec = spack.concretize.concretize_one("patch-several-dependencies @1.0", ctx)
 
     # basic patch on libelf
     assert "patches" in list(spec["libelf"].variants.keys())
@@ -475,10 +477,10 @@ def check_multi_dependency_patch_specs(
     assert url2_patch.archive_sha256 == url2_archive_sha256
 
 
-def test_conditional_patched_deps_with_conditions(mock_packages, config):
+def test_conditional_patched_deps_with_conditions(mock_packages, config, ctx: SpackContext):
     """Test whether conditional patched dependencies with conditions work."""
     spec = spack.concretize.concretize_one(
-        Spec("patch-several-dependencies @1.0 ^libdwarf@20111030"), spack.test.harness.current()
+        Spec("patch-several-dependencies @1.0 ^libdwarf@20111030"), ctx
     )
 
     libelf = spec["libelf"]
@@ -490,12 +492,12 @@ def test_conditional_patched_deps_with_conditions(mock_packages, config):
     )
 
 
-def test_write_and_read_sub_dags_with_patched_deps(mock_packages, config):
+def test_write_and_read_sub_dags_with_patched_deps(mock_packages, config, ctx: SpackContext):
     """Test whether patched dependencies are still correct after writing and
     reading a sub-DAG of a concretized Spec.
     """
     spec = spack.concretize.concretize_one(
-        Spec("patch-several-dependencies @1.0 ^libdwarf@20111030"), spack.test.harness.current()
+        Spec("patch-several-dependencies @1.0 ^libdwarf@20111030"), ctx
     )
 
     # write to YAML and read back in -- new specs will *only* contain
@@ -562,9 +564,9 @@ def test_equality():
     assert patch1 != "not a patch"
 
 
-def test_sha256_setter(mock_packages, mock_patch_stage, config):
+def test_sha256_setter(mock_packages, mock_patch_stage, config, ctx: SpackContext):
     path = os.path.join(data_path, "foo.patch")
-    s = spack.concretize.concretize_one("patch", spack.test.harness.current())
+    s = spack.concretize.concretize_one("patch", ctx)
     patch = spack.patch.FilePatch(s.package, path, level=1, working_dir=".")
     patch.sha256 = "abc"
 
@@ -591,26 +593,19 @@ def test_invalid_from_dict(mock_packages, config):
 
 
 @pytest.mark.regression("52675")
-def test_patch_lookup_for_shadowed_package(mock_packages, config, repo_builder):
+def test_patch_lookup_for_shadowed_package(mock_packages, config, repo_builder, ctx: SpackContext):
     """Patches must be looked up via the spec's fullname, so that a same-named
     package in a higher-precedence repo doesn't shadow the patch owner."""
     repo_builder.add_package("patch")
 
-    with spack.test.harness.use_repositories(repo_builder.root, override=False) as repos:
+    with spack.test.harness.use_repositories(ctx, repo_builder.root, override=False) as repos:
         assert repos.repo_for_pkg("patch").namespace == repo_builder.namespace
 
-        spec = spack.concretize.concretize_one(
-            "builtin_mock.patch@=1.0", spack.test.harness.current()
-        )
-        default = spack.concretize.concretize_one("patch", spack.test.harness.current())
-        assert spec.patches_from(spack.test.harness.current().repo) != default.patches_from(
-            spack.test.harness.current().repo
-        )
+        spec = spack.concretize.concretize_one("builtin_mock.patch@=1.0", ctx)
+        default = spack.concretize.concretize_one("patch", ctx)
+        assert spec.patches_from(ctx.repo) != default.patches_from(ctx.repo)
         assert spec.namespace == "builtin_mock"
 
         # raises SpecError if the lookup uses the bare name: the shadowing
         # class's patch index has no such sha256
-        assert {p.sha256 for p in spec.patches_from(spack.test.harness.current().repo)} == {
-            foo_sha256,
-            baz_sha256,
-        }
+        assert {p.sha256 for p in spec.patches_from(ctx.repo)} == {foo_sha256, baz_sha256}

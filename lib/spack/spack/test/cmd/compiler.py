@@ -12,6 +12,7 @@ import spack.test.harness
 import spack.util.pattern
 import spack.version
 from spack.config import Configuration
+from spack.context import SpackContext
 
 compiler = spack.test.harness.SpackCommand("compiler")
 
@@ -82,14 +83,14 @@ def test_compiler_find_without_paths(no_packages_yaml, working_env, mock_executa
 
 
 @pytest.mark.regression("37996")
-def test_compiler_remove(mutable_config, mock_packages):
+def test_compiler_remove(mutable_config, mock_packages, ctx: SpackContext):
     """Tests that we can remove a compiler from configuration."""
     assert any(
         compiler.satisfies("gcc@=9.4.0")
         for compiler in spack.compilers.config.all_compilers(mutable_config, repo=mock_packages)
     )
     args = spack.util.pattern.Bunch(all=True, compiler_spec="gcc@9.4.0", add_paths=[], scope=None)
-    spack.cmd.compiler.compiler_remove(args, spack.test.harness.current())
+    spack.cmd.compiler.compiler_remove(args, ctx)
     assert not any(
         compiler.satisfies("gcc@=9.4.0")
         for compiler in spack.compilers.config.all_compilers(mutable_config, repo=mock_packages)
@@ -97,7 +98,9 @@ def test_compiler_remove(mutable_config, mock_packages):
 
 
 @pytest.mark.regression("37996")
-def test_removing_compilers_from_multiple_scopes(mutable_config: Configuration, mock_packages):
+def test_removing_compilers_from_multiple_scopes(
+    mutable_config: Configuration, mock_packages, ctx: SpackContext
+):
     # Duplicate "site" scope into "user" scope
     site_config = mutable_config.get("packages", scope="site")
     mutable_config.set("packages", site_config, scope="user")
@@ -107,7 +110,7 @@ def test_removing_compilers_from_multiple_scopes(mutable_config: Configuration, 
         for compiler in spack.compilers.config.all_compilers(mutable_config, repo=mock_packages)
     )
     args = spack.util.pattern.Bunch(all=True, compiler_spec="gcc@9.4.0", add_paths=[], scope=None)
-    spack.cmd.compiler.compiler_remove(args, spack.test.harness.current())
+    spack.cmd.compiler.compiler_remove(args, ctx)
     assert not any(
         compiler.satisfies("gcc@=9.4.0")
         for compiler in spack.compilers.config.all_compilers(mutable_config, repo=mock_packages)
@@ -115,7 +118,7 @@ def test_removing_compilers_from_multiple_scopes(mutable_config: Configuration, 
 
 
 @pytest.mark.not_on_windows("Cannot execute bash script on Windows")
-def test_compiler_add(mutable_config, mock_packages, mock_executable):
+def test_compiler_add(mutable_config, mock_packages, mock_executable, ctx: SpackContext):
     """Tests that we can add a compiler to configuration."""
     expected_version = "4.5.3"
     gcc_path = mock_executable(
@@ -142,7 +145,7 @@ done
         mixed_toolchain=False,
         jobs=1,
     )
-    spack.cmd.compiler.compiler_find(args, spack.test.harness.current())
+    spack.cmd.compiler.compiler_find(args, ctx)
     compilers_after_find = set(
         spack.compilers.config.all_compilers(mutable_config, repo=mock_packages)
     )
@@ -155,7 +158,9 @@ done
 
 @pytest.mark.not_on_windows("Cannot execute bash script on Windows")
 @pytest.mark.regression("17590")
-def test_compiler_find_prefer_no_suffix(no_packages_yaml, working_env, compilers_dir):
+def test_compiler_find_prefer_no_suffix(
+    no_packages_yaml, working_env, compilers_dir, ctx: SpackContext
+):
     """Ensure that we'll pick 'clang' over 'clang-gpu' when there is a choice."""
     clang_path = compilers_dir / "clang"
     shutil.copy(clang_path, clang_path.parent / "clang-gpu")
@@ -168,7 +173,7 @@ def test_compiler_find_prefer_no_suffix(no_packages_yaml, working_env, compilers
     assert "gcc@8.4.0" in output
 
     compilers = spack.compilers.config.all_compilers_from(
-        no_packages_yaml, scope="site", repo=spack.test.harness.current().repo
+        no_packages_yaml, scope="site", repo=ctx.repo
     )
     clang = [x for x in compilers if x.satisfies("llvm@11")]
 

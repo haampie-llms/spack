@@ -17,6 +17,7 @@ import spack.util.executable
 import spack.util.file_cache
 import spack.util.lock
 import spack.util.naming
+from spack.context import SpackContext
 from spack.repo import RepoPath
 from spack.test.conftest import RepoBuilder
 from spack.util.naming import valid_module_name
@@ -106,13 +107,11 @@ def test_all_package_names_is_cached_correctly(mock_packages: RepoPath):
 
 
 def test_all_package_names_is_updated_on_repo_changes(
-    mock_packages: RepoPath, repo_builder: RepoBuilder
+    mock_packages: RepoPath, repo_builder: RepoBuilder, ctx: SpackContext
 ):
     """Package names are cached, but changing the search path drops the cache."""
     repo_builder.add_package("pkg-in-extra-repo")
-    extra_repo = spack.repo.from_path(
-        repo_builder.root, cache=spack.test.harness.current().misc_cache
-    )
+    extra_repo = spack.repo.from_path(repo_builder.root, cache=ctx.misc_cache)
     repos = RepoPath(*mock_packages.repos)
     assert "pkg-in-extra-repo" not in repos.all_package_names()
 
@@ -124,14 +123,14 @@ def test_all_package_names_is_updated_on_repo_changes(
 
 
 @pytest.mark.regression("29203")
-def test_use_repositories_doesnt_change_class(mock_packages):
+def test_use_repositories_doesnt_change_class(mock_packages, ctx: SpackContext):
     """Test that we don't create the same package module and class multiple times
     when swapping repositories.
     """
-    zlib_cls_outer = spack.test.harness.current().repo.get_pkg_class("zlib")
-    current_paths = [r.root for r in spack.test.harness.current().repo.repos]
-    with spack.test.harness.use_repositories(*current_paths):
-        zlib_cls_inner = spack.test.harness.current().repo.get_pkg_class("zlib")
+    zlib_cls_outer = ctx.repo.get_pkg_class("zlib")
+    current_paths = [r.root for r in ctx.repo.repos]
+    with spack.test.harness.use_repositories(ctx, *current_paths):
+        zlib_cls_inner = ctx.repo.get_pkg_class("zlib")
     assert id(zlib_cls_inner) == id(zlib_cls_outer)
 
 
@@ -160,14 +159,16 @@ def test_get_all_mock_packages(mock_packages):
         mock_packages.get_pkg_class(name)
 
 
-def test_repo_path_handles_package_removal(mock_packages, repo_builder: RepoBuilder):
+def test_repo_path_handles_package_removal(
+    mock_packages, repo_builder: RepoBuilder, ctx: SpackContext
+):
     repo_builder.add_package("pkg-c")
-    with spack.test.harness.use_repositories(repo_builder.root, override=False) as repos:
+    with spack.test.harness.use_repositories(ctx, repo_builder.root, override=False) as repos:
         r = repos.repo_for_pkg("pkg-c")
         assert r.namespace == repo_builder.namespace
 
     repo_builder.remove("pkg-c")
-    with spack.test.harness.use_repositories(repo_builder.root, override=False) as repos:
+    with spack.test.harness.use_repositories(ctx, repo_builder.root, override=False) as repos:
         r = repos.repo_for_pkg("pkg-c")
         assert r.namespace == "builtin_mock"
 
@@ -228,17 +229,17 @@ def test_path_computation_with_names(method_name, mock_packages_repo):
     assert qualified == unqualified
 
 
-def test_use_repositories_and_import():
+def test_use_repositories_and_import(ctx: SpackContext):
     """Tests that use_repositories changes the import search too"""
     import spack.paths
 
     repo_dir = pathlib.Path(spack.paths.test_repos_path)
     with spack.test.harness.use_repositories(
-        str(repo_dir / "spack_repo" / "compiler_runtime_test")
+        ctx, str(repo_dir / "spack_repo" / "compiler_runtime_test")
     ):
         import spack_repo.compiler_runtime_test.packages.gcc_runtime.package  # type: ignore[import]  # noqa: E501
 
-    with spack.test.harness.use_repositories(str(repo_dir / "spack_repo" / "builtin_mock")):
+    with spack.test.harness.use_repositories(ctx, str(repo_dir / "spack_repo" / "builtin_mock")):
         import spack_repo.builtin_mock.packages.cmake.package  # type: ignore[import]  # noqa: F401
 
 
@@ -444,7 +445,7 @@ def test_mod_to_pkg_name_and_reverse():
     assert spack.util.naming.pkg_name_to_pkg_dir("none", package_api=(2, 0)) == "none"
 
 
-def test_repo_v2_invalid_module_name(tmp_path: pathlib.Path, capfd):
+def test_repo_v2_invalid_module_name(tmp_path: pathlib.Path, capfd, ctx: SpackContext):
     # Create a repo with a v2 structure
     root, _ = spack.repo.create_repo(str(tmp_path), namespace="repo_1", package_api=(2, 0))
     repo_dir = pathlib.Path(root)
@@ -469,7 +470,7 @@ class Uppercase(PackageBase):
 """
     )
 
-    with spack.test.harness.use_repositories(str(repo_dir)) as repo:
+    with spack.test.harness.use_repositories(ctx, str(repo_dir)) as repo:
         assert len(repo.all_package_names()) == 0
 
     stderr = capfd.readouterr().err
@@ -477,7 +478,7 @@ class Uppercase(PackageBase):
     assert "cannot be used because `UPPERCASE` is not a valid Spack package module name" in stderr
 
 
-def test_repo_v2_module_and_class_to_package_name(tmp_path: pathlib.Path):
+def test_repo_v2_module_and_class_to_package_name(tmp_path: pathlib.Path, ctx: SpackContext):
     # Create a repo with a v2 structure
     root, _ = spack.repo.create_repo(str(tmp_path), namespace="repo_2", package_api=(2, 0))
     repo_dir = pathlib.Path(root)
@@ -493,7 +494,7 @@ class _1example2Test(PackageBase):
 """
     )
 
-    with spack.test.harness.use_repositories(str(repo_dir)) as repo:
+    with spack.test.harness.use_repositories(ctx, str(repo_dir)) as repo:
         assert repo.exists("1example-2-test")
         pkg_cls = repo.get_pkg_class("1example-2-test")
         assert pkg_cls.name == "1example-2-test"
@@ -578,7 +579,7 @@ def test_is_package_module():
     assert not spack.repo.is_package_module("spack.something.else")
 
 
-def test_environment_activation_updates_repo_path(tmp_path: pathlib.Path):
+def test_environment_activation_updates_repo_path(tmp_path: pathlib.Path, ctx: SpackContext):
     """Test that the environment activation updates the repo path correctly."""
     repo_root, _ = spack.repo.create_repo(str(tmp_path / "foo"), namespace="bar")
     (tmp_path / "spack.yaml").write_text(
@@ -588,28 +589,22 @@ spack:
         bar: $env/foo/spack_repo/bar
 """
     )
-    env = spack.environment.Environment(tmp_path, ctx=spack.test.harness.current())
+    env = spack.environment.Environment(tmp_path, ctx=ctx)
 
     with env:
-        assert any(
-            os.path.samefile(repo_root, r.root) for r in spack.test.harness.current().repo.repos
-        )
+        assert any(os.path.samefile(repo_root, r.root) for r in ctx.repo.repos)
 
-    assert not any(
-        os.path.samefile(repo_root, r.root) for r in spack.test.harness.current().repo.repos
-    )
+    assert not any(os.path.samefile(repo_root, r.root) for r in ctx.repo.repos)
 
     with env:
-        assert any(
-            os.path.samefile(repo_root, r.root) for r in spack.test.harness.current().repo.repos
-        )
+        assert any(os.path.samefile(repo_root, r.root) for r in ctx.repo.repos)
 
-    assert not any(
-        os.path.samefile(repo_root, r.root) for r in spack.test.harness.current().repo.repos
-    )
+    assert not any(os.path.samefile(repo_root, r.root) for r in ctx.repo.repos)
 
 
-def test_reading_the_active_environment_keeps_store_and_repo(tmp_path: pathlib.Path):
+def test_reading_the_active_environment_keeps_store_and_repo(
+    tmp_path: pathlib.Path, ctx: SpackContext
+):
     """Re-reading the active environment only swaps its configuration scope: the store and
     repositories it activated are kept."""
     spack.repo.create_repo(str(tmp_path / "foo"), namespace="bar")
@@ -623,7 +618,6 @@ spack:
             root: $env/opt
 """
     )
-    ctx = spack.test.harness.current()
     env = spack.environment.Environment(tmp_path, ctx=ctx)
     with env:
         store, repo = ctx.store, ctx.repo
@@ -633,11 +627,11 @@ spack:
         assert ctx.config.get("config:install_tree:root") == "$env/opt"
 
 
-def test_repo_update(tmp_path: pathlib.Path):
+def test_repo_update(tmp_path: pathlib.Path, ctx: SpackContext):
     existing_root, _ = spack.repo.create_repo(str(tmp_path), namespace="foo")
     nonexisting_root = str(tmp_path / "nonexisting")
     config = {"repos": [existing_root, nonexisting_root]}
-    assert spack.schema.repos.update(config, spack.test.harness.current().config)
+    assert spack.schema.repos.update(config, ctx.config)
     assert config["repos"] == {
         "foo": existing_root
         # non-existing root is removed for simplicity; would be a warning otherwise.
@@ -648,7 +642,7 @@ def test_mock_builtin_repo(mock_packages: RepoPath):
     assert spack.repo.builtin_repo(mock_packages) is mock_packages.get_repo("builtin_mock")
 
 
-def test_parse_config_descriptor_git_1(tmp_path: pathlib.Path):
+def test_parse_config_descriptor_git_1(tmp_path: pathlib.Path, ctx: SpackContext):
     descriptor = spack.repo.parse_config_descriptor(
         name="name",
         descriptor={
@@ -656,7 +650,7 @@ def test_parse_config_descriptor_git_1(tmp_path: pathlib.Path):
             "destination": str(tmp_path / "some/destination"),
         },
         lock=spack.util.lock.Lock(str(tmp_path / "x"), enable=False),
-        config=spack.test.harness.current().config,
+        config=ctx.config,
     )
 
     assert isinstance(descriptor, spack.repo.RemoteRepoDescriptor)
@@ -666,18 +660,18 @@ def test_parse_config_descriptor_git_1(tmp_path: pathlib.Path):
     assert descriptor.relative_paths is None
 
 
-def test_parse_config_descriptor_git_2(tmp_path: pathlib.Path):
+def test_parse_config_descriptor_git_2(tmp_path: pathlib.Path, ctx: SpackContext):
     descriptor = spack.repo.parse_config_descriptor(
         name="name",
         descriptor={"git": str(tmp_path / "repo.git"), "paths": ["some/path"]},
         lock=spack.util.lock.Lock(str(tmp_path / "x"), enable=False),
-        config=spack.test.harness.current().config,
+        config=ctx.config,
     )
     assert isinstance(descriptor, spack.repo.RemoteRepoDescriptor)
     assert descriptor.relative_paths == ["some/path"]
 
 
-def test_remote_descriptor_no_git(tmp_path: pathlib.Path):
+def test_remote_descriptor_no_git(tmp_path: pathlib.Path, ctx: SpackContext):
     """Test that descriptor fails without git."""
     descriptor = spack.repo.parse_config_descriptor(
         name="name",
@@ -686,7 +680,7 @@ def test_remote_descriptor_no_git(tmp_path: pathlib.Path):
             "destination": str(tmp_path / "some/destination"),
         },
         lock=spack.util.lock.Lock(str(tmp_path / "x"), enable=False),
-        config=spack.test.harness.current().config,
+        config=ctx.config,
     )
 
     descriptor.initialize(fetch=True, git=None)
@@ -695,7 +689,7 @@ def test_remote_descriptor_no_git(tmp_path: pathlib.Path):
     assert descriptor.error == "Git executable not found"
 
 
-def test_remote_descriptor_update_no_git(tmp_path: pathlib.Path):
+def test_remote_descriptor_update_no_git(tmp_path: pathlib.Path, ctx: SpackContext):
     """Test that descriptor fails without git."""
     descriptor = spack.repo.parse_config_descriptor(
         name="name",
@@ -704,7 +698,7 @@ def test_remote_descriptor_update_no_git(tmp_path: pathlib.Path):
             "destination": str(tmp_path / "some/destination"),
         },
         lock=spack.util.lock.Lock(str(tmp_path / "x"), enable=False),
-        config=spack.test.harness.current().config,
+        config=ctx.config,
     )
 
     assert isinstance(descriptor, spack.repo.RemoteRepoDescriptor)
@@ -713,26 +707,26 @@ def test_remote_descriptor_update_no_git(tmp_path: pathlib.Path):
         descriptor.update(git=None)
 
 
-def test_parse_config_descriptor_local(tmp_path: pathlib.Path):
+def test_parse_config_descriptor_local(tmp_path: pathlib.Path, ctx: SpackContext):
     descriptor = spack.repo.parse_config_descriptor(
         name="name",
         descriptor=str(tmp_path / "local_repo"),
         lock=spack.util.lock.Lock(str(tmp_path / "x"), enable=False),
-        config=spack.test.harness.current().config,
+        config=ctx.config,
     )
     assert isinstance(descriptor, spack.repo.LocalRepoDescriptor)
     assert descriptor.name == "name"
     assert descriptor.path == str(tmp_path / "local_repo")
 
 
-def test_parse_config_descriptor_no_git(tmp_path: pathlib.Path):
+def test_parse_config_descriptor_no_git(tmp_path: pathlib.Path, ctx: SpackContext):
     """Test that we can parse a descriptor without a git key."""
     with pytest.raises(RuntimeError, match="Invalid configuration for repository"):
         spack.repo.parse_config_descriptor(
             name="name",
             descriptor={"destination": str(tmp_path / "some/destination"), "paths": ["some/path"]},
             lock=spack.util.lock.Lock(str(tmp_path / "x"), enable=False),
-            config=spack.test.harness.current().config,
+            config=ctx.config,
         )
 
 
@@ -982,7 +976,7 @@ def test_repo_descriptors_update_invalid(tmp_path: pathlib.Path):
             descriptor.update(git=MockGitInvalidRemote())
 
 
-def test_repo_use_bad_import(config, repo_builder: RepoBuilder):
+def test_repo_use_bad_import(config, repo_builder: RepoBuilder, ctx: SpackContext):
     """Demonstrate failure when attempt to get the class for package containing
     a failing import (e.g., missing repository)."""
     package_py = pathlib.Path(repo_builder._recipe_filename("importer"))
@@ -1002,20 +996,20 @@ class Importer(PackageBase):
         encoding="utf-8",
     )
 
-    with spack.test.harness.use_repositories(repo_builder.root):
+    with spack.test.harness.use_repositories(ctx, repo_builder.root):
         with pytest.raises(spack.repo.RepoError, match="cannot load"):
-            spack.test.harness.current().repo.get_pkg_class("importer")
+            ctx.repo.get_pkg_class("importer")
 
 
-def test_repo_use_bad_syntax(config, repo_builder: RepoBuilder):
+def test_repo_use_bad_syntax(config, repo_builder: RepoBuilder, ctx: SpackContext):
     """Demonstrate failure when attempt to get class for package with invalid syntax."""
     package_py = pathlib.Path(repo_builder._recipe_filename("erroneous"))
     package_py.parent.mkdir(parents=True)
     package_py.write_text("class 123: pass", encoding="utf-8")
 
-    with spack.test.harness.use_repositories(repo_builder.root):
+    with spack.test.harness.use_repositories(ctx, repo_builder.root):
         with pytest.raises(spack.repo.RepoError):
-            spack.test.harness.current().repo.get_pkg_class("erroneous")
+            ctx.repo.get_pkg_class("erroneous")
 
 
 def test_unknownpkgerror_match_fails(mock_packages):

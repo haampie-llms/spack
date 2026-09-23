@@ -16,6 +16,7 @@ import spack.store
 import spack.test.harness
 import spack.traverse
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.database import Database
 from spack.installer.base import ExitCode, JobServerBase, NoopJobServer
 from spack.installer.schedule import BuildGraph, ScheduleResult, _node_to_roots, schedule_builds
@@ -1069,11 +1070,11 @@ class TestScheduleBuilds:
             lock.release_read()
 
     def test_installed_implicit_explicit_set_produces_db_update(
-        self, temporary_store, mock_packages
+        self, temporary_store, mock_packages, ctx: SpackContext
     ):
         """An installed-implicit spec in explicit set produces a DbUpdate."""
         spec = self._make_spec("trivial-install-test-package", temporary_store)
-        temporary_store.layout.create_install_directory(spec, spack.test.harness.current().config)
+        temporary_store.layout.create_install_directory(spec, ctx.config)
         temporary_store.db.add(spec, explicit=False)
         pending = [spec.dag_hash()]
         result = _schedule(

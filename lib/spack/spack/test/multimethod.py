@@ -8,7 +8,7 @@ import pytest
 
 import spack.concretize
 import spack.platforms
-import spack.test.harness
+from spack.context import SpackContext
 from spack.multimethod import NoSuchMethodError
 
 pytestmark = [
@@ -27,8 +27,8 @@ def pkg_name(request):
     return request.param
 
 
-def test_no_version_match(pkg_name):
-    spec = spack.concretize.concretize_one(pkg_name + "@2.0", spack.test.harness.current())
+def test_no_version_match(pkg_name, ctx: SpackContext):
+    spec = spack.concretize.concretize_one(pkg_name + "@2.0", ctx)
     with pytest.raises(NoSuchMethodError):
         spec.package.no_version_2()
 
@@ -67,26 +67,22 @@ def test_no_version_match(pkg_name):
         ("", "boolean_false_first", "True"),
     ],
 )
-def test_multimethod_calls(pkg_name, constraint_str, method_name, expected_result):
-    s = spack.concretize.concretize_one(
-        f"{pkg_name}{constraint_str}", spack.test.harness.current()
-    )
+def test_multimethod_calls(
+    pkg_name, constraint_str, method_name, expected_result, ctx: SpackContext
+):
+    s = spack.concretize.concretize_one(f"{pkg_name}{constraint_str}", ctx)
     msg = f"Method {method_name} from {s} is giving a wrong result"
     assert getattr(s.package, method_name)() == expected_result, msg
 
 
-def test_target_match(pkg_name):
+def test_target_match(pkg_name, ctx: SpackContext):
     platform = spack.platforms.host()
     targets = list(platform.targets.values())
     for target in targets[:-1]:
-        s = spack.concretize.concretize_one(
-            pkg_name + " target=" + target.name, spack.test.harness.current()
-        )
+        s = spack.concretize.concretize_one(pkg_name + " target=" + target.name, ctx)
         assert s.package.different_by_target() == target.name
 
-    s = spack.concretize.concretize_one(
-        pkg_name + " target=" + targets[-1].name, spack.test.harness.current()
-    )
+    s = spack.concretize.concretize_one(pkg_name + " target=" + targets[-1].name, ctx)
     if len(targets) == 1:
         assert s.package.different_by_target() == targets[-1].name
     else:
@@ -115,6 +111,8 @@ def test_target_match(pkg_name):
         ("multimethod-diamond@4.0", "diamond_inheritance", "subclass"),
     ],
 )
-def test_multimethod_calls_and_inheritance(spec_str, method_name, expected_result):
-    s = spack.concretize.concretize_one(spec_str, spack.test.harness.current())
+def test_multimethod_calls_and_inheritance(
+    spec_str, method_name, expected_result, ctx: SpackContext
+):
+    s = spack.concretize.concretize_one(spec_str, ctx)
     assert getattr(s.package, method_name)() == expected_result

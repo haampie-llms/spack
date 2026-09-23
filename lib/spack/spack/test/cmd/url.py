@@ -5,8 +5,8 @@ import re
 
 import pytest
 
-import spack.test.harness
 from spack.cmd.url import name_parsed_correctly, url_summary, version_parsed_correctly
+from spack.context import SpackContext
 from spack.repo import RepoPath
 from spack.test.harness import SpackCommand
 from spack.url import UndetectableVersionError
@@ -94,11 +94,11 @@ def test_url_list(mock_packages):
     assert 0 < correct_version_urls < total_urls
 
 
-def test_url_summary(mock_packages):
+def test_url_summary(mock_packages, ctx: SpackContext):
     """Test the URL summary command."""
     # test url_summary, the internal function that does the work
     (total_urls, correct_names, correct_versions, name_count_dict, version_count_dict) = (
-        url_summary(None, spack.test.harness.current())
+        url_summary(None, ctx)
     )
 
     assert 0 < correct_names <= sum(name_count_dict.values()) <= total_urls

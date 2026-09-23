@@ -15,11 +15,11 @@ import spack.concretize
 import spack.error
 import spack.fetch_strategy as fs
 import spack.package_base
-import spack.test.harness
 import spack.url
 import spack.util.web as web_util
 import spack.version
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.stage import stage_from_config
 from spack.util import crypto, tty
 from spack.util.executable import which
@@ -191,6 +191,7 @@ def test_fetch(
     config: Configuration,
     mutable_mock_repo,
     monkeypatch,
+    ctx: SpackContext,
 ):
     """Fetch an archive and make sure we can checksum it."""
     algo = crypto.hash_fun_for_algo(checksum_type)()
@@ -201,7 +202,7 @@ def test_fetch(
     # Get a spec and tweak the test package with new checksum params. versions is a class-level
     # dict shared across instances and cached with the package module, so add the version via
     # monkeypatch to restore it after the test instead of leaking it into later tests.
-    s = spack.concretize.concretize_one("url-test", spack.test.harness.current())
+    s = spack.concretize.concretize_one("url-test", ctx)
     s.package.url = mock_archive.url
     monkeypatch.setitem(
         s.package.versions,
@@ -241,13 +242,15 @@ def test_fetch(
     ],
 )
 @pytest.mark.parametrize("_fetch_method", ["curl", "urllib"])
-def test_from_list_url(mock_packages, config: Configuration, spec, url, digest, _fetch_method):
+def test_from_list_url(
+    mock_packages, config: Configuration, spec, url, digest, _fetch_method, ctx: SpackContext
+):
     """
     Test URLs in the url-list-test package, which means they should
     have checksums in the package.
     """
     with config.override("config:url_fetch_method", _fetch_method):
-        s = spack.concretize.concretize_one(spec, spack.test.harness.current())
+        s = spack.concretize.concretize_one(spec, ctx)
         fetch_strategy = fs.from_list_url(s.package)
         assert isinstance(fetch_strategy, fs.URLFetchStrategy)
         assert os.path.basename(fetch_strategy.url) == url
@@ -269,13 +272,17 @@ def test_from_list_url(mock_packages, config: Configuration, spec, url, digest, 
     ],
 )
 def test_new_version_from_list_url(
-    mock_packages, config: Configuration, _fetch_method, requested_version, tarball, digest
+    mock_packages,
+    config: Configuration,
+    _fetch_method,
+    requested_version,
+    tarball,
+    digest,
+    ctx: SpackContext,
 ):
     """Test non-specific URLs from the url-list-test package."""
     with config.override("config:url_fetch_method", _fetch_method):
-        s = spack.concretize.concretize_one(
-            f"url-list-test @{requested_version}", spack.test.harness.current()
-        )
+        s = spack.concretize.concretize_one(f"url-list-test @{requested_version}", ctx)
         fetch_strategy = fs.from_list_url(s.package)
 
         assert isinstance(fetch_strategy, fs.URLFetchStrategy)
@@ -287,9 +294,9 @@ def test_new_version_from_list_url(
         assert fetch_strategy.extra_options == {"timeout": 60}
 
 
-def test_nosource_from_list_url(mock_packages, config):
+def test_nosource_from_list_url(mock_packages, config, ctx: SpackContext):
     """This test confirms BundlePackages do not have list url."""
-    s = spack.concretize.concretize_one("nosource", spack.test.harness.current())
+    s = spack.concretize.concretize_one("nosource", ctx)
     fetch_strategy = fs.from_list_url(s.package)
     assert fetch_strategy is None
 

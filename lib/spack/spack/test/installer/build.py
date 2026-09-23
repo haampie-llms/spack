@@ -8,7 +8,7 @@ import pathlib
 import pytest
 
 import spack.concretize
-import spack.test.harness
+from spack.context import SpackContext
 from spack.installer.build import (
     OVERWRITE_GARBAGE_SUFFIX,
     BinaryCacheMiss,
@@ -236,9 +236,10 @@ class TestPrefixPivoterFailureRecovery:
         assert len(list(tmp_path.iterdir())) == 3
 
 
-def test_dump_packages_of_spec_with_dependencies(mock_packages, config, tmp_path: pathlib.Path):
+def test_dump_packages_of_spec_with_dependencies(
+    mock_packages, config, tmp_path: pathlib.Path, ctx: SpackContext
+):
     """The packages of every node are looked up in the repositories, not in the destination."""
-    ctx = spack.test.harness.current()
     spec = spack.concretize.concretize_one("dependent-install", ctx)
     dump_packages(spec, str(tmp_path), ctx)
     assert list(tmp_path.glob("**/dependent*install/package.py"))

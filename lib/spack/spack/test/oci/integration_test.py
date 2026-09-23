@@ -24,6 +24,7 @@ import spack.spec
 import spack.test.harness
 import spack.traverse
 import spack.util.web
+from spack.context import SpackContext
 from spack.database import Database
 from spack.oci.image import Digest, ImageReference, default_config, default_manifest
 from spack.oci.oci import blob_exists, get_manifest_and_config, upload_blob, upload_manifest
@@ -74,10 +75,10 @@ def test_buildcache_push_command(mutable_database: Database):
         assert os.path.exists(os.path.join(spec.prefix, "bin", "mpileaks"))
 
 
-def test_buildcache_tag(install_mockery, mock_fetch, mutable_mock_env_path):
+def test_buildcache_tag(install_mockery, mock_fetch, mutable_mock_env_path, ctx: SpackContext):
     """Tests whether we can create an OCI image from a full environment with multiple roots."""
     env("create", "test")
-    with ev.read("test", ctx=spack.test.harness.current()):
+    with ev.read("test", ctx=ctx):
         install("--fake", "--add", "libelf")
         install("--fake", "--add", "trivial-install-test-package")
 
@@ -86,12 +87,12 @@ def test_buildcache_tag(install_mockery, mock_fetch, mutable_mock_env_path):
     with oci_servers(registry) as urlopen:
         mirror("add", "oci-test", "oci://example.com/image")
 
-        with ev.read("test", ctx=spack.test.harness.current()):
+        with ev.read("test", ctx=ctx):
             buildcache("push", "--tag", "full_env", "oci-test")
 
         name = ImageReference.from_string("example.com/image:full_env")
 
-        with ev.read("test", ctx=spack.test.harness.current()) as e:
+        with ev.read("test", ctx=ctx) as e:
             specs = [
                 x
                 for x in spack.traverse.traverse_nodes(
@@ -109,7 +110,7 @@ def test_buildcache_tag(install_mockery, mock_fetch, mutable_mock_env_path):
         # also test the case where Spack doesn't have to upload any binaries, it just has to create
         # a new tag.
         libelf = next(s for s in specs if s.name == "libelf")
-        with ev.read("test", ctx=spack.test.harness.current()):
+        with ev.read("test", ctx=ctx):
             # Get libelf spec
             buildcache("push", "--tag", "single_spec", "oci-test", libelf.format("libelf{/hash}"))
 

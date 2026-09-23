@@ -10,13 +10,13 @@ from typing import List
 import pytest
 
 import spack.main
-import spack.test.harness
 import spack.util.executable as ex
 import spack.util.filesystem as fs
+from spack.context import SpackContext
 from spack.hooks.sbang import filter_shebangs_in_directory
 
 
-def test_read_unicode(tmp_path: pathlib.Path, working_env):
+def test_read_unicode(tmp_path: pathlib.Path, working_env, ctx: SpackContext):
     with fs.working_dir(str(tmp_path)):
         script_name = "print_unicode.py"
         script_args: List[str] = []
@@ -38,7 +38,7 @@ print(u'\\xc3')
 
         # make it executable
         fs.set_executable(script_name)
-        filter_shebangs_in_directory(".", spack.test.harness.current().store, [script_name])
+        filter_shebangs_in_directory(".", ctx.store, [script_name])
 
         assert "\xc3" == script(*script_args, output=str).strip()
 

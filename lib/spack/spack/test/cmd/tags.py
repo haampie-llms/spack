@@ -4,6 +4,7 @@
 
 import spack.concretize
 import spack.test.harness
+from spack.context import SpackContext
 from spack.installer import PackageInstaller
 
 tags = spack.test.harness.SpackCommand("tags")
@@ -36,15 +37,15 @@ def test_tags_all_mock_tag_packages(mock_packages):
         assert pkg in out
 
 
-def test_tags_no_tags(repo_builder):
+def test_tags_no_tags(repo_builder, ctx: SpackContext):
     repo_builder.add_package("pkg-a")
-    with spack.test.harness.use_repositories(repo_builder.root):
+    with spack.test.harness.use_repositories(ctx, repo_builder.root):
         out = tags()
     assert "No tagged" in out
 
 
-def test_tags_installed(install_mockery, mock_fetch):
-    s = spack.concretize.concretize_one("mpich", spack.test.harness.current())
+def test_tags_installed(install_mockery, mock_fetch, ctx: SpackContext):
+    s = spack.concretize.concretize_one("mpich", ctx)
     PackageInstaller([s.package], explicit=True, fake=True).install()
 
     out = tags("-i")

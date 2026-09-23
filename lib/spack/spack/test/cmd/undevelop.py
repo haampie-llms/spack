@@ -5,7 +5,7 @@ import pathlib
 
 import spack.concretize
 import spack.environment as ev
-import spack.test.harness
+from spack.context import SpackContext
 from spack.test.harness import SpackCommand
 from spack.util.filesystem import working_dir
 
@@ -14,7 +14,9 @@ env = SpackCommand("env")
 concretize = SpackCommand("concretize")
 
 
-def test_undevelop(tmp_path: pathlib.Path, mutable_config, mock_packages, mutable_mock_env_path):
+def test_undevelop(
+    tmp_path: pathlib.Path, mutable_config, mock_packages, mutable_mock_env_path, ctx: SpackContext
+):
     # setup environment
     envdir = tmp_path / "env"
     envdir.mkdir()
@@ -34,10 +36,10 @@ spack:
             )
 
         env("create", "test", "./spack.yaml")
-        with ev.read("test", ctx=spack.test.harness.current()):
-            before = spack.concretize.concretize_one("mpich", spack.test.harness.current())
+        with ev.read("test", ctx=ctx):
+            before = spack.concretize.concretize_one("mpich", ctx)
             undevelop("mpich")
-            after = spack.concretize.concretize_one("mpich", spack.test.harness.current())
+            after = spack.concretize.concretize_one("mpich", ctx)
 
     # Removing dev spec from environment changes concretization
     assert before.satisfies("dev_path=*")
@@ -45,7 +47,7 @@ spack:
 
 
 def test_undevelop_all(
-    tmp_path: pathlib.Path, mutable_config, mock_packages, mutable_mock_env_path
+    tmp_path: pathlib.Path, mutable_config, mock_packages, mutable_mock_env_path, ctx: SpackContext
 ):
     # setup environment
     envdir = tmp_path / "env"
@@ -66,10 +68,10 @@ spack:
             )
 
         env("create", "test", "./spack.yaml")
-        with ev.read("test", ctx=spack.test.harness.current()):
-            before = spack.concretize.concretize_one("mpich", spack.test.harness.current())
+        with ev.read("test", ctx=ctx):
+            before = spack.concretize.concretize_one("mpich", ctx)
             undevelop("--all")
-            after = spack.concretize.concretize_one("mpich", spack.test.harness.current())
+            after = spack.concretize.concretize_one("mpich", ctx)
 
     # Removing dev spec from environment changes concretization
     assert before.satisfies("dev_path=*")
@@ -77,7 +79,7 @@ spack:
 
 
 def test_undevelop_nonexistent(
-    tmp_path: pathlib.Path, mutable_config, mock_packages, mutable_mock_env_path
+    tmp_path: pathlib.Path, mutable_config, mock_packages, mutable_mock_env_path, ctx: SpackContext
 ):
     # setup environment
     envdir = tmp_path / "env"
@@ -98,7 +100,7 @@ spack:
             )
 
         env("create", "test", "./spack.yaml")
-        with ev.read("test", ctx=spack.test.harness.current()) as e:
+        with ev.read("test", ctx=ctx) as e:
             concretize()
             before = e.specs_by_hash
             undevelop("package-not-in-develop")  # does nothing

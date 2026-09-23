@@ -14,8 +14,8 @@ import spack.concretize
 import spack.environment as ev
 import spack.error
 import spack.spec
-import spack.test.harness
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.main import SpackCommandError
 from spack.store import Store
 from spack.test.harness import SpackCommand
@@ -164,8 +164,8 @@ def test_spec_parse_error():
     assert error_msg in str(e.value)
 
 
-def test_env_aware_spec(mutable_mock_env_path):
-    env = ev.create("test", ctx=spack.test.harness.current())
+def test_env_aware_spec(mutable_mock_env_path, ctx: SpackContext):
+    env = ev.create("test", ctx=ctx)
     env.add("mpileaks")
 
     with env:
@@ -244,10 +244,10 @@ def test_spec_unification_from_cli(
 
 
 def test_buildcache_status_fn_marks_absent_spec(
-    temporary_store: Store, install_mockery, mock_packages
+    temporary_store: Store, install_mockery, mock_packages, ctx: SpackContext
 ):
     """Tests the basic semantics of build_cache_status_fn."""
-    s = spack.concretize.concretize_one("mpileaks", spack.test.harness.current())
+    s = spack.concretize.concretize_one("mpileaks", ctx)
     assert temporary_store.db.install_status(s) == spack.spec.InstallStatus.absent
 
     status_fn = spack.cmd.buildcache_status_fn({s.dag_hash()}, store=temporary_store)
@@ -257,14 +257,12 @@ def test_buildcache_status_fn_marks_absent_spec(
     assert status_fn(s) == spack.spec.InstallStatus.absent
 
 
-def test_buildcache_status_fn_installed_not_overridden(mutable_database):
+def test_buildcache_status_fn_installed_not_overridden(mutable_database, ctx: SpackContext):
     """Tests that an installed spec stays installed even if its hash is in the cache."""
     s = mutable_database.query_one("mpileaks^mpich")
     assert mutable_database.install_status(s) == spack.spec.InstallStatus.installed
 
-    status_fn = spack.cmd.buildcache_status_fn(
-        {s.dag_hash()}, store=spack.test.harness.current().store
-    )
+    status_fn = spack.cmd.buildcache_status_fn({s.dag_hash()}, store=ctx.store)
     assert status_fn(s) == spack.spec.InstallStatus.installed
 
 
@@ -279,7 +277,7 @@ def _root_names() -> List[str]:
 
 
 @pytest.mark.parametrize("unify", ["true", "false", "when_possible"])
-def test_spec_in_empty_environment(tmp_path: pathlib.Path, unify):
+def test_spec_in_empty_environment(tmp_path: pathlib.Path, unify, ctx: SpackContext):
     """Tests that an empty environment doesn't fail with `spack spec`."""
     (tmp_path / ev.manifest_name).write_text(
         f"""\
@@ -289,7 +287,7 @@ spack:
   specs: []
 """
     )
-    with ev.Environment(tmp_path, ctx=spack.test.harness.current()):
+    with ev.Environment(tmp_path, ctx=ctx):
         assert _root_names() == []
 
 
@@ -324,14 +322,16 @@ spack:
         ),
     ],
 )
-def test_spec_env_with_groups_only(unify, tmp_path: pathlib.Path, spack_yaml, expected):
+def test_spec_env_with_groups_only(
+    unify, tmp_path: pathlib.Path, spack_yaml, expected, ctx: SpackContext
+):
     """Tests that `spack spec` uses the root specs of every group, not just the default one."""
     (tmp_path / ev.manifest_name).write_text(spack_yaml.format(unify=unify))
-    with ev.Environment(tmp_path, ctx=spack.test.harness.current()):
+    with ev.Environment(tmp_path, ctx=ctx):
         assert _root_names() == expected
 
 
-def test_spec_env_applies_group_config_override(tmp_path: pathlib.Path):
+def test_spec_env_applies_group_config_override(tmp_path: pathlib.Path, ctx: SpackContext):
     """Tests that the "override" scope of a group is active while solving that group."""
     (tmp_path / ev.manifest_name).write_text(
         """\
@@ -346,14 +346,14 @@ spack:
     - libelf
 """
     )
-    with ev.Environment(tmp_path, ctx=spack.test.harness.current()):
+    with ev.Environment(tmp_path, ctx=ctx):
         roots = _roots()
 
     assert len(roots) == 1
     assert roots[0].satisfies("libelf@0.8.12")
 
 
-def test_spec_env_reuses_specs_from_needed_groups(tmp_path: pathlib.Path):
+def test_spec_env_reuses_specs_from_needed_groups(tmp_path: pathlib.Path, ctx: SpackContext):
     """Tests that specs from a group listed in "needs" are reused."""
     (tmp_path / ev.manifest_name).write_text(
         """\
@@ -375,7 +375,7 @@ spack:
     - mpileaks
 """
     )
-    with ev.Environment(tmp_path, ctx=spack.test.harness.current()) as env:
+    with ev.Environment(tmp_path, ctx=ctx) as env:
         # Ground truth: this is what `spack install` would build
         env.concretize()
         _, gcc = next(iter(env.concretized_specs_by(group="compiler")))
@@ -383,14 +383,16 @@ spack:
         assert mpileaks["c"].dag_hash() == gcc.dag_hash()
 
     # The environment on disk is still not concretized, so `spack spec` has to solve it
-    with ev.Environment(tmp_path, ctx=spack.test.harness.current()):
+    with ev.Environment(tmp_path, ctx=ctx):
         reported = _roots()
 
     # Concrete specs compare by DAG hash, so this checks the whole sub-DAG of each root
     assert reported == [gcc, mpileaks]
 
 
-def test_spec_env_reports_the_concretized_state(tmp_path: pathlib.Path, mutable_config):
+def test_spec_env_reports_the_concretized_state(
+    tmp_path: pathlib.Path, mutable_config, ctx: SpackContext
+):
     """Tests that in a concretized environment `spack spec` reports what is in the lockfile."""
     (tmp_path / ev.manifest_name).write_text(
         """\
@@ -400,20 +402,20 @@ spack:
 """
     )
     mutable_config.set("packages:libelf:require", "@0.8.12")
-    with ev.Environment(tmp_path, ctx=spack.test.harness.current()) as env:
+    with ev.Environment(tmp_path, ctx=ctx) as env:
         env.concretize()
         env.write()
 
     # Configuration drifts after the environment has been concretized
     mutable_config.set("packages:libelf:require", "@0.8.13")
-    with ev.Environment(tmp_path, ctx=spack.test.harness.current()):
+    with ev.Environment(tmp_path, ctx=ctx):
         roots = _roots()
 
     assert len(roots) == 1
     assert roots[0].satisfies("libelf@0.8.12")
 
 
-def test_spec_env_reports_included_concrete_roots(tmp_path: pathlib.Path):
+def test_spec_env_reports_included_concrete_roots(tmp_path: pathlib.Path, ctx: SpackContext):
     """Tests that roots coming from an included concrete environment are reported too."""
     include_dir = tmp_path / "included"
     include_dir.mkdir()
@@ -424,7 +426,7 @@ spack:
   - libelf
 """
     )
-    included = ev.Environment(include_dir, ctx=spack.test.harness.current())
+    included = ev.Environment(include_dir, ctx=ctx)
     included.concretize()
     included.write()
 
@@ -439,7 +441,7 @@ spack:
   - mpich
 """
     )
-    with ev.Environment(root_dir, ctx=spack.test.harness.current()):
+    with ev.Environment(root_dir, ctx=ctx):
         assert _root_names() == ["mpich", "libelf"]
 
 

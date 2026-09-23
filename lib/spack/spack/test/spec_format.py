@@ -5,7 +5,7 @@
 
 import spack.concretize
 import spack.spec
-import spack.test.harness
+from spack.context import SpackContext
 from spack.enums import PartStyle
 from spack.spec import DIM_COLOR, HIGHLIGHT_COLOR, VARIANT_COLOR, VERSION_COLOR, Spec
 from spack.util.tty.color import colorize
@@ -31,9 +31,9 @@ def _variant_key(target_key, match_style, other_style=PartStyle.NORMAL):
     return lambda node, key: match_style if key == target_key else other_style
 
 
-def test_version_style_hidden(config, mock_packages):
+def test_version_style_hidden(config, mock_packages, ctx: SpackContext):
     """Tests that HIDDEN suppresses the version entirely."""
-    s = spack.concretize.concretize_one("mpileaks@2.3", spack.test.harness.current())
+    s = spack.concretize.concretize_one("mpileaks@2.3", ctx)
     result = s.format("{@version}", version_style_fn=_always_version(PartStyle.HIDDEN))
     assert result == ""
 
@@ -41,9 +41,9 @@ def test_version_style_hidden(config, mock_packages):
     assert result == "mpileaks"
 
 
-def test_version_style_highlight(config, mock_packages):
+def test_version_style_highlight(config, mock_packages, ctx: SpackContext):
     """Tests that HIGHLIGHT applies HIGHLIGHT_COLOR to the version"""
-    s = spack.concretize.concretize_one("mpileaks@2.3", spack.test.harness.current())
+    s = spack.concretize.concretize_one("mpileaks@2.3", ctx)
     result = s.format(
         "{name}{@version}", color=True, version_style_fn=_always_version(PartStyle.HIGHLIGHT)
     )
@@ -51,9 +51,9 @@ def test_version_style_highlight(config, mock_packages):
     assert result == expected
 
 
-def test_version_style_dim(config, mock_packages):
+def test_version_style_dim(config, mock_packages, ctx: SpackContext):
     """Tests that DIM applies DIM_COLOR to the version."""
-    s = spack.concretize.concretize_one("mpileaks@2.3", spack.test.harness.current())
+    s = spack.concretize.concretize_one("mpileaks@2.3", ctx)
     result = s.format(
         "{name}{@version}", color=True, version_style_fn=_always_version(PartStyle.DIM)
     )
@@ -61,9 +61,9 @@ def test_version_style_dim(config, mock_packages):
     assert result == expected
 
 
-def test_version_style_normal_uses_default_color(config, mock_packages):
+def test_version_style_normal_uses_default_color(config, mock_packages, ctx: SpackContext):
     """Tests that NORMAL keeps the default VERSION_COLOR."""
-    s = spack.concretize.concretize_one("mpileaks@2.3", spack.test.harness.current())
+    s = spack.concretize.concretize_one("mpileaks@2.3", ctx)
     result = s.format(
         "{name}{@version}", color=True, version_style_fn=_always_version(PartStyle.NORMAL)
     )
@@ -71,16 +71,16 @@ def test_version_style_normal_uses_default_color(config, mock_packages):
     assert result == expected
 
 
-def test_single_variant_style_hidden(config, mock_packages):
+def test_single_variant_style_hidden(config, mock_packages, ctx: SpackContext):
     """Tests that HIDDEN on a single variant suppresses it."""
-    s = spack.concretize.concretize_one("mpileaks+debug", spack.test.harness.current())
+    s = spack.concretize.concretize_one("mpileaks+debug", ctx)
     result = s.format("{name}{variants.debug}", variant_style_fn=_always_variant(PartStyle.HIDDEN))
     assert result == "mpileaks"
 
 
-def test_single_variant_style_highlight(config, mock_packages):
+def test_single_variant_style_highlight(config, mock_packages, ctx: SpackContext):
     """Tests that HIGHLIGHT on a single variant applies HIGHLIGHT_COLOR."""
-    s = spack.concretize.concretize_one("mpileaks+debug", spack.test.harness.current())
+    s = spack.concretize.concretize_one("mpileaks+debug", ctx)
     result = s.format(
         "{name}{variants.debug}", color=True, variant_style_fn=_always_variant(PartStyle.HIGHLIGHT)
     )
@@ -88,9 +88,9 @@ def test_single_variant_style_highlight(config, mock_packages):
     assert result == expected
 
 
-def test_single_variant_style_dim(config, mock_packages):
+def test_single_variant_style_dim(config, mock_packages, ctx: SpackContext):
     """Tests that DIM on a single variant applies DIM_COLOR."""
-    s = spack.concretize.concretize_one("mpileaks+debug", spack.test.harness.current())
+    s = spack.concretize.concretize_one("mpileaks+debug", ctx)
     result = s.format(
         "{name}{variants.debug}", color=True, variant_style_fn=_always_variant(PartStyle.DIM)
     )
@@ -98,9 +98,9 @@ def test_single_variant_style_dim(config, mock_packages):
     assert result == expected
 
 
-def test_single_variant_style_normal_uses_variant_color(config, mock_packages):
+def test_single_variant_style_normal_uses_variant_color(config, mock_packages, ctx: SpackContext):
     """Tests that NORMAL keeps the default VARIANT_COLOR."""
-    s = spack.concretize.concretize_one("mpileaks+debug", spack.test.harness.current())
+    s = spack.concretize.concretize_one("mpileaks+debug", ctx)
     result = s.format(
         "{variants.debug}", color=True, variant_style_fn=_always_variant(PartStyle.NORMAL)
     )
@@ -108,17 +108,17 @@ def test_single_variant_style_normal_uses_variant_color(config, mock_packages):
     assert result == expected
 
 
-def test_all_variants_some_hidden(config, mock_packages):
+def test_all_variants_some_hidden(config, mock_packages, ctx: SpackContext):
     """Tests that HIDDEN for a specific key removes it from the output."""
-    s = spack.concretize.concretize_one("mpileaks+debug", spack.test.harness.current())
+    s = spack.concretize.concretize_one("mpileaks+debug", ctx)
     result = s.format("{variants}", variant_style_fn=_variant_key("debug", PartStyle.HIDDEN))
     assert "+debug" not in result
     assert "~debug" not in result
 
 
-def test_all_variants_mixed_styles(config, mock_packages):
+def test_all_variants_mixed_styles(config, mock_packages, ctx: SpackContext):
     """Tests that different keys can have different styles."""
-    s = spack.concretize.concretize_one("mpileaks+debug", spack.test.harness.current())
+    s = spack.concretize.concretize_one("mpileaks+debug", ctx)
     result = s.format(
         "{variants}",
         color=True,
@@ -130,16 +130,16 @@ def test_all_variants_mixed_styles(config, mock_packages):
     assert dimmed_shared in result
 
 
-def test_all_variants_all_hidden(config, mock_packages):
+def test_all_variants_all_hidden(config, mock_packages, ctx: SpackContext):
     """Tests that all variants HIDDEN leads to the empty string."""
-    s = spack.concretize.concretize_one("mpileaks+debug", spack.test.harness.current())
+    s = spack.concretize.concretize_one("mpileaks+debug", ctx)
     result = s.format("{variants}", variant_style_fn=_always_variant(PartStyle.HIDDEN))
     assert result == ""
 
 
-def test_architecture_platform_hidden(config, mock_packages):
+def test_architecture_platform_hidden(config, mock_packages, ctx: SpackContext):
     """Tests that HIDDEN for 'platform' suppresses the platform part."""
-    s = spack.concretize.concretize_one("mpileaks", spack.test.harness.current())
+    s = spack.concretize.concretize_one("mpileaks", ctx)
     result = s.format(
         "{name}{ platform=architecture.platform}",
         architecture_style_fn=_always_arch(PartStyle.HIDDEN),
@@ -147,27 +147,27 @@ def test_architecture_platform_hidden(config, mock_packages):
     assert result == "mpileaks"
 
 
-def test_architecture_os_hidden(config, mock_packages):
+def test_architecture_os_hidden(config, mock_packages, ctx: SpackContext):
     """Tests that HIDDEN for 'os' suppresses the os part."""
-    s = spack.concretize.concretize_one("mpileaks", spack.test.harness.current())
+    s = spack.concretize.concretize_one("mpileaks", ctx)
     result = s.format(
         "{name}{ os=architecture.os}", architecture_style_fn=_always_arch(PartStyle.HIDDEN)
     )
     assert result == "mpileaks"
 
 
-def test_architecture_target_hidden(config, mock_packages):
+def test_architecture_target_hidden(config, mock_packages, ctx: SpackContext):
     """Tests that HIDDEN for 'target' suppresses the target part."""
-    s = spack.concretize.concretize_one("mpileaks", spack.test.harness.current())
+    s = spack.concretize.concretize_one("mpileaks", ctx)
     result = s.format(
         "{name}{ target=architecture.target}", architecture_style_fn=_always_arch(PartStyle.HIDDEN)
     )
     assert result == "mpileaks"
 
 
-def test_architecture_target_highlight(config, mock_packages):
+def test_architecture_target_highlight(config, mock_packages, ctx: SpackContext):
     """Tests that HIGHLIGHT for 'target' applies HIGHLIGHT_COLOR."""
-    s = spack.concretize.concretize_one("mpileaks", spack.test.harness.current())
+    s = spack.concretize.concretize_one("mpileaks", ctx)
     result = s.format(
         "{ target=architecture.target}",
         color=True,
@@ -177,9 +177,9 @@ def test_architecture_target_highlight(config, mock_packages):
     assert result == expected
 
 
-def test_architecture_os_dim(config, mock_packages):
+def test_architecture_os_dim(config, mock_packages, ctx: SpackContext):
     """Tests that DIM for 'os' applies DIM_COLOR."""
-    s = spack.concretize.concretize_one("mpileaks", spack.test.harness.current())
+    s = spack.concretize.concretize_one("mpileaks", ctx)
     result = s.format(
         "{ os=architecture.os}", color=True, architecture_style_fn=_always_arch(PartStyle.DIM)
     )
@@ -187,9 +187,9 @@ def test_architecture_os_dim(config, mock_packages):
     assert result == expected
 
 
-def test_architecture_style_fn_receives_correct_part(config, mock_packages):
+def test_architecture_style_fn_receives_correct_part(config, mock_packages, ctx: SpackContext):
     """Tests that architecture_style_fn receives the correct sub-part name."""
-    s = spack.concretize.concretize_one("mpileaks", spack.test.harness.current())
+    s = spack.concretize.concretize_one("mpileaks", ctx)
     received_parts = []
 
     def record_part(node, part):
@@ -203,7 +203,7 @@ def test_architecture_style_fn_receives_correct_part(config, mock_packages):
     assert received_parts == ["platform", "os", "target"]
 
 
-def test_abstract_spec_str_roundtrips_namespace(config, mock_packages):
+def test_abstract_spec_str_roundtrips_namespace(config, mock_packages, ctx: SpackContext):
     """Ensure that abstract specs (anonymous or not) round-trip and canonicalize the namespace"""
     named = Spec("foo namespace=bar")
     assert str(named) == "bar.foo"
@@ -216,7 +216,7 @@ def test_abstract_spec_str_roundtrips_namespace(config, mock_packages):
     dep = Spec("pkg-a ^builtin_mock.pkg-b")
     assert str(dep) == "pkg-a ^builtin_mock.pkg-b"
 
-    concrete = spack.concretize.concretize_one("mpileaks", spack.test.harness.current())
+    concrete = spack.concretize.concretize_one("mpileaks", ctx)
     assert concrete.namespace == "builtin_mock"
     assert str(concrete).startswith("mpileaks@")
 
@@ -242,11 +242,11 @@ def test_color_reaches_dependencies_of_transitive_dependencies():
     assert s._format_dependencies(color=False) == "^dep@2 %compiler@3"
 
 
-def test_variants_of_concrete_spec_abbreviate_patches(config, mock_packages):
+def test_variants_of_concrete_spec_abbreviate_patches(config, mock_packages, ctx: SpackContext):
     """A concrete spec renders its patch checksums as 7-character prefixes with a single =,
     a weaker constraint it satisfies; the full checksums remain available through its hash.
     An abstract spec prints its variants exactly, so its string form round-trips."""
-    concrete = spack.concretize.concretize_one("patch", spack.test.harness.current())
+    concrete = spack.concretize.concretize_one("patch", ctx)
     checksums = concrete.variants["patches"].values
     assert checksums
     prefixes = "patches=" + ",".join(c[:7] for c in checksums)

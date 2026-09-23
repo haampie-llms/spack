@@ -12,6 +12,7 @@ import spack.error
 import spack.operating_systems
 import spack.platforms
 import spack.test.harness
+from spack.context import SpackContext
 from spack.spec import ArchSpec, Spec
 
 
@@ -66,11 +67,11 @@ def test_user_input_combination(config, target_str, os_str):
     assert spec.architecture.target == TEST_PLATFORM.target(target_str)
 
 
-def test_default_os_and_target(config, mock_packages):
+def test_default_os_and_target(config, mock_packages, ctx: SpackContext):
     """Test that is we don't specify `os=` or `target=` we get the default values
     after concretization.
     """
-    spec = spack.concretize.concretize_one("libelf", spack.test.harness.current())
+    spec = spack.concretize.concretize_one("libelf", ctx)
     assert spec.architecture.os == str(TEST_PLATFORM.default_operating_system())
     assert spec.architecture.target == TEST_PLATFORM.default_target()
 
@@ -197,15 +198,17 @@ def test_star_target_is_replaced_by_a_named_target_when_constrained():
     str(spack.vendor.archspec.cpu.host().family) != "x86_64",
     reason="tests are for x86_64 uarch ranges",
 )
-def test_concretize_target_ranges(root_target_range, dep_target_range, result, monkeypatch):
+def test_concretize_target_ranges(
+    root_target_range, dep_target_range, result, monkeypatch, ctx: SpackContext
+):
     spec = spack.concretize.concretize_one(
         f"pkg-a foobar=bar target={root_target_range} %gcc@10 ^pkg-b target={dep_target_range}",
-        spack.test.harness.current(),
+        ctx,
     )
     assert spec.target == spec["pkg-b"].target == result
 
 
-def test_instantiate_non_default_macos(mock_packages):
+def test_instantiate_non_default_macos(mock_packages, ctx: SpackContext):
     darwin = spack.platforms.Darwin()
 
     for name, macos in darwin.operating_sys.items():
@@ -221,8 +224,7 @@ def test_instantiate_non_default_macos(mock_packages):
         # has no macos compilers
         target = str(spack.vendor.archspec.cpu.host().family)
         spec = spack.concretize.concretize_one(
-            f"zlib platform=darwin os={non_default_macos_name} target={target}",
-            spack.test.harness.current(),
+            f"zlib platform=darwin os={non_default_macos_name} target={target}", ctx
         )
 
     # Primarily testing that these lines doesn't throw

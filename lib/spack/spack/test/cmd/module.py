@@ -13,6 +13,7 @@ import spack.modules
 import spack.modules.lmod
 import spack.test.harness
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.installer import PackageInstaller
 
 module = spack.test.harness.SpackCommand("module")
@@ -22,12 +23,14 @@ pytestmark = pytest.mark.not_on_windows("does not run on windows")
 
 #: make sure module files are generated for all the tests here
 @pytest.fixture(scope="module", autouse=True)
-def ensure_module_files_are_there(mock_packages_repo, mock_store, mock_configuration_scopes):
+def ensure_module_files_are_there(
+    mock_packages_repo, mock_store, mock_configuration_scopes, ctx: SpackContext
+):
     """Generate module files for module tests."""
     module = spack.test.harness.SpackCommand("module")
-    with spack.test.harness.use_store(str(mock_store)):
+    with spack.test.harness.use_store(ctx, str(mock_store)):
         with spack.test.harness.use_configuration(*mock_configuration_scopes):
-            with spack.test.harness.use_repositories(mock_packages_repo):
+            with spack.test.harness.use_repositories(ctx, mock_packages_repo):
                 module("tcl", "refresh", "-y")
 
 
@@ -175,7 +178,7 @@ writer_cls = spack.modules.lmod.LmodModulefileWriter
 
 
 @pytest.mark.db
-def test_setdefault_command(mutable_database, mutable_config: Configuration):
+def test_setdefault_command(mutable_database, mutable_config: Configuration, ctx: SpackContext):
     data = {
         "default": {
             "enable": ["lmod"],
@@ -187,14 +190,14 @@ def test_setdefault_command(mutable_database, mutable_config: Configuration):
     other_spec, preferred = "pkg-a@1.0", "pkg-a@2.0"
 
     specs = [
-        spack.concretize.concretize_one(other_spec, spack.test.harness.current()),
-        spack.concretize.concretize_one(preferred, spack.test.harness.current()),
+        spack.concretize.concretize_one(other_spec, ctx),
+        spack.concretize.concretize_one(preferred, ctx),
     ]
     PackageInstaller([s.package for s in specs], explicit=True, fake=True).install()
 
     writers = {
-        preferred: writer_cls.from_spec(specs[1], "default", ctx=spack.test.harness.current()),
-        other_spec: writer_cls.from_spec(specs[0], "default", ctx=spack.test.harness.current()),
+        preferred: writer_cls.from_spec(specs[1], "default", ctx=ctx),
+        other_spec: writer_cls.from_spec(specs[0], "default", ctx=ctx),
     }
 
     # Create two module files for the same software

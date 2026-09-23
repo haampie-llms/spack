@@ -12,6 +12,7 @@ import spack.directives_meta
 import spack.paths
 import spack.test.harness
 import spack.util.package_hash as ph
+from spack.context import SpackContext
 from spack.repo import RepoPath
 from spack.spec import Spec
 from spack.util.unparse import unparse
@@ -48,16 +49,14 @@ def compare_hash_sans_name(repo, eq, spec1, spec2):
     assert (hash1 == hash2) == eq
 
 
-def test_hash(mock_packages, config):
-    ph.package_hash(Spec("hash-test1@=1.2"), repo=spack.test.harness.current().repo)
+def test_hash(mock_packages, config, ctx: SpackContext):
+    ph.package_hash(Spec("hash-test1@=1.2"), repo=ctx.repo)
 
 
-def test_different_variants(mock_packages, config):
+def test_different_variants(mock_packages, config, ctx: SpackContext):
     spec1 = Spec("hash-test1@=1.2 +variantx")
     spec2 = Spec("hash-test1@=1.2 +varianty")
-    assert ph.package_hash(spec1, repo=spack.test.harness.current().repo) == ph.package_hash(
-        spec2, repo=spack.test.harness.current().repo
-    )
+    assert ph.package_hash(spec1, repo=ctx.repo) == ph.package_hash(spec2, repo=ctx.repo)
 
 
 def test_all_same_but_name(mock_packages: RepoPath, config):
@@ -97,9 +96,11 @@ def test_all_same_but_install(mock_packages: RepoPath, config):
     compare_sans_name(mock_packages, False, spec1, spec2)
 
 
-def test_content_hash_all_same_but_patch_contents(mock_packages: RepoPath, config):
-    spec1 = spack.concretize.concretize_one("hash-test1@1.1", spack.test.harness.current())
-    spec2 = spack.concretize.concretize_one("hash-test2@1.1", spack.test.harness.current())
+def test_content_hash_all_same_but_patch_contents(
+    mock_packages: RepoPath, config, ctx: SpackContext
+):
+    spec1 = spack.concretize.concretize_one("hash-test1@1.1", ctx)
+    spec2 = spack.concretize.concretize_one("hash-test2@1.1", ctx)
     compare_hash_sans_name(mock_packages, False, spec1, spec2)
 
 
@@ -123,30 +124,30 @@ def test_content_hash_not_concretized(mock_packages: RepoPath, config):
     compare_hash_sans_name(mock_packages, False, spec1, spec2)
 
 
-def test_package_hash_of_shadowed_package(mock_packages: RepoPath, config, repo_builder):
+def test_package_hash_of_shadowed_package(
+    mock_packages: RepoPath, config, repo_builder, ctx: SpackContext
+):
     """The package hash must describe the package.py of the repository the spec names, also when
     a repository of higher precedence has a package of the same name."""
     repo_builder.add_package("pkg-c")
-    with spack.test.harness.use_repositories(repo_builder.root, override=False):
+    with spack.test.harness.use_repositories(ctx, repo_builder.root, override=False):
         shadowing = Spec(f"{repo_builder.namespace}.pkg-c")
         shadowed = Spec("builtin_mock.pkg-c")
 
-        assert ph.package_hash(
-            shadowing, repo=spack.test.harness.current().repo
-        ) != ph.package_hash(shadowed, repo=spack.test.harness.current().repo)
+        assert ph.package_hash(shadowing, repo=ctx.repo) != ph.package_hash(
+            shadowed, repo=ctx.repo
+        )
 
 
-def test_content_hash_different_variants(mock_packages: RepoPath, config):
-    spec1 = spack.concretize.concretize_one(
-        "hash-test1@1.2 +variantx", spack.test.harness.current()
-    )
-    spec2 = spack.concretize.concretize_one(
-        "hash-test2@1.2 ~variantx", spack.test.harness.current()
-    )
+def test_content_hash_different_variants(mock_packages: RepoPath, config, ctx: SpackContext):
+    spec1 = spack.concretize.concretize_one("hash-test1@1.2 +variantx", ctx)
+    spec2 = spack.concretize.concretize_one("hash-test2@1.2 ~variantx", ctx)
     compare_hash_sans_name(mock_packages, True, spec1, spec2)
 
 
-def test_content_hash_cannot_get_details_from_ast(mock_packages: RepoPath, config):
+def test_content_hash_cannot_get_details_from_ast(
+    mock_packages: RepoPath, config, ctx: SpackContext
+):
     """Packages hash-test1 and hash-test3 would be considered the same
     except that hash-test3 conditionally executes a phase based on
     a "when" directive that Spack cannot evaluate by examining the
@@ -156,20 +157,22 @@ def test_content_hash_cannot_get_details_from_ast(mock_packages: RepoPath, confi
     differ where Spack includes a phase on account of AST-examination
     failure.
     """
-    spec3 = spack.concretize.concretize_one("hash-test1@1.7", spack.test.harness.current())
-    spec4 = spack.concretize.concretize_one("hash-test3@1.7", spack.test.harness.current())
+    spec3 = spack.concretize.concretize_one("hash-test1@1.7", ctx)
+    spec4 = spack.concretize.concretize_one("hash-test3@1.7", ctx)
     compare_hash_sans_name(mock_packages, False, spec3, spec4)
 
 
-def test_content_hash_all_same_but_archive_hash(mock_packages: RepoPath, config):
-    spec1 = spack.concretize.concretize_one("hash-test1@1.3", spack.test.harness.current())
-    spec2 = spack.concretize.concretize_one("hash-test2@1.3", spack.test.harness.current())
+def test_content_hash_all_same_but_archive_hash(
+    mock_packages: RepoPath, config, ctx: SpackContext
+):
+    spec1 = spack.concretize.concretize_one("hash-test1@1.3", ctx)
+    spec2 = spack.concretize.concretize_one("hash-test2@1.3", ctx)
     compare_hash_sans_name(mock_packages, False, spec1, spec2)
 
 
-def test_content_hash_parse_dynamic_function_call(mock_packages, config):
-    spec = spack.concretize.concretize_one("hash-test4", spack.test.harness.current())
-    spec.package.content_hash(repo=spack.test.harness.current().repo)
+def test_content_hash_parse_dynamic_function_call(mock_packages, config, ctx: SpackContext):
+    spec = spack.concretize.concretize_one("hash-test4", ctx)
+    spec.package.content_hash(repo=ctx.repo)
 
 
 many_strings = '''\
@@ -380,7 +383,7 @@ def test_remove_complex_package_logic_filtered():
         ("trilinos", "ojbtbu3p6gpa42sbilblo2ioanvhouxu"),
     ],
 )
-def test_package_hash_consistency(package_spec, expected_hash):
+def test_package_hash_consistency(package_spec, expected_hash, ctx: SpackContext):
     """Ensure that that package hash is consistent python version to version.
 
     We assume these tests run across all supported Python versions in CI, and we ensure
@@ -396,7 +399,7 @@ def test_package_hash_consistency(package_spec, expected_hash):
     filename = os.path.join(datadir, "%s.txt" % spec.name)
     with open(filename, "rb") as f:
         source = f.read()
-    h = ph.package_hash(spec, source=source, repo=spack.test.harness.current().repo)
+    h = ph.package_hash(spec, source=source, repo=ctx.repo)
     assert expected_hash == h
 
 
@@ -475,10 +478,8 @@ class Pkg:
         ("pkg@2.0", more_dynamic_multimethods, ["ONE", "THREE", "FIVE"], ["TWO", "FOUR"]),
     ],
 )
-def test_multimethod_resolution(spec_str, source, expected, not_expected):
-    filtered = ph.canonical_source(
-        Spec(spec_str), source=source, repo=spack.test.harness.current().repo
-    )
+def test_multimethod_resolution(spec_str, source, expected, not_expected, ctx: SpackContext):
+    filtered = ph.canonical_source(Spec(spec_str), source=source, repo=ctx.repo)
     for item in expected:
         assert item in filtered
     for item in not_expected:
