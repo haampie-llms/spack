@@ -410,14 +410,13 @@ def test_manual_download(
     Ensure expected fetcher fail message based on manual download and instr.
     """
 
-    @property
     def _instr(pkg):
         return f"Download instructions for {pkg.spec.name}"
 
     spec = spack.concretize.concretize_one("pkg-a", ctx)
     spec.package.manual_download = manual
     if instr:
-        monkeypatch.setattr(spack.package_base.PackageBase, "download_instr", _instr)
+        monkeypatch.setattr(spack.package_base.PackageBase, "download_instr", property(_instr))
 
     expected = spec.package.download_instr if manual else "All fetchers failed"
     with pytest.raises(spack.error.FetchError, match=expected):

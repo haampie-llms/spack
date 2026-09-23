@@ -79,11 +79,10 @@ def test_detect_specs_deduplicates_across_prefixes(
     cmake_cls = mock_packages.get_pkg_class("cmake")
 
     # Patch determine_spec_details to always return the same spec, regardless of prefix.
-    @classmethod
     def _same_spec(cls, prefix, exes_in_prefix):
         return spack.spec.Spec("cmake@3.17.1")
 
-    monkeypatch.setattr(cmake_cls, "determine_spec_details", _same_spec)
+    monkeypatch.setattr(cmake_cls, "determine_spec_details", classmethod(_same_spec))
 
     finder = spack.detection.path.ExecutablesFinder()
     detected = finder.detect_specs(
@@ -162,14 +161,13 @@ def test_detect_specs_validates_variants_with_injected_repo(
 
     gcc_cls = mock_packages.get_pkg_class("gcc")
 
-    @classmethod
     def _determine_spec_details(cls, prefix, exes_in_prefix):
         languages = "c,c++" if prefix == str(prefixes["valid"] / "bin") else "klingon"
         return spack.spec.Spec.from_detection(
             f"gcc@9.4.0 languages={languages}", external_path=str(prefix)
         )
 
-    monkeypatch.setattr(gcc_cls, "determine_spec_details", _determine_spec_details)
+    monkeypatch.setattr(gcc_cls, "determine_spec_details", classmethod(_determine_spec_details))
 
     detected = spack.detection.path.ExecutablesFinder().detect_specs(
         pkg=gcc_cls,

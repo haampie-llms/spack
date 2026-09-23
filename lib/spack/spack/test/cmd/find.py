@@ -25,7 +25,6 @@ from spack.enums import InstallRecordStatus
 from spack.test.harness import SpackCommand
 from spack.test.utilities import SpackCommandArgs
 from spack.util.filesystem import working_dir
-from spack.util.pattern import Bunch
 from spack.version.git_ref_lookup import GitRefLookup
 
 find = SpackCommand("find")
@@ -63,7 +62,7 @@ def test_query_arguments(ctx: SpackContext):
     query_arguments = spack.cmd.find.query_arguments
 
     # Default arguments
-    args = Bunch(
+    args = argparse.Namespace(
         only_missing=False,
         missing=False,
         only_deprecated=False,

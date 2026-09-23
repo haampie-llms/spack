@@ -40,7 +40,9 @@ def test_get_builtin_repo_info_local_repo(mock_git_version_info, monkeypatch, ct
         return {"builtin": spack.repo.LocalRepoDescriptor("builtin", path)}
 
     monkeypatch.setattr(spack.repo.RepoDescriptors, "from_config", _from_config)
-    assert path in spack.cmd.debug._get_builtin_repo_info(ctx.config)
+    repo_info = spack.cmd.debug._get_builtin_repo_info(ctx.config)
+    assert repo_info is not None
+    assert path in repo_info
 
 
 def test_get_builtin_repo_info_unsupported_type(

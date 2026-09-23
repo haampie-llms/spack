@@ -218,10 +218,10 @@ def test_patch_mixed_versions_subset_constraint(mock_packages, config, ctx: Spac
     an x.y version.
     """
     spec1 = spack.concretize.concretize_one("patch@1.0.1", ctx)
-    assert biz_sha256 in spec1.variants["patches"].value
+    assert biz_sha256 in spec1.variants["patches"].values
 
     spec2 = spack.concretize.concretize_one("patch@=1.0", ctx)
-    assert biz_sha256 not in spec2.variants["patches"].value
+    assert biz_sha256 not in spec2.variants["patches"].values
 
 
 def test_patch_order(mock_packages, config, ctx: SpackContext):

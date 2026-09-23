@@ -72,6 +72,7 @@ def test_default_os_and_target(config, mock_packages, ctx: SpackContext):
     after concretization.
     """
     spec = spack.concretize.concretize_one("libelf", ctx)
+    assert spec.architecture
     assert spec.architecture.os == str(TEST_PLATFORM.default_operating_system())
     assert spec.architecture.target == TEST_PLATFORM.default_target()
 

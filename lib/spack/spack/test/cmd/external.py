@@ -259,12 +259,11 @@ def test_overriding_prefix(
     gcc_exe = mock_executable("gcc", output="echo 4.2.1")
     search_dir = gcc_exe.parent
 
-    @classmethod
     def _determine_variants(cls, exes, version_str):
         return "languages=c", {"prefix": "/opt/gcc/bin", "compilers": {"c": exes[0]}}
 
     gcc_cls = mock_packages.get_pkg_class("gcc")
-    monkeypatch.setattr(gcc_cls, "determine_variants", _determine_variants)
+    monkeypatch.setattr(gcc_cls, "determine_variants", classmethod(_determine_variants))
 
     finder = spack.detection.path.ExecutablesFinder()
     detected_specs = finder.find(

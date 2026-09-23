@@ -1516,21 +1516,25 @@ def test_spec_by_hash(database, monkeypatch, config, ctx: SpackContext):
 
     hash_str = f"/{mpileaks.dag_hash()}"
     parsed_spec = SpecParser(hash_str, Spec).next_spec()
+    assert parsed_spec is not None
     spack.hash_lookup.replace_hash(parsed_spec, context=ctx)
     assert parsed_spec == mpileaks
 
     short_hash_str = f"/{mpileaks.dag_hash()[:5]}"
     parsed_spec = SpecParser(short_hash_str, Spec).next_spec()
+    assert parsed_spec is not None
     spack.hash_lookup.replace_hash(parsed_spec, context=ctx)
     assert parsed_spec == mpileaks
 
     name_version_and_hash = f"{mpileaks.name}@{mpileaks.version} /{mpileaks.dag_hash()[:5]}"
     parsed_spec = SpecParser(name_version_and_hash, Spec).next_spec()
+    assert parsed_spec is not None
     spack.hash_lookup.replace_hash(parsed_spec, context=ctx)
     assert parsed_spec == mpileaks
 
     b_hash = f"/{b.dag_hash()}"
     parsed_spec = SpecParser(b_hash, Spec).next_spec()
+    assert parsed_spec is not None
     spack.hash_lookup.replace_hash(parsed_spec, context=ctx)
     assert parsed_spec == b
 
@@ -1545,6 +1549,7 @@ def test_dep_spec_by_hash(database, config, ctx: SpackContext):
     assert "zmpi" in mpileaks_zmpi
 
     mpileaks_hash_fake = SpecParser(f"mpileaks ^/{fake.dag_hash()} ^zmpi", Spec).next_spec()
+    assert mpileaks_hash_fake is not None
     spack.hash_lookup.replace_hash(mpileaks_hash_fake, context=ctx)
     assert "fake" in mpileaks_hash_fake
     assert mpileaks_hash_fake["fake"] == fake
@@ -1552,6 +1557,7 @@ def test_dep_spec_by_hash(database, config, ctx: SpackContext):
     assert mpileaks_hash_fake["zmpi"] == spack.spec.Spec("zmpi")
 
     mpileaks_hash_zmpi = SpecParser(f"mpileaks ^ /{zmpi.dag_hash()}", Spec).next_spec()
+    assert mpileaks_hash_zmpi is not None
     spack.hash_lookup.replace_hash(mpileaks_hash_zmpi, context=ctx)
     assert "zmpi" in mpileaks_hash_zmpi
     assert mpileaks_hash_zmpi["zmpi"] == zmpi
@@ -1559,6 +1565,7 @@ def test_dep_spec_by_hash(database, config, ctx: SpackContext):
     mpileaks_hash_fake_and_zmpi = SpecParser(
         f"mpileaks ^/{fake.dag_hash()[:4]} ^ /{zmpi.dag_hash()[:5]}", Spec
     ).next_spec()
+    assert mpileaks_hash_fake_and_zmpi is not None
     spack.hash_lookup.replace_hash(mpileaks_hash_fake_and_zmpi, context=ctx)
     assert "zmpi" in mpileaks_hash_fake_and_zmpi
     assert mpileaks_hash_fake_and_zmpi["zmpi"] == zmpi
@@ -1619,11 +1626,13 @@ def test_ambiguous_hash(mutable_database, ctx: SpackContext):
 
     # ambiguity in first hash character
     s1 = SpecParser("/xxx", Spec).next_spec()
+    assert s1 is not None
     with pytest.raises(spack.spec.AmbiguousHashError):
         spack.hash_lookup.lookup_hash(s1, context=ctx)
 
     # ambiguity in first hash character AND spec name
     s2 = SpecParser("pkg-a/xxx", Spec).next_spec()
+    assert s2 is not None
     with pytest.raises(spack.spec.AmbiguousHashError):
         spack.hash_lookup.lookup_hash(s2, context=ctx)
 
@@ -1636,14 +1645,17 @@ def test_invalid_hash(database, config, ctx: SpackContext):
     # name + incompatible hash
     with pytest.raises(spack.spec.InvalidHashError):
         parsed_spec = SpecParser(f"zmpi /{mpich.dag_hash()}", Spec).next_spec()
+        assert parsed_spec is not None
         spack.hash_lookup.replace_hash(parsed_spec, context=ctx)
     with pytest.raises(spack.spec.InvalidHashError):
         parsed_spec = SpecParser(f"mpich /{zmpi.dag_hash()}", Spec).next_spec()
+        assert parsed_spec is not None
         spack.hash_lookup.replace_hash(parsed_spec, context=ctx)
 
     # name + dep + incompatible hash
     with pytest.raises(spack.spec.InvalidHashError):
         parsed_spec = SpecParser(f"mpileaks ^zmpi /{mpich.dag_hash()}", Spec).next_spec()
+        assert parsed_spec is not None
         spack.hash_lookup.replace_hash(parsed_spec, context=ctx)
 
 
@@ -1667,6 +1679,7 @@ def test_nonexistent_hash(database, config, ctx: SpackContext):
 
     with pytest.raises(spack.spec.InvalidHashError):
         parsed_spec = SpecParser(f"/{no_such_hash}", Spec).next_spec()
+        assert parsed_spec is not None
         spack.hash_lookup.replace_hash(parsed_spec, context=ctx)
 
 

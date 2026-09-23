@@ -1444,6 +1444,7 @@ class TestSpecSemantics:
 
         # Check that we can still access each member through
         # the architecture attribute
+        assert spec.architecture
         assert "test" in spec.architecture
         assert "debian" in spec.architecture
         assert "x86_64" in spec.architecture

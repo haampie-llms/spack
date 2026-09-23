@@ -158,10 +158,9 @@ def test_failing_overwrite_install_should_keep_previous_installation(
     # Do a failing overwrite install. The build process imports the package class anew, so
     # patch the class: the patch is replayed there.
     monkeypatch.setattr(type(s.package), "succeed", False)
-    kwargs = {"overwrite": [s.dag_hash()]}
 
     with pytest.raises(Exception):
-        PackageInstaller([s.package], explicit=True, **kwargs).install()
+        PackageInstaller([s.package], explicit=True, overwrite=[s.dag_hash()]).install()
 
     assert temporary_store.db.installed(s.package.spec)
     assert os.path.exists(s.prefix)

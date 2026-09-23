@@ -657,7 +657,7 @@ def test_activate_adds_transitive_run_deps_to_path(
     with e:
         install("--add", "--fake", "depends-on-run-env")
 
-    env_variables = {}
+    env_variables: Dict[str, str] = {}
     ev.shell.activate(e, ctx).apply_modifications(env_variables)
     assert env_variables["DEPENDENCY_ENV_VAR"] == "1"
 

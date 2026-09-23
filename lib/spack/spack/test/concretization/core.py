@@ -9,7 +9,7 @@ import pickle
 import platform
 import re
 import sys
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import pytest
 
@@ -1208,6 +1208,7 @@ spack:
             "packages", {"gcc": {"externals": [compiler_factory(spec=f"{compiler_spec}")]}}
         )
         s = spack.concretize.concretize_one(spec, ctx)
+        assert s.architecture
         assert str(s.architecture.target) == str(expected)
 
     @pytest.mark.not_on_windows("Not supported on Windows (yet)")
@@ -1243,6 +1244,7 @@ spack:
         # The preferred compiler is kept and the target is downgraded, instead of
         # switching to llvm to reach a better target.
         assert s.satisfies("%c=gcc@4.4.7")
+        assert s.architecture
         assert str(s.architecture.target) == str(core2)
 
     @pytest.mark.parametrize(
@@ -1726,7 +1728,7 @@ spack:
         self, spec_str, variant_name, expected_values, ctx: SpackContext
     ):
         s = spack.concretize.concretize_one(spec_str, ctx)
-        assert set(expected_values) == set(s.variants[variant_name].value)
+        assert set(expected_values) == set(s.variants[variant_name].values)
 
     @pytest.mark.regression("22533")
     def test_mv_variants_disjoint_sets_from_packages_yaml(
@@ -2098,7 +2100,6 @@ spack:
     def test_best_effort_coconcretize(self, specs, checks, ctx: SpackContext):
         specs = [Spec(s) for s in specs]
         solver = spack.solver.asp.Solver(context=ctx)
-        solver.reuse = False
         concrete_specs = set()
         for result in solver.solve_in_rounds(specs):
             for s in result.specs:
@@ -2144,7 +2145,6 @@ spack:
         """Test package preferences during coconcretization."""
         specs = [Spec(s) for s in specs]
         solver = spack.solver.asp.Solver(context=ctx)
-        solver.reuse = False
         concrete_specs = {}
         for result in solver.solve_in_rounds(specs):
             concrete_specs.update(result.specs_by_input)
@@ -2158,7 +2158,6 @@ spack:
     def test_solve_in_rounds_all_unsolved(self, monkeypatch, mock_packages, ctx: SpackContext):
         specs = [Spec(x) for x in ["libdwarf%gcc", "libdwarf%clang"]]
         solver = spack.solver.asp.Solver(context=ctx)
-        solver.reuse = False
 
         simulate_unsolved_property = [(x, None) for x in specs]
         monkeypatch.setattr(spack.solver.asp.Result, "unsolved_specs", simulate_unsolved_property)
@@ -2168,7 +2167,7 @@ spack:
             list(solver.solve_in_rounds(specs))
 
     def test_coconcretize_reuse_and_virtuals(self, mutable_config, ctx: SpackContext):
-        reusable_specs = []
+        reusable_specs: List[Spec] = []
         for s in ["mpileaks ^mpich", "zmpi"]:
             reusable_specs.extend(spack.concretize.concretize_one(s, ctx).traverse(root=True))
 
@@ -3586,7 +3585,7 @@ def test_selecting_reused_sources(reuse_yaml, expected_length, mutable_config, c
         ),
     )
     specs = selector.reusable_specs(
-        ["mpileaks"],
+        [Spec("mpileaks")],
         policy=spack.deprecation.Policy.from_config(context.config, repo=context.repo),
     )
     assert len(specs) == expected_length
@@ -3681,7 +3680,7 @@ def test_spec_unification(unify, mutable_config: Configuration, mock_packages, c
 def test_parallel_concretization(mutable_config, mock_packages, ctx: SpackContext):
     """Test whether parallel unify-false style concretization works."""
     mutable_config.set("concretizer:unify", False)
-    specs = [(Spec("pkg-a"), None), (Spec("pkg-b"), None)]
+    specs: List[spack.concretize.SpecPairInput] = [(Spec("pkg-a"), None), (Spec("pkg-b"), None)]
     result = spack.concretize.concretize_spec_pairs(specs, ctx)
     assert {s.name for s in result} == {"pkg-a", "pkg-b"}
 
@@ -4749,8 +4748,8 @@ def test_result_roundtrip(mock_packages, config, specs, ctx: SpackContext):
     # to come back as exactly the same graph they were before.
     assert len(result.answers) == len(roundtrip.answers)
     for (_, _, lspecs), (_, _, rspecs) in zip(result.answers, roundtrip.answers):
-        lids = {id(lspec) for lspec in spack.traverse.traverse_nodes(lspecs.values())}
-        rids = {id(rspec) for rspec in spack.traverse.traverse_nodes(rspecs.values())}
+        lids = {id(lspec) for lspec in spack.traverse.traverse_nodes(list(lspecs.values()))}
+        rids = {id(rspec) for rspec in spack.traverse.traverse_nodes(list(rspecs.values()))}
         assert len(lids) == len(rids)
 
     assert roundtrip == result
@@ -4822,7 +4821,7 @@ def test_concretization_cache_store_skips_spliced_results(
     assert root._hash is None
 
     result = Result(specs=[Spec("pkg-a")], repo=ctx.repo)
-    result.answers = [(0, 0, {nid: root})]
+    result.answers = [([0], 0, {nid: root})]
 
     cache = spack.solver.asp.ConcretizationCache(str(use_concretization_cache))
     cache.store("spliced problem", result, statistics=[])
@@ -4930,7 +4929,7 @@ def test_concretization_cache_reapplies_patches_on_hit(
     # First solve: populate the cache. patch@1.0 has foo.patch and baz.patch.
     spec1 = spack.concretize.concretize_one("patch@1.0", ctx)
     assert "patches" in spec1.variants
-    initial_sha256s = frozenset(spec1.variants["patches"].value)
+    initial_sha256s = frozenset(spec1.variants["patches"].values)
 
     # Simulate a recipe change: wrap _inject_patches_variant to inject an extra sha256,
     # as if a new patch directive had been added to the package.
@@ -4957,7 +4956,7 @@ def test_concretization_cache_reapplies_patches_on_hit(
     spec2 = spack.concretize.concretize_one("patch@1.0", ctx)
 
     assert "patches" in spec2.variants
-    new_sha256s = frozenset(spec2.variants["patches"].value)
+    new_sha256s = frozenset(spec2.variants["patches"].values)
 
     # The new patch must appear (post_process_concretization_result re-ran on hit).
     assert EXTRA_SHA256 in new_sha256s, "Expected the new patch to be injected on a cache hit"
@@ -4980,7 +4979,8 @@ def test_patch_condition_on_dependency(
     from serialized solver output."""
     for _ in range(2):
         spec = spack.concretize.concretize_one(spec_str, ctx)
-        assert {p.relative_path for p in spec.patches_from(ctx.repo)} == expected
+        patches = spec.patches_from(ctx.repo)
+        assert {p.relative_path for p in patches} == expected  # type: ignore[attr-defined]
         # concrete specs record every edge without the direct flag
         assert not any(e.direct for s in spec.traverse() for e in s.edges_to_dependencies())
 
@@ -5979,7 +5979,7 @@ def test_asp_facts_with_config_values():
 def test_target_star_concretizes(mock_packages, config, ctx: SpackContext):
     """target=* is not a literal unknown target '*' but rather an unconstrained target"""
     concrete = spack.concretize.concretize_one("pkg-a target=*", ctx)
-    assert concrete.architecture.target_concrete
+    assert concrete.architecture and concrete.architecture.target_concrete
 
 
 @pytest.mark.parametrize(

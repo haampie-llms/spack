@@ -2140,7 +2140,7 @@ def test_ci_validate_standard_versions_valid(
     spec = spack.spec.Spec("diff-test")
     pkg = mock_packages.get_pkg_class(spec.name)(spec)
     pkg.context = ctx
-    version_list = [spack.version.Version(v) for v in versions]
+    version_list = [spack.version.StandardVersion.from_string(v) for v in versions]
 
     assert spack.cmd.ci.validate_standard_versions(
         pkg, version_list, ctx.config, client=ctx.network
@@ -2158,7 +2158,7 @@ def test_ci_validate_standard_versions_invalid(
     spec = spack.spec.Spec("diff-test")
     pkg = mock_packages.get_pkg_class(spec.name)(spec)
     pkg.context = ctx
-    version_list = [spack.version.Version(v) for v in versions]
+    version_list = [spack.version.StandardVersion.from_string(v) for v in versions]
 
     assert (
         spack.cmd.ci.validate_standard_versions(pkg, version_list, ctx.config, client=ctx.network)
@@ -2177,7 +2177,7 @@ def test_ci_validate_standard_versions_invalid_url(
     spec = spack.spec.Spec("diff-test")
     pkg = ctx.repo.get_pkg_class(spec.name)(spec)
     pkg.context = ctx
-    version_list = [spack.version.Version(v) for v in versions]
+    version_list = [spack.version.StandardVersion.from_string(v) for v in versions]
 
     assert (
         spack.cmd.ci.validate_standard_versions(pkg, version_list, ctx.config, client=ctx.network)
@@ -2198,7 +2198,7 @@ def test_ci_validate_standard_versions_invalid_both(
     pkg = ctx.repo.get_pkg_class(spec.name)(spec)
     pkg.context = ctx
     versions = ["2.1.4", "2.1.5"]
-    version_list = [spack.version.Version(v) for v in versions]
+    version_list = [spack.version.StandardVersion.from_string(v) for v in versions]
 
     assert (
         spack.cmd.ci.validate_standard_versions(pkg, version_list, ctx.config, client=ctx.network)
@@ -2218,7 +2218,7 @@ def test_ci_validate_git_versions_valid(
     pkg_class = mock_packages.get_pkg_class(spec.name)
     pkg = pkg_class(spec)
     pkg.context = ctx
-    version_list = [spack.version.Version(v) for v, _ in versions]
+    version_list = [spack.version.StandardVersion.from_string(v) for v, _ in versions]
 
     repo_path, filename, commits = mock_git_version_info
     version_commit_dict = {
@@ -2243,7 +2243,7 @@ def test_ci_validate_git_versions_bad_tag(
     pkg_class = mock_packages.get_pkg_class(spec.name)
     pkg = pkg_class(spec)
     pkg.context = ctx
-    version_list = [spack.version.Version(v) for v, _ in versions]
+    version_list = [spack.version.StandardVersion.from_string(v) for v, _ in versions]
 
     repo_path, filename, commits = mock_git_version_info
     version_commit_dict = {
@@ -2271,7 +2271,7 @@ def test_ci_validate_git_versions_invalid(
     pkg_class = mock_packages.get_pkg_class(spec.name)
     pkg = pkg_class(spec)
     pkg.context = ctx
-    version_list = [spack.version.Version(v) for v, _ in versions]
+    version_list = [spack.version.StandardVersion.from_string(v) for v, _ in versions]
 
     repo_path, filename, commits = mock_git_version_info
     version_commit_dict = {

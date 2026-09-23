@@ -199,6 +199,7 @@ def test_force_uninstall_and_reinstall_by_hash(
     db = mutable_database
     # this is the spec to be removed
     callpath_spec = db.query_one("callpath ^mpich")
+    assert callpath_spec is not None
     dag_hash = callpath_spec.dag_hash()
 
     # ensure can look up by hash and that it's a dependent of mpileaks

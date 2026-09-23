@@ -1667,6 +1667,7 @@ def test_included_path_substitution(ctx: SpackContext):
     # check a straight path substitution
     entry = {"path": "$user_cache_path/path/to/config.yaml"}
     include = spack.config.included_path(entry, ctx.config)
+    assert isinstance(include, spack.config.IncludePath)
     assert spack.paths.user_cache_path in include.path
 
     # check path through an environment variable
@@ -1674,6 +1675,7 @@ def test_included_path_substitution(ctx: SpackContext):
     os.environ["SPACK_TEST_PATH_SUB"] = path
     entry = {"name": "vartest", "path": "$SPACK_TEST_PATH_SUB"}
     include = spack.config.included_path(entry, ctx.config)
+    assert isinstance(include, spack.config.IncludePath)
     assert path in include.path
 
 
@@ -1778,6 +1780,7 @@ def test_included_path_git_substitutions(ctx: SpackContext):
     os.environ["SPACK_TEST_URL_SUB"] = url
     entry["git"] = "$SPACK_TEST_URL_SUB"
     include = spack.config.included_path(entry, ctx.config)
+    assert isinstance(include, spack.config.GitIncludePaths)
     assert include.git == url, "Expected git url environment var substitution"
 
 
@@ -1895,6 +1898,7 @@ def test_included_path_url_temp_dest(mock_low_high_config, ctx: SpackContext):
     for scope in [None, parent_scope]:
         rest = "parent scope with no path" if scope else "no parent scope"
         destination = include.base_directory(entry["path"], parent_scope=scope)
+        assert destination is not None
         dest_dir = str(pathlib.Path(destination).parent)
         temp_dir = tempfile.gettempdir()
         assert dest_dir == temp_dir, pre + rest
@@ -1903,11 +1907,8 @@ def test_included_path_url_temp_dest(mock_low_high_config, ctx: SpackContext):
 def test_included_path_git_temp_dest(mock_low_high_config, ctx: SpackContext):
     """Check a remote (relative) path with different parent scope options that
     result in a temporary cache destination."""
-    entry = {
-        "git": "https://example.com/linux/configs.git",
-        "branch": "develop",
-        "paths": ["config.yaml"],
-    }
+    git_url = "https://example.com/linux/configs.git"
+    entry = {"git": git_url, "branch": "develop", "paths": ["config.yaml"]}
     include = spack.config.included_path(entry, ctx.config)
     parent_scope = mock_low_high_config.scopes["low"]
     parent_scope.path = ""
@@ -1915,7 +1916,8 @@ def test_included_path_git_temp_dest(mock_low_high_config, ctx: SpackContext):
 
     for scope in [None, parent_scope]:
         rest = "parent scope with no path" if scope else "no parent scope"
-        destination = include.base_directory(entry["git"], parent_scope=scope)
+        destination = include.base_directory(git_url, parent_scope=scope)
+        assert destination is not None
         dest_dir = str(pathlib.Path(destination).parent)
         temp_dir = tempfile.gettempdir()
         assert dest_dir == temp_dir, pre + rest

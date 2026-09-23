@@ -498,12 +498,9 @@ def test_ci_create_buildcache(working_env, config, monkeypatch, ctx: SpackContex
     """Test that create_buildcache returns a list of objects with the correct
     keys and types."""
     monkeypatch.setattr(ci, "push_to_build_cache", lambda a, b, c, **kwargs: True)
-    resources = {"ctx": ctx}
 
     results = ci.create_buildcache(
-        Spec(),
-        destination_mirror_urls=["file:///fake-url-one", "file:///fake-url-two"],
-        **resources,
+        Spec(), destination_mirror_urls=["file:///fake-url-one", "file:///fake-url-two"], ctx=ctx
     )
 
     assert len(results) == 2
@@ -514,7 +511,7 @@ def test_ci_create_buildcache(working_env, config, monkeypatch, ctx: SpackContex
     assert result2.url == "file:///fake-url-two"
 
     results = ci.create_buildcache(
-        Spec(), destination_mirror_urls=["file:///fake-url-one"], **resources
+        Spec(), destination_mirror_urls=["file:///fake-url-one"], ctx=ctx
     )
 
     assert len(results) == 1
@@ -530,8 +527,7 @@ def test_ci_run_standalone_tests_missing_requirements(
     err = capfd.readouterr()[1]
     assert "Job spec is required" in err
 
-    args = {"job_spec": spack.concretize.concretize_one("printing-package", ctx)}
-    ci.run_standalone_tests(**args)
+    ci.run_standalone_tests(job_spec=spack.concretize.concretize_one("printing-package", ctx))
     err = capfd.readouterr()[1]
     assert "Reproduction directory is required" in err
 

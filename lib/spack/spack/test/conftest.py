@@ -1583,6 +1583,7 @@ def module_configuration(request, mutable_config: Configuration) -> ConfigUpdate
     writer_cls = getattr(request.module, "writer_cls")
     # Module where the module file writer is defined
     writer_mod = inspect.getmodule(writer_cls)
+    assert writer_mod is not None
     # Key for specific settings relative to this module type
     writer_key = str(writer_mod.__name__).split(".")[-1]
     # Root folder for configuration

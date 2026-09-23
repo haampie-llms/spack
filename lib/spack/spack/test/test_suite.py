@@ -70,7 +70,7 @@ def test_test_ensure_stage(mock_test_stage, mock_packages, ctx: SpackContext):
 def test_write_test_result(mock_packages, mock_test_stage, ctx: SpackContext):
     """Ensure test results written to a results file."""
     spec = spack.concretize.concretize_one("libdwarf", ctx)
-    result = "TEST"
+    result = spack.install_test.TestStatus.PASSED
     test_name = "write-test"
 
     test_suite = spack.install_test.TestSuite([spec], test_name, stage_root=mock_test_stage)
@@ -83,7 +83,7 @@ def test_write_test_result(mock_packages, mock_test_stage, ctx: SpackContext):
         assert len(lines) == 1
 
         msg = lines[0]
-        assert result in msg
+        assert str(result) in msg
         assert spec.name in msg
 
 
@@ -142,11 +142,11 @@ def test_test_stage_caches(mock_packages, install_mockery, mock_test_stage, ctx:
 
     # Check no current base spec yields failure
     test_suite.current_base_spec = None
-    test_suite.current_test_spec = spec
+    test_suite.current_test_spec = spec  # type: ignore[assignment]
     ensure_current_cache_fail(test_suite)
 
     # Check no current test spec yields failure
-    test_suite.current_base_spec = spec
+    test_suite.current_base_spec = spec  # type: ignore[assignment]
     test_suite.current_test_spec = None
     ensure_current_cache_fail(test_suite)
 
@@ -199,6 +199,7 @@ def test_get_test_suite_too_many(mock_packages, mock_test_stage, ctx: SpackConte
     add_suite("libdwarf")
     config = ctx.config
     suite = spack.install_test.get_test_suite(name, config)
+    assert suite is not None
     assert suite.alias == name
 
     add_suite("libelf")
@@ -279,11 +280,11 @@ def test_package_copy_test_files_fails(mock_packages):
 def test_package_copy_test_files_skips(mock_packages, ensure_debug, capfd, ctx: SpackContext):
     """Confirm copy_test_files errors as expected if no package class found."""
     # Try with a non-concrete spec and package with a test suite
-    MockSuite = collections.namedtuple("TestSuite", ["specs"])
+    MockSuite = collections.namedtuple("MockSuite", ["specs"])
     MyPackage = collections.namedtuple("MyPackage", ["name", "spec", "test_suite", "context"])
     vspec = spack.spec.Spec("something")
     pkg = MyPackage("SomePackage", vspec, MockSuite([]), ctx)
-    spack.install_test.copy_test_files(pkg, vspec)
+    spack.install_test.copy_test_files(pkg, vspec)  # type: ignore[arg-type]
     out = capfd.readouterr()[1]
     assert "skipping test data copy" in out
     assert "no package class found" in out

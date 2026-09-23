@@ -6,6 +6,7 @@ import contextlib
 import os
 import pathlib
 import sys
+from typing import List
 
 import pytest
 
@@ -187,7 +188,7 @@ def test_duplicate_module_load(hello_world_cmd, capfd, ctx: SpackContext):
     hello_world_cmd fixture.
     """
     parser = spack.main.make_argument_parser()
-    args = []
+    args: List[str] = []
     hw_cmd = spack.cmd.get_command(hello_world_cmd.command_name, ctx.config)
     hw_cmd(parser, args)
     captured = capfd.readouterr()

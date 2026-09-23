@@ -1464,7 +1464,7 @@ def test_etag_fetching_304(ctx: SpackContext):
         ),
         **_net(ctx=ctx),
         etag="112a8bbc1b3f7f185621c1ee335f0502",
-        urlopen=response_304,
+        urlopen=response_304,  # type: ignore[arg-type]
     )
 
     result = fetcher.conditional_fetch()
@@ -1492,7 +1492,7 @@ def test_etag_fetching_200(mock_index, ctx: SpackContext):
         ),
         **_net(ctx=ctx),
         etag="112a8bbc1b3f7f185621c1ee335f0502",
-        urlopen=response_200,
+        urlopen=response_200,  # type: ignore[arg-type]
     )
 
     result = fetcher.conditional_fetch()
@@ -1521,7 +1521,7 @@ def test_etag_fetching_404(ctx: SpackContext):
         ),
         **_net(ctx=ctx),
         etag="112a8bbc1b3f7f185621c1ee335f0502",
-        urlopen=response_404,
+        urlopen=response_404,  # type: ignore[arg-type]
     )
 
     with pytest.raises(spack.binary_distribution.FetchIndexError):
@@ -1548,7 +1548,7 @@ def test_default_index_fetch_200(mock_index, ctx: SpackContext):
         ),
         **_net(ctx=ctx),
         local_hash="outdated",
-        urlopen=urlopen,
+        urlopen=urlopen,  # type: ignore[arg-type]
     )
 
     result = fetcher.conditional_fetch()
@@ -1578,7 +1578,7 @@ def test_default_index_404(ctx: SpackContext):
         ),
         **_net(ctx=ctx),
         local_hash=None,
-        urlopen=urlopen,
+        urlopen=urlopen,  # type: ignore[arg-type]
     )
 
     with pytest.raises(spack.binary_distribution.FetchIndexError):
@@ -1606,7 +1606,7 @@ def test_default_index_not_modified(mock_index, ctx: SpackContext):
         ),
         **_net(ctx=ctx),
         local_hash=mock_index.index_hash,
-        urlopen=urlopen,
+        urlopen=urlopen,  # type: ignore[arg-type]
     )
 
     assert fetcher.conditional_fetch().fresh

@@ -4,7 +4,7 @@
 
 import json
 import pathlib
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 import pytest
 
@@ -652,7 +652,9 @@ def test_the_source_bootstrapper_concretizes_with_the_request(
     )
 
     request = spack.bootstrap.core.BootstrapRequest.for_module(
-        "clingo", "clingo-bootstrap", concretize=lambda _, ctx: _FakeConcreteSpec("a prototype")
+        "clingo",
+        "clingo-bootstrap",
+        concretize=lambda _, ctx: cast(spack.spec.Spec, _FakeConcreteSpec("a prototype")),
     )
     request.probe = lambda concrete_spec, ctx: concrete_spec.package
 

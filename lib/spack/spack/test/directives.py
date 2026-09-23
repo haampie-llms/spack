@@ -78,7 +78,7 @@ def test_extends_spec(config, mock_packages, ctx: SpackContext):
     extender = spack.concretize.concretize_one("extends-spec", ctx)
     extendee = spack.concretize.concretize_one("extendee", ctx)
 
-    assert extender.dependencies
+    assert extender.dependencies()
     assert extender.package.extends(extendee)
 
 

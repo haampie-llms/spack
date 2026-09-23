@@ -1112,7 +1112,9 @@ def test_reindex_removed_prefix_is_not_installed(
     not installed."""
 
     # Remove libelf from the filesystem
-    prefix = mutable_database.query_one("libelf").prefix
+    libelf = mutable_database.query_one("libelf")
+    assert libelf is not None
+    prefix = libelf.prefix
     assert prefix.startswith(str(mock_store_path))
     shutil.rmtree(prefix)
 

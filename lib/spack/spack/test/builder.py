@@ -133,13 +133,14 @@ def test_monkey_patching_wrapped_pkg(ctx: SpackContext):
     """Confirm 'run_tests' is accessible through wrappers."""
     s = spack.concretize.concretize_one("old-style-autotools", ctx)
     builder = spack.builder.create(s.package)
+    pkg_with_dispatcher = builder.pkg_with_dispatcher  # type: ignore[attr-defined]
     assert s.package.run_tests is False
     assert builder.pkg.run_tests is False
-    assert builder.pkg_with_dispatcher.run_tests is False
+    assert pkg_with_dispatcher.run_tests is False
 
     s.package.run_tests = True
     assert builder.pkg.run_tests is True
-    assert builder.pkg_with_dispatcher.run_tests is True
+    assert pkg_with_dispatcher.run_tests is True
 
 
 @pytest.mark.regression("34440")
@@ -151,7 +152,8 @@ def test_monkey_patching_test_log_file(ctx: SpackContext):
 
     s.package.tester.test_log_file = "/some/file"
     assert builder.pkg.tester.test_log_file == "/some/file"
-    assert builder.pkg_with_dispatcher.tester.test_log_file == "/some/file"
+    pkg_with_dispatcher = builder.pkg_with_dispatcher  # type: ignore[attr-defined]
+    assert pkg_with_dispatcher.tester.test_log_file == "/some/file"
 
 
 # Windows context manager's __exit__ fails with ValueError ("I/O operation
@@ -183,13 +185,15 @@ def test_mixins_with_builders(working_env, ctx: SpackContext):
     """
     s = spack.concretize.concretize_one("builder-and-mixins", ctx)
     builder = spack.builder.create(s.package)
+    run_before_callbacks = builder._run_before_callbacks  # type: ignore[attr-defined]
+    run_after_callbacks = builder._run_after_callbacks  # type: ignore[attr-defined]
 
     # Check that callbacks added by the mixin are in the list
-    assert any(fn.__name__ == "before_install" for _, fn in builder._run_before_callbacks)
-    assert any(fn.__name__ == "after_install" for _, fn in builder._run_after_callbacks)
+    assert any(fn.__name__ == "before_install" for _, fn in run_before_callbacks)
+    assert any(fn.__name__ == "after_install" for _, fn in run_after_callbacks)
 
     # Check that callback from the GenericBuilder are in the list too
-    assert any(fn.__name__ == "sanity_check_prefix" for _, fn in builder._run_after_callbacks)
+    assert any(fn.__name__ == "sanity_check_prefix" for _, fn in run_after_callbacks)
 
 
 def test_reading_api_v20_attributes():

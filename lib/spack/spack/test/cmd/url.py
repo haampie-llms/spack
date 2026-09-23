@@ -108,14 +108,14 @@ def test_url_summary(mock_packages, ctx: SpackContext):
 
     # make sure it agrees with the actual command.
     out = url("summary")
-    out_total_urls = int(re.search(r"Total URLs found:\s*(\d+)", out).group(1))
-    assert out_total_urls == total_urls
+    out_total_urls = re.search(r"Total URLs found:\s*(\d+)", out)
+    assert out_total_urls and int(out_total_urls.group(1)) == total_urls
 
-    out_correct_names = int(re.search(r"Names correctly parsed:\s*(\d+)", out).group(1))
-    assert out_correct_names == correct_names
+    out_correct_names = re.search(r"Names correctly parsed:\s*(\d+)", out)
+    assert out_correct_names and int(out_correct_names.group(1)) == correct_names
 
-    out_correct_versions = int(re.search(r"Versions correctly parsed:\s*(\d+)", out).group(1))
-    assert out_correct_versions == correct_versions
+    out_correct_versions = re.search(r"Versions correctly parsed:\s*(\d+)", out)
+    assert out_correct_versions and int(out_correct_versions.group(1)) == correct_versions
 
 
 def test_url_stats(mock_packages: RepoPath):

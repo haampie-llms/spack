@@ -1,6 +1,7 @@
 # Copyright Spack Project Developers. See COPYRIGHT file for details.
 #
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
+import io
 import os
 import stat
 import types
@@ -166,7 +167,8 @@ module_index:
     use_name: a
 """.format(s1.dag_hash())
 
-    module_indices = [{}, {"tcl": spack.modules.common._read_module_index(tcl_module_index)}]
+    tcl_index = spack.modules.common._read_module_index(io.StringIO(tcl_module_index))
+    module_indices = [{}, {"tcl": tcl_index}]
 
     dbs = ["d0", "d1"]
 
@@ -174,9 +176,13 @@ module_index:
     upstream_index = UpstreamModuleIndex(mock_db, module_indices)
 
     module_ctx = SpackContext(ctx.config)
-    module_ctx.store = types.SimpleNamespace(db=mock_db)
+    module_ctx.store = types.SimpleNamespace(db=mock_db)  # type: ignore[assignment]
     m1_path = spack.modules.get_module(
-        "tcl", s1, True, ctx=module_ctx, upstream_index=upstream_index
+        "tcl",
+        s1,  # type: ignore[arg-type]
+        True,
+        ctx=module_ctx,
+        upstream_index=upstream_index,
     )
     assert m1_path == "/path/to/a"
 

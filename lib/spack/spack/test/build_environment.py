@@ -745,7 +745,7 @@ def test_clear_compiler_related_runtime_variables_of_build_deps(
     elsewhere."""
     s = spack.concretize.concretize_one("build-env-compiler-var-a", ctx)
     setup_ctx = spack.build_environment.SetupContext(s, context=Context.BUILD)
-    result = {}
+    result: Dict[str, str] = {}
     setup_ctx.get_env_modifications().apply_modifications(result)
     assert "CC" not in result
     assert "CXX" not in result

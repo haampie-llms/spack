@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from typing import List
 
 import pytest
 
@@ -211,7 +212,7 @@ def test_fixup_macos_rpaths(make_dylib, make_object_file, ctx: SpackContext):
         spack.relocate.fixup_macos_rpath, store_root=ctx.store.layout.root
     )
 
-    no_rpath = []
+    no_rpath: List[str] = []
     duplicate_rpaths = ["/usr", "/usr"]
     bad_rpath = ["/nonexistent/path"]
 
