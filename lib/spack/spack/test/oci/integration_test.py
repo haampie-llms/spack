@@ -319,11 +319,11 @@ def test_best_effort_upload(mutable_database: spack.database.Database, monkeypat
     _push_blob = spack.binary_distribution._oci_push_pkg_blob
     _push_manifest = spack.binary_distribution._oci_put_manifest
 
-    def push_blob(image_ref, spec, tmpdir, **kwargs):
+    def push_blob(ctx, image_ref, spec, tmpdir):
         # fail to upload the blob of mpich
         if spec.name == "mpich":
             raise Exception("Blob Server Error")
-        return _push_blob(image_ref, spec, tmpdir, **kwargs)
+        return _push_blob(ctx, image_ref, spec, tmpdir)
 
     def put_manifest(
         base_images, checksums, image_ref, tmpdir, extra_config, annotations, *specs, **kwargs
