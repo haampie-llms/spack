@@ -2322,8 +2322,8 @@ def test_environment_pickle_preserves_lock_state(
 
     blob = pickle.dumps(env)
 
-    # Flip the global config, then unpickle: the rebuilt transaction lock must keep the state
-    # that was pickled, not the (now different) global one.
+    # Flip the config, then unpickle: the rebuilt transaction lock must keep the state
+    # that was pickled, not the (now different) configured one.
     with mutable_config.override("config:locks", not enable_locks):
         restored = pickle.loads(blob)
 

@@ -623,7 +623,7 @@ class ReadModify:
     """
 
     def __call__(self):
-        # Runs in a child process where the global store is legitimately re-established.
+        # Runs in a child process, which receives the test context
         db = spack.test.harness.current().store.db
         # check that other process can read DB
         _check_db_sanity(db)

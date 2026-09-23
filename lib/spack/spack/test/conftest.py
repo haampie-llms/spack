@@ -553,7 +553,7 @@ class MockStageRoot:
 def mock_stage(tmp_path_factory: pytest.TempPathFactory, monkeypatch, request):
     """Establish the temporary build_stage for the mock archive."""
     # The approach with this autouse fixture is to replace the stage root
-    # instead of using spack.test.harness.current().config.override() to avoid configuration
+    # instead of using config.override() to avoid configuration
     # conflicts with dozens of tests that rely on other configuration
     # fixtures, such as config.
 
