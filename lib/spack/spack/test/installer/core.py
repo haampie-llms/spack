@@ -12,6 +12,7 @@ import pytest
 import spack.binary_distribution
 import spack.error
 import spack.spec
+import spack.url_buildcache
 from spack.config import Configuration
 from spack.installer.base import TEE_CANCEL, TEE_RESUME, ExitCode
 from spack.installer.core import PackageInstaller, read_connection, write_connection
@@ -444,9 +445,8 @@ def binaries_for_all_specs(monkeypatch, mutable_config: Configuration, tmp_path)
     monkeypatch.setattr(
         spack.binary_distribution.BINARY_INDEX, "update", lambda *args, **kwargs: None
     )
-    monkeypatch.setattr(
-        spack.binary_distribution.BINARY_INDEX, "find_by_hash", lambda h: ["local"]
-    )
+    mirror = spack.url_buildcache.MirrorMetadata((tmp_path / "mirror").as_uri(), 3)
+    monkeypatch.setattr(spack.binary_distribution.BINARY_INDEX, "find_by_hash", lambda h: [mirror])
 
 
 def test_cache_install_starts_before_dependencies(
@@ -541,3 +541,35 @@ def test_cache_miss_of_early_build_waits_for_dependencies(
         (root.name, "source_only", False),
     ]
     assert _record(temporary_store, root)
+
+
+@pytest.mark.parametrize("largest", ["pkg-a", "pkg-b"])
+def test_largest_archives_start_first(
+    largest, temporary_store, mock_packages, binaries_for_all_specs, monkeypatch
+):
+    """Among specs started before their dependencies, the largest archives go first."""
+    dep = _make_concrete("dependency-install")
+    a, b = _make_concrete("pkg-a", deps=[dep]), _make_concrete("pkg-b", deps=[dep])
+    monkeypatch.setattr(
+        spack.url_buildcache,
+        "local_archive_size",
+        lambda spec, mirror: 1000 if spec.name == largest else 10,
+    )
+    launcher = ScriptedLauncher(
+        {
+            dep.name: Script(hang=True),
+            a.name: Script(raw_state=WAITING, hang=True),
+            b.name: Script(raw_state=WAITING, hang=True),
+        }
+    )
+    early = EarlyBuilds(launcher)
+
+    def tick():
+        if len(launcher.requests) == 3 and launcher.builds[0].exitcode is None:
+            launcher.builds[0].finish()
+        early.tick()
+
+    _install(launcher, a, b, ui=DrivingUI(tick))
+
+    assert launcher.requests[1].spec.name == largest
+    assert _record(temporary_store, a) and _record(temporary_store, b)

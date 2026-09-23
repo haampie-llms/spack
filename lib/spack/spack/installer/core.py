@@ -343,6 +343,19 @@ class PackageInstaller:
                 for s in reversed(list(nodes))
                 if s.dag_hash() in self.build_graph.nodes and self._may_start_early(s.dag_hash())
             ]
+            # Largest archives first, since they take longest. Sizes are known for local build
+            # caches only; the others keep dependency order.
+            sizes = {
+                h: max(
+                    (
+                        spack.url_buildcache.local_archive_size(self.build_graph.nodes[h], m) or 0
+                        for m in self.binary_cache_for_spec[h]
+                    ),
+                    default=0,
+                )
+                for h in self.early_candidates
+            }
+            self.early_candidates.sort(key=lambda h: -sizes[h])
 
         self._run_event_loop()
 

@@ -1088,6 +1088,31 @@ class URLBuildcacheEntryV2(URLBuildcacheEntry):
             self.spec_stage = None
 
 
+def local_archive_size(spec: spack.spec.Spec, mirror: "MirrorMetadata") -> Optional[int]:
+    """Size of the archive of a spec in a build cache on a local filesystem, or None if it is not
+    known cheaply. The manifest is not verified: the size is only a scheduling hint."""
+    if mirror.version != CURRENT_BUILD_CACHE_LAYOUT_VERSION or mirror.view:
+        return None
+    path = url_util.local_file_path(URLBuildcacheEntry.get_manifest_url(spec, mirror.url))
+    if path is None:
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            contents = f.read()
+        if spack.util.gpg.is_clearsig(contents):
+            manifest = spack.util.gpg.extract_json_from_clearsig(contents)
+        else:
+            manifest = json.loads(contents)
+        media_types = URLBuildcacheEntry.component_to_media_types(BuildcacheComponent.TARBALL)
+        return next(
+            int(record["contentLength"])
+            for record in manifest["data"]
+            if record["mediaType"] in media_types
+        )
+    except (OSError, ValueError, LookupError, TypeError, StopIteration):
+        return None
+
+
 def get_url_buildcache_class(
     layout_version: int = CURRENT_BUILD_CACHE_LAYOUT_VERSION,
 ) -> Type[URLBuildcacheEntry]:

@@ -1893,3 +1893,55 @@ def test_manifest_reads_older_media_types(component, oldest):
     records = [BlobRecord(1, t, "gzip", "sha256", t) for t in (oldest, current)]
     manifest = BuildcacheManifest(layout_version=3, data=records)
     assert [r.checksum for r in manifest.get_blob_records(media_types)] == [current, oldest]
+
+
+@pytest.mark.parametrize("signed", [False, True])
+def test_local_archive_size(signed, tmp_path: pathlib.Path, mock_packages, config):
+    """The archive size is read from manifests of local build caches, for scheduling."""
+    spec, other = (
+        spack.concretize.concretize_one("libelf"),
+        spack.concretize.concretize_one("zmpi"),
+    )
+    mirror = spack.url_buildcache.MirrorMetadata(tmp_path.as_uri(), 3)
+    manifest = {
+        "version": 3,
+        "data": [
+            {
+                "contentLength": 12,
+                "mediaType": URLBuildcacheEntry.current_component_to_media_type(
+                    BuildcacheComponent.SPEC
+                ),
+                "compression": "gzip",
+                "checksumAlgorithm": "sha256",
+                "checksum": "0" * 64,
+            },
+            {
+                "contentLength": 1234,
+                "mediaType": URLBuildcacheEntry.current_component_to_media_type(
+                    BuildcacheComponent.TARBALL
+                ),
+                "compression": "gzip",
+                "checksumAlgorithm": "sha256",
+                "checksum": "1" * 64,
+            },
+        ],
+    }
+    contents = json.dumps(manifest)
+    if signed:
+        contents = (
+            "-----BEGIN PGP SIGNED MESSAGE-----\nHash: SHA512\n\n"
+            f"{contents}\n-----BEGIN PGP SIGNATURE-----\n\nxyz\n-----END PGP SIGNATURE-----\n"
+        )
+    path = pathlib.Path(
+        url_util.local_file_path(URLBuildcacheEntry.get_manifest_url(spec, mirror.url))
+    )
+    path.parent.mkdir(parents=True)
+    path.write_text(contents)
+
+    assert spack.url_buildcache.local_archive_size(spec, mirror) == 1234
+    # Missing manifests, remote build caches and older layouts have no known size
+    assert spack.url_buildcache.local_archive_size(other, mirror) is None
+    remote = spack.url_buildcache.MirrorMetadata("https://example.com/mirror", 3)
+    assert spack.url_buildcache.local_archive_size(spec, remote) is None
+    old = spack.url_buildcache.MirrorMetadata(tmp_path.as_uri(), 2)
+    assert spack.url_buildcache.local_archive_size(spec, old) is None
