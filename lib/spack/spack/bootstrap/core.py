@@ -52,7 +52,6 @@ import spack.relocate
 import spack.repo
 import spack.spec
 import spack.store
-import spack.user_environment
 import spack.util.executable
 import spack.util.spack_yaml
 import spack.util.url

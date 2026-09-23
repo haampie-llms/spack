@@ -60,7 +60,6 @@ import spack.platforms
 import spack.spec
 import spack.stage
 import spack.store
-import spack.user_environment
 import spack.util.archive
 import spack.util.crypto
 import spack.util.filesystem as fsys

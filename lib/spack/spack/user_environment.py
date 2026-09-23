@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 import spack.config
 import spack.error
-import spack.repo
 import spack.spec
 from spack.util import environment
 
