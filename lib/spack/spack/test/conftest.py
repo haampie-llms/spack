@@ -15,6 +15,7 @@ import itertools
 import json
 import multiprocessing
 import os
+import pickle
 import re
 import shutil
 import stat
@@ -24,7 +25,7 @@ import tempfile
 import textwrap
 import xml.etree.ElementTree
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
 
 import pytest
 
@@ -2509,6 +2510,37 @@ def _libc_from_python(*args):
 @pytest.fixture()
 def do_not_check_runtimes_on_reuse(monkeypatch):
     monkeypatch.setattr(spack.solver.reuse, "_has_runtime_dependencies", _true)
+
+
+class _MemoizedConfigFileReader:
+    """``read_config_file`` that parses and validates each file once per content, and returns
+    a new copy of the result on every call. The copy is unpickled, which is several times
+    faster than deep-copying the YAML types."""
+
+    def __init__(self, read: Callable[..., Optional[Dict[str, Any]]]) -> None:
+        self.read = read
+        self.parsed: Dict[Tuple[str, bytes, int], bytes] = {}
+
+    def __call__(self, path: str, schema: Optional[Dict[str, Any]] = None):
+        try:
+            with open(path, "rb") as f:
+                content = f.read()
+        except OSError:
+            return self.read(path, schema)
+        key = (path, content, id(schema))
+        if key not in self.parsed:
+            self.parsed[key] = pickle.dumps(self.read(path, schema), pickle.HIGHEST_PROTOCOL)
+        return pickle.loads(self.parsed[key])
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _parse_config_files_once():
+    """Every test reads the mock configuration files into a configuration of its own; parse
+    them once per session instead of once per test."""
+    read = spack.config.read_config_file
+    spack.config.read_config_file = _MemoizedConfigFileReader(read)
+    yield
+    spack.config.read_config_file = read
 
 
 @pytest.fixture(autouse=True, scope="session")
