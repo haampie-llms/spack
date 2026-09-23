@@ -2021,8 +2021,9 @@ def relocate_package(spec: spack.spec.Spec) -> None:
             os.unlink(install_manifest)
 
 
-#: Bytes copied per write when extracting a file from a build cache tarball.
-_TARBALL_COPY_SIZE = 1024 * 1024
+#: Bytes copied per write when extracting a file from a build cache tarball. Below glibc's mmap
+#: threshold, so that buffers are reused instead of freshly mapped and page faulted every time.
+_TARBALL_COPY_SIZE = 64 * 1024
 
 
 class _ReadAhead(io.RawIOBase):
@@ -2210,7 +2211,7 @@ class _TarReader:
             raise ValueError("Tarball contains a header with an invalid checksum")
         return header
 
-    def chunks(self, size: int = 1024 * 1024) -> Iterator[bytes]:
+    def chunks(self, size: int = _TARBALL_COPY_SIZE) -> Iterator[bytes]:
         while self.remaining:
             chunk = self._read(min(size, self.remaining))
             self.remaining -= len(chunk)
