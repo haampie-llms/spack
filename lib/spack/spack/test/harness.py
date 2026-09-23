@@ -106,11 +106,6 @@ def use_store(
         config.remove_scope(scope_name=scope_name)
 
 
-def reinitialize_store() -> None:
-    """Rebuild the store of the test context from its configuration on next access."""
-    current().__dict__.pop("store", None)
-
-
 @contextlib.contextmanager
 def use_repositories(
     *paths_and_repos: Union[str, spack.repo.Repo], override: bool = True
