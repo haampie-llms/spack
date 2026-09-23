@@ -81,8 +81,7 @@ def bootstrap_context(ctx: "spack.context.SpackContext") -> "spack.context.Spack
         config.push_scope(scope)
 
     # The user's install tree is replaced by the bootstrap store
-    user_config = user.get("config")
-    user_config.pop("install_tree", None)
+    user_config = {k: v for k, v in user.get("config").items() if k != "install_tree"}
     user_data = {
         "bootstrap": user.get("bootstrap"),
         "config": user_config,
