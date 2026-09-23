@@ -820,11 +820,7 @@ def stat_url(url: str, *, client: NetworkClient) -> Optional[Tuple[int, float]]:
 
 
 def spider(
-    root_urls: Union[str, Iterable[str]],
-    depth: int = 0,
-    *,
-    executor: concurrent.futures.Executor,
-    client: NetworkClient,
+    root_urls: Union[str, Iterable[str]], depth: int = 0, *, executor: concurrent.futures.Executor
 ):
     """Get web pages from root URLs.
 
@@ -834,8 +830,8 @@ def spider(
     Args:
         root_urls: root urls used as a starting point for spidering
         depth: level of recursion into links
-        executor: executor the requests are submitted to
-        client: client to open the URLs with
+        executor: executor the requests are submitted to, whose workers share the network
+            client to open the URLs with
 
     Returns:
         A dict of pages visited (URL) mapped to their full text and the set of visited links.
@@ -855,7 +851,7 @@ def spider(
     while current_depth <= depth:
         tty.debug(f"SPIDER: [depth={current_depth}, max_depth={depth}, urls={len(spider_args)}]")
         results = [
-            executor.submit(_spider, *one_search_args, client=client)
+            executor.submit_shared(_spider, *one_search_args)  # type: ignore[attr-defined]
             for one_search_args in spider_args
         ]
         spider_args = []
@@ -874,11 +870,7 @@ def spider(
 
 
 def _spider(
-    url: urllib.parse.ParseResult,
-    collect_nested: bool,
-    _visited: Set[str],
-    *,
-    client: NetworkClient,
+    client: NetworkClient, url: urllib.parse.ParseResult, collect_nested: bool, _visited: Set[str]
 ):
     """Fetches URL and any pages it links to.
 

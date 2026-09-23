@@ -172,9 +172,9 @@ def mock_s3_client(monkeypatch):
     ],
 )
 def test_spider(depth, expected_found, expected_not_found, expected_text, config):
-    with spack.util.parallel.make_concurrent_executor() as executor:
-        client = spack.util.web.NetworkClient.from_config(config)
-        pages, links = spack.util.web.spider(root, depth=depth, executor=executor, client=client)
+    client = spack.util.web.NetworkClient.from_config(config)
+    with spack.util.parallel.make_concurrent_executor(shared=client) as executor:
+        pages, links = spack.util.web.spider(root, depth=depth, executor=executor)
 
     for page in expected_found["pages"]:
         assert page in pages
@@ -198,10 +198,7 @@ def test_spider_no_response(monkeypatch, config):
         spack.util.web, "read_from_url", lambda x, y, *, client: (None, None, None)
     )
     pages, links, _, _ = spack.util.web._spider(
-        root,
-        collect_nested=False,
-        _visited=set(),
-        client=spack.util.web.NetworkClient.from_config(config),
+        spack.util.web.NetworkClient.from_config(config), root, False, set()
     )
     assert not pages and not links
 

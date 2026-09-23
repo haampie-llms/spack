@@ -68,9 +68,9 @@ def _delete_entries_from_cache(
     pruned_objects = 0
     futures: List[Future] = []
 
-    with spack.util.parallel.make_concurrent_executor() as executor:
+    with spack.util.parallel.make_concurrent_executor(shared=client) as executor:
         for url in urls_to_delete:
-            futures.append(executor.submit(_delete_object, url, dry_run, client))
+            futures.append(executor.submit_shared(_delete_object, url, dry_run))
 
         for manifest_or_blob_future in as_completed(futures):
             pruned_objects += manifest_or_blob_future.result()
@@ -78,7 +78,7 @@ def _delete_entries_from_cache(
     return pruned_objects
 
 
-def _delete_object(url: str, dry_run: bool, client: web_util.NetworkClient) -> int:
+def _delete_object(client: web_util.NetworkClient, url: str, dry_run: bool) -> int:
     try:
         if dry_run:
             tty.info(f"Would have removed object {url}")
@@ -92,7 +92,7 @@ def _delete_object(url: str, dry_run: bool, client: web_util.NetworkClient) -> i
 
 
 def _object_has_prunable_mtime(
-    url: str, pruning_started_at: float, client: web_util.NetworkClient
+    client: web_util.NetworkClient, url: str, pruning_started_at: float
 ) -> Tuple[str, bool]:
     """Check if an object's modification time makes it eligible for pruning.
 
@@ -115,11 +115,11 @@ def _filter_new_specs(
     Runs parallel modification time checks on all URLs and yields only
     those that are old enough to be safely pruned.
     """
-    with spack.util.parallel.make_concurrent_executor() as executor:
+    with spack.util.parallel.make_concurrent_executor(shared=client) as executor:
         futures = []
         for url in urls:
             futures.append(
-                executor.submit(_object_has_prunable_mtime, url, pruning_started_at, client)
+                executor.submit_shared(_object_has_prunable_mtime, url, pruning_started_at)
             )
 
         for manifest_or_blob_future in as_completed(futures):
