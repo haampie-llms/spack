@@ -1829,7 +1829,7 @@ def test_update_does_not_warn_on_mirror_with_no_index(monkeypatch, tmp_path, mut
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        binary_index.update(config=mutable_config)
+        binary_index.update()
 
     concretization_warnings = [
         w for w in caught if "cannot be used in concretization" in str(w.message)
@@ -1847,7 +1847,7 @@ def test_load_buildcache_index(monkeypatch, tmp_path):
     def fake_regenerate(clear_existing=False):
         regenerate_calls.append(clear_existing)
 
-    def fake_update(with_cooldown=False, *, config=None):
+    def fake_update(with_cooldown=False):
         update_calls.append(with_cooldown)
 
     monkeypatch.setattr(mock_index, "regenerate_spec_cache", fake_regenerate)

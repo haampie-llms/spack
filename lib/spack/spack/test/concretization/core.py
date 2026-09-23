@@ -2904,7 +2904,7 @@ packages:
             f"{request_str} ^dyninst@8.1.1", spack.test.harness.current()
         )
         monkeypatch.setattr(
-            spack.solver.reuse, "_specs_from_mirror", lambda binary_index, config: [reused]
+            spack.solver.reuse, "_specs_from_mirror", lambda binary_index: [reused]
         )
 
         # Exclude dyninst from reuse, so we expect that the old version is not taken into account
@@ -5580,14 +5580,14 @@ def test_specs_from_mirror_warns_when_index_missing(monkeypatch):
         config=spack.test.harness.current().config, client=spack.test.harness.current().network
     )
 
-    def fake_update(*, config):
+    def fake_update():
         binary_index.mirrors_without_index = {"file:///fake-mirror"}
 
     monkeypatch.setattr(binary_index, "update", fake_update)
     monkeypatch.setattr(binary_index, "get_all_built_specs", lambda: [])
 
     with pytest.warns(UserWarning, match="cannot be used in concretization"):
-        spack.solver.reuse._specs_from_mirror(binary_index, spack.test.harness.current().config)
+        spack.solver.reuse._specs_from_mirror(binary_index)
 
 
 @pytest.mark.parametrize(
@@ -6198,9 +6198,7 @@ def test_solve_in_rounds_in_a_context_of_its_own(injected_context):
 
 def test_buildcache_query_in_a_context_of_its_own(injected_context):
     """Querying an injected buildcache index reads the injected configuration."""
-    query = spack.binary_distribution.BinaryCacheQuery(
-        True, index=injected_context.binary_index, config=injected_context.config
-    )
+    query = spack.binary_distribution.BinaryCacheQuery(True, index=injected_context.binary_index)
 
     assert query(Spec("pkg-a")) == []
 

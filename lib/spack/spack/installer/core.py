@@ -319,7 +319,7 @@ class PackageInstaller:
 
         # check what specs we could fetch from binaries (checks against cache, not remotely)
         try:
-            self.ctx.binary_index.update(config=self.ctx.config)
+            self.ctx.binary_index.update()
         except spack.binary_distribution.FetchCacheError:
             pass
 
