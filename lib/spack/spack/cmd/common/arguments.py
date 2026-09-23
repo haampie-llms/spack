@@ -224,7 +224,7 @@ def _cdash_reporter(namespace):
     argparse namespace under construction, so it can later use it to create the object.
     """
 
-    def _factory():
+    def _factory(ctx: "SpackContext"):
         def installed_specs(args):
             packages = []
 
@@ -247,7 +247,7 @@ def _cdash_reporter(namespace):
             track=namespace.cdash_track,
         )
 
-        return spack.reporters.CDash(configuration=configuration)
+        return spack.reporters.CDash(configuration=configuration, urlopen=ctx.network.urlopen)
 
     return _factory
 
@@ -258,7 +258,7 @@ class CreateReporter(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
         setattr(namespace, self.dest, values)
         if values == "junit":
-            setattr(namespace, "reporter", spack.reporters.JUnit)
+            setattr(namespace, "reporter", lambda ctx: spack.reporters.JUnit())
         elif values == "cdash":
             setattr(namespace, "reporter", _cdash_reporter(namespace))
 

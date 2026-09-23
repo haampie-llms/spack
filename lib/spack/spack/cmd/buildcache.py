@@ -750,7 +750,10 @@ def save_specfile_fn(args, ctx):
 
 
 def copy_buildcache_entry(
-    cache_entry: URLBuildcacheEntry, destination_url: str, config: spack.config.Configuration
+    cache_entry: URLBuildcacheEntry,
+    destination_url: str,
+    config: spack.config.Configuration,
+    client: web_util.NetworkClient,
 ):
     """Download buildcache entry and copy it to the destination_url"""
     try:
@@ -777,7 +780,9 @@ def copy_buildcache_entry(
     tarball_dest_url = cache_entry.get_blob_url(destination_url, tarball_blob_record)
 
     try:
-        web_util.push_to_url(local_tarball_path, tarball_dest_url, keep_original=True)
+        web_util.push_to_url(
+            local_tarball_path, tarball_dest_url, keep_original=True, client=client
+        )
     except Exception as e:
         tty.warn(f"Failed to push {local_tarball_path} to {tarball_dest_url} due to {e}")
         cache_entry.destroy()
@@ -791,7 +796,7 @@ def copy_buildcache_entry(
     spec_dest_url = cache_entry.get_blob_url(destination_url, spec_blob_record)
 
     try:
-        web_util.push_to_url(local_spec_path, spec_dest_url, keep_original=True)
+        web_util.push_to_url(local_spec_path, spec_dest_url, keep_original=True, client=client)
     except Exception as e:
         tty.warn(f"Failed to push {local_spec_path} to {spec_dest_url} due to {e}")
         cache_entry.destroy()
@@ -817,7 +822,9 @@ def copy_buildcache_entry(
     local_manifest_path = manifest_stage.save_filename
 
     try:
-        web_util.push_to_url(local_manifest_path, manifest_dest_url, keep_original=True)
+        web_util.push_to_url(
+            local_manifest_path, manifest_dest_url, keep_original=True, client=client
+        )
     except Exception as e:
         tty.warn(f"Failed to push manifest to {manifest_dest_url} due to {e}")
 
@@ -841,7 +848,7 @@ def sync_fn(args, ctx):
         if args.dest_mirror:
             tty.warn(f"Ignoring unused argument: {args.dest_mirror.name}")
 
-        manifest_copy(glob.glob(args.manifest_glob), ctx.config, args.src_mirror)
+        manifest_copy(glob.glob(args.manifest_glob), ctx.config, ctx.network, args.src_mirror)
         return 0
 
     if args.src_mirror is None or args.dest_mirror is None:
@@ -871,12 +878,13 @@ def sync_fn(args, ctx):
         )
         src_cache_entry = cache_class(src_mirror_url, s, allow_unsigned=True)
         src_cache_entry.read_manifest()
-        copy_buildcache_entry(src_cache_entry, dest_mirror_url, ctx.config)
+        copy_buildcache_entry(src_cache_entry, dest_mirror_url, ctx.config, ctx.network)
 
 
 def manifest_copy(
     manifest_file_list: List[str],
     config: spack.config.Configuration,
+    client: web_util.NetworkClient,
     dest_mirror: Optional[spack.mirrors.mirror.Mirror] = None,
 ):
     """Read manifest files containing information about specific specs to copy
@@ -905,7 +913,7 @@ def manifest_copy(
         else:
             destination_url = cache_class.get_base_url(copy_obj["dest"])
         tty.debug("copying {0} to {1}".format(copy_obj["src"], destination_url))
-        copy_buildcache_entry(src_cache_entry, destination_url, config)
+        copy_buildcache_entry(src_cache_entry, destination_url, config, client)
 
 
 def update_index(
@@ -1000,7 +1008,7 @@ def update_view(
     # local cache.
     index_exists = True
     try:
-        ctx.binary_index._fetch_and_cache_index(mirror_metadata)
+        ctx.binary_index._fetch_and_cache_index(mirror_metadata, client=ctx.network)
     except spack.binary_distribution.BuildcacheIndexNotExists:
         index_exists = False
 
@@ -1069,7 +1077,7 @@ def check_index_fn(args, ctx):
     index_exists = True
     missing_index_blob = False
     try:
-        ctx.binary_index._fetch_and_cache_index(mirror_metadata)
+        ctx.binary_index._fetch_and_cache_index(mirror_metadata, client=ctx.network)
     except spack.binary_distribution.BuildcacheIndexNotExists:
         index_exists = False
     except spack.binary_distribution.FetchIndexError:

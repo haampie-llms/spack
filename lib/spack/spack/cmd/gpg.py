@@ -201,7 +201,7 @@ def gpg_publish(args, ctx):
         url = spack.util.url.path_to_file_url(args.directory)
         mirror = spack.mirrors.mirror.Mirror(url, url)
     elif args.mirror_name:
-        mirror = spack.mirrors.mirror.MirrorCollection(binary=True, config=ctx.config).lookup(
+        mirror = spack.mirrors.mirror.MirrorCollection.from_config(ctx.config, binary=True).lookup(
             args.mirror_name
         )
     elif args.mirror_url:

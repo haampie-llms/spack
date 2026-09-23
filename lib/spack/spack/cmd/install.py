@@ -323,7 +323,7 @@ def install(parser, args, ctx):
 
     arguments.sanitize_reporter_options(args)
 
-    reporter = args.reporter() if args.log_format else None
+    reporter = args.reporter(ctx) if args.log_format else None
     install_kwargs = install_kwargs_from_args(args, ctx.config)
     env = ctx.environment
 
@@ -428,7 +428,7 @@ def concrete_specs_from_cli(args, install_kwargs, ctx):
     except SpackError as e:
         tty.debug(e)
         if args.log_format is not None:
-            reporter = args.reporter()
+            reporter = args.reporter(ctx)
             reporter.concretization_report(report_filename(args, abstract_specs), e.message)
         raise
     return concrete_specs
