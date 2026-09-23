@@ -1148,9 +1148,7 @@ def mutable_empty_config(tmp_path_factory: pytest.TempPathFactory, configuration
 
 @pytest.fixture
 def inactive_config():
-    """Returns a factory of Configuration objects that are never the configuration of the test
-    context, to test that code uses the configuration it is given.
-    """
+    """Returns a factory of Configuration objects made of a single scope with the given data."""
 
     def _factory(data: Dict[str, Any]) -> spack.config.Configuration:
         config = spack.config.Configuration()

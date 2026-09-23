@@ -1051,11 +1051,9 @@ def test_url_exists_no_raise(monkeypatch, exception, config):
     assert not spack.util.web.url_exists("https://not.real.io", client=client)
 
 
-def test_base_curl_fetch_args_uses_given_config(mutable_config: Configuration, inactive_config):
-    """Tests that curl arguments come from the configuration passed as an argument, and not
-    from the global one."""
-    mutable_config.set("config:verify_ssl", True)
-    mutable_config.set("config:connect_timeout", 10)
+def test_base_curl_fetch_args_uses_given_config(inactive_config):
+    """Tests that curl arguments come from the configuration of the client."""
+    verified = inactive_config({"config": {"verify_ssl": True, "connect_timeout": 10}})
     unverified = inactive_config({"config": {"verify_ssl": False, "connect_timeout": 42}})
 
     client = spack.util.web.NetworkClient.from_config(unverified)
@@ -1063,17 +1061,15 @@ def test_base_curl_fetch_args_uses_given_config(mutable_config: Configuration, i
     assert "-k" in args
     assert args[args.index("--connect-timeout") + 1] == "42"
 
-    client = spack.util.web.NetworkClient.from_config(mutable_config)
+    client = spack.util.web.NetworkClient.from_config(verified)
     args = spack.util.web.base_curl_fetch_args("https://example.com", client=client)
     assert "-k" not in args
     assert args[args.index("--connect-timeout") + 1] == "10"
 
 
-def test_network_client_uses_given_config(mutable_config: Configuration, inactive_config):
+def test_network_client_uses_given_config(inactive_config):
     """Tests that a client takes its settings and mirrors from the configuration passed as an
-    argument, and not from the global one."""
-    mutable_config.set("config:verify_ssl", True)
-    mutable_config.set("config:url_fetch_method", "urllib")
+    argument."""
     other = inactive_config(
         {
             "config": {"verify_ssl": False, "url_fetch_method": "curl -v"},
@@ -1092,11 +1088,8 @@ def test_network_client_uses_given_config(mutable_config: Configuration, inactiv
     assert client_args["use_ssl"] is False
 
 
-def test_require_curl_uses_given_config(
-    tmp_path: pathlib.Path, ssl_scrubbed_env, mutable_config: Configuration, inactive_config
-):
-    """Tests that curl gets the custom certificates of the configuration passed as an argument,
-    and not those of the global one."""
+def test_require_curl_uses_given_config(tmp_path: pathlib.Path, ssl_scrubbed_env, inactive_config):
+    """Tests that curl gets the custom certificates of the configuration of the client."""
     mock_cert = tmp_path / "mock_cert.crt"
     mock_cert.write_text("")
     with_certs = inactive_config({"config": {"ssl_certs": str(mock_cert)}})
@@ -1106,10 +1099,10 @@ def test_require_curl_uses_given_config(
     spack.util.web.require_curl(client=client)("--help", output=str, _dump_env=certs_env)
     assert certs_env["CURL_CA_BUNDLE"] == str(mock_cert)
 
-    global_env: Dict[str, str] = {}
-    client = spack.util.web.NetworkClient.from_config(mutable_config)
-    spack.util.web.require_curl(client=client)("--help", output=str, _dump_env=global_env)
-    assert "CURL_CA_BUNDLE" not in global_env
+    default_env: Dict[str, str] = {}
+    client = spack.util.web.NetworkClient.from_config(inactive_config({}))
+    spack.util.web.require_curl(client=client)("--help", output=str, _dump_env=default_env)
+    assert "CURL_CA_BUNDLE" not in default_env
 
 
 def test_network_client_pickle_roundtrip(tmp_path: pathlib.Path, inactive_config):
