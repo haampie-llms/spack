@@ -442,7 +442,7 @@ def no_path_access(monkeypatch):
 @pytest.fixture(scope="session", autouse=True)
 def clean_user_environment():
     spack_env_value = os.environ.pop(ev.spack_env_var, None)
-    with ev.no_active_environment():
+    with ev.no_active_environment(spack.context.current()):
         yield
     if spack_env_value:
         os.environ[ev.spack_env_var] = spack_env_value
@@ -454,7 +454,7 @@ def clean_user_environment():
 @pytest.fixture(scope="function", autouse=True)
 def clean_test_environment():
     yield
-    ev.deactivate()
+    spack.context.current().deactivate()
 
 
 # Hooks to add command line options or set other custom behaviors.

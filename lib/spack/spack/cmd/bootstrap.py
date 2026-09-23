@@ -205,7 +205,7 @@ def _root(args, ctx):
 
 
 def _list(args, ctx):
-    sources = spack.bootstrap.core.bootstrapping_sources(scope=args.scope)
+    sources = spack.bootstrap.core.bootstrapping_sources(ctx.config, scope=args.scope)
     if not sources:
         spack.util.tty.msg("No method available for bootstrapping Spack's dependencies")
         return
@@ -313,16 +313,13 @@ def _status(args, ctx):
     )
     print(spack.util.tty.color.colorize(header))
     print()
-    # Use the context manager here to avoid swapping between user and
-    # bootstrap config many times
     missing = False
-    with spack.bootstrap.ensure_bootstrap_configuration():
-        for current_section in sections:
-            status_msg, fail = spack.bootstrap.status_message(section=current_section)
-            missing = missing or fail
-            if status_msg:
-                print(spack.util.tty.color.colorize(status_msg))
-        print()
+    for current_section in sections:
+        status_msg, fail = spack.bootstrap.status_message(current_section, ctx)
+        missing = missing or fail
+        if status_msg:
+            print(spack.util.tty.color.colorize(status_msg))
+    print()
     legend = (
         "Spack will take care of bootstrapping any missing dependency marked"
         " as [@*y{B}]. Dependencies marked as [@*y{-}] are instead required"
@@ -335,7 +332,7 @@ def _status(args, ctx):
 
 
 def _add(args, ctx):
-    initial_sources = spack.bootstrap.core.bootstrapping_sources()
+    initial_sources = spack.bootstrap.core.bootstrapping_sources(ctx.config)
     names = [s["name"] for s in initial_sources]
 
     # If the name is already used error out
@@ -365,7 +362,7 @@ def _add(args, ctx):
 
 
 def _remove(args, ctx):
-    initial_sources = spack.bootstrap.core.bootstrapping_sources()
+    initial_sources = spack.bootstrap.core.bootstrapping_sources(ctx.config)
     names = [s["name"] for s in initial_sources]
     if args.name not in names:
         msg = (
@@ -458,10 +455,9 @@ def _mirror(args, ctx):
 
 
 def _now(args, ctx):
-    with spack.bootstrap.ensure_bootstrap_configuration():
-        spack.bootstrap.ensure_core_dependencies()
-        if args.dev:
-            spack.bootstrap.ensure_environment_dependencies()
+    spack.bootstrap.ensure_core_dependencies(ctx)
+    if args.dev:
+        spack.bootstrap.ensure_environment_dependencies(ctx)
 
 
 def bootstrap(parser, args, ctx):

@@ -178,11 +178,11 @@ spack:
     )
 
     env = spack.environment.Environment(tmp_path, ctx=spack.context.current())
-    spack.environment.activate(env)
+    env.activate()
     try:
         assert {r.namespace for r in spack.repo.PATH.repos} == {"builder_test", "builtin_mock"}
     finally:
-        spack.environment.deactivate()
+        env.ctx.deactivate()
 
     assert [r.namespace for r in spack.repo.PATH.repos] == ["builtin_mock"]
 

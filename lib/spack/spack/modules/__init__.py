@@ -14,7 +14,7 @@ import spack.spec
 from spack.util import tty
 
 from . import common
-from .common import BaseModuleFileWriter, disable_modules
+from .common import BaseModuleFileWriter
 from .error import ModuleNotFoundError
 from .lmod import LmodModulefileWriter
 from .tcl import TclModulefileWriter
@@ -22,7 +22,7 @@ from .tcl import TclModulefileWriter
 if TYPE_CHECKING:
     import spack.context
 
-__all__ = ["TclModulefileWriter", "LmodModulefileWriter", "disable_modules"]
+__all__ = ["TclModulefileWriter", "LmodModulefileWriter"]
 
 module_types: Dict[str, Type[BaseModuleFileWriter]] = {
     "tcl": TclModulefileWriter,

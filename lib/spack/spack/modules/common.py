@@ -14,7 +14,6 @@ To add a new module type, subclass ``BaseConfiguration`` and ``BaseModuleFileWri
 """
 
 import collections
-import contextlib
 import copy
 import datetime
 import itertools
@@ -29,7 +28,6 @@ from typing import (
     Any,
     ClassVar,
     Dict,
-    Iterator,
     List,
     NamedTuple,
     Optional,
@@ -1472,12 +1470,3 @@ class BaseModuleFileWriter:
             os.unlink(default_symlink)
         except OSError:
             pass
-
-
-@contextlib.contextmanager
-def disable_modules() -> Iterator[None]:
-    """Disable the generation of modulefiles within the context manager."""
-    data: Dict[str, object] = {"modules:": {"default": {"enable": []}}}
-    disable_scope = spack.config.InternalConfigScope("disable_modules", data=data)
-    with spack.config.CONFIG.override(disable_scope):
-        yield

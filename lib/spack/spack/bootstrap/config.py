@@ -1,31 +1,16 @@
 # Copyright Spack Project Developers. See COPYRIGHT file for details.
 #
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
-"""Manage configuration swapping for bootstrapping purposes"""
+"""The context Spack's own dependencies are bootstrapped in"""
 
-import contextlib
 import os
 import sys
-from typing import Any, Dict, Generator, MutableSequence, Sequence
+from typing import List
 
 import spack.config
 import spack.context
-import spack.environment
-import spack.modules
 import spack.paths
-import spack.platforms
-import spack.repo
-import spack.store
-from spack.error import ExplicitDatabaseUpgradeError
 from spack.util import tty
-
-#: Reference counter for the bootstrapping configuration context manager
-_REF_COUNT = 0
-
-
-def is_bootstrapping() -> bool:
-    """Return True if we are in a bootstrapping context, False otherwise."""
-    return _REF_COUNT > 0
 
 
 def spec_for_current_python() -> str:
@@ -41,126 +26,79 @@ def spec_for_current_python() -> str:
     return f"python@{version_str}"
 
 
-def root_path() -> str:
+def root_path(config: spack.config.Configuration) -> str:
     """Root of all the bootstrap related folders"""
-    config = spack.context.current().config
     return spack.config.canonicalize_path(
         config.get("bootstrap:root", spack.paths.default_user_bootstrap_path), config=config
     )
 
 
-def store_path() -> str:
+def store_path(config: spack.config.Configuration) -> str:
     """Path to the store used for bootstrapped software"""
-    enabled = spack.config.CONFIG.get("bootstrap:enable", True)
+    enabled = config.get("bootstrap:enable", True)
     if not enabled:
         msg = 'bootstrapping is currently disabled. Use "spack bootstrap enable" to enable it'
         raise RuntimeError(msg)
 
-    return _store_path()
+    return spack.config.canonicalize_path(os.path.join(root_path(config), "store"), config=config)
 
 
-@contextlib.contextmanager
-def _spack_python_interpreter() -> Generator:
-    """Override the current configuration to set the interpreter under
-    which Spack is currently running as the only Python external spec
-    available.
-    """
-    python_prefix = sys.exec_prefix
-    external_python = spec_for_current_python()
-
-    entry = {
-        "buildable": False,
-        "externals": [{"prefix": python_prefix, "spec": str(external_python)}],
-    }
-
-    with spack.config.CONFIG.override("packages:python::", entry):
-        yield
+def _config_path(config: spack.config.Configuration) -> str:
+    return spack.config.canonicalize_path(os.path.join(root_path(config), "config"), config=config)
 
 
-def _store_path() -> str:
-    bootstrap_root_path = root_path()
-    return spack.config.canonicalize_path(
-        os.path.join(bootstrap_root_path, "store"), config=spack.context.current().config
-    )
-
-
-def _config_path() -> str:
-    bootstrap_root_path = root_path()
-    return spack.config.canonicalize_path(
-        os.path.join(bootstrap_root_path, "config"), config=spack.context.current().config
-    )
-
-
-@contextlib.contextmanager
-def ensure_bootstrap_configuration() -> Generator:
-    """Swap the current configuration for the one used to bootstrap Spack.
-
-    The context manager is reference counted to ensure we don't swap multiple
-    times if there's nested use of it in the stack. One compelling use case
-    is bootstrapping patchelf during the bootstrap of clingo.
-    """
-    global _REF_COUNT  # pylint: disable=global-statement
-    already_swapped = bool(_REF_COUNT)
-    _REF_COUNT += 1
-    try:
-        if already_swapped:
-            yield
-        else:
-            with _ensure_bootstrap_configuration():
-                yield
-    except ExplicitDatabaseUpgradeError as e:
-        # Adjust database upgrade error messages to include -b flag when in bootstrap mode
-        if e._long_message:
-            e._long_message = e._long_message.replace("spack reindex", "spack -b reindex")
-        raise
-    finally:
-        _REF_COUNT -= 1
-
-
-def _read_and_sanitize_configuration() -> Dict[str, Any]:
-    """Read the user configuration that needs to be reused for bootstrapping
-    and remove the entries that should not be copied over.
-    """
-    # Read the "config" section but pop the install tree (the entry will not be
-    # considered due to the use_store context manager, so it will be confusing
-    # to have it in the configuration).
-    config_yaml = spack.config.CONFIG.get("config")
-    config_yaml.pop("install_tree", None)
-    return {
-        "bootstrap": spack.config.CONFIG.get("bootstrap"),
-        "config": config_yaml,
-        "repos": spack.config.CONFIG.get("repos"),
-    }
-
-
-def _bootstrap_config_scopes() -> Sequence["spack.config.ConfigScope"]:
+def _bootstrap_config_scopes(config: spack.config.Configuration) -> List[spack.config.ConfigScope]:
     tty.debug("[BOOTSTRAP CONFIG SCOPE] name=_builtin")
-    config_scopes: MutableSequence["spack.config.ConfigScope"] = [
+    config_scopes: List[spack.config.ConfigScope] = [
         spack.config.InternalConfigScope("_builtin", spack.config.CONFIG_DEFAULTS)
     ]
-    configuration_paths = (spack.config.CONFIGURATION_DEFAULTS_PATH, ("bootstrap", _config_path()))
+    configuration_paths = (
+        spack.config.CONFIGURATION_DEFAULTS_PATH,
+        ("bootstrap", _config_path(config)),
+    )
     for name, path in configuration_paths:
         generic_scope = spack.config.DirectoryConfigScope(name, path)
         config_scopes.append(generic_scope)
-        msg = "[BOOTSTRAP CONFIG SCOPE] name={0}, path={1}"
-        tty.debug(msg.format(generic_scope.name, generic_scope.path))
+        tty.debug(f"[BOOTSTRAP CONFIG SCOPE] name={generic_scope.name}, path={generic_scope.path}")
     return config_scopes
 
 
-@contextlib.contextmanager
-def _ensure_bootstrap_configuration() -> Generator:
-    spack.repo.PATH.repos  # ensure this is instantiated from current config.
-    spack.store.ensure_singleton_created()
-    bootstrap_store_path = store_path()
-    user_configuration = _read_and_sanitize_configuration()
-    with spack.environment.no_active_environment(), spack.platforms.use_platform(
-        spack.platforms.real_host()
-    ), spack.config.use_configuration(
-        # Default configuration scopes excluding command line and builtin
-        *_bootstrap_config_scopes()
-    ), spack.store.use_store(bootstrap_store_path, extra_data={"padded_length": 0}):
-        spack.config.CONFIG.set("bootstrap", user_configuration["bootstrap"])
-        spack.config.CONFIG.set("config", user_configuration["config"])
-        spack.config.CONFIG.set("repos", user_configuration["repos"])
-        with spack.modules.disable_modules(), _spack_python_interpreter():
-            yield
+def bootstrap_context(ctx: spack.context.SpackContext) -> spack.context.SpackContext:
+    """Return the context to bootstrap Spack's own dependencies in, derived from ``ctx``.
+
+    Its configuration has the default and bootstrap scopes, plus the ``bootstrap``, ``config``
+    and ``repos`` sections of ``ctx``. Software is installed in the bootstrap store, and the
+    interpreter running Spack is the only Python. It shares the repositories and caches of
+    ``ctx``.
+    """
+    user = ctx.config
+    bootstrap_store = store_path(user)
+
+    config = spack.config.Configuration()
+    for scope in _bootstrap_config_scopes(user):
+        config.push_scope(scope)
+
+    # The user's install tree is replaced by the bootstrap store
+    user_config = user.get("config")
+    user_config.pop("install_tree", None)
+    user_data = {
+        "bootstrap": user.get("bootstrap"),
+        "config": user_config,
+        "repos": user.get("repos"),
+    }
+    config.push_scope(spack.config.InternalConfigScope("bootstrap_user", user_data))
+
+    python = {
+        "buildable": False,
+        "externals": [{"prefix": sys.exec_prefix, "spec": spec_for_current_python()}],
+    }
+    overrides = {
+        "config": {"install_tree": {"root": bootstrap_store, "padded_length": 0}},
+        "modules:": {"default": {"enable": []}},
+        "packages": {"python:": python},
+    }
+    config.push_scope(spack.config.InternalConfigScope("bootstrap_overrides", overrides))
+
+    result = spack.context.SpackContext(config, is_bootstrap=True)
+    result.share(ctx, "repo", "misc_cache", "compiler_cache", "network")
+    return result

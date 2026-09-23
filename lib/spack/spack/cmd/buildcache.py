@@ -20,6 +20,7 @@ import spack.error
 import spack.mirrors.mirror
 import spack.oci.image
 import spack.oci.oci
+import spack.relocate
 import spack.repo
 import spack.spec
 import spack.stage
@@ -642,6 +643,7 @@ def install_fn(args, ctx):
             config=ctx.config,
             client=ctx.network,
             store=ctx.store,
+            patchelf=spack.relocate.patchelf_finder(ctx),
         )
 
 

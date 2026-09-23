@@ -13,7 +13,6 @@ import spack.context
 import spack.deptypes as dt
 import spack.repo
 import spack.rewiring
-import spack.store
 from spack.installer import PackageInstaller
 from spack.store import Store
 from spack.test.relocate import text_in_bin
@@ -45,7 +44,7 @@ def test_rewire_db(mock_fetch, temporary_store: Store, install_mockery, transiti
     spack.repo.attach_packages([spliced_spec], spack.context.current())
     assert spec.dag_hash() != spliced_spec.dag_hash()
 
-    spack.rewiring.rewire(spliced_spec, spack.store.STORE)
+    spack.rewiring.rewire(spliced_spec, spack.context.current())
 
     # check that the prefix exists
     assert os.path.exists(spliced_spec.prefix)
@@ -71,7 +70,7 @@ def test_rewire_bin(mock_fetch, temporary_store: Store, install_mockery, transit
 
     assert spec.dag_hash() != spliced_spec.dag_hash()
 
-    spack.rewiring.rewire(spliced_spec, spack.store.STORE)
+    spack.rewiring.rewire(spliced_spec, spack.context.current())
 
     # check that the prefix exists
     assert os.path.exists(spliced_spec.prefix)
@@ -98,7 +97,7 @@ def test_rewire_writes_new_metadata(mock_fetch, temporary_store: Store, install_
     PackageInstaller([spec.package, dep.package], explicit=True).install()
     spliced_spec = spec.splice(dep, transitive=True)
     spack.repo.attach_packages([spliced_spec], spack.context.current())
-    spack.rewiring.rewire(spliced_spec, spack.store.STORE)
+    spack.rewiring.rewire(spliced_spec, spack.context.current())
 
     # test install manifests
     for node in spliced_spec.traverse(root=True):
@@ -141,7 +140,7 @@ def test_uninstall_rewired_spec(mock_fetch, temporary_store: Store, install_mock
     PackageInstaller([spec.package, dep.package], explicit=True).install()
     spliced_spec = spec.splice(dep, transitive=transitive)
     spack.repo.attach_packages([spliced_spec], spack.context.current())
-    spack.rewiring.rewire(spliced_spec, spack.store.STORE)
+    spack.rewiring.rewire(spliced_spec, spack.context.current())
     spliced_spec.package.do_uninstall()
     assert len(temporary_store.db.query(spliced_spec)) == 0
     assert not os.path.exists(spliced_spec.prefix)
@@ -158,7 +157,7 @@ def test_rewire_not_installed_fails(mock_fetch, install_mockery):
         spack.rewiring.PackageNotInstalledError,
         match="failed due to missing install of build spec",
     ):
-        spack.rewiring.rewire(spliced_spec, spack.store.STORE)
+        spack.rewiring.rewire(spliced_spec, spack.context.current())
 
 
 def test_rewire_virtual(mock_fetch, install_mockery):
@@ -173,7 +172,7 @@ def test_rewire_virtual(mock_fetch, install_mockery):
 
     spliced_spec = spec.splice(alt_spec, True)
     spack.repo.attach_packages([spliced_spec], spack.context.current())
-    spack.rewiring.rewire(spliced_spec, spack.store.STORE)
+    spack.rewiring.rewire(spliced_spec, spack.context.current())
 
     # Confirm the original spec still has the original virtual implementation.
     assert spec.satisfies(f"^{dep}")

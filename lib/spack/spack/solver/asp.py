@@ -73,7 +73,13 @@ from spack.util import tty
 from spack.util.lang import elide_list
 
 from .clauses import SpecClauseGenerator
-from .compat import default_clingo_control, make_error_control, symbol_name, symbol_string
+from .compat import (
+    default_clingo_control,
+    load_clingo,
+    make_error_control,
+    symbol_name,
+    symbol_string,
+)
 from .core import (
     AspFunction,
     AspVar,
@@ -881,7 +887,7 @@ class PyclingoDriver:
         if sys.platform == "win32":
             from spack.bootstrap import ensure_winsdk_external_or_raise
 
-            ensure_winsdk_external_or_raise()
+            ensure_winsdk_external_or_raise(setup.context)
 
         # assemble a list of the control files needed for this problem. Some are conditionally
         # included depending on what features we're using in the solve.
@@ -3523,6 +3529,7 @@ class Solver:
         specs_factory: Optional[SpecFiltersFactory] = None,
     ):
         self.context = context
+        load_clingo(context)
 
         cache_root = self.context.config.get("concretizer:concretization_cache:url", None)
         if cache_root is None:

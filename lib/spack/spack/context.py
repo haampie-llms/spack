@@ -11,7 +11,7 @@ This module imports nothing at runtime, so it can be imported from anywhere.
 """
 
 import functools
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 if TYPE_CHECKING:
     import spack.binary_distribution
@@ -32,9 +32,14 @@ class SpackContext:
         config: "spack.config.Configuration",
         *,
         environment: Optional["spack.environment.Environment"] = None,
+        is_bootstrap: bool = False,
     ) -> None:
         self._config = config
         self._environment = environment
+        #: Whether this context bootstraps Spack's own dependencies
+        self.is_bootstrap = is_bootstrap
+        #: Members replaced by activating an environment, restored by deactivating it
+        self._before_activation: Dict[str, Any] = {}
 
     @property
     def config(self) -> "spack.config.Configuration":
@@ -62,10 +67,12 @@ class SpackContext:
 
     @functools.cached_property
     def repo(self) -> "spack.repo.RepoPath":
-        """Package repositories."""
+        """Package repositories, enabled for importing package modules."""
         import spack.repo
 
-        return spack.repo.RepoPath.from_config(self.config, cache=self.misc_cache)
+        repo = spack.repo.RepoPath.from_config(self.config, cache=self.misc_cache)
+        repo.enable()
+        return repo
 
     def repo_provider(self) -> "spack.repo.RepoPath":
         """Return ``repo``: pass the bound method where the repositories may be needed later."""
@@ -94,10 +101,88 @@ class SpackContext:
 
         return spack.util.web.NetworkClient.from_config(self.config)
 
+    @functools.cached_property
+    def bootstrap(self) -> "SpackContext":
+        """Context to bootstrap Spack's own dependencies in."""
+        if self.is_bootstrap:
+            return self
+        import spack.bootstrap.config
+
+        return spack.bootstrap.config.bootstrap_context(self)
+
+    def share(self, other: "SpackContext", *members: str) -> None:
+        """Use the given members of ``other`` instead of building them from ``config``."""
+        for member in members:
+            self.__dict__[member] = getattr(other, member)
+
+    def activate(
+        self, env: "spack.environment.Environment", *, use_env_repo: bool = False
+    ) -> None:
+        """Make ``env`` the environment of this context: its scope is pushed onto ``config``, and
+        the store and repositories are rebuilt if the scope changes their configuration."""
+        self.deactivate()
+        before = self._store_and_repo_config()
+        # Set first: "$env" substitutions in the environment's includes need it
+        self._set_environment(env)
+        try:
+            env.manifest.prepare_config_scope(self.config)
+        except Exception:
+            self._set_environment(None)
+            raise
+        after = self._store_and_repo_config()
+        if before[0] != after[0]:
+            self._replace_member("store", None)
+        if before[1] != after[1] or use_env_repo:
+            import spack.repo
+
+            repo = spack.repo.RepoPath.from_config(self.config, cache=self.misc_cache)
+            if use_env_repo:
+                repo.put_first(env.repo)
+            self._replace_member("repo", repo)
+
+    def deactivate(self) -> None:
+        """Undo ``activate``, if an environment is active."""
+        env = self.environment
+        if env is None:
+            return
+        for member, value in self._before_activation.items():
+            self._restore_member(member, value)
+        self._before_activation.clear()
+        env.manifest.deactivate_config_scope(self.config)
+        self._set_environment(None)
+
+    def _store_and_repo_config(self):
+        config = self.config
+        return ((config.get("config:install_tree"), config.get("upstreams")), config.get("repos"))
+
+    def _set_environment(self, env: Optional["spack.environment.Environment"]) -> None:
+        self._environment = env
+        self.config.env_path = env.path if env is not None else None
+
+    def _replace_member(self, member: str, value: Any) -> None:
+        """Replace a member for the activation; ``None`` rebuilds it on next access."""
+        self._before_activation[member] = self.__dict__.pop(member, None)
+        if value is not None:
+            self.__dict__[member] = value
+            if member == "repo":
+                value.enable()
+
+    def _restore_member(self, member: str, value: Any) -> None:
+        self.__dict__.pop(member, None)
+        if value is not None:
+            self.__dict__[member] = value
+            if member == "repo":
+                value.enable()
+
     def __reduce__(self):
-        return SpackContext, (self._config,), {"_environment": self._environment}
+        return (
+            SpackContext,
+            (self._config,),
+            {"_environment": self._environment, "is_bootstrap": self.is_bootstrap},
+        )
 
     def __setstate__(self, state):
+        self._before_activation = {}
         self.__dict__.update(state)
 
 
@@ -108,13 +193,74 @@ class _ProcessContext(SpackContext):
     """
 
     def __init__(self) -> None:
-        pass
+        self.is_bootstrap = False
+        self._before_activation = {}
 
     @property
     def config(self) -> "spack.config.Configuration":
         import spack.config
 
         return spack.config.CONFIG
+
+    def activate(
+        self, env: "spack.environment.Environment", *, use_env_repo: bool = False
+    ) -> None:
+        import spack.config
+        import spack.repo
+        import spack.store
+        from spack.util.lang import ensure_unwrapped
+
+        self.deactivate()
+        config = spack.config.CONFIG
+        try:
+            before = self._store_and_repo_config()
+            # PATH may be a lazy singleton created from config: materialize it before pushing
+            # the env scope, otherwise we'd save (and later restore) the env's repositories.
+            repo_before = ensure_unwrapped(spack.repo.PATH)
+            self._set_environment(env)
+            env.manifest.prepare_config_scope(config)
+            after = self._store_and_repo_config()
+            if before[0] != after[0]:
+                setattr(env, "store_token", spack.store.reinitialize())
+            if before[1] != after[1] or use_env_repo:
+                setattr(env, "repo_token", repo_before)
+                repo_before.disable()
+                new_repo = spack.repo.RepoPath.from_config(config, cache=self.misc_cache)
+                if use_env_repo:
+                    new_repo.put_first(env.repo)
+                spack.repo.enable_repo(new_repo)
+        except Exception:
+            self._set_environment(None)
+            raise
+
+    def deactivate(self) -> None:
+        import spack.config
+        import spack.repo
+        import spack.store
+
+        env = self.environment
+        if env is None:
+            return
+        store = getattr(env, "store_token", None)
+        if store is not None:
+            spack.store.restore(store)
+            delattr(env, "store_token")
+        repo = getattr(env, "repo_token", None)
+        if repo is not None:
+            spack.repo.PATH.disable()
+            spack.repo.enable_repo(repo)
+            delattr(env, "repo_token")
+        env.manifest.deactivate_config_scope(spack.config.CONFIG)
+        self._set_environment(None)
+
+    def _set_environment(self, env: Optional["spack.environment.Environment"]) -> None:
+        import spack.active_environment
+        import spack.config
+        from spack.util.lang import ensure_unwrapped
+
+        spack.active_environment._active_environment = env
+        # Write through the singleton, so code holding an unwrapped reference sees it
+        ensure_unwrapped(spack.config.CONFIG).env_path = env.path if env is not None else None
 
     @property
     def environment(self) -> Optional["spack.environment.Environment"]:

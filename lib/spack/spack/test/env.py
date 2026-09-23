@@ -154,14 +154,6 @@ def test_env_change_spec_in_matrix_raises_error(tmp_path: pathlib.Path, mutable_
     assert "Cannot directly change specs in matrices" in str(error)
 
 
-def test_activate_should_require_an_env():
-    with pytest.raises(TypeError):
-        ev.activate(env="name")
-
-    with pytest.raises(TypeError):
-        ev.activate(env=None)
-
-
 def test_user_view_path_is_not_canonicalized_in_yaml(tmp_path: pathlib.Path, config):
     # When spack.yaml files are checked into version control, we
     # don't want view: ./relative to get canonicalized on disk.
@@ -207,7 +199,7 @@ def test_environment_cant_modify_environments_root(tmp_path: pathlib.Path):
     with fs.working_dir(str(tmp_path)):
         with pytest.raises(ev.SpackEnvironmentError):
             e = ev.Environment(str(tmp_path), ctx=spack.context.current())
-            ev.activate(e)
+            e.activate()
 
 
 @pytest.mark.regression("35420")
@@ -1140,7 +1132,7 @@ spack:
     )
 
     e = ev.Environment(env_path, ctx=spack.context.current())
-    with e.manifest.use_config(spack.config.CONFIG):
+    with e.manifest.use_config(spack.context.current()):
         assert not mutable_config.get("config:verify_ssl")
         python_reqs = mutable_config.get("packages")["python"]["require"]
         req_specs = {x["spec"] for x in python_reqs}

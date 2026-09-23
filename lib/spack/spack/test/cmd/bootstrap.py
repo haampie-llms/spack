@@ -10,6 +10,7 @@ import spack.bootstrap
 import spack.bootstrap.core
 import spack.cmd.mirror
 import spack.concretize
+import spack.config
 import spack.context
 import spack.environment as ev
 import spack.main
@@ -158,17 +159,17 @@ def test_remove_failure_for_non_existing_names(mutable_config):
 
 def test_remove_and_add_a_source(mutable_config):
     # Check we start with a single bootstrapping source
-    sources = spack.bootstrap.core.bootstrapping_sources()
+    sources = spack.bootstrap.core.bootstrapping_sources(spack.config.CONFIG)
     assert len(sources) == 1
 
     # Remove it and check the result
     _bootstrap("remove", "github-actions")
-    sources = spack.bootstrap.core.bootstrapping_sources()
+    sources = spack.bootstrap.core.bootstrapping_sources(spack.config.CONFIG)
     assert not sources
 
     # Add it back and check we restored the initial state
     _bootstrap("add", "github-actions", "$spack/share/spack/bootstrap/github-actions-v2")
-    sources = spack.bootstrap.core.bootstrapping_sources()
+    sources = spack.bootstrap.core.bootstrapping_sources(spack.config.CONFIG)
     assert len(sources) == 1
 
 
@@ -193,4 +194,7 @@ def test_bootstrap_mirror_metadata(
     _bootstrap("add", "--trust", "test-mirror", str(metadata_dir))
 
     assert _bootstrap.returncode == 0
-    assert any(m["name"] == "test-mirror" for m in spack.bootstrap.core.bootstrapping_sources())
+    assert any(
+        m["name"] == "test-mirror"
+        for m in spack.bootstrap.core.bootstrapping_sources(spack.config.CONFIG)
+    )

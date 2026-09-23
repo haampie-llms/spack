@@ -527,10 +527,10 @@ class Gpg:
     ) -> Optional[Executable]:
         """Create a GPG function wrapper"""
         import spack.bootstrap
+        import spack.context
 
-        with spack.bootstrap.ensure_bootstrap_configuration():
-            spack.bootstrap.ensure_gpg_in_path_or_raise()
-            result = finder()
+        spack.bootstrap.ensure_gpg_in_path_or_raise(spack.context.current())
+        result = finder()
 
         if result is None:
             return None

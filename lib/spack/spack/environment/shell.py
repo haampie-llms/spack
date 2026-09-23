@@ -169,7 +169,7 @@ def activate(
     Returns:
         spack.util.environment.EnvironmentModifications: Environment variables
         modifications to activate environment."""
-    ev.activate(env, use_env_repo=use_env_repo)
+    ctx.activate(env, use_env_repo=use_env_repo)
 
     env_mods = EnvironmentModifications()
 
@@ -222,7 +222,7 @@ def deactivate(
     if active is None:
         return env_mods
 
-    with active.manifest.use_config(ctx.config):
+    with active.manifest.use_config(ctx):
         env_vars_yaml = ctx.config.get("env_vars", None)
     if env_vars_yaml:
         env_mods.extend(spack.schema.environment.parse(env_vars_yaml).reversed())
@@ -240,6 +240,6 @@ def deactivate(
                 "or repo, shell environment may be corrupt."
             )
 
-    ev.deactivate()
+    ctx.deactivate()
 
     return env_mods

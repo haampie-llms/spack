@@ -19,28 +19,40 @@ import functools
 import importlib
 import pathlib
 from types import ModuleType
-from typing import Any, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Optional, Tuple
+
+if TYPE_CHECKING:
+    import spack.config
+    import spack.context
 
 #: Process-global cache of the lazily-imported clingo module.
 _CLINGO_MODULE: Optional[ModuleType] = None
 
 
 def clingo() -> ModuleType:
-    """Lazy imports the Python module for clingo, and returns it."""
+    """Return the clingo module loaded by ``load_clingo``, or import it if it is importable."""
+    if _CLINGO_MODULE is not None:
+        return _CLINGO_MODULE
+    clingo_mod = importlib.import_module("clingo")
+    # Make sure we didn't import an empty module
+    _ensure_clingo_or_raise(clingo_mod, None)
+    return _set_clingo_module_cache(clingo_mod)
+
+
+def load_clingo(ctx: "spack.context.SpackContext") -> ModuleType:
+    """Return the clingo module, bootstrapping it from ``ctx`` if it cannot be imported."""
     if _CLINGO_MODULE is not None:
         return _CLINGO_MODULE
 
     try:
         clingo_mod = importlib.import_module("clingo")
         # Make sure we didn't import an empty module
-        _ensure_clingo_or_raise(clingo_mod)
+        _ensure_clingo_or_raise(clingo_mod, ctx.config)
     except ImportError:
-        clingo_mod = None
+        import spack.bootstrap
 
-    if clingo_mod is not None:
-        return _set_clingo_module_cache(clingo_mod)
-
-    clingo_mod = _bootstrap_clingo()
+        spack.bootstrap.ensure_clingo_importable_or_raise(ctx)
+        clingo_mod = importlib.import_module("clingo")
     return _set_clingo_module_cache(clingo_mod)
 
 
@@ -52,15 +64,15 @@ def _set_clingo_module_cache(clingo_mod: ModuleType) -> ModuleType:
     return clingo_mod
 
 
-def _ensure_clingo_or_raise(clingo_mod: ModuleType) -> None:
-    """Ensures the clingo module can access expected attributes, otherwise raises an error."""
+def _ensure_clingo_or_raise(
+    clingo_mod: ModuleType, config: Optional["spack.config.Configuration"]
+) -> None:
+    """Ensures the clingo module can access expected attributes, otherwise raises an error. The
+    error names the bootstrap root of ``config``, if given, when clingo was bootstrapped."""
     # These are imports that may be problematic at top level (circular imports). They are used
     # only to provide exhaustive details when erroring due to a broken clingo module.
     import spack.config
-    import spack.context
     import spack.paths as sp
-
-    config = spack.context.current().config
 
     try:
         clingo_mod.Symbol
@@ -82,7 +94,7 @@ def _ensure_clingo_or_raise(clingo_mod: ModuleType) -> None:
             "Alternatively, consider installing clingo via Spack."
         )
         # check whether Spack is responsible
-        if (
+        if config is not None and (
             pathlib.Path(
                 spack.config.canonicalize_path(
                     config.get("bootstrap:root", sp.default_user_bootstrap_path), config=config
@@ -102,17 +114,6 @@ def _ensure_clingo_or_raise(clingo_mod: ModuleType) -> None:
             "\n\nClingo does not provide symbol clingo.Symbol"
             f"{msg}"
         )
-
-
-def _bootstrap_clingo() -> ModuleType:
-    """Bootstraps the clingo module and returns it"""
-    import spack.bootstrap
-
-    with spack.bootstrap.ensure_bootstrap_configuration():
-        spack.bootstrap.ensure_clingo_importable_or_raise()
-        clingo_mod = importlib.import_module("clingo")
-
-    return clingo_mod
 
 
 class ClingoFlavor(enum.Enum):

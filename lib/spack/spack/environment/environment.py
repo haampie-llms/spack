@@ -30,10 +30,8 @@ from typing import (
 )
 
 import spack
-import spack.active_environment
 import spack.concretize
 import spack.config
-import spack.context
 import spack.deptypes as dt
 import spack.error
 import spack.filesystem_view as fsv
@@ -57,7 +55,6 @@ import spack.util.spack_yaml as syaml
 import spack.util.tty.color as clr
 import spack.variant as vt
 from spack import traverse
-from spack.active_environment import active_environment
 from spack.concretize_ui import (
     DEFAULT_USER_SPEC_GROUP,
     ConcretizerUI,
@@ -71,7 +68,7 @@ from spack.spec import Spec
 from spack.spec_filter import SpecFilter
 from spack.util import tty
 from spack.util.filesystem import copy_tree, islink, readlink
-from spack.util.lang import ensure_unwrapped, stable_partition
+from spack.util.lang import stable_partition
 from spack.util.link_tree import ConflictingSpecsError
 
 from .list import SpecList, SpecListError, SpecListParser
@@ -211,90 +208,6 @@ def validate_env_name(name):
             f"{name}: names may only contain letters, numbers, _, and -, and may not start with -."
         )
     return name
-
-
-def set_active_environment(env: Optional["Environment"]) -> None:
-    """Set or clear the active environment, keeping the "$env" config substitution in sync."""
-    spack.active_environment._active_environment = env
-    # Write through the singleton: setting the attribute on the wrapper would leave it unset on
-    # the Configuration that code holding an unwrapped reference reads.
-    ensure_unwrapped(spack.config.CONFIG).env_path = env.path if env is not None else None
-
-
-def activate(env, use_env_repo=False):
-    """Activate an environment.
-
-    To activate an environment, we add its manifest's configuration scope to the
-    existing Spack configuration, and we set active to the current environment.
-
-    Arguments:
-        env (Environment): the environment to activate
-        use_env_repo (bool): use the packages exactly as they appear in the
-            environment's repository
-    """
-    try:
-        # Fail early to avoid ending in an invalid state
-        if not isinstance(env, Environment):
-            raise TypeError(f"`env` should be of type {Environment.__name__}")
-
-        install_tree_before = spack.config.CONFIG.get("config:install_tree")
-        upstreams_before = spack.config.CONFIG.get("upstreams")
-        repos_before = spack.config.CONFIG.get("repos")
-        # PATH may be a lazy singleton created from config, so materialize it before pushing
-        # the env scope, otherwise we'd save (and later restore) the env's repositories.
-        repo_before = ensure_unwrapped(spack.repo.PATH)
-
-        # Record the active env (and its path, so config "$env" substitutions work)
-        set_active_environment(env)
-        env.manifest.prepare_config_scope(spack.config.CONFIG)
-
-        install_tree_after = spack.config.CONFIG.get("config:install_tree")
-        upstreams_after = spack.config.CONFIG.get("upstreams")
-        repos_after = spack.config.CONFIG.get("repos")
-
-        # Check if we need to reinitialize spack.store.STORE and spack.repo.REPO
-        if install_tree_before != install_tree_after or upstreams_before != upstreams_after:
-            setattr(env, "store_token", spack.store.reinitialize())
-
-        if repos_before != repos_after:
-            setattr(env, "repo_token", repo_before)
-            repo_before.disable()
-            new_repo = spack.repo.RepoPath.from_config(
-                spack.config.CONFIG, cache=spack.context.current().misc_cache
-            )
-            if use_env_repo:
-                new_repo.put_first(env.repo)
-            spack.repo.enable_repo(new_repo)
-
-        tty.debug(f"Using environment '{env.name}'")
-    except Exception:
-        set_active_environment(None)
-        raise
-
-
-def deactivate():
-    """Undo any configuration or repo settings modified by ``activate()``."""
-    env = active_environment()
-    if not env:
-        return
-
-    # If any config changes affected spack.store.STORE or spack.repo.PATH, undo them.
-    store = getattr(env, "store_token", None)
-    if store is not None:
-        spack.store.restore(store)
-        delattr(env, "store_token")
-
-    repo = getattr(env, "repo_token", None)
-
-    if repo is not None:
-        spack.repo.PATH.disable()
-        spack.repo.enable_repo(repo)
-
-    env.manifest.deactivate_config_scope(spack.config.CONFIG)
-
-    tty.debug(f"Deactivated environment '{env.name}'")
-
-    set_active_environment(None)
 
 
 def _root(name, config: spack.config.Configuration):
@@ -1251,7 +1164,7 @@ class Environment:
         """Instantiate and load the manifest file contents into memory."""
         with lk.ReadTransaction(self.txlock):
             self.manifest = EnvironmentManifestFile(self.path, self.name)
-            with self.manifest.use_config(self.ctx.config):
+            with self.manifest.use_config(self.ctx):
                 self._read()
 
     @contextlib.contextmanager
@@ -1477,8 +1390,8 @@ class Environment:
         return env and self.path == env.path
 
     def activate(self, use_env_repo=False) -> None:
-        """Activate this environment globally."""
-        activate(self, use_env_repo=use_env_repo)
+        """Activate this environment in its context."""
+        self.ctx.activate(self, use_env_repo=use_env_repo)
 
     @property
     def manifest_path(self):
@@ -2741,16 +2654,14 @@ class Environment:
         self._repo = None
 
     def __enter__(self):
-        self._previous_active = active_environment()
-        if self._previous_active:
-            deactivate()
-        activate(self)
+        self._previous_active = self.ctx.environment
+        self.ctx.activate(self)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        deactivate()
+        self.ctx.deactivate()
         if self._previous_active:
-            activate(self._previous_active)
+            self.ctx.activate(self._previous_active)
 
 
 def _is_uninstalled(spec, db):
@@ -3235,17 +3146,17 @@ def is_latest_format(manifest):
 
 
 @contextlib.contextmanager
-def no_active_environment():
-    """Deactivate the active environment for the duration of the context. Has no
+def no_active_environment(ctx: "spack.context.SpackContext"):
+    """Deactivate the environment of ``ctx`` for the duration of the context. Has no
     effect when there is no active environment."""
-    env = active_environment()
+    env = ctx.environment
     try:
-        deactivate()
+        ctx.deactivate()
         yield
     finally:
         # TODO: we don't handle `use_env_repo` here.
         if env:
-            activate(env)
+            ctx.activate(env)
 
 
 def initialize_environment_dir(
@@ -3796,12 +3707,12 @@ class EnvironmentManifestFile(collections.abc.Mapping):
         config.remove_scope(self.env_config_scope.name)
 
     @contextlib.contextmanager
-    def use_config(self, config: spack.config.Configuration):
-        """Ensure only the manifest's configuration scopes are in ``config``."""
-        with no_active_environment():
-            self.prepare_config_scope(config)
+    def use_config(self, ctx: "spack.context.SpackContext"):
+        """Ensure only the manifest's configuration scopes are in the configuration of ``ctx``."""
+        with no_active_environment(ctx):
+            self.prepare_config_scope(ctx.config)
             yield
-            self.deactivate_config_scope(config)
+            self.deactivate_config_scope(ctx.config)
 
 
 def environment_path_scope(

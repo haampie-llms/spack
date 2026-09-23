@@ -2120,9 +2120,11 @@ def dedupe_hardlinks_if_necessary(root, buildinfo):
         buildinfo[key] = new_list
 
 
-def relocate_package(spec: spack.spec.Spec, *, store: spack.store.Store) -> None:
+def relocate_package(
+    spec: spack.spec.Spec, *, store: spack.store.Store, patchelf: relocate.PatchelfFinder
+) -> None:
     """Relocate binaries and text files in the given spec prefix in ``store``, based on its
-    buildinfo file."""
+    buildinfo file. ``patchelf`` is used for ELF binaries that cannot be updated in place."""
     spec_prefix = str(spec.prefix)
     buildinfo = read_buildinfo_file(spec_prefix)
     old_layout_root = str(buildinfo["buildpath"])
@@ -2208,7 +2210,7 @@ def relocate_package(spec: spack.spec.Spec, *, store: spack.store.Store) -> None
     if "macho" in platform.binary_formats:
         relocate.relocate_macho_binaries(binaries, prefix_to_prefix)
     elif "elf" in platform.binary_formats:
-        relocate.relocate_elf_binaries(binaries, prefix_to_prefix)
+        relocate.relocate_elf_binaries(binaries, prefix_to_prefix, patchelf=patchelf)
 
     relocate.relocate_links(links, prefix_to_prefix)
     relocate.relocate_text(textfiles, prefix_to_prefix)
@@ -2283,6 +2285,7 @@ def extract_tarball(
     *,
     config: spack.config.Configuration,
     store: spack.store.Store,
+    patchelf: relocate.PatchelfFinder,
 ):
     """
     extract binary tarball for given package into install area of ``store``
@@ -2316,7 +2319,7 @@ def extract_tarball(
     timer.start("relocate")
 
     try:
-        relocate_package(spec, store=store)
+        relocate_package(spec, store=store, patchelf=patchelf)
     except Exception as e:
         shutil.rmtree(spec.prefix, ignore_errors=True)
         raise e
@@ -2380,6 +2383,7 @@ def install_root_node(
     config: spack.config.Configuration,
     client: web_util.NetworkClient,
     store: spack.store.Store,
+    patchelf: relocate.PatchelfFinder,
 ) -> None:
     """Install the root node of a concrete spec from a buildcache.
 
@@ -2396,6 +2400,7 @@ def install_root_node(
         config: configuration listing the mirrors
         client: network client used to download
         store: store to install into
+        patchelf: finds patchelf for relocation
     """
     # Early termination
     if spec.external or not spec.concrete:
@@ -2413,7 +2418,7 @@ def install_root_node(
     # don't print long padded paths while extracting/relocating binaries
     with spack.store.filter_padding(store):
         tty.msg('Installing "{0}" from a buildcache'.format(spec.format()))
-        extract_tarball(spec, tarball_stage, force, config=config, store=store)
+        extract_tarball(spec, tarball_stage, force, config=config, store=store, patchelf=patchelf)
         spec.package.windows_establish_runtime_linkage()
         spack.hooks.post_install(spec, False)
         store.db.add(spec, allow_missing=allow_missing)
@@ -2427,6 +2432,7 @@ def install_single_spec(
     config: spack.config.Configuration,
     client: web_util.NetworkClient,
     store: spack.store.Store,
+    patchelf: relocate.PatchelfFinder,
 ):
     """Install a single concrete spec from a buildcache.
 
@@ -2438,10 +2444,17 @@ def install_single_spec(
         config: configuration listing the mirrors
         client: network client used to download
         store: store to install into
+        patchelf: finds patchelf for relocation
     """
     for node in spec.traverse(root=True, order="post", deptype=("link", "run")):
         install_root_node(
-            node, unsigned=unsigned, force=force, config=config, client=client, store=store
+            node,
+            unsigned=unsigned,
+            force=force,
+            config=config,
+            client=client,
+            store=store,
+            patchelf=patchelf,
         )
 
 
