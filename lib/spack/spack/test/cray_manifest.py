@@ -22,6 +22,7 @@ import spack.compilers.config
 import spack.concretize
 import spack.context
 import spack.cray_manifest
+import spack.deprecation
 import spack.platforms
 import spack.platforms.test
 import spack.repo
@@ -203,6 +204,7 @@ def test_compiler_from_entry(mock_executable):
             executables={"cc": "gcc", "cxx": "g++", "fc": "gfortran"},
         ).compiler_json(),
         manifest_path="/example/file",
+        repo=spack.repo.PATH,
     )
 
     assert compiler.satisfies("gcc@7.5.0 target=x86_64 os=centos8")
@@ -250,7 +252,7 @@ def test_generate_specs_from_manifest(generate_openmpi_entries):
     """Given JSON entries, check that we can form a set of Specs
     including dependency references.
     """
-    specs = entries_to_specs(generate_openmpi_entries)
+    specs = entries_to_specs(generate_openmpi_entries, ctx=spack.context.current())
     (openmpi_spec,) = [x for x in specs.values() if x.name == "openmpi"]
     assert openmpi_spec["hwloc"]
 
@@ -279,7 +281,7 @@ def test_translate_cray_platform_to_linux(monkeypatch, _common_compiler):
         parameters={},
     ).to_dict()
 
-    (spec,) = entries_to_specs([spec_json]).values()
+    (spec,) = entries_to_specs([spec_json], ctx=spack.context.current()).values()
     assert spec.architecture.platform == "linux"
 
 
@@ -288,14 +290,19 @@ def test_translate_cray_platform_to_linux(monkeypatch, _common_compiler):
     [("nvidia", "nvhpc"), ("rocm", "llvm-amdgpu"), ("clang", "llvm")],
 )
 def test_translated_compiler_name(name_in_manifest, expected_name):
-    assert spack.cray_manifest.translated_compiler_name(name_in_manifest) == expected_name
+    assert (
+        spack.cray_manifest.translated_compiler_name(name_in_manifest, repo=spack.repo.PATH)
+        == expected_name
+    )
 
 
 def test_failed_translate_compiler_name(_common_arch):
     unknown_compiler = JsonCompilerEntry(name="unknown", version="1.0")
 
     with pytest.raises(spack.compilers.config.UnknownCompilerError):
-        compiler_from_entry(unknown_compiler.compiler_json(), manifest_path="/example/file")
+        compiler_from_entry(
+            unknown_compiler.compiler_json(), manifest_path="/example/file", repo=spack.repo.PATH
+        )
 
     spec_json = JsonSpecEntry(
         name="packagey",
@@ -309,7 +316,7 @@ def test_failed_translate_compiler_name(_common_arch):
     ).to_dict()
 
     with pytest.raises(spack.compilers.config.UnknownCompilerError):
-        entries_to_specs([spec_json])
+        entries_to_specs([spec_json], ctx=spack.context.current())
 
 
 @pytest.fixture
@@ -330,12 +337,14 @@ def test_read_cray_manifest(temporary_store, manifest_file):
     """Check that (a) we can read the cray manifest and add it to the Spack
     Database and (b) we can concretize specs based on that.
     """
-    spack.cray_manifest.read(str(manifest_file), True)
+    spack.cray_manifest.read(str(manifest_file), True, ctx=spack.context.current())
 
     query_specs = temporary_store.db.query("openmpi")
     assert any(x.dag_hash() == "openmpifakehasha" for x in query_specs)
 
-    concretized_spec = spack.concretize.concretize_one("depends-on-openmpi ^/openmpifakehasha")
+    concretized_spec = spack.concretize.concretize_one(
+        "depends-on-openmpi ^/openmpifakehasha", spack.context.current()
+    )
     assert concretized_spec["hwloc"].dag_hash() == "hwlocfakehashaaa"
 
 
@@ -344,14 +353,14 @@ def test_read_cray_manifest_add_compiler_failure(
 ):
     """Tests the Cray manifest can be read even if some compilers cannot be added."""
 
-    def _mock(entry, *, manifest_path):
+    def _mock(entry, *, manifest_path, repo):
         if entry["name"] == "clang":
             raise RuntimeError("cannot determine the compiler")
         return spack.spec.Spec(f"{entry['name']}@{entry['version']}")
 
     monkeypatch.setattr(spack.cray_manifest, "compiler_from_entry", _mock)
 
-    spack.cray_manifest.read(str(manifest_file), True)
+    spack.cray_manifest.read(str(manifest_file), True, ctx=spack.context.current())
     query_specs = temporary_store.db.query("openmpi")
     assert any(x.dag_hash() == "openmpifakehasha" for x in query_specs)
 
@@ -359,14 +368,14 @@ def test_read_cray_manifest_add_compiler_failure(
 def test_read_cray_manifest_twice_no_duplicates(
     mutable_config, temporary_store, manifest_file, monkeypatch, tmp_path: pathlib.Path
 ):
-    def _mock(entry, *, manifest_path):
+    def _mock(entry, *, manifest_path, repo):
         return spack.spec.Spec(f"{entry['name']}@{entry['version']}", external_path=str(tmp_path))
 
     monkeypatch.setattr(spack.cray_manifest, "compiler_from_entry", _mock)
 
     # Read the manifest twice
-    spack.cray_manifest.read(str(manifest_file), True)
-    spack.cray_manifest.read(str(manifest_file), True)
+    spack.cray_manifest.read(str(manifest_file), True, ctx=spack.context.current())
+    spack.cray_manifest.read(str(manifest_file), True, ctx=spack.context.current())
 
     config_data = mutable_config.get("packages")["gcc"]
     assert "externals" in config_data
@@ -392,7 +401,7 @@ def test_read_old_manifest_v1_2(tmp_path: pathlib.Path, temporary_store):
 }
 """
     )
-    spack.cray_manifest.read(str(manifest), True)
+    spack.cray_manifest.read(str(manifest), True, ctx=spack.context.current())
 
 
 def test_convert_validation_error(
@@ -409,7 +418,7 @@ def test_convert_validation_error(
 """
         )
     with pytest.raises(spack.cray_manifest.ManifestValidationError) as e:
-        spack.cray_manifest.read(invalid_json_path, True)
+        spack.cray_manifest.read(invalid_json_path, True, ctx=spack.context.current())
     str(e)
 
     # Valid JSON, but does not conform to schema (schema-version is not a string
@@ -429,7 +438,7 @@ def test_convert_validation_error(
 """
         )
     with pytest.raises(spack.cray_manifest.ManifestValidationError) as e:
-        spack.cray_manifest.read(invalid_schema_path, True)
+        spack.cray_manifest.read(invalid_schema_path, True, ctx=spack.context.current())
 
 
 @pytest.fixture
@@ -449,7 +458,9 @@ def test_find_external_nonempty_default_manifest_dir(
     """
     monkeypatch.setenv("PATH", "")
     monkeypatch.setattr(spack.cray_manifest, "default_path", str(manifest_file.parent))
-    spack.cmd.external._collect_and_consume_cray_manifest_files(ignore_default_dir=False)
+    spack.cmd.external._collect_and_consume_cray_manifest_files(
+        spack.context.current(), ignore_default_dir=False
+    )
     specs = temporary_store.db.query("hwloc")
     assert any(x.dag_hash() == "hwlocfakehashaaa" for x in specs)
 
@@ -459,13 +470,20 @@ def _reusable_hashes(context):
     selector = ReusableSpecsSelector(
         context=context, packages_with_externals=external_config_with_implicit_externals(context)
     )
-    return {x.dag_hash() for x in selector.reusable_specs([])}
+    return {
+        x.dag_hash()
+        for x in selector.reusable_specs(
+            [], policy=spack.deprecation.Policy.from_config(context.config, repo=context.repo)
+        )
+    }
 
 
 def test_reusable_externals_cray_manifest(temporary_store, mutable_config, manifest_file):
     """The concretizer should be able to reuse specs imported from a manifest without a
     externals config entry in packages.yaml"""
-    spack.cray_manifest.read(path=str(manifest_file), apply_updates=True)
+    spack.cray_manifest.read(
+        path=str(manifest_file), apply_updates=True, ctx=spack.context.current()
+    )
     imported = {x.dag_hash() for x in temporary_store.db.query_local()}
     assert imported, "the manifest imported no spec"
 
@@ -479,7 +497,9 @@ def test_cray_manifest_externals_from_a_build_cache_are_not_reusable(
 ):
     """What makes a manifest entry reusable is the origin recorded for it in the local
     database, which a build cache does not carry, so an entry coming from one is not reusable."""
-    spack.cray_manifest.read(path=str(manifest_file), apply_updates=True)
+    spack.cray_manifest.read(
+        path=str(manifest_file), apply_updates=True, ctx=spack.context.current()
+    )
     spec = temporary_store.db.query_local()[0]
 
     assert not spack.solver.reuse._is_reusable(
@@ -496,7 +516,9 @@ def test_reusable_externals_cray_manifest_from_upstream(mutable_config, tmp_path
     upstream_root = tmp_path / "upstream"
 
     with spack.store.use_store(str(upstream_root)):
-        spack.cray_manifest.read(path=str(manifest_file), apply_updates=True)
+        spack.cray_manifest.read(
+            path=str(manifest_file), apply_updates=True, ctx=spack.context.current()
+        )
         imported = {x.dag_hash() for x in spack.store.STORE.db.query_local()}
 
     assert imported, "the manifest imported no spec"

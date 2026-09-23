@@ -30,6 +30,7 @@ from spack.stage import (
     stage_from_config,
 )
 from spack.util.filesystem import getuid, mkdirp, partition_path, readlink, touch, working_dir
+from spack.util.web import NetworkClient
 
 # The following values are used for common fetch and stage mocking fixtures:
 _archive_base = "test-files"
@@ -314,7 +315,9 @@ def composite_stage_with_expanding_resource(
     """Sets up a composite for expanding resources prior to staging."""
     composite_stage = StageComposite()
     archive = mock_stage_archive()
-    root_stage = stage_from_config(archive.url, config=mutable_config)
+    root_stage = stage_from_config(
+        archive.url, config=mutable_config, client=NetworkClient.from_config(mutable_config)
+    )
     composite_stage.append(root_stage)
 
     test_resource_fetcher = spack.fetch_strategy.from_kwargs(url=mock_expand_resource.url)
@@ -322,7 +325,11 @@ def composite_stage_with_expanding_resource(
     # directory
     test_resource = Resource("test_resource", test_resource_fetcher, "", "resource-dir")
     resource_stage = resource_stage_from_config(
-        test_resource_fetcher, root_stage, test_resource, config=mutable_config
+        test_resource_fetcher,
+        root_stage,
+        test_resource,
+        config=mutable_config,
+        client=NetworkClient.from_config(mutable_config),
     )
     composite_stage.append(resource_stage)
     return composite_stage, root_stage, resource_stage, mock_expand_resource
@@ -399,19 +406,31 @@ class TestStage:
 
     def test_setup_and_destroy_name_with_tmp(self, mock_stage_archive, mutable_config):
         archive = mock_stage_archive()
-        with stage_from_config(archive.url, name=self.stage_name, config=mutable_config) as stage:
+        with stage_from_config(
+            archive.url,
+            name=self.stage_name,
+            config=mutable_config,
+            client=NetworkClient.from_config(mutable_config),
+        ) as stage:
             check_setup(stage, self.stage_name, archive)
         check_destroy(stage, self.stage_name)
 
     def test_setup_and_destroy_name_without_tmp(self, mock_stage_archive, mutable_config):
         archive = mock_stage_archive()
-        with stage_from_config(archive.url, name=self.stage_name, config=mutable_config) as stage:
+        with stage_from_config(
+            archive.url,
+            name=self.stage_name,
+            config=mutable_config,
+            client=NetworkClient.from_config(mutable_config),
+        ) as stage:
             check_setup(stage, self.stage_name, archive)
         check_destroy(stage, self.stage_name)
 
     def test_setup_and_destroy_no_name_with_tmp(self, mock_stage_archive, mutable_config):
         archive = mock_stage_archive()
-        with stage_from_config(archive.url, config=mutable_config) as stage:
+        with stage_from_config(
+            archive.url, config=mutable_config, client=NetworkClient.from_config(mutable_config)
+        ) as stage:
             check_setup(stage, None, archive)
         check_destroy(stage, None)
 
@@ -422,7 +441,11 @@ class TestStage:
         test_noexpand_fetcher = spack.fetch_strategy.from_kwargs(
             url=url_util.path_to_file_url(mock_noexpand_resource), expand=False
         )
-        with stage_from_config(test_noexpand_fetcher, config=mutable_config) as stage:
+        with stage_from_config(
+            test_noexpand_fetcher,
+            config=mutable_config,
+            client=NetworkClient.from_config(mutable_config),
+        ) as stage:
             stage.fetch()
             stage.expand_archive()
             assert os.path.exists(stage.archive_file)
@@ -433,7 +456,9 @@ class TestStage:
     ):
         archive = mock_stage_archive()
         composite_stage = StageComposite()
-        root_stage = stage_from_config(archive.url, config=mutable_config)
+        root_stage = stage_from_config(
+            archive.url, config=mutable_config, client=NetworkClient.from_config(mutable_config)
+        )
         composite_stage.append(root_stage)
 
         resource_dst_name = "resource-dst-name.sh"
@@ -442,7 +467,11 @@ class TestStage:
         )
         test_resource = Resource("test_resource", test_resource_fetcher, resource_dst_name, None)
         resource_stage = resource_stage_from_config(
-            test_resource_fetcher, root_stage, test_resource, config=mutable_config
+            test_resource_fetcher,
+            root_stage,
+            test_resource,
+            config=mutable_config,
+            client=NetworkClient.from_config(mutable_config),
         )
         composite_stage.append(resource_stage)
 
@@ -501,7 +530,9 @@ class TestStage:
 
     def test_setup_and_destroy_no_name_without_tmp(self, mock_stage_archive, mutable_config):
         archive = mock_stage_archive()
-        with stage_from_config(archive.url, config=mutable_config) as stage:
+        with stage_from_config(
+            archive.url, config=mutable_config, client=NetworkClient.from_config(mutable_config)
+        ) as stage:
             check_setup(stage, None, archive)
         check_destroy(stage, None)
 
@@ -510,7 +541,10 @@ class TestStage:
         archive = mock_stage_archive()
         with mutable_config.override("config:debug", debug):
             with stage_from_config(
-                archive.url, name=self.stage_name, config=mutable_config
+                archive.url,
+                name=self.stage_name,
+                config=mutable_config,
+                client=NetworkClient.from_config(mutable_config),
             ) as stage:
                 stage.fetch()
                 check_setup(stage, self.stage_name, archive)
@@ -522,7 +556,11 @@ class TestStage:
     ):
         archive = mock_stage_archive()
         stage = stage_from_config(
-            archive.url, name=self.stage_name, search_fn=failing_search_fn, config=mutable_config
+            archive.url,
+            name=self.stage_name,
+            search_fn=failing_search_fn,
+            config=mutable_config,
+            client=NetworkClient.from_config(mutable_config),
         )
         with stage:
             stage.fetch()
@@ -534,6 +572,7 @@ class TestStage:
             name=self.stage_name,
             search_fn=failing_search_fn,
             config=config,
+            client=NetworkClient.from_config(config),
         )
         with stage:
             try:
@@ -551,7 +590,11 @@ class TestStage:
     )
     def test_search_if_default_fails(self, search_fn, err_msg, expected, config):
         stage = stage_from_config(
-            FailingFetchStrategy(), name=self.stage_name, search_fn=search_fn, config=config
+            FailingFetchStrategy(),
+            name=self.stage_name,
+            search_fn=search_fn,
+            config=config,
+            client=NetworkClient.from_config(config),
         )
 
         with stage:
@@ -563,7 +606,12 @@ class TestStage:
 
     def test_ensure_one_stage_entry(self, mock_stage_archive, mutable_config):
         archive = mock_stage_archive()
-        with stage_from_config(archive.url, name=self.stage_name, config=mutable_config) as stage:
+        with stage_from_config(
+            archive.url,
+            name=self.stage_name,
+            config=mutable_config,
+            client=NetworkClient.from_config(mutable_config),
+        ) as stage:
             stage.fetch()
             stage_path = get_stage_path(stage, self.stage_name)
             spack.fetch_strategy._ensure_one_stage_entry(stage_path)
@@ -580,7 +628,12 @@ class TestStage:
     )
     def test_expand_archive(self, expected_file_list, mock_stage_archive, mutable_config):
         archive = mock_stage_archive(expected_file_list)
-        with stage_from_config(archive.url, name=self.stage_name, config=mutable_config) as stage:
+        with stage_from_config(
+            archive.url,
+            name=self.stage_name,
+            config=mutable_config,
+            client=NetworkClient.from_config(mutable_config),
+        ) as stage:
             stage.fetch()
             check_setup(stage, self.stage_name, archive)
             check_fetch(stage, self.stage_name)
@@ -591,7 +644,12 @@ class TestStage:
     def test_expand_archive_extra_expand(self, mock_stage_archive, mutable_config):
         """Test expand with an extra expand after expand (i.e., no-op)."""
         archive = mock_stage_archive()
-        with stage_from_config(archive.url, name=self.stage_name, config=mutable_config) as stage:
+        with stage_from_config(
+            archive.url,
+            name=self.stage_name,
+            config=mutable_config,
+            client=NetworkClient.from_config(mutable_config),
+        ) as stage:
             stage.fetch()
             check_setup(stage, self.stage_name, archive)
             check_fetch(stage, self.stage_name)
@@ -602,7 +660,12 @@ class TestStage:
 
     def test_restage(self, mock_stage_archive, mutable_config):
         archive = mock_stage_archive()
-        with stage_from_config(archive.url, name=self.stage_name, config=mutable_config) as stage:
+        with stage_from_config(
+            archive.url,
+            name=self.stage_name,
+            config=mutable_config,
+            client=NetworkClient.from_config(mutable_config),
+        ) as stage:
             stage.fetch()
             stage.expand_archive()
 
@@ -624,7 +687,11 @@ class TestStage:
     def test_no_keep_without_exceptions(self, mock_stage_archive, mutable_config):
         archive = mock_stage_archive()
         stage = stage_from_config(
-            archive.url, name=self.stage_name, keep=False, config=mutable_config
+            archive.url,
+            name=self.stage_name,
+            keep=False,
+            config=mutable_config,
+            client=NetworkClient.from_config(mutable_config),
         )
         with stage:
             pass
@@ -634,7 +701,11 @@ class TestStage:
     def test_keep_without_exceptions(self, mock_stage_archive, mutable_config):
         archive = mock_stage_archive()
         stage = stage_from_config(
-            archive.url, name=self.stage_name, keep=True, config=mutable_config
+            archive.url,
+            name=self.stage_name,
+            keep=True,
+            config=mutable_config,
+            client=NetworkClient.from_config(mutable_config),
         )
         with stage:
             pass
@@ -648,7 +719,11 @@ class TestStage:
 
         archive = mock_stage_archive()
         stage = stage_from_config(
-            archive.url, name=self.stage_name, keep=False, config=mutable_config
+            archive.url,
+            name=self.stage_name,
+            keep=False,
+            config=mutable_config,
+            client=NetworkClient.from_config(mutable_config),
         )
         try:
             with stage:
@@ -665,7 +740,11 @@ class TestStage:
 
         archive = mock_stage_archive()
         stage = stage_from_config(
-            archive.url, name=self.stage_name, keep=True, config=mutable_config
+            archive.url,
+            name=self.stage_name,
+            keep=True,
+            config=mutable_config,
+            client=NetworkClient.from_config(mutable_config),
         )
         try:
             with stage:
@@ -678,7 +757,12 @@ class TestStage:
     def test_source_path_available(self, mock_stage_archive, mutable_config):
         """Ensure source path available but does not exist on instantiation."""
         archive = mock_stage_archive()
-        stage = stage_from_config(archive.url, name=self.stage_name, config=mutable_config)
+        stage = stage_from_config(
+            archive.url,
+            name=self.stage_name,
+            config=mutable_config,
+            client=NetworkClient.from_config(mutable_config),
+        )
 
         source_path = stage.source_path
         assert source_path
@@ -768,7 +852,7 @@ class TestStage:
 
         assert spack.stage._resolve_paths([path_with_user], config=config) == [path_with_user]
 
-        canonicalized_tempdir = canonicalize_path("$tempdir")
+        canonicalized_tempdir = canonicalize_path("$tempdir", config=spack.config.CONFIG)
         temp_has_user = user in canonicalized_tempdir.split(os.sep)
         paths = [
             os.path.join("$tempdir", "stage"),
@@ -777,7 +861,7 @@ class TestStage:
             os.path.join("$tempdir", "$user", "stage", "$user"),
         ]
 
-        res_paths = [canonicalize_path(p) for p in paths]
+        res_paths = [canonicalize_path(p, config=spack.config.CONFIG) for p in paths]
         if temp_has_user:
             res_paths[1] = canonicalized_tempdir
             res_paths[2] = os.path.join(canonicalized_tempdir, user)
@@ -832,13 +916,18 @@ class TestStage:
     def test_stage_constructor_no_fetcher(self, config):
         """Ensure Stage constructor with no URL or fetch strategy fails."""
         with pytest.raises(ValueError):
-            with stage_from_config(None, config=config):
+            with stage_from_config(None, config=config, client=NetworkClient.from_config(config)):
                 pass
 
     def test_stage_constructor_with_path(self, tmp_path: pathlib.Path, config):
         """Ensure Stage constructor with a path uses it."""
         testpath = str(tmp_path)
-        with stage_from_config("file:///does-not-exist", path=testpath, config=config) as stage:
+        with stage_from_config(
+            "file:///does-not-exist",
+            path=testpath,
+            config=config,
+            client=NetworkClient.from_config(config),
+        ) as stage:
             assert stage.path == testpath
 
 
@@ -941,7 +1030,9 @@ def test_stage_create_replace_path(tmp_build_stage_dir, mutable_config):
     touch(nondir)
     path = url_util.path_to_file_url(str(nondir))
 
-    stage = stage_from_config(path, name="afile", config=mutable_config)
+    stage = stage_from_config(
+        path, name="afile", config=mutable_config, client=NetworkClient.from_config(mutable_config)
+    )
     stage.create()
 
     # Ensure the stage path is "converted" to a directory
@@ -959,9 +1050,10 @@ def test_cannot_access(capfd):
 
 
 def test_override_keep_in_composite_stage(config):
-    stage_1 = stage_from_config("file:///does-not-exist", keep=True, config=config)
-    stage_2 = stage_from_config("file:///does-not-exist", keep=False, config=config)
-    stage_3 = stage_from_config("file:///does-not-exist", keep=True, config=config)
+    client = NetworkClient.from_config(config)
+    stage_1 = stage_from_config("file:///does-not-exist", keep=True, config=config, client=client)
+    stage_2 = stage_from_config("file:///does-not-exist", keep=False, config=config, client=client)
+    stage_3 = stage_from_config("file:///does-not-exist", keep=True, config=config, client=client)
     stages = spack.stage.StageComposite.from_iterable((stage_1, stage_2, stage_3))
 
     # The getter for the composite stage just returns the value of the first stage

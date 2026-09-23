@@ -40,7 +40,7 @@ pytestmark = pytest.mark.not_on_windows("does not run on windows")
 @pytest.mark.usefixtures("install_mockery", "mock_gnupghome", "mock_fetch")
 def test_buildcache(tmp_path: pathlib.Path, mutable_config: Configuration):
     # Install a test package
-    spec = spack.concretize.concretize_one("trivial-install-test-package")
+    spec = spack.concretize.concretize_one("trivial-install-test-package", spack.context.current())
     PackageInstaller([spec.package], explicit=True).install()
     pkghash = "/" + str(spec.dag_hash(7))
 
@@ -54,14 +54,18 @@ def test_buildcache(tmp_path: pathlib.Path, mutable_config: Configuration):
 
     # Create the build cache and put it directly into the mirror
     mirror_path = str(tmp_path / "test-mirror")
-    spack.cmd.mirror.create(mirror_path, specs=[], repo=spack.context.current().repo)
+    spack.cmd.mirror.create(mirror_path, specs=[], ctx=spack.context.current())
 
     # register mirror with spack config
     mirrors = {"spack-mirror-test": url_util.path_to_file_url(mirror_path)}
     mutable_config.set("mirrors", mirrors)
 
     with spack.stage.stage_from_config(
-        mirrors["spack-mirror-test"], name="build_cache", keep=True, config=mutable_config
+        mirrors["spack-mirror-test"],
+        name="build_cache",
+        keep=True,
+        config=mutable_config,
+        client=spack.context.current().network,
     ):
         parser = argparse.ArgumentParser()
         buildcache.setup_parser(parser)
@@ -407,7 +411,7 @@ def test_manual_download(mock_download, config, mock_packages, monkeypatch, manu
     def _instr(pkg):
         return f"Download instructions for {pkg.spec.name}"
 
-    spec = spack.concretize.concretize_one("pkg-a")
+    spec = spack.concretize.concretize_one("pkg-a", spack.context.current())
     spec.package.manual_download = manual
     if instr:
         monkeypatch.setattr(spack.package_base.PackageBase, "download_instr", _instr)
@@ -431,14 +435,14 @@ def fetching_not_allowed(monkeypatch):
 
 def test_fetch_without_code_is_noop(config, mock_packages, fetching_not_allowed):
     """do_fetch for packages without code should be a no-op"""
-    pkg = spack.concretize.concretize_one("pkg-a").package
+    pkg = spack.concretize.concretize_one("pkg-a", spack.context.current()).package
     pkg.has_code = False
     pkg.do_fetch()
 
 
 def test_fetch_external_package_is_noop(config, mock_packages, fetching_not_allowed):
     """do_fetch for packages without code should be a no-op"""
-    spec = spack.concretize.concretize_one("pkg-a")
+    spec = spack.concretize.concretize_one("pkg-a", spack.context.current())
     spec.external_path = "/some/where"
     assert spec.external
     spec.package.do_fetch()

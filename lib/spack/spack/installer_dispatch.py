@@ -6,9 +6,6 @@ from typing import TYPE_CHECKING, List, Optional, Set, Union
 
 from spack.vendor.typing_extensions import Literal
 
-import spack.config
-import spack.sandbox
-
 if TYPE_CHECKING:
     import spack.installer
     import spack.package_base
@@ -41,11 +38,7 @@ def create_installer(
     dependencies_policy: Literal["auto", "cache_only", "source_only"] = "auto",
     create_reports: bool = False,
 ) -> "spack.installer.PackageInstaller":
-    """Create an installer based on the current configuration and feature support."""
-    if spack.config.CONFIG.get("config:sandbox:enable", False):
-        # Probe sandbox support now so builds don't fail later inside a subprocess.
-        spack.sandbox.get_sandbox()
-
+    """Create an installer for the given packages."""
     from spack.installer import PackageInstaller
 
     return PackageInstaller(

@@ -10,9 +10,10 @@ import re
 import subprocess
 import sys
 import textwrap
-from typing import TYPE_CHECKING, Callable, Container, Generator, List, Optional, Sequence, Union
+from typing import Callable, Container, Generator, List, Optional, Sequence, Union
 
 import spack.concretize
+import spack.context
 import spack.environment as ev
 import spack.error
 import spack.extensions
@@ -32,9 +33,6 @@ from spack.util.tty.colify import colify
 from spack.util.tty.color import colorize
 
 from ..enums import InstallRecordStatus
-
-if TYPE_CHECKING:
-    import spack.context
 
 # cmd has a submodule called "list" so preserve the python list module
 python_list = list
@@ -88,7 +86,9 @@ def all_commands():
     if _all_commands is None:
         _all_commands = []
         command_paths = [spack.paths.command_path]  # Built-in commands
-        command_paths += spack.extensions.get_command_paths()  # Extensions
+        # Extensions; the command registry is process-wide and has no context yet
+        config = spack.context.current().config  # noqa: TID251
+        command_paths += spack.extensions.get_command_paths(config)
         for path in command_paths:
             for file in os.listdir(path):
                 if file.endswith(".py") and not re.search(ignore_files, file):
@@ -125,7 +125,8 @@ def get_module(cmd_name):
         module = importlib.import_module(module_name)
         tty.debug("Imported {0} from built-in commands".format(pname))
     except ImportError:
-        module = spack.extensions.get_module(cmd_name)
+        config = spack.context.current().config  # noqa: TID251
+        module = spack.extensions.get_module(cmd_name, config)
         if not module:
             raise CommandNotFoundError(cmd_name)
 
@@ -202,7 +203,7 @@ def parse_specs(
 
     to_concretize: List[spack.concretize.SpecPairInput] = [(s, None) for s in specs]
     return spack.concretize.concretize_spec_pairs(
-        to_concretize, tests=tests, ui=ui or TerminalUI()
+        to_concretize, ctx, tests=tests, ui=ui or TerminalUI()
     )
 
 
@@ -214,9 +215,9 @@ def matching_spec_from_env(spec, ctx: "spack.context.SpackContext"):
     """
     env = ctx.environment
     if env:
-        return env.matching_spec(spec) or spack.concretize.concretize_one(spec)
+        return env.matching_spec(spec) or spack.concretize.concretize_one(spec, ctx)
     else:
-        return spack.concretize.concretize_one(spec)
+        return spack.concretize.concretize_one(spec, ctx)
 
 
 def matching_specs_from_env(specs, ctx: "spack.context.SpackContext"):
@@ -233,7 +234,7 @@ def matching_specs_from_env(specs, ctx: "spack.context.SpackContext"):
         [(concrete, concrete) for _, concrete in env.concretized_specs()] if env else []
     )
     return spack.concretize.concretize_spec_pairs(
-        spec_pairs + additional_concrete_specs, ui=TerminalUI()
+        spec_pairs + additional_concrete_specs, ctx, ui=TerminalUI()
     )[: len(spec_pairs)]
 
 
@@ -649,7 +650,9 @@ def require_active_env(
     )
 
 
-def find_environment(args: argparse.Namespace) -> Optional[ev.Environment]:
+def find_environment(
+    args: argparse.Namespace, ctx: "spack.context.SpackContext"
+) -> Optional[ev.Environment]:
     """Find active environment from args or environment variable.
 
     Check for an environment in this order:
@@ -661,6 +664,7 @@ def find_environment(args: argparse.Namespace) -> Optional[ev.Environment]:
 
     Arguments:
         args: argparse namespace with command arguments
+        ctx: context to read the environment in
 
     Returns: a found environment, or ``None``
     """
@@ -668,8 +672,8 @@ def find_environment(args: argparse.Namespace) -> Optional[ev.Environment]:
     # treat env as a name
     env = args.env
     if env:
-        if ev.exists(env):
-            return ev.read(env)
+        if ev.exists(env, config=ctx.config):
+            return ev.read(env, ctx=ctx)
 
     else:
         # if env was specified, see if it is a directory otherwise, look
@@ -686,8 +690,8 @@ def find_environment(args: argparse.Namespace) -> Optional[ev.Environment]:
 
     # if we get here, env isn't the name of a spack environment; it has
     # to be a path to an environment, or there is something wrong.
-    if ev.is_env_dir(env):
-        return ev.Environment(env)
+    if ev.is_env_dir(env, config=ctx.config):
+        return ev.Environment(env, ctx=ctx)
 
     raise ev.SpackEnvironmentError("no environment in %s" % env)
 

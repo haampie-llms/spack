@@ -200,7 +200,7 @@ def _root(args, ctx):
 
     root = ctx.config.get("bootstrap:root", default=None, scope=args.scope)
     if root:
-        root = spack.config.canonicalize_path(root)
+        root = spack.config.canonicalize_path(root, config=ctx.config)
     print(root)
 
 
@@ -344,7 +344,7 @@ def _add(args, ctx):
         raise RuntimeError(msg.format(args.name))
 
     # Check that the metadata file exists
-    metadata_dir = spack.config.canonicalize_path(args.metadata_dir)
+    metadata_dir = spack.config.canonicalize_path(args.metadata_dir, config=ctx.config)
     if not os.path.exists(metadata_dir) or not os.path.isdir(metadata_dir):
         raise RuntimeError('the directory "{0}" does not exist'.format(args.metadata_dir))
 
@@ -392,7 +392,9 @@ def _remove(args, ctx):
 
 
 def _mirror(args, ctx):
-    mirror_dir = spack.config.canonicalize_path(os.path.join(args.root_dir, LOCAL_MIRROR_DIR))
+    mirror_dir = spack.config.canonicalize_path(
+        os.path.join(args.root_dir, LOCAL_MIRROR_DIR), config=ctx.config
+    )
 
     # TODO: Here we are adding gnuconfig manually, but this can be fixed
     # TODO: as soon as we have an option to add to a mirror all the possible
@@ -406,11 +408,11 @@ def _mirror(args, ctx):
         spack.util.tty.msg(msg.format(spec_str, mirror_dir))
         # Suppress tty from the call below for terser messages
         spack.util.tty.set_msg_enabled(False)
-        spec = spack.concretize.concretize_one(spec_str)
+        spec = spack.concretize.concretize_one(spec_str, ctx)
         for node in spec.traverse():
             if node.external:
                 continue
-            spack.cmd.mirror.create(mirror_dir, [node], ctx.repo)
+            spack.cmd.mirror.create(mirror_dir, [node], ctx)
         spack.util.tty.set_msg_enabled(True)
 
     if args.binary_packages:
@@ -418,7 +420,7 @@ def _mirror(args, ctx):
         spack.util.tty.msg(msg.format(BINARY_TARBALL, mirror_dir))
         spack.util.tty.set_msg_enabled(False)
         stage = spack.stage.stage_from_config(
-            BINARY_TARBALL, path=tempfile.mkdtemp(), config=ctx.config
+            BINARY_TARBALL, path=tempfile.mkdtemp(), config=ctx.config, client=ctx.network
         )
         stage.create()
         stage.fetch()
@@ -446,9 +448,11 @@ def _mirror(args, ctx):
     instructions += cmd.format("local-sources", rel_directory)
     if args.binary_packages:
         abs_directory, rel_directory = write_metadata(subdir="binaries", metadata=BINARY_METADATA)
-        shutil.copy(spack.config.canonicalize_path(CLINGO_JSON), abs_directory)
-        shutil.copy(spack.config.canonicalize_path(GNUPG_JSON), abs_directory)
-        shutil.copy(spack.config.canonicalize_path(PATCHELF_JSON), abs_directory)
+        shutil.copy(spack.config.canonicalize_path(CLINGO_JSON, config=ctx.config), abs_directory)
+        shutil.copy(spack.config.canonicalize_path(GNUPG_JSON, config=ctx.config), abs_directory)
+        shutil.copy(
+            spack.config.canonicalize_path(PATCHELF_JSON, config=ctx.config), abs_directory
+        )
         instructions += cmd.format("local-binaries", rel_directory)
     print(instructions)
 

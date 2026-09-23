@@ -59,13 +59,13 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument("output_dir", help="output directory")
 
 
-def make_installer(parser, args):
+def make_installer(parser, args, ctx):
     """
     Use CMake to generate WIX installer in newly created build directory
     """
     if sys.platform == "win32":
         output_dir = args.output_dir
-        cmake_spec = spack.concretize.concretize_one("cmake")
+        cmake_spec = spack.concretize.concretize_one("cmake", ctx)
         cmake_path = os.path.join(cmake_spec.prefix, "bin", "cmake.exe")
         cpack_path = os.path.join(cmake_spec.prefix, "bin", "cpack.exe")
         spack_source = args.spack_source

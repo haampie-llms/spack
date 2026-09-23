@@ -13,7 +13,7 @@ import sys
 import time
 from collections import deque
 from enum import Enum
-from typing import Dict, Generator, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Dict, Generator, List, Optional, Set, Tuple
 from urllib.parse import quote, urlencode, urlparse
 from urllib.request import Request
 
@@ -34,6 +34,9 @@ from spack.reporters.cdash import build_stamp as cdash_build_stamp
 from spack.url_buildcache import get_url_buildcache_class
 from spack.util import compression, tty
 from spack.util.lang import memoized
+
+if TYPE_CHECKING:
+    import spack.context
 
 IS_WINDOWS = sys.platform == "win32"
 SPACK_RESERVED_TAGS = ["public", "protected", "notary"]
@@ -166,8 +169,9 @@ class CDashHandler:
     Class for managing CDash data and processing.
     """
 
-    def __init__(self, ci_cdash, *, urlopen: web_util.OpenType):
+    def __init__(self, ci_cdash, *, urlopen: web_util.OpenType, config: cfg.Configuration):
         self._urlopen = urlopen
+        self._config = config
 
         # start with the gitlab ci configuration
         self.url = ci_cdash.get("url")
@@ -298,7 +302,7 @@ class CDashHandler:
             buildstamp=self.build_stamp,
             track=None,
         )
-        reporter = CDash(configuration=configuration, urlopen=self._urlopen)
+        reporter = CDash(configuration=configuration, urlopen=self._urlopen, config=self._config)
         reporter.test_skipped_report(report_dir, spec, reason)
 
 
@@ -334,6 +338,8 @@ class PipelineOptions:
         pipeline_type: Optional[PipelineType] = None,
         require_signing: bool = False,
         cdash_handler: Optional["CDashHandler"] = None,
+        *,
+        ctx: "spack.context.SpackContext",
     ):
         """
         Args:
@@ -353,7 +359,9 @@ class PipelineOptions:
             pipeline_type: Type of pipeline running (optional)
             require_signing: Require buildcache to be signed (fail w/out signing key)
             cdash_handler: Object for communicating build information with CDash
+            ctx: resources the pipeline is generated with
         """
+        self.ctx = ctx
         self.env = env
         self.buildcache_destination = buildcache_destination
         self.artifacts_root = artifacts_root
@@ -572,12 +580,15 @@ class SpackCIConfig:
             self.ir["jobs"][dag_hash] = self.__init_job(node.spec)
 
     # Generate IR from the configs
-    def generate_ir(self):
+    def generate_ir(self, *, config: cfg.Configuration):
         """Generate the IR from the Spack CI configurations.
 
         Generate makes use of special strings that need to be expanded by python format.
 
             env_dir: The concrete environment directory used in downstream jobs
+
+        Args:
+            config: configuration listing the pipeline mirrors
         """
 
         jobs = self.ir["jobs"]
@@ -596,9 +607,7 @@ class SpackCIConfig:
             {"noop-job": {"script": ['echo "All specs already up to date, nothing to rebuild."']}},
         ]
 
-        pipeline_mirrors = spack.mirrors.mirror.MirrorCollection.from_config(
-            cfg.CONFIG, binary=True
-        )
+        pipeline_mirrors = spack.mirrors.mirror.MirrorCollection.from_config(config, binary=True)
         buildcache_destination = pipeline_mirrors["buildcache-destination"]
         update_index_extra_args = []
         if buildcache_destination.push_view:
@@ -739,7 +748,7 @@ class SpackCIConfig:
                     )
                     try:
                         with self._urlopen(request) as response:
-                            config = json.load(response)
+                            mapping = json.load(response)
                     except Exception as e:
                         # For now just ignore any errors from dynamic mapping and continue
                         # This is still experimental, and failures should not stop CI
@@ -750,17 +759,17 @@ class SpackCIConfig:
                     # Strip ignore keys
                     if ignored:
                         for key in ignored:
-                            if key in config:
-                                config.pop(key)
+                            if key in mapping:
+                                mapping.pop(key)
 
                     # Only keep allowed keys
                     clean_config = {}
                     if allowed:
                         for key in allowed:
-                            if key in config:
-                                clean_config[key] = config[key]
+                            if key in mapping:
+                                clean_config[key] = mapping[key]
                     else:
-                        clean_config = config
+                        clean_config = mapping
 
                     # Verify all of the required keys are present
                     if required:

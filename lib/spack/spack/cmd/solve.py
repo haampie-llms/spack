@@ -133,7 +133,7 @@ def solve(parser, args, ctx: spack.context.SpackContext):
 
     show_status = args.install_status
     if show_status:
-        spack.binary_distribution.load_buildcache_index()
+        spack.binary_distribution.load_buildcache_index(ctx.binary_index)
         status_fn = spack.cmd.buildcache_status_fn(ctx.binary_index, store=ctx.store)
     else:
         status_fn = None
@@ -180,7 +180,7 @@ def solve(parser, args, ctx: spack.context.SpackContext):
     if not specs:
         return
 
-    spack.concretize.ensure_compilers_in_configuration()
+    spack.concretize.ensure_compilers_in_configuration(ctx)
     solver = asp.Solver(context=ctx)
     output = sys.stdout if "asp" in show else None
     setup_only = set(show) == {"asp"}

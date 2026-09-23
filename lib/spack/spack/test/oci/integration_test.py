@@ -16,6 +16,7 @@ from contextlib import contextmanager
 import pytest
 
 import spack.binary_distribution
+import spack.context
 import spack.database
 import spack.deptypes as dt
 import spack.environment as ev
@@ -34,6 +35,11 @@ buildcache = SpackCommand("buildcache")
 mirror = SpackCommand("mirror")
 env = SpackCommand("env")
 install = SpackCommand("install")
+
+
+def _stage_resources():
+    ctx = spack.context.current()
+    return {"config": ctx.config, "client": ctx.network}
 
 
 @contextmanager
@@ -71,7 +77,7 @@ def test_buildcache_push_command(mutable_database: Database):
 def test_buildcache_tag(install_mockery, mock_fetch, mutable_mock_env_path):
     """Tests whether we can create an OCI image from a full environment with multiple roots."""
     env("create", "test")
-    with ev.read("test"):
+    with ev.read("test", ctx=spack.context.current()):
         install("--fake", "--add", "libelf")
         install("--fake", "--add", "trivial-install-test-package")
 
@@ -80,12 +86,12 @@ def test_buildcache_tag(install_mockery, mock_fetch, mutable_mock_env_path):
     with oci_servers(registry) as urlopen:
         mirror("add", "oci-test", "oci://example.com/image")
 
-        with ev.read("test"):
+        with ev.read("test", ctx=spack.context.current()):
             buildcache("push", "--tag", "full_env", "oci-test")
 
         name = ImageReference.from_string("example.com/image:full_env")
 
-        with ev.read("test") as e:
+        with ev.read("test", ctx=spack.context.current()) as e:
             specs = [
                 x
                 for x in spack.traverse.traverse_nodes(
@@ -94,7 +100,7 @@ def test_buildcache_tag(install_mockery, mock_fetch, mutable_mock_env_path):
                 if not x.external
             ]
 
-        manifest, _ = get_manifest_and_config(name, urlopen=urlopen)
+        manifest, _ = get_manifest_and_config(name, urlopen=urlopen, **_stage_resources())
 
         # without a base image, we should have one layer per spec
         assert len(manifest["layers"]) == len(specs)
@@ -103,12 +109,12 @@ def test_buildcache_tag(install_mockery, mock_fetch, mutable_mock_env_path):
         # also test the case where Spack doesn't have to upload any binaries, it just has to create
         # a new tag.
         libelf = next(s for s in specs if s.name == "libelf")
-        with ev.read("test"):
+        with ev.read("test", ctx=spack.context.current()):
             # Get libelf spec
             buildcache("push", "--tag", "single_spec", "oci-test", libelf.format("libelf{/hash}"))
 
         name = ImageReference.from_string("example.com/image:single_spec")
-        manifest, _ = get_manifest_and_config(name, urlopen=urlopen)
+        manifest, _ = get_manifest_and_config(name, urlopen=urlopen, **_stage_resources())
         assert len(manifest["layers"]) == len(
             [x for x in libelf.traverse(deptype=dt.LINK | dt.RUN) if not x.external]
         )
@@ -183,7 +189,9 @@ def test_buildcache_push_with_base_image_command(mutable_database, tmp_path: pat
 
         # Fetch the manifest and config
         dst_image = ImageReference.from_string(f"dst.example.com/image:{tag}")
-        retrieved_manifest, retrieved_config = get_manifest_and_config(dst_image, urlopen=urlopen)
+        retrieved_manifest, retrieved_config = get_manifest_and_config(
+            dst_image, urlopen=urlopen, **_stage_resources()
+        )
 
         # Check that the media type is OCI
         assert retrieved_manifest["mediaType"] == "application/vnd.oci.image.manifest.v1+json"
@@ -311,18 +319,20 @@ def test_best_effort_upload(mutable_database: spack.database.Database, monkeypat
     _push_blob = spack.binary_distribution._oci_push_pkg_blob
     _push_manifest = spack.binary_distribution._oci_put_manifest
 
-    def push_blob(image_ref, spec, tmpdir):
+    def push_blob(image_ref, spec, tmpdir, **kwargs):
         # fail to upload the blob of mpich
         if spec.name == "mpich":
             raise Exception("Blob Server Error")
-        return _push_blob(image_ref, spec, tmpdir)
+        return _push_blob(image_ref, spec, tmpdir, **kwargs)
 
-    def put_manifest(base_images, checksums, image_ref, tmpdir, extra_config, annotations, *specs):
+    def put_manifest(
+        base_images, checksums, image_ref, tmpdir, extra_config, annotations, *specs, **kwargs
+    ):
         # fail to upload the manifest of libdwarf
         if "libdwarf" in (s.name for s in specs):
             raise Exception("Manifest Server Error")
         return _push_manifest(
-            base_images, checksums, image_ref, tmpdir, extra_config, annotations, *specs
+            base_images, checksums, image_ref, tmpdir, extra_config, annotations, *specs, **kwargs
         )
 
     monkeypatch.setattr(spack.binary_distribution, "_oci_push_pkg_blob", push_blob)
@@ -348,7 +358,7 @@ def test_best_effort_upload(mutable_database: spack.database.Database, monkeypat
         for name in without_manifest:
             tagged_img = image.with_tag(spack.binary_distribution._oci_default_tag(mpileaks[name]))
             with pytest.raises(urllib.error.HTTPError, match="404"):
-                get_manifest_and_config(tagged_img, urlopen=urlopen)
+                get_manifest_and_config(tagged_img, urlopen=urlopen, **_stage_resources())
 
         # Collect the layer digests of successfully uploaded packages. Every package should refer
         # to its own tarballs and those of its runtime deps that were uploaded.
@@ -363,7 +373,9 @@ def test_best_effort_upload(mutable_database: spack.database.Database, monkeypat
 
             # This should not raise a 404.
             manifest, _ = get_manifest_and_config(
-                image.with_tag(spack.binary_distribution._oci_default_tag(s)), urlopen=urlopen
+                image.with_tag(spack.binary_distribution._oci_default_tag(s)),
+                urlopen=urlopen,
+                **_stage_resources(),
             )
 
             # Collect layer digests

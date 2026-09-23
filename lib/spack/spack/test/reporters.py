@@ -6,6 +6,7 @@ import pathlib
 
 import pytest
 
+import spack.context
 import spack.reporters.extract
 import spack.util.filesystem as fs
 import spack.util.web
@@ -174,7 +175,11 @@ def test_reporters_report_for_package_no_stdout(tmp_path: pathlib.Path, monkeypa
     )
     monkeypatch.setattr(tty, "_debug", 1)
 
-    reporter = MockCDash(configuration=configuration, urlopen=_client().urlopen)
+    reporter = MockCDash(
+        configuration=configuration,
+        urlopen=_client().urlopen,
+        config=spack.context.current().config,
+    )
     pkg_data = {"name": "fake-package"}
     reporter.test_report_for_package(str(tmp_path), pkg_data, 0)
     err = capfd.readouterr()[1]
@@ -194,7 +199,11 @@ def test_cdash_reporter_truncates_build_name_if_too_long():
         track="fake-track",
     )
 
-    reporter = CDash(configuration=configuration, urlopen=_client().urlopen)
+    reporter = CDash(
+        configuration=configuration,
+        urlopen=_client().urlopen,
+        config=spack.context.current().config,
+    )
     new_build_name = reporter.report_build_name("fake-package")
 
     assert new_build_name != extra_long_build_name

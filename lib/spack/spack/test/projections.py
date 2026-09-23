@@ -4,6 +4,7 @@
 
 from datetime import date
 
+import spack.config
 import spack.projections
 import spack.spec
 
@@ -14,5 +15,5 @@ def test_projection_expansion(mock_packages, monkeypatch):
     monkeypatch.setenv("FOO_ENV_VAR", "test-string")
     projections = {"all": "{name}-{version}/$FOO_ENV_VAR/$date"}
     spec = spack.spec.Spec("fake@1.0")
-    projection = spack.projections.get_projection(projections, spec)
+    projection = spack.projections.get_projection(projections, spec, spack.config.CONFIG)
     assert "{name}-{version}/test-string/%s" % date.today().strftime("%Y-%m-%d") == projection

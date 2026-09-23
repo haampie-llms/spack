@@ -640,6 +640,7 @@ def info(
     pkg_cls = ctx.repo.get_pkg_class(spec.fullname)
     pkg_cls.validate_variant_names(spec)
     pkg = pkg_cls(spec)
+    pkg.context = ctx
 
     # Output core package information
     header = section_title("{0}:   ").format(pkg.build_system_class) + pkg.name

@@ -8,6 +8,7 @@ import pytest
 import spack.vendor.archspec.cpu
 
 import spack.concretize
+import spack.context
 import spack.error
 import spack.operating_systems
 import spack.platforms
@@ -69,7 +70,7 @@ def test_default_os_and_target(config, mock_packages):
     """Test that is we don't specify `os=` or `target=` we get the default values
     after concretization.
     """
-    spec = spack.concretize.concretize_one("libelf")
+    spec = spack.concretize.concretize_one("libelf", spack.context.current())
     assert spec.architecture.os == str(TEST_PLATFORM.default_operating_system())
     assert spec.architecture.target == TEST_PLATFORM.default_target()
 
@@ -198,7 +199,8 @@ def test_star_target_is_replaced_by_a_named_target_when_constrained():
 )
 def test_concretize_target_ranges(root_target_range, dep_target_range, result, monkeypatch):
     spec = spack.concretize.concretize_one(
-        f"pkg-a foobar=bar target={root_target_range} %gcc@10 ^pkg-b target={dep_target_range}"
+        f"pkg-a foobar=bar target={root_target_range} %gcc@10 ^pkg-b target={dep_target_range}",
+        spack.context.current(),
     )
     assert spec.target == spec["pkg-b"].target == result
 
@@ -219,7 +221,8 @@ def test_instantiate_non_default_macos(mock_packages):
         # has no macos compilers
         target = str(spack.vendor.archspec.cpu.host().family)
         spec = spack.concretize.concretize_one(
-            f"zlib platform=darwin os={non_default_macos_name} target={target}"
+            f"zlib platform=darwin os={non_default_macos_name} target={target}",
+            spack.context.current(),
         )
 
     # Primarily testing that these lines doesn't throw

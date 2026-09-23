@@ -21,6 +21,7 @@ from types import ModuleType
 from typing import TYPE_CHECKING, Optional
 
 import spack.config
+import spack.context
 import spack.paths
 import spack.platforms
 import spack.repo
@@ -125,7 +126,9 @@ class GlobalStateMarshaler:
             s3_client_cache.clear()
             return
         spack.config.CONFIG = self.config
-        spack.repo.enable_repo(spack.repo.RepoPath.from_config(self.config))
+        spack.repo.enable_repo(
+            spack.repo.RepoPath.from_config(self.config, cache=spack.context.current().misc_cache)
+        )
         spack.platforms.host = self.platform
         spack.store.STORE = self.store
         spack.paths.spack_working_dir = self.spack_working_dir

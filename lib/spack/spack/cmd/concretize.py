@@ -50,7 +50,7 @@ def concretize(parser, args, ctx: spack.context.SpackContext):
         if not args.quiet:
             if concretized_specs:
                 tty.msg(f"Concretized {plural(len(concretized_specs), 'spec')}:")
-                spack.binary_distribution.load_buildcache_index()
+                spack.binary_distribution.load_buildcache_index(ctx.binary_index)
                 status_fn = spack.cmd.buildcache_status_fn(ctx.binary_index, store=ctx.store)
                 ev.display_specs(
                     [concrete for _, concrete in concretized_specs],

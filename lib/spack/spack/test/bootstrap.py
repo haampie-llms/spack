@@ -17,6 +17,7 @@ import spack.bootstrap.status
 import spack.compilers.config
 import spack.concretize
 import spack.config
+import spack.context
 import spack.database
 import spack.environment
 import spack.error
@@ -56,7 +57,7 @@ def isolated_bootstrap_root(monkeypatch, tmp_path: pathlib.Path):
 
 @pytest.fixture
 def active_mock_environment(mutable_config, mutable_mock_env_path):
-    with spack.environment.create("bootstrap-test") as env:
+    with spack.environment.create("bootstrap-test", ctx=spack.context.current()) as env:
         yield env
 
 
@@ -123,7 +124,7 @@ def test_store_path_customization(config_value, expected, mutable_config):
 
     # Check the store path
     current = spack.bootstrap.config.store_path()
-    assert current == spack.config.canonicalize_path(expected)
+    assert current == spack.config.canonicalize_path(expected, config=spack.config.CONFIG)
 
 
 def test_raising_exception_if_bootstrap_disabled(mutable_config):
@@ -253,7 +254,7 @@ spack:
       root: {0}
 """.format(install_root)
     )
-    with spack.environment.Environment(str(tmp_path)):
+    with spack.environment.Environment(str(tmp_path), ctx=spack.context.current()):
         assert active_environment()
         assert spack.config.CONFIG.get("config:install_tree:root") == str(install_root)
         # Don't trigger evaluation here
@@ -447,7 +448,7 @@ def _fake_request(probes: List[Any], result: Optional[str] = None):
         metadata_name="zlib",
         probe=probe,
         installer_args={},
-        concretize=spack.concretize.concretize_one,
+        concretize=lambda s: spack.concretize.concretize_one(s, spack.context.current()),
     )
 
 
@@ -570,7 +571,9 @@ def recording_installer(monkeypatch):
     """Let the source bootstrapper run without detecting, concretizing or installing."""
     installer = _RecordingInstaller()
     monkeypatch.setattr(spack.bootstrap.core, "_add_externals_if_missing", lambda: None)
-    monkeypatch.setattr(spack.concretize, "concretize_one", _FakeConcreteSpec)
+    monkeypatch.setattr(
+        spack.concretize, "concretize_one", lambda spec, ctx: _FakeConcreteSpec(spec)
+    )
     monkeypatch.setattr(spack.installer_dispatch, "create_installer", installer)
     return installer
 
@@ -635,7 +638,7 @@ def test_the_source_bootstrapper_concretizes_with_the_request(
     calls ``spack.concretize.concretize_one``.
     """
 
-    def _regular_concretizer(abstract_spec):
+    def _regular_concretizer(abstract_spec, ctx):
         raise AssertionError("concretize_one was called instead of request.concretize")
 
     monkeypatch.setattr(spack.concretize, "concretize_one", _regular_concretizer)

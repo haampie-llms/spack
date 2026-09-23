@@ -222,7 +222,11 @@ def setup_parser(subparser: argparse.ArgumentParser):
 
 def repo_create(args, ctx):
     """create a new package repository"""
-    full_path, namespace = spack.repo.create_repo(args.directory, args.namespace, args.subdir)
+    full_path, namespace = spack.repo.create_repo(
+        spack.config.canonicalize_path(args.directory, config=ctx.config),
+        args.namespace,
+        args.subdir,
+    )
     tty.msg("Created repo with namespace '%s'." % namespace)
     tty.msg("To register it with spack, run this command:", "spack repo add %s" % full_path)
 
@@ -261,7 +265,7 @@ def _add_repo(
         entry = spack.config.canonicalize_path(path_or_repo, config=config)
 
     descriptor = spack.repo.parse_config_descriptor(
-        name or "<unnamed>", entry, lock=spack.repo.package_repository_lock(config)
+        name or "<unnamed>", entry, lock=spack.repo.package_repository_lock(config), config=config
     )
     descriptor.initialize(git=spack.util.executable.which("git"))
 
@@ -336,7 +340,7 @@ def _remove_repo(
         key = namespace_or_path
     else:
         # delete by namespace or path (requires constructing the repo)
-        canon_path = spack.config.canonicalize_path(namespace_or_path)
+        canon_path = spack.config.canonicalize_path(namespace_or_path, config=config)
         descriptors = spack.repo.RepoDescriptors.from_config(config, scope=scope)
         for name, descriptor in descriptors.items():
             descriptor.initialize(fetch=False)
@@ -446,7 +450,9 @@ def _get_repo(
 ) -> Optional[spack.repo.Repo]:
     """get a repo by path or namespace"""
     try:
-        return spack.repo.from_path(name_or_path)
+        return spack.repo.from_path(
+            spack.config.canonicalize_path(name_or_path, config=config), cache=cache
+        )
     except spack.repo.RepoError:
         pass
 
@@ -482,7 +488,7 @@ def repo_migrate(args: Any, ctx) -> int:
 
     try:
         if (1, 0) <= repo.package_api < (2, 0):
-            success, repo_v2 = migrate_v1_to_v2(repo, patch_file=patch_file)
+            success, repo_v2 = migrate_v1_to_v2(repo, patch_file=patch_file, cache=ctx.misc_cache)
             exit_code = 0 if success else 1
         elif (2, 0) <= repo.package_api < (3, 0):
             repo_v2 = None

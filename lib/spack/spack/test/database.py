@@ -15,6 +15,7 @@ import sys
 import pytest
 
 import spack.config
+import spack.context
 import spack.subprocess_context
 from spack.config import Configuration
 from spack.database import Database
@@ -68,8 +69,8 @@ def test_query_by_install_tree(
     up_db, down_db = upstream_and_downstream_db
 
     # Set the upstream DB to contain "pkg-c" and downstream to contain "pkg-b")
-    b = spack.concretize.concretize_one("pkg-b")
-    c = spack.concretize.concretize_one("pkg-c")
+    b = spack.concretize.concretize_one("pkg-b", spack.context.current())
+    c = spack.concretize.concretize_one("pkg-c", spack.context.current())
     with writable(up_db):
         up_db.add(c)
     up_db._read()
@@ -89,7 +90,7 @@ def test_installed_upstream(upstream_and_downstream_db, repo_builder: RepoBuilde
     repo_builder.add_package("w", dependencies=[("x", None, None), ("y", None, None)])
 
     with spack.repo.use_repositories(repo_builder.root):
-        spec = spack.concretize.concretize_one("w")
+        spec = spack.concretize.concretize_one("w", spack.context.current())
         with writable(upstream_db):
             for dep in spec.traverse(root=False):
                 upstream_db.add(dep)
@@ -101,7 +102,7 @@ def test_installed_upstream(upstream_and_downstream_db, repo_builder: RepoBuilde
             with pytest.raises(lk.ForbiddenLockError):
                 upstream_db.get_by_hash(dep.dag_hash())
 
-        new_spec = spack.concretize.concretize_one("w")
+        new_spec = spack.concretize.concretize_one("w", spack.context.current())
         downstream_db.add(new_spec)
         for dep in new_spec.traverse(root=False):
             upstream, record = downstream_db.query_by_spec_hash(dep.dag_hash())
@@ -138,7 +139,7 @@ def test_missing_upstream_build_dep(
     monkeypatch.setattr(spack.store.STORE, "db", downstream_db)
 
     with spack.repo.use_repositories(repo_builder.root):
-        y = spack.concretize.concretize_one("y")
+        y = spack.concretize.concretize_one("y", spack.context.current())
         z_y = y["z"]
         z_y.set_prefix(z_y_prefix)
 
@@ -176,7 +177,7 @@ def test_removed_upstream_dep(
     repo_builder.add_package("y", dependencies=[("z", None, None)])
 
     with spack.repo.use_repositories(repo_builder.root):
-        y = spack.concretize.concretize_one("y")
+        y = spack.concretize.concretize_one("y", spack.context.current())
         z = y["z"]
 
         # add dependency to upstream, dependents to downstream
@@ -209,7 +210,7 @@ def test_add_to_upstream_after_downstream(upstream_and_downstream_db, repo_build
     repo_builder.add_package("x")
 
     with spack.repo.use_repositories(repo_builder.root):
-        spec = spack.concretize.concretize_one("x")
+        spec = spack.concretize.concretize_one("x", spack.context.current())
 
         downstream_db.add(spec)
         with writable(upstream_db):
@@ -224,12 +225,8 @@ def test_add_to_upstream_after_downstream(upstream_and_downstream_db, repo_build
         qresults = downstream_db.query("x")
         assert len(qresults) == 1
         (queried_spec,) = qresults
-        try:
-            orig_db = spack.store.STORE.db
-            spack.store.STORE.db = downstream_db
-            assert queried_spec.prefix == downstream_db.layout.path_for_spec(spec)
-        finally:
-            spack.store.STORE.db = orig_db
+        _, record = downstream_db.query_by_spec_hash(queried_spec.dag_hash())
+        assert record.path == downstream_db.layout.path_for_spec(spec)
 
 
 def test_cannot_write_upstream(tmp_path: pathlib.Path, mock_packages, config):
@@ -242,7 +239,7 @@ def test_cannot_write_upstream(tmp_path: pathlib.Path, mock_packages, config):
     db = Database(str(tmp_path), is_upstream=True)
 
     with pytest.raises(lk.ForbiddenLockError):
-        db.add(spack.concretize.concretize_one("pkg-a"))
+        db.add(spack.concretize.concretize_one("pkg-a", spack.context.current()))
 
 
 @pytest.mark.usefixtures("config", "temporary_store")
@@ -259,7 +256,7 @@ def test_recursive_upstream_dbs(
     repo_builder.add_package("x", dependencies=[("y", None, None)])
 
     with spack.repo.use_repositories(repo_builder.root):
-        spec = spack.concretize.concretize_one("x")
+        spec = spack.concretize.concretize_one("x", spack.context.current())
         db_c = Database(roots[2], layout=layouts[2])
         db_c.add(spec["z"])
 
@@ -410,7 +407,7 @@ def _check_remove_and_add_package(database: Database, spec):
 
 
 def _mock_install(spec: str):
-    s = spack.concretize.concretize_one(spec)
+    s = spack.concretize.concretize_one(spec, spack.context.current())
     PackageInstaller([s.package], fake=True, explicit=True).install()
 
 
@@ -519,8 +516,8 @@ def test_015_write_and_read(mutable_database: Database):
 
 
 def test_016_roundtrip_spliced_spec(mutable_database):
-    build_spec = spack.concretize.concretize_one("splice-t")
-    replacement = spack.concretize.concretize_one("splice-h+foo")
+    build_spec = spack.concretize.concretize_one("splice-t", spack.context.current())
+    replacement = spack.concretize.concretize_one("splice-h+foo", spack.context.current())
     spec = build_spec.splice(replacement)
 
     mutable_database.add(spec)
@@ -823,7 +820,7 @@ def test_regression_issue_8036(mutable_database: Database, usr_folder_exists):
     # existing. Even when the package prefix exists, the package should
     # not be considered installed until it is added to the database by
     # the installer with install().
-    s = spack.concretize.concretize_one("externaltool@0.9")
+    s = spack.concretize.concretize_one("externaltool@0.9", spack.context.current())
     assert not mutable_database.installed(s)
 
     # Now install the external package and check again the `installed` status
@@ -859,7 +856,9 @@ def test_uninstall_by_spec(mutable_database):
     with mutable_database.write_transaction():
         for spec in mutable_database.query():
             if mutable_database.installed(spec):
-                spack.package_base.PackageBase.uninstall_by_spec(spec, force=True)
+                spack.package_base.PackageBase.uninstall_by_spec(
+                    spec, spack.store.STORE, force=True
+                )
             else:
                 mutable_database.remove(spec)
     assert len(mutable_database.query()) == 0
@@ -867,7 +866,7 @@ def test_uninstall_by_spec(mutable_database):
 
 def test_query_unused_specs(mutable_database):
     # This spec installs a fake cmake as a build only dependency
-    s = spack.concretize.concretize_one("simple-inheritance")
+    s = spack.concretize.concretize_one("simple-inheritance", spack.context.current())
     PackageInstaller([s.package], fake=True, explicit=True).install()
 
     si = s.dag_hash()
@@ -917,7 +916,7 @@ def test_query_unused_specs(mutable_database):
 def test_query_spec_with_conditional_dependency(mutable_database: Database):
     # The issue is triggered by having dependencies that are
     # conditional on a Boolean variant
-    s = spack.concretize.concretize_one("hdf5~mpi")
+    s = spack.concretize.concretize_one("hdf5~mpi", spack.context.current())
     PackageInstaller([s.package], fake=True, explicit=True).install()
 
     results = mutable_database.query_local("hdf5 ^mpich")
@@ -957,7 +956,7 @@ def test_clear_failure_keep(mutable_database_store: Store, monkeypatch, capfd):
     # Pretend the spec has been failure locked
     monkeypatch.setattr(spack.database.FailureTracker, "lock_taken", _is)
 
-    s = spack.concretize.concretize_one("pkg-a")
+    s = spack.concretize.concretize_one("pkg-a", spack.context.current())
     mutable_database_store.failure_tracker.clear(s)
     out = capfd.readouterr()[0]
     assert "Retaining failure marking" in out
@@ -975,7 +974,7 @@ def test_clear_failure_forced(mutable_database_store: Store, monkeypatch, capfd)
     # Ensure raise OSError when try to remove the non-existent marking
     monkeypatch.setattr(spack.database.FailureTracker, "persistent_mark", _is)
 
-    s = spack.concretize.concretize_one("pkg-a")
+    s = spack.concretize.concretize_one("pkg-a", spack.context.current())
     mutable_database_store.failure_tracker.clear(s, force=True)
     out = capfd.readouterr()[1]
     assert "Removing failure marking despite lock" in out
@@ -990,7 +989,7 @@ def test_mark_failed(mutable_database_store: Store, monkeypatch, tmp_path: pathl
         raise lk.LockTimeoutError(lk.LockType.WRITE, "/mock-lock", 1.234, 10)
 
     with fs.working_dir(str(tmp_path)):
-        s = spack.concretize.concretize_one("pkg-a")
+        s = spack.concretize.concretize_one("pkg-a", spack.context.current())
 
         # Ensure attempt to acquire write lock on the mark raises the exception
         monkeypatch.setattr(lk.Lock, "acquire_write", _raise_exc)
@@ -1006,7 +1005,7 @@ def test_mark_failed(mutable_database_store: Store, monkeypatch, tmp_path: pathl
 def test_prefix_failed(mutable_database_store: Store, monkeypatch):
     """Add coverage to failed operation."""
 
-    s = spack.concretize.concretize_one("pkg-a")
+    s = spack.concretize.concretize_one("pkg-a", spack.context.current())
     failure_tracker = mutable_database_store.failure_tracker
 
     # Confirm the spec is not already marked as failed
@@ -1031,7 +1030,7 @@ def test_prefix_write_lock_error(mutable_database_store: Store, monkeypatch):
     def _raise(db, spec):
         raise lk.LockError("Mock lock error")
 
-    s = spack.concretize.concretize_one("pkg-a")
+    s = spack.concretize.concretize_one("pkg-a", spack.context.current())
 
     # Ensure subsequent lock operations fail
     monkeypatch.setattr(lk.Lock, "acquire_write", _raise)
@@ -1068,12 +1067,12 @@ def test_database_works_with_empty_dir(tmp_path: pathlib.Path, request):
 )
 def test_store_find_failures(database, query_arg, exc_type, msg_str):
     with pytest.raises(exc_type) as exc_info:
-        spack.store.find(query_arg, multiple=False)
+        spack.store.find(query_arg, database.query, multiple=False)
     assert msg_str in str(exc_info.value)
 
 
 def test_store_find_accept_string(database):
-    result = spack.store.find("callpath", multiple=True)
+    result = spack.store.find("callpath", database.query, multiple=True)
     assert len(result) == 3
 
 
@@ -1266,7 +1265,7 @@ def test_database_read_works_with_trailing_data(tmp_path: pathlib.Path, config, 
     # Populate a database
     root = str(tmp_path)
     db = Database(root, layout=None)
-    spec = spack.concretize.concretize_one("pkg-a")
+    spec = spack.concretize.concretize_one("pkg-a", spack.context.current())
     db.add(spec)
     specs_in_db = db.query_local()
     assert spec in specs_in_db
@@ -1293,7 +1292,7 @@ def test_reindex_with_upstreams(tmp_path: pathlib.Path, monkeypatch, mock_packag
     # we install `mpileaks` locally with dependencies in the upstream. And we even install
     # `mpileaks` with the same hash in the upstream. After reindexing, `mpileaks` should still be
     # in the local db, and `callpath` should not.
-    mpileaks = spack.concretize.concretize_one("mpileaks")
+    mpileaks = spack.concretize.concretize_one("mpileaks", spack.context.current())
     callpath = mpileaks.dependencies("callpath")[0]
 
     upstream_store = spack.store.create(
@@ -1419,7 +1418,7 @@ def test_database_installed(
     upstream_db, downstream_db = upstream_and_downstream_db
 
     with spack.repo.use_repositories(mock_custom_repository):
-        spec = spack.concretize.concretize_one("pkg-c")
+        spec = spack.concretize.concretize_one("pkg-c", spack.context.current())
 
         # a concrete but not-yet-installed spec is not installed anywhere
         assert not downstream_db.installed(spec)

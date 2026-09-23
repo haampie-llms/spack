@@ -37,6 +37,7 @@ def versions(parser, args, ctx):
     spec = spack.spec.Spec(args.package)
     pkg_cls = ctx.repo.get_pkg_class(spec.name)
     pkg = pkg_cls(spec)
+    pkg.context = ctx
 
     safe_versions = pkg.versions
 

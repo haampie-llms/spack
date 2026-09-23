@@ -6,6 +6,7 @@ import pathlib
 
 import pytest
 
+import spack.context
 import spack.environment
 import spack.package_base
 import spack.paths
@@ -111,7 +112,7 @@ def test_all_package_names_is_updated_on_repo_changes(
 ):
     """Package names are cached, but changing the search path drops the cache."""
     repo_builder.add_package("pkg-in-extra-repo")
-    extra_repo = spack.repo.from_path(repo_builder.root)
+    extra_repo = spack.repo.from_path(repo_builder.root, cache=spack.context.current().misc_cache)
     repos = RepoPath(*mock_packages.repos)
     assert "pkg-in-extra-repo" not in repos.all_package_names()
 
@@ -144,8 +145,9 @@ def test_use_repositories_with_unmaterialized_path(
     (tmp_path / "packages").mkdir()
     (tmp_path / "repo.yaml").write_text("repo:\n  namespace: myrepo\n")
 
+    cache = spack.context.current().misc_cache
     monkeypatch.setattr(
-        spack.repo, "PATH", Singleton(lambda: spack.repo.create_and_enable(config))
+        spack.repo, "PATH", Singleton(lambda: spack.repo.create_and_enable(config, cache=cache))
     )
 
     with spack.repo.use_repositories(str(tmp_path)) as repo:
@@ -169,11 +171,12 @@ spack:
 """
     )
 
+    cache = spack.context.current().misc_cache
     monkeypatch.setattr(
-        spack.repo, "PATH", Singleton(lambda: spack.repo.create_and_enable(config))
+        spack.repo, "PATH", Singleton(lambda: spack.repo.create_and_enable(config, cache=cache))
     )
 
-    env = spack.environment.Environment(tmp_path)
+    env = spack.environment.Environment(tmp_path, ctx=spack.context.current())
     spack.environment.activate(env)
     try:
         assert {r.namespace for r in spack.repo.PATH.repos} == {"builder_test", "builtin_mock"}
@@ -636,7 +639,7 @@ spack:
         bar: $env/foo/spack_repo/bar
 """
     )
-    env = spack.environment.Environment(tmp_path)
+    env = spack.environment.Environment(tmp_path, ctx=spack.context.current())
 
     with env:
         assert any(os.path.samefile(repo_root, r.root) for r in spack.repo.PATH.repos)
@@ -672,6 +675,7 @@ def test_parse_config_descriptor_git_1(tmp_path: pathlib.Path):
             "destination": str(tmp_path / "some/destination"),
         },
         lock=spack.util.lock.Lock(str(tmp_path / "x"), enable=False),
+        config=spack.context.current().config,
     )
 
     assert isinstance(descriptor, spack.repo.RemoteRepoDescriptor)
@@ -686,6 +690,7 @@ def test_parse_config_descriptor_git_2(tmp_path: pathlib.Path):
         name="name",
         descriptor={"git": str(tmp_path / "repo.git"), "paths": ["some/path"]},
         lock=spack.util.lock.Lock(str(tmp_path / "x"), enable=False),
+        config=spack.context.current().config,
     )
     assert isinstance(descriptor, spack.repo.RemoteRepoDescriptor)
     assert descriptor.relative_paths == ["some/path"]
@@ -700,6 +705,7 @@ def test_remote_descriptor_no_git(tmp_path: pathlib.Path):
             "destination": str(tmp_path / "some/destination"),
         },
         lock=spack.util.lock.Lock(str(tmp_path / "x"), enable=False),
+        config=spack.context.current().config,
     )
 
     descriptor.initialize(fetch=True, git=None)
@@ -717,6 +723,7 @@ def test_remote_descriptor_update_no_git(tmp_path: pathlib.Path):
             "destination": str(tmp_path / "some/destination"),
         },
         lock=spack.util.lock.Lock(str(tmp_path / "x"), enable=False),
+        config=spack.context.current().config,
     )
 
     assert isinstance(descriptor, spack.repo.RemoteRepoDescriptor)
@@ -730,6 +737,7 @@ def test_parse_config_descriptor_local(tmp_path: pathlib.Path):
         name="name",
         descriptor=str(tmp_path / "local_repo"),
         lock=spack.util.lock.Lock(str(tmp_path / "x"), enable=False),
+        config=spack.context.current().config,
     )
     assert isinstance(descriptor, spack.repo.LocalRepoDescriptor)
     assert descriptor.name == "name"
@@ -743,6 +751,7 @@ def test_parse_config_descriptor_no_git(tmp_path: pathlib.Path):
             name="name",
             descriptor={"destination": str(tmp_path / "some/destination"), "paths": ["some/path"]},
             lock=spack.util.lock.Lock(str(tmp_path / "x"), enable=False),
+            config=spack.context.current().config,
         )
 
 
@@ -1035,7 +1044,9 @@ def test_unknownpkgerror_match_fails(mock_packages):
         raise MemoryError("Too many packages to compare")
 
     # Confirm that the error indicates there were no matches (default).
-    exception = spack.repo.UnknownPackageError("pkg_a", get_close_matches=_get_close_matches)
+    exception = spack.repo.UnknownPackageError(
+        "pkg_a", mock_packages, get_close_matches=_get_close_matches
+    )
     assert "mean one of the following" not in str(exception)
 
 

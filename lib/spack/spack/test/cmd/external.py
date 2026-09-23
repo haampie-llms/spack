@@ -211,7 +211,7 @@ def test_find_external_manifest_failure(mutable_config, tmp_path: pathlib.Path, 
     test_manifest_file_path = os.path.join(test_manifest_dir, "test.json")
     touch(test_manifest_file_path)
 
-    def fail():
+    def fail(ctx):
         raise Exception()
 
     monkeypatch.setattr(spack.cmd.external, "_collect_and_consume_cray_manifest_files", fail)
@@ -266,7 +266,10 @@ def test_overriding_prefix(mock_executable, mutable_config, monkeypatch, mock_pa
 
     finder = spack.detection.path.ExecutablesFinder()
     detected_specs = finder.find(
-        pkg_name="gcc", initial_guess=[str(search_dir)], repository=mock_packages
+        pkg_name="gcc",
+        initial_guess=[str(search_dir)],
+        repository=mock_packages,
+        additional_search_paths=[],
     )
 
     assert len(detected_specs) == 1

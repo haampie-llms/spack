@@ -8,11 +8,13 @@ import pathlib
 import pytest
 
 import spack.concretize
+import spack.context
 from spack.config import Configuration
 from spack.fetch_strategy import HgFetchStrategy
 from spack.stage import stage_from_config
 from spack.util.executable import which
 from spack.util.filesystem import mkdirp, touch, working_dir
+from spack.util.web import NetworkClient
 from spack.version import Version
 
 # Test functionality covered is supported on Windows, but currently failing
@@ -42,7 +44,7 @@ def test_fetch(
     h = mock_hg_repository.hash
 
     # Construct the package under test
-    s = spack.concretize.concretize_one("hg-test")
+    s = spack.concretize.concretize_one("hg-test", spack.context.current())
     monkeypatch.setitem(s.package.versions, Version("hg"), t.args)
 
     # Enter the stage directory and check some properties
@@ -77,7 +79,9 @@ def test_hg_extra_fetch(tmp_path: pathlib.Path, config):
     testpath = str(tmp_path)
 
     fetcher = HgFetchStrategy(hg="file:///not-a-real-hg-repo")
-    with stage_from_config(fetcher, path=testpath, config=config) as stage:
+    with stage_from_config(
+        fetcher, path=testpath, config=config, client=NetworkClient.from_config(config)
+    ) as stage:
         source_path = stage.source_path
         mkdirp(source_path)
         fetcher.fetch()

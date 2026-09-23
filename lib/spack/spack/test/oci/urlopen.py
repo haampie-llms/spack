@@ -14,6 +14,7 @@ from urllib.request import Request
 
 import pytest
 
+import spack.context
 import spack.mirrors.mirror
 import spack.util.web
 from spack.oci.image import Digest, ImageReference, default_config, default_manifest
@@ -532,7 +533,10 @@ def test_copy_missing_layers(tmp_path: pathlib.Path, config):
     upload_manifest(src, manifest, urlopen=urlopen)
 
     # Finally, copy the image from src to dst
-    copy_missing_layers(src, dst, architecture="amd64", urlopen=urlopen)
+    client = spack.util.web.NetworkClient.from_config(config)
+    copy_missing_layers(
+        src, dst, architecture="amd64", urlopen=urlopen, config=config, client=client
+    )
 
     # Check that all layers (not config) were copied and identical
     assert len(dst_registry.blobs) == len(blobs)
@@ -549,7 +553,9 @@ def test_copy_missing_layers(tmp_path: pathlib.Path, config):
 
     # Check that re-uploading skips existing layers.
     dst_registry.clear_log()
-    copy_missing_layers(src, dst, architecture="amd64", urlopen=urlopen)
+    copy_missing_layers(
+        src, dst, architecture="amd64", urlopen=urlopen, config=config, client=client
+    )
 
     # Check that no uploads were initiated, only existence checks were done.
     assert sum(is_upload(method, path) for method, path in dst_registry.requests) == 0
@@ -708,15 +714,25 @@ def test_manifest_index(tmp_path: pathlib.Path):
     upload_manifest(img, index, tag=True, urlopen=urlopen)
 
     # Check that we fetcht the correct manifest and config for each architecture
+    ctx = spack.context.current()
     for arch in ("amd64", "arm64"):
         assert (
-            get_manifest_and_config(img, architecture=arch, urlopen=urlopen)
+            get_manifest_and_config(
+                img, architecture=arch, urlopen=urlopen, config=ctx.config, client=ctx.network
+            )
             == manifest_and_config[arch]
         )
 
     # Also test max recursion
     with pytest.raises(Exception, match="Maximum recursion depth reached"):
-        get_manifest_and_config(img, architecture="amd64", recurse=0, urlopen=urlopen)
+        get_manifest_and_config(
+            img,
+            architecture="amd64",
+            recurse=0,
+            urlopen=urlopen,
+            config=ctx.config,
+            client=ctx.network,
+        )
 
 
 class BrokenServer(DummyServer):

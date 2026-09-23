@@ -30,9 +30,9 @@ import uuid
 from typing import Any, Callable, Dict, Generic, List, Optional, Sequence, Type, TypeVar
 
 import spack.binary_distribution
-import spack.compilers.libraries
 import spack.concretize
 import spack.config
+import spack.context
 import spack.detection
 import spack.error
 import spack.installer_dispatch
@@ -122,7 +122,7 @@ class BootstrapRequest(Generic[ResultT]):
                 "root_policy": "source_only",
                 "dependencies_policy": "source_only",
             },
-            concretize=concretize or spack.concretize.concretize_one,
+            concretize=concretize or _concretize,
         )
 
     @classmethod
@@ -136,7 +136,7 @@ class BootstrapRequest(Generic[ResultT]):
             metadata_name=abstract_spec.name,
             probe=functools.partial(_executables_in_store, executables),
             installer_args={},
-            concretize=spack.concretize.concretize_one,
+            concretize=_concretize,
         )
 
 
@@ -145,7 +145,9 @@ class Bootstrapper:
 
     def __init__(self, conf: ConfigDictionary) -> None:
         self.name = conf["name"]
-        self.metadata_dir = spack.config.canonicalize_path(conf["metadata"])
+        self.metadata_dir = spack.config.canonicalize_path(
+            conf["metadata"], config=spack.context.current().config
+        )
 
         # Check for relative paths, and turn them into absolute paths
         # root is the metadata_dir
@@ -200,8 +202,9 @@ class BuildcacheBootstrapper(Bootstrapper):
 
     def _install_by_hash(self, pkg_hash: str, pkg_sha256: str) -> None:
         # The caller is inside ensure_bootstrap_configuration, which already selects the platform
+        ctx = spack.context.current()
         query = spack.binary_distribution.BinaryCacheQuery(
-            all_architectures=True, config=spack.config.CONFIG
+            all_architectures=True, index=ctx.binary_index, config=spack.config.CONFIG
         )
         for match in spack.store.find([f"/{pkg_hash}"], multiple=False, query_fn=query):
             spack.binary_distribution.install_root_node(
@@ -214,6 +217,9 @@ class BuildcacheBootstrapper(Bootstrapper):
                 force=True,
                 sha256=pkg_sha256,
                 allow_missing=True,
+                config=ctx.config,
+                client=ctx.network,
+                store=ctx.store,
             )
 
     def _install_and_test(
@@ -223,9 +229,10 @@ class BuildcacheBootstrapper(Bootstrapper):
         with spack.config.CONFIG.override(self.mirror_scope):
             # This index is currently needed to get the compiler used to build some
             # specs that we know by dag hash.
-            spack.binary_distribution.BINARY_INDEX.regenerate_spec_cache()
+            binary_index = spack.context.current().binary_index
+            binary_index.regenerate_spec_cache()
             index = spack.binary_distribution.update_cache_and_get_specs(
-                config=spack.config.CONFIG
+                binary_index, config=spack.config.CONFIG
             )
 
             if not index:
@@ -448,7 +455,9 @@ def _add_externals_if_missing() -> None:
     ]
     if IS_WINDOWS:
         search_list.append("winbison")
-    externals = spack.detection.by_path(search_list, repo=spack.repo.PATH)
+    externals = spack.detection.by_path(
+        search_list, repo=spack.repo.PATH, config=spack.context.current().config
+    )
     # System git is typically deprecated, so mark as non-buildable to force it as external
     non_buildable_externals = {k: externals.pop(k) for k in ("git",) if k in externals}
     spack.detection.update_configuration(
@@ -469,6 +478,11 @@ def clingo_root_spec(platform: Optional[str] = None, target: Optional[str] = Non
     return _root_spec("clingo-bootstrap@spack+python", platform=platform, target=target)
 
 
+def _concretize(abstract_spec: spack.spec.Spec) -> spack.spec.Spec:
+    """Concretize with the configuration in use when bootstrapping."""
+    return spack.concretize.concretize_one(abstract_spec, spack.context.current())
+
+
 def _concretize_clingo(abstract_spec: spack.spec.Spec) -> spack.spec.Spec:
     """Return the clingo spec to be built, edited from a prototype.
 
@@ -478,7 +492,7 @@ def _concretize_clingo(abstract_spec: spack.spec.Spec) -> spack.spec.Spec:
     return ClingoBootstrapConcretizer(
         spack.config.CONFIG,
         repo=spack.repo.PATH,
-        compiler_cache=spack.compilers.libraries.COMPILER_CACHE,
+        compiler_cache=spack.context.current().compiler_cache,
     ).concretize()
 
 
@@ -562,7 +576,12 @@ def ensure_winsdk_external_or_raise() -> None:
         return
     tty.debug("Detecting Windows SDK and WGL installations")
     # find the externals sequentially to avoid subprocesses being spawned
-    externals = spack.detection.by_path(["win-sdk", "wgl"], repo=spack.repo.PATH, max_workers=1)
+    externals = spack.detection.by_path(
+        ["win-sdk", "wgl"],
+        repo=spack.repo.PATH,
+        config=spack.context.current().config,
+        max_workers=1,
+    )
     if not set(["win-sdk", "wgl"]) == externals.keys():
         missing_packages_lst = []
         if "wgl" not in externals:
@@ -606,7 +625,9 @@ def bootstrapping_sources(scope: Optional[str] = None):
     list_of_sources = []
     for entry in source_configs:
         current = copy.copy(entry)
-        metadata_dir = spack.config.canonicalize_path(entry["metadata"])
+        metadata_dir = spack.config.canonicalize_path(
+            entry["metadata"], config=spack.context.current().config
+        )
         metadata_yaml = os.path.join(metadata_dir, METADATA_YAML_FILENAME)
         try:
             with open(metadata_yaml, encoding="utf-8") as stream:

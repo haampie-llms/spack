@@ -14,6 +14,7 @@ import spack.deprecation
 import spack.environment as ev
 import spack.error
 import spack.main
+import spack.repo
 from spack.cmd.common import arguments
 from spack.config import Configuration
 from spack.solver.asp import UnsatisfiableSpecError
@@ -89,7 +90,7 @@ def test_match_spec_env(mock_packages, mutable_mock_env_path):
     check_defaults = spack.cmd.parse_specs(["pkg-a"], spack.context.current(), concretize=True)[0]
     assert not check_defaults.satisfies("foobar=baz")
 
-    e = ev.create("test")
+    e = ev.create("test", ctx=spack.context.current())
     e.add("pkg-a foobar=baz")
     e.concretize()
     with e:
@@ -101,7 +102,7 @@ def test_match_spec_env(mock_packages, mutable_mock_env_path):
 
 
 def test_multiple_env_match_raises_error(mock_packages, mutable_mock_env_path):
-    e = ev.create("test")
+    e = ev.create("test", ctx=spack.context.current())
     e.add("pkg-a foobar=baz")
     e.add("pkg-a foobar=fee")
     e.concretize()
@@ -116,7 +117,7 @@ def test_multiple_env_match_raises_error(mock_packages, mutable_mock_env_path):
 
 
 def test_root_and_dep_match_returns_root(mock_packages, mutable_mock_env_path):
-    e = ev.create("test")
+    e = ev.create("test", ctx=spack.context.current())
     e.add("pkg-b@0.9")
     e.add("pkg-a foobar=bar")  # Depends on b, should choose b@1.0
     e.concretize()
@@ -227,17 +228,25 @@ def test_deprecated_flag_is_honored_by_the_install_time_check(
     including those on a package with an 'allow' list of its own.
     """
     with mutable_config.override("packages:all:deprecation:allow", [{"severity": "critical"}]):
-        concrete = spack.concretize.concretize_one("deprecated-with-labels@3.0")
+        concrete = spack.concretize.concretize_one(
+            "deprecated-with-labels@3.0", spack.context.current()
+        )
 
     mutable_config.set(
         "packages:deprecated-with-labels:deprecation:allow", [{"labels": ["CVE-2026-0002"]}]
     )
     with pytest.raises(spack.error.InstallError, match="deprecated"):
-        spack.deprecation.check_deprecations([concrete])
+        spack.deprecation.check_deprecations(
+            [concrete],
+            policy=spack.deprecation.Policy.from_config(spack.config.CONFIG, repo=spack.repo.PATH),
+        )
 
     parser = argparse.ArgumentParser()
     arguments.add_concretizer_args(parser)
     namespace = parser.parse_args(["--deprecated"])
     arguments.apply_deferred_config(namespace, spack.context.current())
 
-    spack.deprecation.check_deprecations([concrete])  # must not raise
+    spack.deprecation.check_deprecations(
+        [concrete],
+        policy=spack.deprecation.Policy.from_config(spack.config.CONFIG, repo=spack.repo.PATH),
+    )  # must not raise

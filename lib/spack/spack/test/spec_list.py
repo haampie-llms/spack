@@ -6,6 +6,7 @@ import itertools
 import pytest
 
 import spack.concretize
+import spack.context
 from spack.environment.list import SpecListParser
 from spack.installer import PackageInstaller
 from spack.spec import Spec
@@ -40,7 +41,7 @@ DEFAULT_SPECS = [
 @pytest.fixture()
 def parser_and_speclist():
     """Default configuration of parser and user spec list for tests"""
-    parser = SpecListParser()
+    parser = SpecListParser(ctx=spack.context.current())
     parser.parse_definitions(
         data=[
             {"gccs": ["%gcc@4.5.0"]},
@@ -90,7 +91,9 @@ class TestSpecList:
         ],
     )
     def test_spec_list_constraint_ordering(self, specs, expected):
-        result = SpecListParser().parse_user_specs(name="specs", yaml_list=specs)
+        result = SpecListParser(ctx=spack.context.current()).parse_user_specs(
+            name="specs", yaml_list=specs
+        )
         assert result.specs == [Spec(x) for x in expected]
 
     def test_mock_spec_list(self, parser_and_speclist):
@@ -157,7 +160,7 @@ class TestSpecList:
             {"mpis": ["zmpi@1.0", "mpich@3.0"]},
         ]
 
-        parser = SpecListParser()
+        parser = SpecListParser(ctx=spack.context.current())
         parser.parse_definitions(data=definitions)
         result = parser.parse_user_specs(name="specs", yaml_list=input)
 
@@ -167,7 +170,7 @@ class TestSpecList:
 
     @pytest.mark.regression("16841")
     def test_spec_list_matrix_exclude(self):
-        parser = SpecListParser()
+        parser = SpecListParser(ctx=spack.context.current())
         result = parser.parse_user_specs(
             name="specs",
             yaml_list=[
@@ -181,13 +184,13 @@ class TestSpecList:
 
     def test_spec_list_exclude_with_abstract_hashes(self, install_mockery):
         # Put mpich in the database so it can be referred to by hash.
-        mpich_1 = spack.concretize.concretize_one("mpich+debug")
-        mpich_2 = spack.concretize.concretize_one("mpich~debug")
+        mpich_1 = spack.concretize.concretize_one("mpich+debug", spack.context.current())
+        mpich_2 = spack.concretize.concretize_one("mpich~debug", spack.context.current())
         PackageInstaller([mpich_1.package, mpich_2.package], explicit=True, fake=True).install()
 
         # Create matrix and exclude +debug, which excludes the first mpich after its abstract hash
         # is resolved.
-        parser = SpecListParser()
+        parser = SpecListParser(ctx=spack.context.current())
         result = parser.parse_user_specs(
             name="specs",
             yaml_list=[
@@ -209,7 +212,7 @@ class TestSpecList:
     @pytest.mark.regression("51703")
     def test_exclusion_with_conditional_dependencies(self):
         """Tests that we can exclude some spec using conditional dependencies in the exclusion."""
-        parser = SpecListParser()
+        parser = SpecListParser(ctx=spack.context.current())
         result = parser.parse_user_specs(
             name="specs",
             yaml_list=[

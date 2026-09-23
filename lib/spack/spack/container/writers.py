@@ -12,6 +12,7 @@ from typing import Optional
 
 import spack.vendor.jsonschema
 
+import spack.context
 import spack.environment as ev
 import spack.error
 import spack.schema.env
@@ -286,7 +287,7 @@ class PathContext(tengine.Context):
             config_args = _spack_checkout_config(images_config)
             command = checkout_command(*config_args)
             template_path = bootstrap_template_for(self.operating_system_key)
-            env = tengine.make_environment()
+            env = tengine.make_environment(spack.context.current().config)
             context = {"bootstrap": {"image": self.bootstrap_image, "spack_checkout": command}}
             bootstrap_recipe = env.get_template(template_path).render(**context)
 
@@ -303,7 +304,7 @@ class PathContext(tengine.Context):
 
     def __call__(self):
         """Returns the recipe as a string"""
-        env = tengine.make_environment()
+        env = tengine.make_environment(spack.context.current().config)
         template_name = self.container_config.get("template", self.template_name)
         t = env.get_template(template_name)
         return t.render(**self.to_dict())

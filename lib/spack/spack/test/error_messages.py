@@ -12,6 +12,7 @@ import pytest
 
 import spack.vendor.archspec.cpu
 
+import spack.context
 import spack.error
 import spack.repo
 import spack.util.file_cache
@@ -423,14 +424,14 @@ def check_error(msg, should_mention: Optional[Iterable] = None):
 
 
 def test_diamond_with_pkg_conflict1(concretize_scope, test_repo):
-    concretize_one("x2")
-    concretize_one("x3")
-    concretize_one("x4")
+    concretize_one("x2", spack.context.current())
+    concretize_one("x3", spack.context.current())
+    concretize_one("x4", spack.context.current())
 
     important_points = ["x2 depends on x4@4.1", "x3 depends on x4@4.0"]
 
     with expect_failure_and_print(should_mention=important_points):
-        concretize_one("x1")
+        concretize_one("x1", spack.context.current())
 
 
 def test_diamond_with_pkg_conflict2(concretize_scope, test_repo):
@@ -441,13 +442,13 @@ def test_diamond_with_pkg_conflict2(concretize_scope, test_repo):
     ]
 
     with expect_failure_and_print(should_mention=important_points):
-        concretize_one("y1")
+        concretize_one("y1", spack.context.current())
 
 
 @pytest.mark.xfail(reason="Not addressed yet")
 def test_version_range_null(concretize_scope, test_repo):
     with expect_failure_and_print():
-        concretize_one("x2@3:4")
+        concretize_one("x2@3:4", spack.context.current())
 
 
 # This error message is hard to follow: neither z2 or z3
@@ -466,10 +467,10 @@ def test_null_variant_for_requested_version(concretize_scope, test_repo):
            (z2 ^z3:2.0)
            (v2 only exists for @2.1:)
     """
-    concretize_one("z1")
+    concretize_one("z1", spack.context.current())
 
     with expect_failure_and_print(should_mention=["z2"]):
-        concretize_one("z1@1.1")
+        concretize_one("z1@1.1", spack.context.current())
 
 
 def test_errmsg_requirements_1(concretize_scope, test_repo):
@@ -483,7 +484,7 @@ def test_errmsg_requirements_1(concretize_scope, test_repo):
     ]
 
     with expect_failure_and_print(should_mention=important_points):
-        concretize_one("w4@:2.0 ^w3@2.1")
+        concretize_one("w4@:2.0 ^w3@2.1", spack.context.current())
 
 
 def test_errmsg_requirements_cfg(concretize_scope, test_repo, mutable_config: Configuration):
@@ -504,7 +505,7 @@ packages:
 
     # w4 has: depends_on("w2@:2.0", when="@:2.0")
     with expect_failure_and_print(should_mention=important_points):
-        concretize_one("w4@2.0 ^w2+v1")
+        concretize_one("w4@2.0 ^w2+v1", spack.context.current())
 
 
 # This reencodes prior test test_errmsg_requirements_cfg
@@ -520,7 +521,7 @@ def test_errmsg_requirements_directives(concretize_scope, test_repo):
     ]
 
     with expect_failure_and_print(should_mention=important_points):
-        concretize_one("t4@:2.0 ^t2+v1")
+        concretize_one("t4@:2.0 ^t2+v1", spack.context.current())
 
 
 # Simulates a user error: package is specified as external with a version,
@@ -543,7 +544,7 @@ packages:
     important_points = ["no externals satisfy the request"]
 
     with expect_failure_and_print(should_mention=important_points):
-        concretize_one("t1")
+        concretize_one("t1", spack.context.current())
 
 
 @pytest.mark.parametrize("section", ["prefer", "require"])
@@ -553,7 +554,7 @@ def test_warns_on_compiler_constraint_in_all(
     """Compiler constraints under packages:all: are a footgun and should warn."""
     update_packages_config(f"packages:\n  all:\n    {section}:\n    - '%c=gcc'\n", mutable_config)
     with pytest.warns(UserWarning, match="packages: all:"):
-        concretize_one("gmake")
+        concretize_one("gmake", spack.context.current())
 
 
 @pytest.mark.regression("52209")
@@ -563,7 +564,7 @@ def test_unknown_concrete_target_in_input_spec(concretize_scope, test_repo):
     """
     spec_str = "x4 target=not-a-real-uarch"
     with pytest.raises(spack.error.SpackError) as exc_info:
-        concretize_one(spec_str)
+        concretize_one(spec_str, spack.context.current())
     check_error(str(exc_info.value), should_mention=[spec_str, "not a known target"])
 
 
@@ -582,7 +583,7 @@ packages:
         mutable_config,
     )
     with pytest.raises(spack.error.SpackError) as exc_info:
-        concretize_one("x4")
+        concretize_one("x4", spack.context.current())
     check_error(str(exc_info.value), should_mention=[target_str, "unknown target"])
 
 
@@ -601,7 +602,7 @@ packages:
         mutable_config,
     )
     with pytest.raises(spack.error.SpackError) as exc_info:
-        concretize_one("x4")
+        concretize_one("x4", spack.context.current())
     check_error(
         str(exc_info.value),
         should_mention=["target=not-a-real-uarch", "target=also-fake", "unknown target"],
@@ -626,7 +627,7 @@ packages:
         mutable_config,
     )
     with pytest.warns(UserWarning, match="not-a-real-uarch"):
-        concretize_one("x4")
+        concretize_one("x4", spack.context.current())
 
 
 @pytest.mark.regression("52209")
@@ -641,4 +642,4 @@ packages:
         mutable_config,
     )
     with pytest.warns(UserWarning, match="not-a-real-uarch"):
-        concretize_one("x4")
+        concretize_one("x4", spack.context.current())

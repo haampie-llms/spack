@@ -6,6 +6,7 @@ from collections import namedtuple
 import pytest
 
 import spack.concretize
+import spack.context
 import spack.directives
 import spack.spec
 import spack.version
@@ -74,8 +75,8 @@ def test_constraints_from_context_are_merged(mock_packages: RepoPath):
 
 @pytest.mark.regression("27754")
 def test_extends_spec(config, mock_packages):
-    extender = spack.concretize.concretize_one("extends-spec")
-    extendee = spack.concretize.concretize_one("extendee")
+    extender = spack.concretize.concretize_one("extends-spec", spack.context.current())
+    extendee = spack.concretize.concretize_one("extendee", spack.context.current())
 
     assert extender.dependencies
     assert extender.package.extends(extendee)
@@ -83,14 +84,18 @@ def test_extends_spec(config, mock_packages):
 
 @pytest.mark.regression("48024")
 def test_conditionally_extends_transitive_dep(config, mock_packages):
-    spec = spack.concretize.concretize_one("conditionally-extends-transitive-dep")
+    spec = spack.concretize.concretize_one(
+        "conditionally-extends-transitive-dep", spack.context.current()
+    )
 
     assert not spec.package.extendee_spec
 
 
 @pytest.mark.regression("48025")
 def test_conditionally_extends_direct_dep(config, mock_packages):
-    spec = spack.concretize.concretize_one("conditionally-extends-direct-dep")
+    spec = spack.concretize.concretize_one(
+        "conditionally-extends-direct-dep", spack.context.current()
+    )
 
     assert not spec.package.extendee_spec
 
@@ -190,7 +195,7 @@ def test_redistribute_directive(
 ):
     spec = spack.spec.Spec(spec_str)
     assert mock_packages.get_pkg_class(spec.fullname).redistribute_source(spec) == distribute_src
-    concretized_spec = spack.concretize.concretize_one(spec)
+    concretized_spec = spack.concretize.concretize_one(spec, spack.context.current())
     assert concretized_spec.package.redistribute_binary == distribute_bin
 
 

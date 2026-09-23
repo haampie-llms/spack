@@ -8,10 +8,12 @@ import pathlib
 import pytest
 
 import spack.concretize
+import spack.context
 from spack.fetch_strategy import CvsFetchStrategy
 from spack.stage import stage_from_config
 from spack.util.executable import which
 from spack.util.filesystem import mkdirp, touch, working_dir
+from spack.util.web import NetworkClient
 from spack.version import Version
 
 pytestmark = pytest.mark.skipif(not which("cvs"), reason="requires CVS to be installed")
@@ -37,7 +39,7 @@ def test_fetch(type_of_test, mock_cvs_repository, config, mutable_mock_repo):
     get_date = mock_cvs_repository.get_date
 
     # Construct the package under test
-    spec = spack.concretize.concretize_one("cvs-test")
+    spec = spack.concretize.concretize_one("cvs-test", spack.context.current())
     spec.package.versions[Version("cvs")] = test.args
 
     # Enter the stage directory and check some properties
@@ -77,7 +79,9 @@ def test_cvs_extra_fetch(tmp_path: pathlib.Path, config):
     fetcher = CvsFetchStrategy(cvs=":pserver:not-a-real-cvs-repo%module=not-a-real-module")
     assert fetcher is not None
 
-    with stage_from_config(fetcher, path=testpath, config=config) as stage:
+    with stage_from_config(
+        fetcher, path=testpath, config=config, client=NetworkClient.from_config(config)
+    ) as stage:
         assert stage is not None
 
         source_path = stage.source_path

@@ -7,6 +7,7 @@ import pathlib
 import pytest
 
 import spack.concretize
+import spack.context
 import spack.spec
 from spack.enums import InstallRecordStatus
 from spack.main import SpackCommand
@@ -76,8 +77,12 @@ def test_deprecate_deps(mock_packages, mock_archive, mock_fetch, temporary_store
     install("--fake", "libdwarf@20130729 ^libelf@0.8.13")
     install("--fake", "libdwarf@20130207 ^libelf@0.8.10")
 
-    new_spec = spack.concretize.concretize_one("libdwarf@20130729^libelf@0.8.13")
-    old_spec = spack.concretize.concretize_one("libdwarf@20130207^libelf@0.8.10")
+    new_spec = spack.concretize.concretize_one(
+        "libdwarf@20130729^libelf@0.8.13", spack.context.current()
+    )
+    old_spec = spack.concretize.concretize_one(
+        "libdwarf@20130207^libelf@0.8.10", spack.context.current()
+    )
 
     all_installed = temporary_store.db.query()
 
@@ -121,12 +126,12 @@ def test_deprecate_already_deprecated(
     install("--fake", "libelf@0.8.12")
     install("--fake", "libelf@0.8.10")
 
-    deprecated_spec = spack.concretize.concretize_one("libelf@0.8.10")
+    deprecated_spec = spack.concretize.concretize_one("libelf@0.8.10", spack.context.current())
 
     deprecate("-y", "libelf@0.8.10", "libelf@0.8.12")
 
     deprecator = temporary_store.db.deprecator(deprecated_spec)
-    assert deprecator == spack.concretize.concretize_one("libelf@0.8.12")
+    assert deprecator == spack.concretize.concretize_one("libelf@0.8.12", spack.context.current())
 
     deprecate("-y", "libelf@0.8.10", "libelf@0.8.13")
 
@@ -136,7 +141,7 @@ def test_deprecate_already_deprecated(
     assert len(all_available) == 3
 
     deprecator = temporary_store.db.deprecator(deprecated_spec)
-    assert deprecator == spack.concretize.concretize_one("libelf@0.8.13")
+    assert deprecator == spack.concretize.concretize_one("libelf@0.8.13", spack.context.current())
 
 
 def test_deprecate_deprecator(
@@ -148,9 +153,13 @@ def test_deprecate_deprecator(
     install("--fake", "libelf@0.8.12")
     install("--fake", "libelf@0.8.10")
 
-    first_deprecated_spec = spack.concretize.concretize_one("libelf@0.8.10")
-    second_deprecated_spec = spack.concretize.concretize_one("libelf@0.8.12")
-    final_deprecator = spack.concretize.concretize_one("libelf@0.8.13")
+    first_deprecated_spec = spack.concretize.concretize_one(
+        "libelf@0.8.10", spack.context.current()
+    )
+    second_deprecated_spec = spack.concretize.concretize_one(
+        "libelf@0.8.12", spack.context.current()
+    )
+    final_deprecator = spack.concretize.concretize_one("libelf@0.8.13", spack.context.current())
 
     deprecate("-y", "libelf@0.8.10", "libelf@0.8.12")
 
@@ -180,7 +189,7 @@ def test_concretize_deprecated(mock_packages, mock_archive, mock_fetch, install_
 
     spec = spack.spec.Spec("libelf@0.8.10")
     with pytest.raises(spack.spec.SpecDeprecatedError):
-        spack.concretize.concretize_one(spec)
+        spack.concretize.concretize_one(spec, spack.context.current())
 
 
 @pytest.mark.usefixtures("mock_packages", "mock_archive", "mock_fetch", "install_mockery")

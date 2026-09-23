@@ -568,7 +568,7 @@ def push_fn(args, ctx):
 
     # Warn about possible old binary mirror layout
     if not spack.oci.image.is_oci_url(mirror.push_url):
-        check_mirror_for_layout(mirror)
+        check_mirror_for_layout(mirror, client=ctx.network)
 
     with spack.binary_distribution.make_uploader(
         mirror=mirror,
@@ -576,6 +576,9 @@ def push_fn(args, ctx):
         update_index=args.update_index,
         signing_key=signing_key,
         base_image=args.base_image,
+        config=ctx.config,
+        client=ctx.network,
+        store=ctx.store,
     ) as uploader:
         skipped, upload_errors = uploader.push(specs=specs)
         failed.extend(upload_errors)
@@ -632,7 +635,12 @@ def install_fn(args, ctx):
         ctx.store.db.ensure_latest_db_version()
     for match in matches:
         spack.binary_distribution.install_single_spec(
-            match, unsigned=args.unsigned, force=args.force
+            match,
+            unsigned=args.unsigned,
+            force=args.force,
+            config=ctx.config,
+            client=ctx.network,
+            store=ctx.store,
         )
 
 
@@ -670,7 +678,13 @@ def keys_fn(args, ctx):
         mirror_map = dict([(m.name, m) for m in args.mirrors])
 
     spack.binary_distribution.trust_keys(
-        args.yes_to_all, args.install, args.trust, args.force, mirrors=mirror_map
+        args.yes_to_all,
+        args.install,
+        args.trust,
+        args.force,
+        mirrors=mirror_map,
+        config=ctx.config,
+        client=ctx.network,
     )
 
 
@@ -691,7 +705,7 @@ def check_fn(args: argparse.Namespace, ctx):
         tty.msg("No specs provided, exiting.")
         return
 
-    specs = [spack.concretize.concretize_one(s) for s in specs]
+    specs = [spack.concretize.concretize_one(s, ctx) for s in specs]
 
     # Next see if there are any configured binary mirrors
     configured_mirrors = ctx.config.get("mirrors", scope=args.scope)
@@ -705,7 +719,7 @@ def check_fn(args: argparse.Namespace, ctx):
 
     if (
         spack.binary_distribution.check_specs_against_mirrors(
-            configured_mirrors, specs, args.output_file
+            configured_mirrors, specs, args.output_file, config=ctx.config, client=ctx.network
         )
         == 1
     ):
@@ -724,7 +738,9 @@ def download_fn(args, ctx):
     if len(specs) != 1:
         args.subparser.error("requires a single spec argument")
 
-    spack.binary_distribution.download_single_spec(specs[0], args.path)
+    spack.binary_distribution.download_single_spec(
+        specs[0], args.path, config=ctx.config, client=ctx.network
+    )
 
 
 def save_specfile_fn(args, ctx):
@@ -742,7 +758,7 @@ def save_specfile_fn(args, ctx):
     root = specs[0]
 
     if not root.concrete:
-        root = spack.concretize.concretize_one(root)
+        root = spack.concretize.concretize_one(root, ctx)
 
     save_dependency_specfiles(
         root, args.specfile_dir, dependencies=spack.cmd.parse_specs(args.specs, ctx)
@@ -808,7 +824,7 @@ def copy_buildcache_entry(
     manifest_src_url = cache_entry.remote_manifest_url
     manifest_dest_url = cache_entry.get_manifest_url(target_spec, destination_url)
 
-    manifest_stage = spack.stage.stage_from_config(manifest_src_url, config=config)
+    manifest_stage = spack.stage.stage_from_config(manifest_src_url, config=config, client=client)
 
     try:
         manifest_stage.create()
@@ -876,7 +892,9 @@ def sync_fn(args, ctx):
         cache_class = get_url_buildcache_class(
             layout_version=spack.binary_distribution.CURRENT_BUILD_CACHE_LAYOUT_VERSION
         )
-        src_cache_entry = cache_class(src_mirror_url, s, allow_unsigned=True)
+        src_cache_entry = cache_class(
+            src_mirror_url, s, allow_unsigned=True, config=ctx.config, client=ctx.network
+        )
         src_cache_entry.read_manifest()
         copy_buildcache_entry(src_cache_entry, dest_mirror_url, ctx.config, ctx.network)
 
@@ -905,7 +923,10 @@ def manifest_copy(
             layout_version=spack.binary_distribution.CURRENT_BUILD_CACHE_LAYOUT_VERSION
         )
         src_cache_entry = cache_class(
-            cache_class.get_base_url(copy_obj["src"]), allow_unsigned=True
+            cache_class.get_base_url(copy_obj["src"]),
+            allow_unsigned=True,
+            config=config,
+            client=client,
         )
         src_cache_entry.read_manifest(manifest_url=copy_obj["src"])
         if dest_mirror:
@@ -919,6 +940,7 @@ def manifest_copy(
 def update_index(
     mirror: spack.mirrors.mirror.Mirror,
     config: spack.config.Configuration,
+    client: web_util.NetworkClient,
     update_keys=False,
     timer=timer_mod.NULL_TIMER,
 ):
@@ -933,24 +955,32 @@ def update_index(
         with tempfile.TemporaryDirectory(
             dir=spack.stage.stage_root(config)
         ) as tmpdir, spack.util.parallel.make_concurrent_executor() as executor:
-            spack.binary_distribution._oci_update_index(image_ref, tmpdir, executor, timer=timer)
+            spack.binary_distribution._oci_update_index(
+                image_ref, tmpdir, executor, timer=timer, config=config, client=client
+            )
         return
 
     # Otherwise, assume a normal mirror.
     url = mirror.push_url
 
     with tempfile.TemporaryDirectory(dir=spack.stage.stage_root(config)) as tmpdir:
-        spack.binary_distribution._url_generate_package_index(url, tmpdir, timer=timer)
+        spack.binary_distribution._url_generate_package_index(
+            url, tmpdir, timer=timer, config=config, client=client
+        )
 
     if update_keys:
-        mirror_update_keys(mirror, config)
+        mirror_update_keys(mirror, config, client)
 
 
-def mirror_update_keys(mirror: spack.mirrors.mirror.Mirror, config: spack.config.Configuration):
+def mirror_update_keys(
+    mirror: spack.mirrors.mirror.Mirror,
+    config: spack.config.Configuration,
+    client: web_util.NetworkClient,
+):
     url = mirror.push_url
     try:
         with tempfile.TemporaryDirectory(dir=spack.stage.stage_root(config)) as tmpdir:
-            spack.binary_distribution.generate_key_index(url, tmpdir)
+            spack.binary_distribution.generate_key_index(url, tmpdir, config=config, client=client)
     except spack.binary_distribution.CannotListKeys as e:
         # Do not error out if listing keys went wrong. This usually means that the _gpg path
         # does not exist. TODO: distinguish between this and other errors.
@@ -1021,7 +1051,7 @@ def update_view(
     if sources:
         for source in sources:
             tty.debug(f"reading specs from source: {source}")
-            env = ev.environment_from_name_or_dir(source)
+            env = ev.environment_from_name_or_dir(source, ctx=ctx)
             hashes.extend(env.all_hashes())
     else:
         # Get hashes in the current active environment
@@ -1046,10 +1076,12 @@ def update_view(
                     if f is not None:
                         db._read_from_stream(f)
 
-        spack.binary_distribution._url_generate_package_index(url, tmpdir, db, name, filter_fn)
+        spack.binary_distribution._url_generate_package_index(
+            url, tmpdir, db, name, filter_fn, config=ctx.config, client=ctx.network
+        )
 
     if update_keys:
-        mirror_update_keys(mirror, ctx.config)
+        mirror_update_keys(mirror, ctx.config, ctx.network)
 
 
 def check_index_fn(args, ctx):
@@ -1097,7 +1129,7 @@ def check_index_fn(args, ctx):
         manifest_files = []
         if "manifests" in verify or "blobs" in verify:
             manifest_files, read_fn = get_entries_from_cache(
-                mirror.fetch_url, BuildcacheComponent.SPEC
+                mirror.fetch_url, BuildcacheComponent.SPEC, config=ctx.config, client=ctx.network
             )
         if "manifests" in verify and index_exists:
             # Read the index file
@@ -1208,7 +1240,7 @@ def update_index_fn(args, ctx):
             ctx=ctx,
         )
     else:
-        update_index(args.mirror, ctx.config, update_keys=args.keys, timer=t)
+        update_index(args.mirror, ctx.config, ctx.network, update_keys=args.keys, timer=t)
 
     if tty.is_verbose():
         tty.msg("Timing summary:")
@@ -1261,7 +1293,13 @@ def migrate_fn(args, ctx):
     if not proceed:
         tty.die("Migration aborted.")
 
-    migrate(target_mirror, unsigned=unsigned, delete_existing=delete_existing)
+    migrate(
+        target_mirror,
+        unsigned=unsigned,
+        delete_existing=delete_existing,
+        config=ctx.config,
+        client=ctx.network,
+    )
 
 
 def prune_fn(args, ctx):
@@ -1275,7 +1313,9 @@ def prune_fn(args, ctx):
     dry_run: bool = args.dry_run
     assert isinstance(mirror, spack.mirrors.mirror.Mirror)
 
-    prune_buildcache(mirror=mirror, keeplist=keeplist, dry_run=dry_run)
+    prune_buildcache(
+        mirror=mirror, keeplist=keeplist, dry_run=dry_run, config=ctx.config, client=ctx.network
+    )
 
 
 def buildcache(parser, args, ctx):

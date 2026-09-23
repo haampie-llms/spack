@@ -137,7 +137,7 @@ def url_parse(args, ctx):
     if args.spider:
         print()
         tty.msg("Spidering for versions:")
-        versions = spack.url.find_versions_of_archive(url)
+        versions = spack.url.find_versions_of_archive(url, client=ctx.network)
 
         if not versions:
             print("  Found no versions for {0}".format(name))

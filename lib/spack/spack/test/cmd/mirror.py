@@ -15,7 +15,6 @@ import spack.context
 import spack.environment as ev
 import spack.mirrors.utils
 import spack.package_base
-import spack.repo
 import spack.spec
 import spack.util.crypto
 import spack.util.git
@@ -58,14 +57,14 @@ def test_mirror_from_env(
     env_name = "test"
 
     env("create", env_name)
-    with ev.read(env_name):
+    with ev.read(env_name, ctx=spack.context.current()):
         add("trivial-install-test-package")
         add("git-test")
         concretize()
         with mutable_config.override("config:checksum", False):
             mirror("create", "-d", mirror_dir, "--all")
 
-    e = ev.read(env_name)
+    e = ev.read(env_name, ctx=spack.context.current())
     assert set(os.listdir(mirror_dir)) == set([s.name for s in e.user_specs])
     for spec in e.specs_by_hash.values():
         mirror_res = os.listdir(os.path.join(mirror_dir, spec.name))
@@ -85,9 +84,7 @@ def test_mirror_cli_parallel_args(
     mirror_dir = str(tmp_path / "mirror")
     env_name = "test-parallel"
 
-    def mock_create_mirror_for_all_specs(
-        mirror_specs, path, skip_unstable_versions, workers, repo
-    ):
+    def mock_create_mirror_for_all_specs(mirror_specs, path, skip_unstable_versions, workers, ctx):
         assert path == mirror_dir
         assert workers == 2
 
@@ -96,7 +93,7 @@ def test_mirror_cli_parallel_args(
     )
 
     env("create", env_name)
-    with ev.read(env_name):
+    with ev.read(env_name, ctx=spack.context.current()):
         add("trivial-install-test-package")
         add("git-test")
         concretize()
@@ -112,17 +109,17 @@ def test_mirror_from_env_parallel(
     env_name = "test-parallel"
 
     env("create", env_name)
-    with ev.read(env_name):
+    with ev.read(env_name, ctx=spack.context.current()):
         add("trivial-install-test-package")
         add("git-test")
         concretize()
 
-    e = ev.read(env_name)
+    e = ev.read(env_name, ctx=spack.context.current())
     specs = list(e.specs_by_hash.values())
 
     with mutable_config.override("config:checksum", False):
         mirror_stats = spack.cmd.mirror.create_mirror_for_all_specs(
-            specs, mirror_dir, False, workers=2, repo=spack.repo.PATH
+            specs, mirror_dir, False, workers=2, ctx=spack.context.current()
         )
 
     assert len(mirror_stats.errors) == 0
@@ -195,13 +192,13 @@ def test_mirror_spec_from_env(
     env_name = "test"
 
     env("create", env_name)
-    with ev.read(env_name):
+    with ev.read(env_name, ctx=spack.context.current()):
         add("simple-standalone-test@0.9")
         concretize()
         with mutable_config.override("config:checksum", False):
             mirror("create", "-d", mirror_dir, "simple-standalone-test")
 
-    e = ev.read(env_name)
+    e = ev.read(env_name, ctx=spack.context.current())
     assert set(os.listdir(mirror_dir)) == set([s.name for s in e.user_specs])
     spec = e.concrete_roots()[0]
     mirror_res = os.listdir(os.path.join(mirror_dir, spec.name))
@@ -211,7 +208,7 @@ def test_mirror_spec_from_env(
 
 @pytest.fixture
 def source_for_pkg_with_hash(mock_packages, tmp_path: pathlib.Path):
-    s = spack.concretize.concretize_one("trivial-pkg-with-valid-hash")
+    s = spack.concretize.concretize_one("trivial-pkg-with-valid-hash", spack.context.current())
     local_url_basename = os.path.basename(s.package.url)
     local_path = tmp_path / local_url_basename
     local_path.write_text(s.package.hashed_content, encoding="utf-8")
@@ -225,9 +222,12 @@ def test_mirror_skip_unstable(
     mirror_dir = str(tmp_path_factory.mktemp("mirror-dir"))
 
     specs = [
-        spack.concretize.concretize_one(x) for x in ["git-test", "trivial-pkg-with-valid-hash"]
+        spack.concretize.concretize_one(x, spack.context.current())
+        for x in ["git-test", "trivial-pkg-with-valid-hash"]
     ]
-    spack.cmd.mirror.create(mirror_dir, specs, spack.repo.PATH, skip_unstable_versions=True)
+    spack.cmd.mirror.create(
+        mirror_dir, specs, spack.context.current(), skip_unstable_versions=True
+    )
 
     assert set(os.listdir(mirror_dir)) - set(["_source-cache"]) == set(
         ["trivial-pkg-with-valid-hash"]
@@ -265,7 +265,8 @@ def test_exclude_specs(mock_packages, config):
 
     mirror_specs = spack.cmd.mirror._specs_to_mirror(args, spack.context.current())
     expected_include = {
-        spack.concretize.concretize_one(x) for x in ["mpich@3.0.3", "mpich@3.0.4", "mpich@3.0"]
+        spack.concretize.concretize_one(x, spack.context.current())
+        for x in ["mpich@3.0.3", "mpich@3.0.4", "mpich@3.0"]
     }
     expected_exclude = {spack.spec.Spec(x) for x in ["mpich@3.0.1", "mpich@3.0.2", "mpich@1.0"]}
     assert expected_include <= set(mirror_specs)
@@ -299,7 +300,8 @@ mpich@1.0
 
     mirror_specs = spack.cmd.mirror._specs_to_mirror(args, spack.context.current())
     expected_include = {
-        spack.concretize.concretize_one(x) for x in ["mpich@3.0.3", "mpich@3.0.4", "mpich@3.0"]
+        spack.concretize.concretize_one(x, spack.context.current())
+        for x in ["mpich@3.0.3", "mpich@3.0.4", "mpich@3.0"]
     }
     expected_exclude = {spack.spec.Spec(x) for x in ["mpich@3.0.1", "mpich@3.0.2", "mpich@1.0"]}
     assert expected_include <= set(mirror_specs)
@@ -768,7 +770,7 @@ def test_git_provenance_url_fails_mirror_resolves_commit(
         mirror("create", "-d", mirror_path, "git-test-commit@main")
     mirror("add", "--type", "source", "test-mirror", mirror_path)
 
-    spec = spack.concretize.concretize_one("git-test-commit@main")
+    spec = spack.concretize.concretize_one("git-test-commit@main", spack.context.current())
 
     assert spec.package.fetcher.source_id() == gold_commit
     assert "commit" in spec.variants
@@ -802,10 +804,12 @@ def test_git_provenance_relative_to_mirror(
     git("-C", repo_path, "commit", "--no-gpg-sign", "--allow-empty", "-m", "bump sha")
     head_commit = git("-C", repo_path, "rev-parse", "main", output=str).strip()
 
-    spec_mirror = spack.concretize.concretize_one("git-test-commit@main")
+    spec_mirror = spack.concretize.concretize_one("git-test-commit@main", spack.context.current())
     assert spec_mirror.variants["commit"].value == mirror_commit
 
-    spec_head = spack.concretize.concretize_one(f"git-test-commit@main commit={head_commit}")
+    spec_head = spack.concretize.concretize_one(
+        f"git-test-commit@main commit={head_commit}", spack.context.current()
+    )
     assert spec_head.variants["commit"].value == head_commit
 
 
@@ -820,7 +824,7 @@ def test_mirror_skip_placeholder_pkg(tmp_path: pathlib.Path):
     mirror_cache = spack.mirrors.utils.get_mirror_cache(str(tmp_path))
     mirror_stats = spack.mirrors.utils.MirrorStatsForOneSpec(spec)
     result = spack.mirrors.utils.create_mirror_from_package_object(
-        pkg_obj, mirror_cache, mirror_stats
+        pkg_obj, mirror_cache, mirror_stats, config=spack.context.current().config
     )
     assert result is False
     assert not mirror_stats.errors

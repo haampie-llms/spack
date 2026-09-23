@@ -32,6 +32,7 @@ Skimming this module is a nice way to get acquainted with the types of
 calls you can make from within the install() function.
 """
 
+import functools
 import inspect
 import io
 import multiprocessing
@@ -69,15 +70,14 @@ import spack.compilers.libraries
 import spack.config
 import spack.deptypes as dt
 import spack.error
+import spack.hooks.sbang
 import spack.multimethod
 import spack.package_base
 import spack.paths
 import spack.platforms
-import spack.repo
 import spack.schema.environment
 import spack.spec
 import spack.stage
-import spack.store
 import spack.subprocess_context
 import spack.util.executable
 import spack.util.module_cmd
@@ -302,7 +302,7 @@ class DeprecatedExecutable:
         self.__call__()
 
 
-def clean_environment():
+def clean_environment(config: spack.config.Configuration):
     # Stuff in here sanitizes the build environment to eliminate
     # anything the user has set that may interfere. We apply it immediately
     # unlike the other functions so it doesn't overwrite what the modules load.
@@ -382,7 +382,7 @@ def clean_environment():
     for v in mpi_vars:
         env.unset(v)
 
-    build_lang = spack.config.CONFIG.get("config:build_language")
+    build_lang = config.get("config:build_language")
     if build_lang:
         # Override language-related variables. This can be used to force
         # English compiler messages etc., which allows the log parser to
@@ -425,7 +425,7 @@ def set_wrapper_environment_variables_for_flags(pkg, env):
     if pkg.keep_werror is not None:
         keep_werror = pkg.keep_werror
     else:
-        keep_werror = spack.config.CONFIG.get("config:flags:keep_werror")
+        keep_werror = pkg.context.config.get("config:flags:keep_werror")
 
     _add_werror_handling(keep_werror, env)
 
@@ -492,13 +492,13 @@ def set_wrapper_variables(pkg, env):
     set_wrapper_environment_variables_for_flags(pkg, env)
 
     # Working directory for the spack command itself, for debug logs.
-    if spack.config.CONFIG.get("config:debug"):
+    if pkg.context.config.get("config:debug"):
         env.set(SPACK_DEBUG, "TRUE")
     env.set(SPACK_SHORT_SPEC, pkg.spec.short_spec)
     env.set(SPACK_DEBUG_LOG_ID, pkg.spec.format("{name}-{hash:7}"))
     env.set(SPACK_DEBUG_LOG_DIR, spack.paths.spack_working_dir)
 
-    if spack.config.CONFIG.get("config:ccache"):
+    if pkg.context.config.get("config:ccache"):
         # Enable ccache in the compiler wrapper
         env.set(SPACK_CCACHE_BINARY, spack.util.executable.which_string("ccache", required=True))
     else:
@@ -562,7 +562,7 @@ def set_wrapper_variables(pkg, env):
     rpath_dirs = list(dedupe(filter_system_paths(rpath_dirs)))
 
     default_dynamic_linker_filter = spack.compilers.libraries.dynamic_linker_filter_for(
-        pkg.spec, repo=spack.repo.PATH, cache=spack.compilers.libraries.COMPILER_CACHE
+        pkg.spec, repo=pkg.context.repo, cache=pkg.context.compiler_cache
     )
     if default_dynamic_linker_filter:
         rpath_dirs = default_dynamic_linker_filter(rpath_dirs)
@@ -570,9 +570,9 @@ def set_wrapper_variables(pkg, env):
     # Spack managed directories include the stage, store and upstream stores. We extend this with
     # their real paths to make it more robust (e.g. /tmp vs /private/tmp on macOS).
     spack_managed_dirs: Set[str] = {
-        spack.stage.stage_root(spack.config.CONFIG),
-        spack.store.STORE.db.root,
-        *(db.root for db in spack.store.STORE.db.upstream_dbs),
+        spack.stage.stage_root(pkg.context.config),
+        pkg.context.store.db.root,
+        *(db.root for db in pkg.context.store.db.upstream_dbs),
     }
     spack_managed_dirs.update([os.path.realpath(p) for p in spack_managed_dirs])
 
@@ -595,7 +595,7 @@ def set_package_py_globals(pkg, context: Context = Context.BUILD):
     """
     module = ModuleChangePropagator(pkg)
 
-    jobs = spack.config.determine_number_of_jobs(parallel=pkg.parallel)
+    jobs = spack.config.determine_number_of_jobs(parallel=pkg.parallel, config=pkg.context.config)
     module.make_jobs = jobs
 
     module.make = DeprecatedExecutable(pkg.name, "make", "gmake")
@@ -628,6 +628,19 @@ def set_package_py_globals(pkg, context: Context = Context.BUILD):
         )
 
     module.static_to_shared_library = static_to_shared_library
+
+    # Package API functions that take no package, bound to the package's context
+    ctx = pkg.context
+    module.determine_number_of_jobs = functools.partial(
+        spack.config.determine_number_of_jobs, config=ctx.config
+    )
+    module.sbang_install_path = functools.partial(
+        spack.hooks.sbang.sbang_install_path_for, ctx.store
+    )
+    module.sbang_shebang_line = functools.partial(
+        spack.hooks.sbang.sbang_shebang_line_for, ctx.store
+    )
+    module.filter_shebang = lambda path: spack.hooks.sbang.filter_shebang_for(path, ctx.store)
 
     module.propagate_changes_to_mro()
 
@@ -776,7 +789,7 @@ def setup_package(pkg, dirty, context: Context = Context.BUILD):
 
     # Keep track of env changes from packages separately, since we want to
     # issue warnings when packages make "suspicious" modifications.
-    env_base = EnvironmentModifications() if dirty else clean_environment()
+    env_base = EnvironmentModifications() if dirty else clean_environment(pkg.context.config)
     env_mods = EnvironmentModifications()
 
     # setup compilers for build contexts
@@ -808,7 +821,7 @@ def setup_package(pkg, dirty, context: Context = Context.BUILD):
     if enable_var_name in env_by_name and disable_var_name in env_by_name:
         enable_new_dtags = _extract_dtags_arg(env_by_name, var_name=enable_var_name)
         disable_new_dtags = _extract_dtags_arg(env_by_name, var_name=disable_var_name)
-        if spack.config.CONFIG.get("config:shared_linking:type") == "rpath":
+        if pkg.context.config.get("config:shared_linking:type") == "rpath":
             env_mods.set("SPACK_DTAGS_TO_STRIP", enable_new_dtags)
             env_mods.set("SPACK_DTAGS_TO_ADD", disable_new_dtags)
         else:

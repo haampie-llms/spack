@@ -20,7 +20,6 @@ import spack.paths
 import spack.repo
 import spack.report
 import spack.spec
-import spack.store
 import spack.util.executable
 import spack.util.filesystem as fs
 import spack.util.spack_json as sjson
@@ -91,15 +90,18 @@ def get_escaped_text_output(filename: str) -> List[str]:
     return [re.escape(ln) for ln in expected.split("\n")]
 
 
-def get_test_stage_dir() -> str:
+def get_test_stage_dir(config: spack.config.Configuration) -> str:
     """Retrieves the ``config:test_stage`` path to the configured test stage
     root directory
+
+    Args:
+        config: configuration to read the test stage from
 
     Returns:
         absolute path to the configured test stage root or, if none, the default test stage path
     """
     return spack.config.canonicalize_path(
-        spack.config.CONFIG.get("config:test_stage", spack.paths.default_test_path)
+        config.get("config:test_stage", spack.paths.default_test_path), config=config
     )
 
 
@@ -273,7 +275,9 @@ class PackageTest:
         else:
             # Running phase-time tests for a single package whose results are
             # retained in the package's stage directory.
-            pkg.test_suite = TestSuite([pkg.spec])
+            pkg.test_suite = TestSuite(
+                [pkg.spec], stage_root=get_test_stage_dir(pkg.context.config)
+            )
             self.test_log_file = fs.join_path(pkg.stage.path, spack_install_test_log)
             self.pkg_id = pkg.spec.format("{name}-{version}-{hash:7}")
 
@@ -361,7 +365,7 @@ class PackageTest:
             method_names: phase-specific callback method names
         """
         verbose = tty.is_verbose()
-        fail_fast = spack.config.CONFIG.get("config:fail_fast", False)
+        fail_fast = builder.pkg.context.config.get("config:fail_fast", False)
 
         with self.test_logger(verbose=verbose, externals=False) as logger:
             # Report running each of the methods in the build log
@@ -525,7 +529,7 @@ def test_part(
             exc = e  # e is deleted after this block
 
             # If we fail fast, raise another error
-            if spack.config.CONFIG.get("config:fail_fast", False):
+            if pkg.context.config.get("config:fail_fast", False):
                 raise TestFailure([(exc, m)])
             else:
                 tester.add_failure(exc, m)
@@ -559,7 +563,7 @@ def copy_test_files(pkg: "spack.package_base.PackageBase", test_spec: spack.spec
 
     # copy test data into test stage data dir
     try:
-        pkg_cls = spack.repo.PATH.get_pkg_class(test_spec.fullname)
+        pkg_cls = pkg.context.repo.get_pkg_class(test_spec.fullname)
     except spack.repo.UnknownPackageError:
         tty.debug(f"{test_spec.name}: skipping test data copy since no package class found")
         return
@@ -598,7 +602,8 @@ def test_functions(
     Args:
         pkg: package or package class of interest
         add_virtuals: ``True`` adds test methods of provided package
-            virtual, ``False`` only returns test functions of the package
+            virtual, ``False`` only returns test functions of the package;
+            requires a package instance
 
     Returns:
         list of non-empty test functions' (name, function)
@@ -608,10 +613,12 @@ def test_functions(
     """
     classes = [pkg if isinstance(pkg, type) else pkg.__class__]
     if add_virtuals:
+        if isinstance(pkg, type):
+            raise ValueError("adding virtuals requires a package instance")
         vpkgs = virtuals(pkg)
         for vname in vpkgs:
             try:
-                classes.append(spack.repo.PATH.get_pkg_class(vname))
+                classes.append(pkg.context.repo.get_pkg_class(vname))
             except spack.repo.UnknownPackageError:
                 tty.debug(f"{vname}: virtual does not appear to have a package file")
 
@@ -658,7 +665,7 @@ def process_test_parts(
 
             # grab test functions associated with the spec, which may be virtual
             try:
-                tests = test_functions(spack.repo.PATH.get_pkg_class(spec.fullname))
+                tests = test_functions(pkg.context.repo.get_pkg_class(spec.fullname))
             except spack.repo.UnknownPackageError:
                 # Some virtuals don't have a package so we don't want to report
                 # them as not having tests when that isn't appropriate.
@@ -715,7 +722,7 @@ def test_process(pkg: "spack.package_base.PackageBase", kwargs):
             pkg.tester.status(pkg.spec.name, TestStatus.SKIPPED)
             return
 
-        if not spack.store.STORE.db.installed(pkg.spec):
+        if not pkg.context.store.db.installed(pkg.spec):
             print_message(logger, "Skipped not installed package", verbose)
             pkg.tester.status(pkg.spec.name, TestStatus.SKIPPED)
             return
@@ -751,13 +758,16 @@ def virtuals(pkg):
     return v_names
 
 
-def get_all_test_suites():
+def get_all_test_suites(config: spack.config.Configuration) -> List["TestSuite"]:
     """Retrieves all validly staged TestSuites
+
+    Args:
+        config: configuration to read the test stage from
 
     Returns:
         list: a list of TestSuite objects, which may be empty if there are none
     """
-    stage_root = get_test_stage_dir()
+    stage_root = get_test_stage_dir(config)
     if not os.path.isdir(stage_root):
         return []
 
@@ -771,12 +781,16 @@ def get_all_test_suites():
         if valid_stage(d)
     ]
 
-    test_suites = [TestSuite.from_file(c) for c in candidates]
+    test_suites = [TestSuite.from_file(c, stage_root=stage_root) for c in candidates]
     return test_suites
 
 
-def get_named_test_suites(name):
+def get_named_test_suites(name: str, config: spack.config.Configuration) -> List["TestSuite"]:
     """Retrieves test suites with the provided name.
+
+    Args:
+        name: name of the test suites
+        config: configuration to read the test stage from
 
     Returns:
         list: a list of matching TestSuite instances, which may be empty if none
@@ -787,12 +801,16 @@ def get_named_test_suites(name):
     if not name:
         raise TestSuiteNameError("Test suite name is required.")
 
-    test_suites = get_all_test_suites()
+    test_suites = get_all_test_suites(config)
     return [ts for ts in test_suites if ts.name == name]
 
 
-def get_test_suite(name: str) -> Optional["TestSuite"]:
+def get_test_suite(name: str, config: spack.config.Configuration) -> Optional["TestSuite"]:
     """Ensure there is only one matching test suite with the provided name.
+
+    Args:
+        name: name of the test suite
+        config: configuration to read the test stage from
 
     Returns:
         the name if one matching test suite, else None
@@ -800,7 +818,7 @@ def get_test_suite(name: str) -> Optional["TestSuite"]:
     Raises:
         TestSuiteNameError: If there are more than one matching TestSuites
     """
-    suites = get_named_test_suites(name)
+    suites = get_named_test_suites(name, config)
     if len(suites) > 1:
         raise TestSuiteNameError(f"Too many suites named '{name}'. May shadow hash.")
 
@@ -836,7 +854,9 @@ def write_test_summary(counts: "Counter"):
 class TestSuite:
     """The class that manages specs for ``spack test run`` execution."""
 
-    def __init__(self, specs: Iterable[Spec], alias: Optional[str] = None) -> None:
+    def __init__(
+        self, specs: Iterable[Spec], alias: Optional[str] = None, *, stage_root: str
+    ) -> None:
         # copy so that different test suites have different package objects
         # even if they contain the same spec
         self.specs = [spec.copy() for spec in specs]
@@ -844,6 +864,7 @@ class TestSuite:
         self.current_base_spec = None  # spec currently running do_test
 
         self.alias = alias
+        self.stage_root = stage_root
         self._hash: Optional[str] = None
         self._stage: Optional[Prefix] = None
 
@@ -971,7 +992,7 @@ class TestSuite:
             self.ensure_stage()
             if spec.external and not externals:
                 status = TestStatus.SKIPPED
-            elif not spack.store.STORE.db.installed(spec):
+            elif not spec.package.context.store.db.installed(spec):
                 status = TestStatus.SKIPPED
             else:
                 status = TestStatus.NO_TESTS
@@ -990,7 +1011,7 @@ class TestSuite:
     def stage(self) -> Prefix:
         """The root test suite stage directory"""
         if not self._stage:
-            self._stage = Prefix(fs.join_path(get_test_stage_dir(), self.content_hash))
+            self._stage = Prefix(fs.join_path(self.stage_root, self.content_hash))
         return self._stage
 
     @stage.setter
@@ -1096,13 +1117,14 @@ class TestSuite:
 
     def write_reproducibility_data(self) -> None:
         for spec in self.specs:
+            repo = spec.package.context.repo
             repo_cache_path = self.stage.repo.join(spec.name)
-            spack.repo.PATH.dump_provenance(spec, repo_cache_path)
+            repo.dump_provenance(spec, repo_cache_path)
             for vspec in spec.package.virtuals_provided:
                 repo_cache_path = self.stage.repo.join(vspec.name)
                 if not os.path.exists(repo_cache_path):
                     try:
-                        spack.repo.PATH.dump_provenance(vspec, repo_cache_path)
+                        repo.dump_provenance(vspec, repo_cache_path)
                     except spack.repo.UnknownPackageError:
                         pass  # not all virtuals have package files
 
@@ -1124,28 +1146,31 @@ class TestSuite:
         return d
 
     @staticmethod
-    def from_dict(d):
+    def from_dict(d, *, stage_root: str):
         """Instantiates a TestSuite based on a dictionary specs and an
         optional alias:
 
         * specs: list of the test suite's specs in dictionary form
         * alias: the test suite alias
 
+        The suite is staged under ``stage_root``.
+
         Returns:
             TestSuite: Instance created from the specs
         """
         specs = [Spec.from_dict(spec_dict) for spec_dict in d["specs"]]
         alias = d.get("alias", None)
-        return TestSuite(specs, alias)
+        return TestSuite(specs, alias, stage_root=stage_root)
 
     @staticmethod
-    def from_file(filename: str) -> "TestSuite":
+    def from_file(filename: str, *, stage_root: str) -> "TestSuite":
         """Instantiate a TestSuite using the specs and optional alias
         provided in the given file.
 
         Args:
             filename: The path to the JSON file containing the test
                 suite specs and optional alias.
+            stage_root: root directory of test suite stages
 
         Raises:
             BaseException: sjson.SpackJSONError if problem parsing the file
@@ -1153,7 +1178,7 @@ class TestSuite:
         try:
             with open(filename, encoding="utf-8") as f:
                 data = sjson.load(f)
-                test_suite = TestSuite.from_dict(data)
+                test_suite = TestSuite.from_dict(data, stage_root=stage_root)
                 content_hash = os.path.basename(os.path.dirname(filename))
                 test_suite._hash = content_hash
                 return test_suite

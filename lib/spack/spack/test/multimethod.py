@@ -7,6 +7,7 @@
 import pytest
 
 import spack.concretize
+import spack.context
 import spack.platforms
 from spack.multimethod import NoSuchMethodError
 
@@ -27,7 +28,7 @@ def pkg_name(request):
 
 
 def test_no_version_match(pkg_name):
-    spec = spack.concretize.concretize_one(pkg_name + "@2.0")
+    spec = spack.concretize.concretize_one(pkg_name + "@2.0", spack.context.current())
     with pytest.raises(NoSuchMethodError):
         spec.package.no_version_2()
 
@@ -67,7 +68,7 @@ def test_no_version_match(pkg_name):
     ],
 )
 def test_multimethod_calls(pkg_name, constraint_str, method_name, expected_result):
-    s = spack.concretize.concretize_one(f"{pkg_name}{constraint_str}")
+    s = spack.concretize.concretize_one(f"{pkg_name}{constraint_str}", spack.context.current())
     msg = f"Method {method_name} from {s} is giving a wrong result"
     assert getattr(s.package, method_name)() == expected_result, msg
 
@@ -76,10 +77,14 @@ def test_target_match(pkg_name):
     platform = spack.platforms.host()
     targets = list(platform.targets.values())
     for target in targets[:-1]:
-        s = spack.concretize.concretize_one(pkg_name + " target=" + target.name)
+        s = spack.concretize.concretize_one(
+            pkg_name + " target=" + target.name, spack.context.current()
+        )
         assert s.package.different_by_target() == target.name
 
-    s = spack.concretize.concretize_one(pkg_name + " target=" + targets[-1].name)
+    s = spack.concretize.concretize_one(
+        pkg_name + " target=" + targets[-1].name, spack.context.current()
+    )
     if len(targets) == 1:
         assert s.package.different_by_target() == targets[-1].name
     else:
@@ -109,5 +114,5 @@ def test_target_match(pkg_name):
     ],
 )
 def test_multimethod_calls_and_inheritance(spec_str, method_name, expected_result):
-    s = spack.concretize.concretize_one(spec_str)
+    s = spack.concretize.concretize_one(spec_str, spack.context.current())
     assert getattr(s.package, method_name)() == expected_result

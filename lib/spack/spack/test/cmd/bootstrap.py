@@ -10,6 +10,7 @@ import spack.bootstrap
 import spack.bootstrap.core
 import spack.cmd.mirror
 import spack.concretize
+import spack.context
 import spack.environment as ev
 import spack.main
 import spack.spec
@@ -61,7 +62,7 @@ def test_reset_in_file_scopes(mutable_config, scopes):
 def test_reset_in_environment(mutable_mock_env_path, mutable_config: Configuration):
     env = spack.main.SpackCommand("env")
     env("create", "bootstrap-test")
-    current_environment = ev.read("bootstrap-test")
+    current_environment = ev.read("bootstrap-test", ctx=spack.context.current())
 
     with current_environment:
         _bootstrap("disable")
@@ -181,8 +182,8 @@ def test_bootstrap_mirror_metadata(
     expensive operation for a unit test.
     """
     old_create = spack.cmd.mirror.create
-    monkeypatch.setattr(spack.cmd.mirror, "create", lambda p, s, r: old_create(p, [], r))
-    monkeypatch.setattr(spack.concretize, "concretize_one", lambda p: spack.spec.Spec(p))
+    monkeypatch.setattr(spack.cmd.mirror, "create", lambda p, s, ctx: old_create(p, [], ctx))
+    monkeypatch.setattr(spack.concretize, "concretize_one", lambda p, ctx: spack.spec.Spec(p))
 
     # Create the mirror in a temporary folder
     _bootstrap("mirror", str(tmp_path))

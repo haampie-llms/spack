@@ -8,6 +8,7 @@ import pathlib
 import pytest
 
 import spack.concretize
+import spack.context
 from spack.directory_layout import DirectoryLayout
 from spack.filesystem_view import SimpleFilesystemView, YamlFilesystemView
 from spack.installer import PackageInstaller
@@ -19,7 +20,7 @@ def test_remove_extensions_ordered(install_mockery, mock_fetch, tmp_path: pathli
     view_dir = str(tmp_path / "view")
     layout = DirectoryLayout(view_dir)
     view = YamlFilesystemView(view_dir, layout)
-    e2 = spack.concretize.concretize_one("extension2")
+    e2 = spack.concretize.concretize_one("extension2", spack.context.current())
     PackageInstaller([e2.package], explicit=True).install()
     view.add_specs(e2)
 

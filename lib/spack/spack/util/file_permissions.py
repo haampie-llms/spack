@@ -5,6 +5,7 @@
 import os
 import stat as st
 
+import spack.context
 import spack.package_prefs as pp
 import spack.util.filesystem as fs
 from spack.error import SpackError
@@ -12,11 +13,12 @@ from spack.error import SpackError
 
 def set_permissions_by_spec(path, spec):
     # Get permissions for spec
+    config = spack.context.current().config
     if os.path.isdir(path):
-        perms = pp.get_package_dir_permissions(spec)
+        perms = pp.get_package_dir_permissions(spec, config=config)
     else:
-        perms = pp.get_package_permissions(spec)
-    group = pp.get_package_group(spec)
+        perms = pp.get_package_permissions(spec, config=config)
+    group = pp.get_package_group(spec, config=config)
 
     set_permissions(path, perms, group)
 

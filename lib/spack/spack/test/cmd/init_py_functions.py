@@ -125,8 +125,8 @@ def test_special_cases_concretization_matching_specs_from_env(
 
     mutable_config.set("concretizer:unify", unify)
 
-    ev.create("test")
-    env = ev.read("test")
+    ev.create("test", ctx=spack.context.current())
+    env = ev.read("test", ctx=spack.context.current())
 
     args = [f"/{mutable_database.query(s)[0].dag_hash()}" for s in spec_strs]
     if len(args) > 1:

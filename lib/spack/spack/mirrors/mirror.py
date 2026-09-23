@@ -19,6 +19,7 @@ from typing import (
 )
 
 import spack.config
+import spack.context
 import spack.util.spack_yaml as syaml
 import spack.util.url as url_util
 from spack.error import MirrorError
@@ -61,7 +62,8 @@ def _url_or_path_to_url(url_or_path: str) -> str:
         return url_or_path
 
     # Otherwise we interpret it as path, and we should promote it to file:// URL.
-    return url_util.path_to_file_url(spack.config.canonicalize_path(url_or_path))
+    path = spack.config.canonicalize_path(url_or_path, config=spack.context.current().config)
+    return url_util.path_to_file_url(path)
 
 
 class Mirror:

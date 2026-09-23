@@ -85,6 +85,7 @@ from spack.vendor.typing_extensions import Literal
 import spack
 import spack.aliases
 import spack.compilers.flags
+import spack.context
 import spack.deptypes as dt
 import spack.enums
 import spack.error
@@ -2381,7 +2382,9 @@ class Spec:
             self.name
         )
         if not self._package:
-            self._package = spack.repo.PATH.get(self)
+            ctx = spack.context.current()
+            self._package = ctx.repo.get(self)
+            self._package.context = ctx
         return self._package
 
     @property
@@ -2402,34 +2405,6 @@ class Spec:
     def spliced(self):
         """Returns whether this Spec is being deployed as built i.e. whether it has been spliced"""
         return self.build_spec is not self
-
-    @property
-    def installed(self):
-        """Whether the spec is installed, locally or in an upstream."""
-        if not self.concrete:
-            return False
-
-        try:
-            # If the spec is in the DB, check the installed
-            # attribute of the record
-            from spack.store import STORE
-
-            return STORE.db.get_record(self).installed
-        except KeyError:
-            # If the spec is not in the DB, the method
-            #  above raises a Key error
-            return False
-
-    @property
-    def installed_upstream(self):
-        """Whether the spec is installed in an upstream database."""
-        if not self.concrete:
-            return False
-
-        from spack.store import STORE
-
-        upstream, record = STORE.db.query_by_spec_hash(self.dag_hash())
-        return upstream and record and record.installed
 
     @overload
     def traverse(
@@ -2543,13 +2518,7 @@ class Spec:
             raise spack.error.SpecError(f"Spec is not concrete: {self}")
 
         if self._prefix is None:
-            from spack.store import STORE
-
-            _, record = STORE.db.query_by_spec_hash(self.dag_hash())
-            if record and record.path:
-                self.set_prefix(record.path)
-            else:
-                self.set_prefix(STORE.layout.path_for_spec(self))
+            spack.context.current().store.assign_prefix(self)
         assert self._prefix is not None
         return self._prefix
 
@@ -2858,11 +2827,11 @@ class Spec:
             return Spec.from_yaml(file_content)
 
     @staticmethod
-    def override(init_spec, change_spec):
+    def override(init_spec, change_spec, *, repo: "spack.repo.RepoPath"):
         # TODO: this doesn't account for the case where the changed spec
         # (and the user spec) have dependencies
         new_spec = init_spec.copy()
-        package_cls = spack.repo.PATH.get_pkg_class(new_spec.name)
+        package_cls = repo.get_pkg_class(new_spec.name)
         if change_spec.versions and not change_spec.versions == vn.any_version:
             new_spec.versions = change_spec.versions
 
@@ -3188,14 +3157,13 @@ class Spec:
             dm[spec.name].append(spec)
         return dm
 
-    def validate_or_raise(self, *, repo=None):
+    def validate_or_raise(self, *, repo: "spack.repo.RepoPath"):
         """Checks that names and values in this spec are real. If they're not,
         it will raise an appropriate exception.
 
         Args:
-            repo: repositories to look packages up in. Defaults to the process-wide ones.
+            repo: repositories to look packages up in
         """
-        repo = spack.repo.repo_or_default(repo)
         # FIXME: this function should be lazy, and collect all the errors
         # FIXME: before raising the exceptions, instead of being greedy and
         # FIXME: raise just the first one encountered
@@ -3607,22 +3575,11 @@ class Spec:
         changed |= self.propagated_variants.constrain(other.propagated_variants)
         return changed
 
-    @property  # type: ignore[misc] # decorated prop not supported in mypy
-    def patches(self):
-        """Return patch objects for any patch sha256 sums on this Spec.
+    def patches_from(self, repo: "spack.repo.RepoPath") -> List["spack.patch.Patch"]:
+        """Return patch objects for any patch sha256 sums on this Spec, looked up in ``repo``.
 
-        This is for use after concretization to iterate over any patches
-        associated with this spec.
-
-        TODO: this only checks in the package; it doesn't resurrect old
-        patches from install directories, but it probably should.
-        """
-        return self._patches_from(spack.repo.repo_or_default(None))
-
-    def _patches_from(self, repo: "spack.repo.RepoPath") -> List["spack.patch.Patch"]:
-        """Return the patch objects for this spec, looked up in ``repo``.
-
-        The result is memoized on first call, so a later call with a different repository
+        This is for use after concretization to iterate over any patches associated with this
+        spec. The result is memoized on first call, so a later call with a different repository
         returns the patches found by the first one.
         """
         if not hasattr(self, "_patches"):
@@ -5222,7 +5179,7 @@ class SpecBuildInterface(lang.ObjectWrapper, Spec):
         return self.wrapped_obj.copy(*args, **kwargs)
 
 
-def substitute_abstract_variants(spec: Spec, *, repo=None):
+def substitute_abstract_variants(spec: Spec, *, repo: "spack.repo.RepoPath"):
     """Uses the information in ``spec.package`` to turn any variant that needs
     it into a SingleValuedVariant or BoolValuedVariant.
 
@@ -5231,9 +5188,8 @@ def substitute_abstract_variants(spec: Spec, *, repo=None):
 
     Args:
         spec: spec on which to operate the substitution
-        repo: repositories to look the package up in. Defaults to the process-wide ones.
+        repo: repositories to look the package up in
     """
-    repo = spack.repo.repo_or_default(repo)
     # This method needs to be best effort so that it works in matrix exclusion
     # in $spack/lib/spack/spack/spec_list.py
     unknown = []
@@ -5598,7 +5554,7 @@ def wire_spec_nodes(
             node_spec._build_spec = build_spec
 
     if reader.SPEC_VERSION < 6:
-        spack.repo.reconstruct_virtuals(specs_by_hash.values(), repo=spack.repo.PATH)
+        spack.repo.reconstruct_virtuals(specs_by_hash.values(), repo=spack.context.current().repo)
 
     return specs_by_hash
 
@@ -5640,7 +5596,7 @@ class SpecfileV1(SpecfileReaderBase):
                     direct=dep.direct,
                 )
 
-        spack.repo.reconstruct_virtuals(dep_list, repo=spack.repo.PATH)
+        spack.repo.reconstruct_virtuals(dep_list, repo=spack.context.current().repo)
         return result
 
     @classmethod

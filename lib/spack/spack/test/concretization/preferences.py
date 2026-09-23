@@ -9,6 +9,7 @@ import pytest
 
 import spack.concretize
 import spack.config
+import spack.context
 import spack.package_prefs
 import spack.paths
 import spack.repo
@@ -48,7 +49,7 @@ callpath:
 
 
 def concretize(abstract_spec):
-    return spack.concretize.concretize_one(abstract_spec)
+    return spack.concretize.concretize_one(abstract_spec, spack.context.current())
 
 
 def update_packages(pkgname, section, value):
@@ -220,13 +221,13 @@ mpileaks:
 
     def test_preferred(self):
         """ "Test packages with some version marked as preferred=True"""
-        spec = spack.concretize.concretize_one("python")
+        spec = spack.concretize.concretize_one("python", spack.context.current())
         assert spec.version == Version("2.7.11")
 
         # now add packages.yaml with versions other than preferred
         # ensure that once config is in place, non-preferred version is used
         update_packages("python", "version", ["3.5.0"])
-        spec = spack.concretize.concretize_one("python")
+        spec = spack.concretize.concretize_one("python", spack.context.current())
         assert spec.version == Version("3.5.0")
 
     def test_preferred_undefined_raises(self):
@@ -234,7 +235,7 @@ mpileaks:
         update_packages("python", "version", ["3.5.0.1"])
         spec = Spec("python")
         with pytest.raises(ConfigError):
-            spack.concretize.concretize_one(spec)
+            spack.concretize.concretize_one(spec, spack.context.current())
 
     def test_preferred_truncated(self):
         """Versions without "=" are treated as version ranges: if there is
@@ -242,29 +243,29 @@ mpileaks:
         (don't define a new version).
         """
         update_packages("python", "version", ["3.5"])
-        spec = spack.concretize.concretize_one("python")
+        spec = spack.concretize.concretize_one("python", spack.context.current())
         assert spec.satisfies("@3.5.1")
 
     def test_develop(self):
         """Test concretization with develop-like versions"""
-        spec = spack.concretize.concretize_one("develop-test")
+        spec = spack.concretize.concretize_one("develop-test", spack.context.current())
         assert spec.version == Version("0.2.15")
-        spec = spack.concretize.concretize_one("develop-test2")
+        spec = spack.concretize.concretize_one("develop-test2", spack.context.current())
         assert spec.version == Version("0.2.15")
 
         # now add packages.yaml with develop-like versions
         # ensure that once config is in place, develop-like version is used
         update_packages("develop-test", "version", ["develop"])
-        spec = spack.concretize.concretize_one("develop-test")
+        spec = spack.concretize.concretize_one("develop-test", spack.context.current())
         assert spec.version == Version("develop")
 
         update_packages("develop-test2", "version", ["0.2.15.develop"])
-        spec = spack.concretize.concretize_one("develop-test2")
+        spec = spack.concretize.concretize_one("develop-test2", spack.context.current())
         assert spec.version == Version("0.2.15.develop")
 
     def test_external_mpi(self, mutable_config: Configuration):
         # make sure this doesn't give us an external first.
-        spec = spack.concretize.concretize_one("mpi")
+        spec = spack.concretize.concretize_one("mpi", spack.context.current())
         assert not spec.external and spec.package.provides("mpi")
 
         # load config
@@ -283,7 +284,7 @@ mpich:
         mutable_config.set("packages", conf, scope="concretize")
 
         # ensure that once config is in place, external is used
-        spec = spack.concretize.concretize_one("mpi")
+        spec = spack.concretize.concretize_one("mpi", spack.context.current())
         assert spec["mpich"].external_path == os.path.sep + os.path.join("dummy", "path")
 
     def test_external_module(self, monkeypatch, mutable_config: Configuration):
@@ -298,7 +299,7 @@ mpich:
 
         monkeypatch.setattr(spack.util.module_cmd, "module", mock_module)
 
-        spec = spack.concretize.concretize_one("mpi")
+        spec = spack.concretize.concretize_one("mpi", spack.context.current())
         assert not spec.external and spec.package.provides("mpi")
 
         # load config
@@ -317,7 +318,7 @@ mpi:
         mutable_config.set("packages", conf, scope="concretize")
 
         # ensure that once config is in place, external is used
-        spec = spack.concretize.concretize_one("mpi")
+        spec = spack.concretize.concretize_one("mpi", spack.context.current())
         assert spec["mpich"].external_path == os.path.sep + os.path.join("dummy", "path")
 
     def test_config_permissions_from_all(self, configure_permissions):
@@ -327,52 +328,58 @@ mpi:
 
         # Test inheriting from 'all'
         spec = Spec("zmpi")
-        perms = spack.package_prefs.get_package_permissions(spec)
+        perms = spack.package_prefs.get_package_permissions(spec, config=spack.config.CONFIG)
         assert perms == stat.S_IRWXU | stat.S_IRWXG
 
-        dir_perms = spack.package_prefs.get_package_dir_permissions(spec)
+        dir_perms = spack.package_prefs.get_package_dir_permissions(
+            spec, config=spack.config.CONFIG
+        )
         assert dir_perms == stat.S_IRWXU | stat.S_IRWXG | stat.S_ISGID
 
-        group = spack.package_prefs.get_package_group(spec)
+        group = spack.package_prefs.get_package_group(spec, config=spack.config.CONFIG)
         assert group == "all"
 
     def test_config_permissions_from_package(self, configure_permissions):
         # Test overriding 'all'
         spec = Spec("mpich")
-        perms = spack.package_prefs.get_package_permissions(spec)
+        perms = spack.package_prefs.get_package_permissions(spec, config=spack.config.CONFIG)
         assert perms == stat.S_IRWXU
 
-        dir_perms = spack.package_prefs.get_package_dir_permissions(spec)
+        dir_perms = spack.package_prefs.get_package_dir_permissions(
+            spec, config=spack.config.CONFIG
+        )
         assert dir_perms == stat.S_IRWXU
 
-        group = spack.package_prefs.get_package_group(spec)
+        group = spack.package_prefs.get_package_group(spec, config=spack.config.CONFIG)
         assert group == "all"
 
     def test_config_permissions_differ_read_write(self, configure_permissions):
         # Test overriding group from 'all' and different readable/writable
         spec = Spec("mpileaks")
-        perms = spack.package_prefs.get_package_permissions(spec)
+        perms = spack.package_prefs.get_package_permissions(spec, config=spack.config.CONFIG)
         assert perms == stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP
 
-        dir_perms = spack.package_prefs.get_package_dir_permissions(spec)
+        dir_perms = spack.package_prefs.get_package_dir_permissions(
+            spec, config=spack.config.CONFIG
+        )
         expected = stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_ISGID
         assert dir_perms == expected
 
-        group = spack.package_prefs.get_package_group(spec)
+        group = spack.package_prefs.get_package_group(spec, config=spack.config.CONFIG)
         assert group == "mpileaks"
 
     def test_config_perms_fail_write_gt_read(self, configure_permissions):
         # Test failure for writable more permissive than readable
         spec = Spec("callpath")
         with pytest.raises(ConfigError):
-            spack.package_prefs.get_package_permissions(spec)
+            spack.package_prefs.get_package_permissions(spec, config=spack.config.CONFIG)
 
     @pytest.mark.regression("20040")
     def test_variant_not_flipped_to_pull_externals(self):
         """Test that a package doesn't prefer pulling in an
         external to using the default value of a variant.
         """
-        s = spack.concretize.concretize_one("vdefault-or-external-root")
+        s = spack.concretize.concretize_one("vdefault-or-external-root", spack.context.current())
 
         assert "~external" in s["vdefault-or-external"]
         assert "externaltool" not in s
@@ -384,7 +391,7 @@ mpi:
         that makes the overall version score even or better and maybe
         has a better score in some lower priority criteria.
         """
-        s = spack.concretize.concretize_one("version-test-root")
+        s = spack.concretize.concretize_one("version-test-root", spack.context.current())
 
         assert s.satisfies("^version-test-pkg@2.4.6")
         assert "version-test-dependency-preferred" not in s
@@ -404,13 +411,13 @@ mpi:
         with mutable_config.override(
             "packages:all", {"providers": {"somevirtual": ["some-virtual-preferred"]}}
         ):
-            s = spack.concretize.concretize_one("somevirtual")
+            s = spack.concretize.concretize_one("somevirtual", spack.context.current())
             assert s.name == "some-virtual-preferred"
 
     @pytest.mark.regression("26721,19736")
     def test_sticky_variant_accounts_for_packages_yaml(self, mutable_config: Configuration):
         with mutable_config.override("packages:sticky-variant", {"variants": "+allow-gcc"}):
-            s = spack.concretize.concretize_one("sticky-variant %gcc")
+            s = spack.concretize.concretize_one("sticky-variant %gcc", spack.context.current())
             assert s.satisfies("%gcc") and s.satisfies("+allow-gcc")
 
     @pytest.mark.regression("41134")
@@ -421,7 +428,7 @@ mpi:
         packages.yaml doesn't fail with an error.
         """
         with mutable_config.override("packages:all", {"variants": "+foo"}):
-            s = spack.concretize.concretize_one("pkg-a")
+            s = spack.concretize.concretize_one("pkg-a", spack.context.current())
             assert s.satisfies("foo=bar")
 
     def test_version_preference_cannot_generate_buildable_versions(
@@ -444,9 +451,9 @@ mpi:
 
         with mutable_config.override("packages", mpileaks_external):
             # Asking for mpileaks+debug results in the external being chosen
-            mpileaks = spack.concretize.concretize_one("mpileaks+debug")
+            mpileaks = spack.concretize.concretize_one("mpileaks+debug", spack.context.current())
             assert mpileaks.external and mpileaks.satisfies("@0.9 +debug")
 
             # Asking for ~debug results in the highest known version being chosen
-            mpileaks = spack.concretize.concretize_one("mpileaks~debug")
+            mpileaks = spack.concretize.concretize_one("mpileaks~debug", spack.context.current())
             assert not mpileaks.external and mpileaks.satisfies("@2.3 ~debug")

@@ -15,6 +15,7 @@ import traceback
 import warnings
 from typing import Dict, Iterable, List, Optional, Set, Tuple, Type
 
+import spack.config
 import spack.error
 import spack.repo
 import spack.spec
@@ -45,7 +46,7 @@ if sys.platform == "win32":
     DETECTION_TIMEOUT = 120
 
 
-def common_windows_package_paths(pkg_cls=None) -> List[str]:
+def common_windows_package_paths(pkg_cls=None, *, additional_search_paths: List[str]) -> List[str]:
     """Get the paths for common package installation location on Windows
     that are outside the PATH
     Returns [] on unix
@@ -53,7 +54,7 @@ def common_windows_package_paths(pkg_cls=None) -> List[str]:
     if sys.platform != "win32":
         return []
     paths = WindowsCompilerExternalPaths.find_windows_compiler_bundled_packages()
-    paths.extend(find_win32_additional_install_paths())
+    paths.extend(find_win32_additional_install_paths(additional_search_paths))
     paths.extend(WindowsKitExternalPaths.find_windows_kit_bin_paths())
     paths.extend(WindowsKitExternalPaths.find_windows_kit_reg_installed_roots_paths())
     paths.extend(WindowsKitExternalPaths.find_windows_kit_reg_sdk_paths())
@@ -340,7 +341,12 @@ class Finder:
         return result
 
     def find(
-        self, *, pkg_name: str, repository, initial_guess: Optional[List[str]] = None
+        self,
+        *,
+        pkg_name: str,
+        repository,
+        initial_guess: Optional[List[str]] = None,
+        additional_search_paths: List[str],
     ) -> List["spack.spec.Spec"]:
         """For a given package, returns a list of detected specs.
 
@@ -349,6 +355,7 @@ class Finder:
             repository: repository to retrieve the package
             initial_guess: initial list of paths to search from the caller if None, default paths
                 are searched. If this is an empty list, nothing will be searched.
+            additional_search_paths: extra paths searched on Windows, with the default ones
         """
         pkg_cls = repository.get_pkg_class(pkg_name)
         patterns = self.search_patterns(pkg=pkg_cls)
@@ -356,7 +363,11 @@ class Finder:
             return []
         if initial_guess is None:
             initial_guess = self.default_path_hints()
-            initial_guess.extend(common_windows_package_paths(pkg_cls))
+            initial_guess.extend(
+                common_windows_package_paths(
+                    pkg_cls, additional_search_paths=additional_search_paths
+                )
+            )
         candidates = self.candidate_files(patterns=patterns, paths=initial_guess)
         return self.detect_specs(pkg=pkg_cls, paths=candidates, repo_path=repository)
 
@@ -423,6 +434,7 @@ def by_path(
     packages_to_search: Iterable[str],
     *,
     repo: spack.repo.RepoPath,
+    config: spack.config.Configuration,
     path_hints: Optional[List[str]] = None,
     max_workers: Optional[int] = None,
 ) -> Dict[str, List["spack.spec.Spec"]]:
@@ -433,6 +445,7 @@ def by_path(
         packages_to_search: list of packages to be detected. Each package can be either unqualified
             of fully qualified
         repo: repository used to retrieve the package classes
+        config: configuration with the additional search paths
         path_hints: initial list of paths to be searched
         max_workers: maximum number of workers to search for packages in parallel
     """
@@ -443,6 +456,7 @@ def by_path(
 
     result = collections.defaultdict(list)
     repository = spack.util.lang.ensure_unwrapped(repo)
+    additional_search_paths = config.get("config:additional_external_search_paths", default=[])
 
     executor: concurrent.futures.Executor
     if max_workers == 1:
@@ -456,12 +470,14 @@ def by_path(
                 pkg_name=pkg,
                 initial_guess=path_hints,
                 repository=repository,
+                additional_search_paths=additional_search_paths,
             )
             library_future = executor.submit(
                 libraries_finder.find,
                 pkg_name=pkg,
                 initial_guess=path_hints,
                 repository=repository,
+                additional_search_paths=additional_search_paths,
             )
             detected_specs_by_package[pkg] = executable_future, library_future
 

@@ -99,14 +99,19 @@ def update(data: Dict[str, Any]) -> bool:
     if not isinstance(data["repos"], list):
         return False
 
+    import spack.config
+    import spack.context
     from spack.repo import from_path
     from spack.util import tty
+
+    ctx = spack.context.current()
 
     # Convert old format [paths...] to new format {namespace: path, ...}
     repos = {}
     for path in data["repos"]:
         try:
-            repo = from_path(path)
+            root = spack.config.canonicalize_path(path, config=ctx.config)
+            repo = from_path(root, cache=ctx.misc_cache)
         except Exception as e:
             tty.warn(f"package repository {path} is disabled due to: {e}")
             continue

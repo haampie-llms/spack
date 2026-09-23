@@ -101,7 +101,7 @@ def deprecate(parser, args, ctx):
     )
 
     if args.install:
-        deprecator = spack.concretize.concretize_one(specs[1])
+        deprecator = spack.concretize.concretize_one(specs[1], ctx)
     else:
         deprecator = spack.cmd.disambiguate_spec(specs[1], env, store=ctx.store, local=True)
 
@@ -185,5 +185,7 @@ def deprecate_spec(
         deprecate_spec(deprecated, deprecator, link_fn, store)
 
     # Now that we've handled metadata, uninstall and replace with link
-    spack.package_base.PackageBase.uninstall_by_spec(spec, force=True, deprecator=deprecator)
+    spack.package_base.PackageBase.uninstall_by_spec(
+        spec, store, force=True, deprecator=deprecator
+    )
     link_fn(deprecator.prefix, spec.prefix)

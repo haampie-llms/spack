@@ -6,6 +6,7 @@ import pathlib
 
 import pytest
 
+import spack.context
 import spack.database
 import spack.environment as ev
 import spack.package_base
@@ -72,7 +73,7 @@ def test_stage_with_env_outside_env(mutable_mock_env_path, monkeypatch):
 
     monkeypatch.setattr(spack.package_base.PackageBase, "do_stage", fake_stage)
 
-    e = ev.create("test")
+    e = ev.create("test", ctx=spack.context.current())
     e.add("mpileaks")
     e.concretize()
 
@@ -90,7 +91,7 @@ def test_stage_with_env_inside_env(mutable_mock_env_path, monkeypatch):
 
     monkeypatch.setattr(spack.package_base.PackageBase, "do_stage", fake_stage)
 
-    e = ev.create("test")
+    e = ev.create("test", ctx=spack.context.current())
     e.add("mpileaks@=100.100")
     e.concretize()
 
@@ -102,7 +103,7 @@ def test_stage_with_env_inside_env(mutable_mock_env_path, monkeypatch):
 def test_stage_full_env(mutable_mock_env_path, monkeypatch):
     """Verify that stage filters specs in environment."""
 
-    e = ev.create("test")
+    e = ev.create("test", ctx=spack.context.current())
     e.add("mpileaks@=100.100")
     e.concretize()
 
@@ -151,7 +152,7 @@ def test_stage_spec_filters(
     exclusions,
     monkeypatch,
 ):
-    e = ev.create("test")
+    e = ev.create("test", ctx=spack.context.current())
     e.add("mpileaks@=100.100")
     e.concretize()
     all_specs = e.all_specs()

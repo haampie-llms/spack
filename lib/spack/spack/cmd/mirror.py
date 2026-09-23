@@ -378,7 +378,7 @@ def mirror_add(args, ctx):
         mirror = spack.mirrors.mirror.Mirror(connection, name=args.name)
     else:
         mirror = spack.mirrors.mirror.Mirror(args.url, name=args.name)
-    spack.mirrors.utils.add(mirror, args.scope)
+    spack.mirrors.utils.add(mirror, args.scope, config=ctx.config)
 
 
 def mirror_add_archive(args, ctx):
@@ -391,7 +391,7 @@ def mirror_add_archive(args, ctx):
     mirror_root = args.directory or spack.caches.fetch_cache_location(config=ctx.config)
 
     fetcher = spack.fetch_strategy.URLFetchStrategy(url=url)
-    with spack.stage.stage_from_config(fetcher, config=ctx.config) as stage:
+    with spack.stage.stage_from_config(fetcher, config=ctx.config, client=ctx.network) as stage:
         stage.fetch()
 
         # The archive is stored content-addressed, named after its sha256 checksum
@@ -416,7 +416,7 @@ def mirror_remove(args, ctx):
 
     removed = False
     for scope in scopes:
-        removed_from_this_scope = spack.mirrors.utils.remove(name, scope)
+        removed_from_this_scope = spack.mirrors.utils.remove(name, scope, config=ctx.config)
         if removed_from_this_scope:
             tty.msg(f"Removed mirror {name} from {scope} scope")
 
@@ -529,7 +529,7 @@ def concrete_specs_from_user(args, ctx: spack.context.SpackContext):
     is passed either from command line or from a text file.
     """
     specs = concrete_specs_from_cli_or_file(args, ctx)
-    specs = extend_with_additional_versions(specs, num_versions=versions_per_spec(args))
+    specs = extend_with_additional_versions(specs, num_versions=versions_per_spec(args), ctx=ctx)
     if args.dependencies:
         specs = extend_with_dependencies(specs)
     specs = filter_externals(specs)
@@ -538,12 +538,12 @@ def concrete_specs_from_user(args, ctx: spack.context.SpackContext):
     return specs
 
 
-def extend_with_additional_versions(specs, num_versions):
+def extend_with_additional_versions(specs, num_versions, ctx):
     if num_versions == "all":
-        mirror_specs = spack.mirrors.utils.get_all_versions(specs)
+        mirror_specs = spack.mirrors.utils.get_all_versions(specs, repo=ctx.repo)
     else:
         mirror_specs = spack.mirrors.utils.get_matching_versions(specs, num_versions=num_versions)
-    mirror_specs = [spack.concretize.concretize_one(x) for x in mirror_specs]
+    mirror_specs = [spack.concretize.concretize_one(x, ctx) for x in mirror_specs]
     return mirror_specs
 
 
@@ -622,7 +622,7 @@ def concrete_specs_from_environment(env):
 
 def all_specs_with_all_versions(repo: spack.repo.RepoPath):
     specs = [spack.spec.Spec(n) for n in repo.all_package_names()]
-    mirror_specs = spack.mirrors.utils.get_all_versions(specs)
+    mirror_specs = spack.mirrors.utils.get_all_versions(specs, repo=repo)
     mirror_specs.sort(key=lambda s: (s.name, s.version))
     return mirror_specs
 
@@ -702,7 +702,7 @@ def mirror_create(args, ctx):
         path=path,
         skip_unstable_versions=args.skip_unstable_versions,
         workers=workers,
-        repo=ctx.repo,
+        ctx=ctx,
     )
 
 
@@ -720,17 +720,20 @@ def _specs_to_mirror(args, ctx: spack.context.SpackContext):
     return mirror_specs
 
 
-def create_mirror_for_one_spec(candidate, mirror_cache, repo: spack.repo.RepoPath):
-    pkg_cls = repo.get_pkg_class(candidate.name)
+def create_mirror_for_one_spec(candidate, mirror_cache, ctx: spack.context.SpackContext):
+    pkg_cls = ctx.repo.get_pkg_class(candidate.name)
     pkg_obj = pkg_cls(spack.spec.Spec(candidate))
+    pkg_obj.context = ctx
     mirror_stats = spack.mirrors.utils.MirrorStatsForOneSpec(candidate)
-    spack.mirrors.utils.create_mirror_from_package_object(pkg_obj, mirror_cache, mirror_stats)
+    spack.mirrors.utils.create_mirror_from_package_object(
+        pkg_obj, mirror_cache, mirror_stats, config=ctx.config
+    )
     mirror_stats.finalize()
     return mirror_stats
 
 
 def create_mirror_for_all_specs(
-    mirror_specs, path, skip_unstable_versions, workers, repo: spack.repo.RepoPath
+    mirror_specs, path, skip_unstable_versions, workers, ctx: spack.context.SpackContext
 ):
     mirror_cache = spack.mirrors.utils.get_mirror_cache(
         path, skip_unstable_versions=skip_unstable_versions
@@ -739,7 +742,7 @@ def create_mirror_for_all_specs(
     with spack.util.parallel.make_concurrent_executor(jobs=workers) as executor:
         # Submit tasks to the process pool
         futures = [
-            executor.submit(create_mirror_for_one_spec, candidate, mirror_cache, repo)
+            executor.submit(create_mirror_for_one_spec, candidate, mirror_cache, ctx)
             for candidate in mirror_specs
         ]
         for mirror_future in as_completed(futures):
@@ -750,7 +753,7 @@ def create_mirror_for_all_specs(
     return mirror_stats
 
 
-def create(path, specs, repo: spack.repo.RepoPath, skip_unstable_versions=False):
+def create(path, specs, ctx: spack.context.SpackContext, skip_unstable_versions=False):
     """Create a directory to be used as a spack mirror, and fill it with
     package archives.
 
@@ -758,7 +761,7 @@ def create(path, specs, repo: spack.repo.RepoPath, skip_unstable_versions=False)
         path: Path to create a mirror directory hierarchy in.
         specs: Any package versions matching these specs will be added \
             to the mirror.
-        repo: Repositories providing the packages of ``specs``.
+        ctx: Context providing the packages of ``specs`` and their fetch settings.
         skip_unstable_versions: if true, this skips adding resources when
             they do not have a stable archive checksum (as determined by
             ``fetch_strategy.stable_target``)
@@ -773,7 +776,7 @@ def create(path, specs, repo: spack.repo.RepoPath, skip_unstable_versions=False)
     # automatically spec-ify anything in the specs array.
     specs = [s if isinstance(s, spack.spec.Spec) else spack.spec.Spec(s) for s in specs]
     mirror_stats = create_mirror_for_all_specs(
-        specs, path, skip_unstable_versions, workers=1, repo=repo
+        specs, path, skip_unstable_versions, workers=1, ctx=ctx
     )
     return mirror_stats.stats()
 

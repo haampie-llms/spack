@@ -75,16 +75,24 @@ class MigrationException(spack.error.SpackError):
 
 
 def _migrate_spec(
-    s: spack.spec.Spec, mirror_url: str, tmpdir: str, unsigned: bool = False, signing_key: str = ""
+    s: spack.spec.Spec,
+    mirror_url: str,
+    tmpdir: str,
+    unsigned: bool = False,
+    signing_key: str = "",
+    *,
+    config: spack.config.Configuration,
+    client: web_util.NetworkClient,
 ) -> MigrateSpecResult:
     """Parallelizable function to migrate a single spec"""
-    client = web_util.NetworkClient.from_config(spack.config.CONFIG)
     print_spec = f"{s.name}/{s.dag_hash()[:7]}"
 
     # Check if the spec file exists in the new location and exit early if so
 
     v3_cache_class = get_url_buildcache_class(layout_version=3)
-    v3_cache_entry = v3_cache_class(mirror_url, s, allow_unsigned=unsigned)
+    v3_cache_entry = v3_cache_class(
+        mirror_url, s, allow_unsigned=unsigned, config=config, client=client
+    )
     exists = v3_cache_entry.exists([BuildcacheComponent.SPEC, BuildcacheComponent.TARBALL])
     v3_cache_entry.destroy()
 
@@ -131,7 +139,7 @@ def _migrate_spec(
         )
         with open(local_signed_pre_verify, "w", encoding="utf-8") as fd:
             fd.write(spec_contents)
-        if not try_verify(local_signed_pre_verify):
+        if not try_verify(local_signed_pre_verify, config=config):
             return MigrateSpecResult(False, f"Failed to verify signature of {print_spec}")
         with open(local_signed_pre_verify, encoding="utf-8") as fd:
             spec_dict = spack.util.gpg.extract_json_from_clearsig(fd.read())
@@ -155,7 +163,7 @@ def _migrate_spec(
     # location
     archive_stage_path = os.path.join(tmpdir, f"archive_stage_{s.name}_{s.dag_hash()}")
     archive_stage = spack.stage.stage_from_config(
-        v2_archive_url, path=archive_stage_path, config=spack.config.CONFIG
+        v2_archive_url, path=archive_stage_path, config=config, client=client
     )
 
     try:
@@ -253,7 +261,12 @@ def _migrate_spec(
 
 
 def migrate(
-    mirror: spack.mirrors.mirror.Mirror, unsigned: bool = False, delete_existing: bool = False
+    mirror: spack.mirrors.mirror.Mirror,
+    unsigned: bool = False,
+    delete_existing: bool = False,
+    *,
+    config: spack.config.Configuration,
+    client: web_util.NetworkClient,
 ) -> None:
     """Perform migration of the given mirror
 
@@ -262,7 +275,6 @@ def migrate(
     will attempt to verify signatures and re-sign specs, and will fail if not
     able to do so.  If delete_existing is True, spack will delete the original
     contents of the mirror once the migration is complete."""
-    client = web_util.NetworkClient.from_config(spack.config.CONFIG)
     signing_key = ""
     if not unsigned:
         try:
@@ -292,7 +304,7 @@ def migrate(
     except (web_util.SpackWebError, OSError):
         raise MigrationException("Buildcache migration requires a buildcache index")
 
-    with tempfile.TemporaryDirectory(dir=spack.stage.stage_root(spack.config.CONFIG)) as tmpdir:
+    with tempfile.TemporaryDirectory(dir=spack.stage.stage_root(config)) as tmpdir:
         index_path = os.path.join(tmpdir, "_tmp_index.json")
         with open(index_path, "w", encoding="utf-8") as fd:
             fd.write(contents)
@@ -310,7 +322,16 @@ def migrate(
         # Run the tasks in parallel if possible
         executor = spack.util.parallel.make_concurrent_executor()
         migrate_futures = [
-            executor.submit(_migrate_spec, spec, mirror_url, tmpdir, unsigned, signing_key)
+            executor.submit(
+                _migrate_spec,
+                spec,
+                mirror_url,
+                tmpdir,
+                unsigned,
+                signing_key,
+                config=config,
+                client=client,
+            )
             for spec in specs_to_migrate
         ]
 
@@ -336,19 +357,26 @@ def migrate(
 
             # If the layout.json doesn't yet exist on this mirror, push it
             v3_cache_class = get_url_buildcache_class(layout_version=3)
-            v3_cache_class.maybe_push_layout_json(mirror_url)
+            v3_cache_class.maybe_push_layout_json(mirror_url, config=config, client=client)
 
             # Push the migrated mirror index
             index_tmpdir = os.path.join(tmpdir, "rebuild_index")
             os.mkdir(index_tmpdir)
-            spack.binary_distribution._push_index(db, index_tmpdir, mirror_url)
+            spack.binary_distribution._push_index(
+                db, index_tmpdir, mirror_url, config=config, client=client
+            )
 
             # Push the public part of the signing key
             if not unsigned:
                 keys_tmpdir = os.path.join(tmpdir, "keys")
                 os.mkdir(keys_tmpdir)
                 spack.binary_distribution._url_push_keys(
-                    mirror_url, keys=[signing_key], update_index=True, tmpdir=keys_tmpdir
+                    mirror_url,
+                    keys=[signing_key],
+                    update_index=True,
+                    tmpdir=keys_tmpdir,
+                    config=config,
+                    client=client,
                 )
         else:
             tty.warn("No specs migrated, did you mean to perform an unsigned migration instead?")

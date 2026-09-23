@@ -39,6 +39,7 @@ import spack.compilers.config
 import spack.compilers.libraries
 import spack.concretize
 import spack.config
+import spack.context
 import spack.database
 import spack.directives_meta
 import spack.environment as ev
@@ -702,7 +703,9 @@ def mock_binary_index(monkeypatch, tmp_path_factory: pytest.TempPathFactory):
     tmpdir = tmp_path_factory.mktemp("mock_binary_index")
     index_path = tmpdir / "binary_index"
     mock_index = spack.binary_distribution.BinaryIndexCache(
-        str(index_path), config=spack.config.CONFIG
+        str(index_path),
+        config=spack.config.CONFIG,
+        client=spack.util.web.NetworkClient.from_config(spack.config.CONFIG),
     )
     monkeypatch.setattr(spack.binary_distribution, "BINARY_INDEX", mock_index)
     yield
@@ -776,7 +779,9 @@ def _load_clingo():
 #
 @pytest.fixture(scope="session")
 def mock_packages_repo():
-    yield spack.repo.from_path(spack.paths.mock_packages_path)
+    yield spack.repo.from_path(
+        spack.paths.mock_packages_path, cache=spack.context.current().misc_cache
+    )
 
 
 @pytest.fixture
@@ -846,7 +851,9 @@ def mock_packages(mock_packages_repo, mock_pkg_install, request):
 def mutable_mock_repo(mock_packages_repo, request):
     """Function-scoped mock packages, for tests that need to modify them."""
     ensure_configuration_fixture_run_before(request)
-    mock_repo = spack.repo.from_path(spack.paths.mock_packages_path)
+    mock_repo = spack.repo.from_path(
+        spack.paths.mock_packages_path, cache=spack.context.current().misc_cache
+    )
     with spack.repo.use_repositories(mock_repo) as mock_packages_repo:
         yield mock_packages_repo
 
@@ -1284,7 +1291,7 @@ def _populate(mock_db):
     """
 
     def _install(spec):
-        s = spack.concretize.concretize_one(spec)
+        s = spack.concretize.concretize_one(spec, spack.context.current())
         PackageInstaller([s.package], fake=True, explicit=True).install()
 
     _install("mpileaks ^mpich")
@@ -1436,10 +1443,17 @@ def _return_none(*args):
     return None
 
 
+class _InMemoryCompilerCache:
+    """Descriptor giving every context a compiler cache that does not persist."""
+
+    def __get__(self, obj, objtype=None):
+        return spack.compilers.libraries.CompilerCache()
+
+
 @pytest.fixture(autouse=True)
 def disable_compiler_output_cache(monkeypatch):
     monkeypatch.setattr(
-        spack.compilers.libraries, "COMPILER_CACHE", spack.compilers.libraries.CompilerCache()
+        spack.context._ProcessContext, "compiler_cache", _InMemoryCompilerCache()
     )
 
 
@@ -2512,7 +2526,7 @@ def disable_parallelism(monkeypatch, request):
         monkeypatch.setattr(spack.util.parallel, "ENABLE_PARALLELISM", False)
 
 
-def _root_path(x, y, *, path):
+def _root_path(x, y, z, *, path):
     return path
 
 
@@ -2640,7 +2654,7 @@ def write_config_file(tmp_path: Path):
 @pytest.fixture()
 def wrapper_dir(install_mockery):
     """Installs the compiler wrapper and returns the prefix where the script is installed."""
-    wrapper = spack.concretize.concretize_one("compiler-wrapper")
+    wrapper = spack.concretize.concretize_one("compiler-wrapper", spack.context.current())
     wrapper_pkg = wrapper.package
     PackageInstaller([wrapper_pkg], explicit=True).install()
     return wrapper_pkg.bin_dir()

@@ -9,6 +9,7 @@ import os
 from typing import Optional, Union
 
 import spack.cmd
+import spack.config
 import spack.paths
 import spack.repo
 import spack.util.editor
@@ -85,7 +86,7 @@ def locate_package(name: str, repo: Union[spack.repo.Repo, spack.repo.RepoPath])
             return path
     except OSError as e:
         if e.errno == errno.ENOENT:
-            raise spack.repo.UnknownPackageError(name) from e
+            raise spack.repo.UnknownPackageError(name, repo) from e
         tty.die(f"Cannot edit package: {e}")
 
 
@@ -160,7 +161,9 @@ def edit(parser, args, ctx):
     if args.namespace:
         repo = ctx.repo.get_repo(args.namespace)
     elif args.repo:
-        repo = spack.repo.Repo(args.repo, cache=ctx.misc_cache)
+        repo = spack.repo.Repo(
+            spack.config.canonicalize_path(args.repo, config=ctx.config), cache=ctx.misc_cache
+        )
     # default_repo used when no name provided
     default_repo = repo or ctx.repo.first_repo()
 

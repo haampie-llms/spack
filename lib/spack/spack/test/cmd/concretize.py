@@ -5,6 +5,7 @@
 
 import pytest
 
+import spack.context
 import spack.environment as ev
 from spack import spack_version
 from spack.main import SpackCommand
@@ -24,7 +25,7 @@ def test_concretize_all_test_dependencies(unify, mutable_config, mutable_mock_en
     """Check all test dependencies are concretized."""
     env("create", "test")
 
-    with ev.read("test") as e:
+    with ev.read("test", ctx=spack.context.current()) as e:
         mutable_config.set("concretizer:unify", unify)
         add("depb")
         concretize("--test", "all")
@@ -38,7 +39,7 @@ def test_concretize_root_test_dependencies_not_recursive(
     """Check that test dependencies are not concretized recursively."""
     env("create", "test")
 
-    with ev.read("test") as e:
+    with ev.read("test", ctx=spack.context.current()) as e:
         mutable_config.set("concretizer:unify", unify)
         add("depb")
         concretize("--test", "root")
@@ -52,7 +53,7 @@ def test_concretize_root_test_dependencies_are_concretized(
     """Check that root test dependencies are concretized."""
     env("create", "test")
 
-    with ev.read("test") as e:
+    with ev.read("test", ctx=spack.context.current()) as e:
         mutable_config.set("concretizer:unify", unify)
         add("pkg-a")
         add("pkg-b")

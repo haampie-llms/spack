@@ -90,7 +90,7 @@ def graph(parser, args, ctx: spack.context.SpackContext):
         tty.die("no spec matching the query")
 
     if args.static:
-        static_graph_dot(specs, depflag=args.deptype)
+        static_graph_dot(specs, depflag=args.deptype, ctx=ctx)
         return
 
     if args.dot:
@@ -105,7 +105,7 @@ def graph(parser, args, ctx: spack.context.SpackContext):
             builder = DAGWithDependencyTypes(node_label_fmt)
         else:
             builder = SimpleDAG(node_label_fmt)
-        graph_dot(specs, builder=builder, depflag=args.deptype)
+        graph_dot(specs, builder=builder, depflag=args.deptype, config=ctx.config)
         return
 
     # ascii is default: user doesn't need to provide it explicitly

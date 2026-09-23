@@ -190,7 +190,7 @@ def test_find_json_deps(database):
 @pytest.mark.db
 def test_display_json(database, capfd):
     specs = [
-        spack.concretize.concretize_one(s)
+        spack.concretize.concretize_one(s, spack.context.current())
         for s in ["mpileaks ^zmpi", "mpileaks ^mpich", "mpileaks ^mpich2"]
     ]
 
@@ -206,7 +206,7 @@ def test_display_json(database, capfd):
 @pytest.mark.db
 def test_display_json_deps(database, capfd):
     specs = [
-        spack.concretize.concretize_one(s)
+        spack.concretize.concretize_one(s, spack.context.current())
         for s in ["mpileaks ^zmpi", "mpileaks ^mpich", "mpileaks ^mpich2"]
     ]
 
@@ -279,7 +279,7 @@ mpileaks-2.3
 @pytest.mark.db
 def test_find_format_deps_paths(database, config):
     output = find("-dp", "--format", "{name}-{version}", "mpileaks", "^zmpi")
-    mpileaks = spack.concretize.concretize_one("mpileaks ^zmpi")
+    mpileaks = spack.concretize.concretize_one("mpileaks ^zmpi", spack.context.current())
     assert (
         output
         == f"""\
@@ -303,7 +303,7 @@ def test_find_very_long(database, config):
     output = find("-L", "--no-groups", "mpileaks")
 
     specs = [
-        spack.concretize.concretize_one(s)
+        spack.concretize.concretize_one(s, spack.context.current())
         for s in ["mpileaks ^zmpi", "mpileaks ^mpich", "mpileaks ^mpich2"]
     ]
 
@@ -341,7 +341,7 @@ def test_find_prefix_in_env(
 ):
     """Test `find` formats requiring concrete specs work in environments."""
     env("create", "test")
-    with ev.read("test"):
+    with ev.read("test", ctx=spack.context.current()):
         install("--fake", "--add", "mpileaks")
         find("-p")
         find("-l")
@@ -365,7 +365,7 @@ spack:
             )
         env("create", "test1", "spack.yaml")
 
-    test1 = ev.read("test1")
+    test1 = ev.read("test1", ctx=spack.context.current())
     test1.concretize()
     test1.write()
 
@@ -380,13 +380,13 @@ spack:
             )
         env("create", "test2", "spack.yaml")
 
-    test2 = ev.read("test2")
+    test2 = ev.read("test2", ctx=spack.context.current())
     test2.concretize()
     test2.write()
 
     env("create", "--include-concrete", "test1", "--include-concrete", "test2", "combined_env")
 
-    with ev.read("combined_env"):
+    with ev.read("combined_env", ctx=spack.context.current()):
         output = find()
 
     assert "no root specs" in output
@@ -411,19 +411,19 @@ spack:
             )
         env("create", "test1", "spack.yaml")
 
-    test1 = ev.read("test1")
+    test1 = ev.read("test1", ctx=spack.context.current())
     test1.concretize()
     test1.write()
 
     env("create", "--include-concrete", "test1", "test2")
-    test2 = ev.read("test2")
+    test2 = ev.read("test2", ctx=spack.context.current())
     test2.add("libelf")
     test2.concretize()
     test2.write()
 
     env("create", "--include-concrete", "test2", "test3")
 
-    with ev.read("test3"):
+    with ev.read("test3", ctx=spack.context.current()):
         output = find()
 
     assert "no root specs" in output
@@ -452,7 +452,7 @@ def test_environment_with_version_range_in_compiler_doesnt_fail(
     by a version range (i.e. @X.Y rather the single version than @=X.Y) doesn't result in an error
     when invoking "spack find".
     """
-    test_environment = ev.create_in_dir(tmp_path)
+    test_environment = ev.create_in_dir(tmp_path, ctx=spack.context.current())
     test_environment.add("zlib %gcc@12.1.0")
     test_environment.write()
 
@@ -495,7 +495,7 @@ def test_find_concretized_not_installed(
         return len(_qresult[0]), len(_qresult[1])
 
     env("create", "test")
-    with ev.read("test"):
+    with ev.read("test", ctx=spack.context.current()):
         install("--fake", "--add", "a0")
 
         assert _nresults(_query()) == (3, 0)
@@ -606,7 +606,7 @@ def test_find_env_with_groups(spack_yaml, expected, not_expected, tmp_path: path
     environment with groups.
     """
     (tmp_path / "spack.yaml").write_text(spack_yaml)
-    with ev.Environment(tmp_path):
+    with ev.Environment(tmp_path, ctx=spack.context.current()):
         output = find()
 
     assert all(x in output for x in expected)

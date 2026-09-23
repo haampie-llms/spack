@@ -43,22 +43,22 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     spack.cmd.common.arguments.add_common_arguments(subparser, ["yes_to_all", "constraint"])
 
 
-def roots_from_environments(args, active_env):
+def roots_from_environments(args, active_env, ctx):
     # if we're using -E or -e, make a list of environments whose roots we should consider.
     all_environments = []
 
     # -E will garbage collect anything not needed by any env, including the current one
     if args.except_any_environment:
-        all_environments += list(ev.all_environments())
+        all_environments += list(ev.all_environments(ctx))
         if active_env:
             all_environments.append(active_env)
 
     # -e says "also preserve things needed by this particular env"
     for env_name_or_dir in args.except_environment:
-        if ev.exists(env_name_or_dir):
-            env = ev.read(env_name_or_dir)
-        elif ev.is_env_dir(env_name_or_dir):
-            env = ev.Environment(env_name_or_dir)
+        if ev.exists(env_name_or_dir, config=ctx.config):
+            env = ev.read(env_name_or_dir, ctx=ctx)
+        elif ev.is_env_dir(env_name_or_dir, config=ctx.config):
+            env = ev.Environment(env_name_or_dir, ctx=ctx)
         else:
             tty.die(f"No such environment: '{env_name_or_dir}'")
         all_environments.append(env)
@@ -83,7 +83,7 @@ def gc(parser, args, ctx):
         if args.except_environment or args.except_any_environment:
             # if either of these is specified, we ignore the active environment and garbage
             # collect anything NOT in specified environments.
-            root_hashes = roots_from_environments(args, active_env)
+            root_hashes = roots_from_environments(args, active_env, ctx)
 
         elif active_env:
             # only gc what's in current environment

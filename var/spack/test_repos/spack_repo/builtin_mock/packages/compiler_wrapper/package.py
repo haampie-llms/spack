@@ -279,6 +279,8 @@ class CompilerWrapper(Package):
 
 
 def _implicit_rpaths(pkg: spack.package_base.PackageBase) -> List[str]:
-    detector = spack.compilers.libraries.CompilerPropertyDetector(pkg.spec)
+    detector = spack.compilers.libraries.CompilerPropertyDetector(
+        pkg.spec, repo=pkg.context.repo, cache=pkg.context.compiler_cache
+    )
     paths = detector.implicit_rpaths()
     return paths

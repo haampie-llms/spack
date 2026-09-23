@@ -10,14 +10,12 @@ import shutil
 import stat
 import sys
 import tempfile
-from typing import Any, Dict, List, Optional, Set, Tuple, cast
+from typing import Any, Dict, List, Optional, Set, Tuple
 
-import spack.caches
 import spack.repo
 import spack.schema.environment
 import spack.spec
 import spack.util.executable
-import spack.util.lang
 import spack.util.libc
 import spack.util.module_cmd
 import spack.util.path
@@ -141,26 +139,18 @@ class CompilerPropertyDetector:
     """Detects compiler properties of a given compiler spec. Useful for compiler wrappers."""
 
     def __init__(
-        self,
-        compiler_spec: spack.spec.Spec,
-        *,
-        # We can't avoid the optional for the time being, since the compiler-wrapper
-        # constructs an instance without the repo arg.
-        repo: Optional[spack.repo.RepoPath] = None,
-        cache: Optional["CompilerCache"] = None,
+        self, compiler_spec: spack.spec.Spec, *, repo: spack.repo.RepoPath, cache: "CompilerCache"
     ):
         """
         Args:
             compiler_spec: concrete spec of the compiler to inspect.
-            repo: package repositories the compiler recipe is read from. Defaults to the
-                process-wide repositories, since package recipes construct detectors without one.
-            cache: where the verbose output of the compiler is stored. Defaults to the
-                process-wide cache, since package recipes construct detectors without one.
+            repo: package repositories the compiler recipe is read from.
+            cache: where the verbose output of the compiler is stored.
         """
         assert compiler_spec.concrete, "only concrete compiler specs are allowed"
         self.spec = compiler_spec
-        self.repo = spack.repo.repo_or_default(repo)
-        self.cache = cache if cache is not None else COMPILER_CACHE
+        self.repo = repo
+        self.cache = cache
 
     @contextlib.contextmanager
     def compiler_environment(self):
@@ -464,10 +454,3 @@ class FileCompilerCache(CompilerCache):
     def _key(self, compiler: spack.spec.Spec) -> str:
         as_bytes = json.dumps(compiler.to_dict(), separators=(",", ":")).encode("utf-8")
         return hashlib.sha256(as_bytes).hexdigest()
-
-
-def _make_compiler_cache():
-    return FileCompilerCache(spack.caches.MISC_CACHE)
-
-
-COMPILER_CACHE = cast(CompilerCache, spack.util.lang.Singleton(_make_compiler_cache))

@@ -9,6 +9,7 @@ import sys
 from typing import Any, Dict, Generator, MutableSequence, Sequence
 
 import spack.config
+import spack.context
 import spack.environment
 import spack.modules
 import spack.paths
@@ -42,8 +43,9 @@ def spec_for_current_python() -> str:
 
 def root_path() -> str:
     """Root of all the bootstrap related folders"""
+    config = spack.context.current().config
     return spack.config.canonicalize_path(
-        spack.config.CONFIG.get("bootstrap:root", spack.paths.default_user_bootstrap_path)
+        config.get("bootstrap:root", spack.paths.default_user_bootstrap_path), config=config
     )
 
 
@@ -77,12 +79,16 @@ def _spack_python_interpreter() -> Generator:
 
 def _store_path() -> str:
     bootstrap_root_path = root_path()
-    return spack.config.canonicalize_path(os.path.join(bootstrap_root_path, "store"))
+    return spack.config.canonicalize_path(
+        os.path.join(bootstrap_root_path, "store"), config=spack.context.current().config
+    )
 
 
 def _config_path() -> str:
     bootstrap_root_path = root_path()
-    return spack.config.canonicalize_path(os.path.join(bootstrap_root_path, "config"))
+    return spack.config.canonicalize_path(
+        os.path.join(bootstrap_root_path, "config"), config=spack.context.current().config
+    )
 
 
 @contextlib.contextmanager

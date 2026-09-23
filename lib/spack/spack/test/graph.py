@@ -4,14 +4,16 @@
 import io
 
 import spack.concretize
+import spack.config
+import spack.context
 import spack.graph
 
 
 def test_dynamic_dot_graph_mpileaks(config, mock_packages):
     """Test dynamically graphing the mpileaks package."""
-    s = spack.concretize.concretize_one("mpileaks")
+    s = spack.concretize.concretize_one("mpileaks", spack.context.current())
     stream = io.StringIO()
-    spack.graph.graph_dot([s], out=stream)
+    spack.graph.graph_dot([s], out=stream, config=spack.config.CONFIG)
     dot = stream.getvalue()
 
     nodes_to_check = ["mpileaks", "mpi", "callpath", "dyninst", "libdwarf", "libelf"]
@@ -38,7 +40,7 @@ def test_dynamic_dot_graph_mpileaks(config, mock_packages):
 
 def test_ascii_graph_mpileaks(config, mock_packages, monkeypatch):
     monkeypatch.setattr(spack.graph.AsciiGraph, "_node_label", lambda self, node: node.name)
-    s = spack.concretize.concretize_one("mpileaks")
+    s = spack.concretize.concretize_one("mpileaks", spack.context.current())
 
     stream = io.StringIO()
     graph = spack.graph.AsciiGraph()

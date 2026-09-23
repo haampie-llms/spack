@@ -13,6 +13,7 @@ from typing import Iterable, List
 import spack.vendor.archspec.cpu
 
 import spack.config
+import spack.context
 import spack.environment
 import spack.error
 import spack.paths
@@ -32,7 +33,7 @@ class BootstrapEnvironment(spack.environment.Environment):
     def __init__(self) -> None:
         if not self.spack_yaml().exists():
             self._write_spack_yaml_file()
-        super().__init__(self.environment_root())
+        super().__init__(self.environment_root(), ctx=spack.context.current())
 
         # Remove python package roots created before python-venv was introduced
         for s in self.concrete_roots():
@@ -54,7 +55,8 @@ class BootstrapEnvironment(spack.environment.Environment):
         environment_dir = f"{python_part}-{arch_part}-{interpreter_part}"
         return pathlib.Path(
             spack.config.canonicalize_path(
-                os.path.join(bootstrap_root_path, "environments", environment_dir)
+                os.path.join(bootstrap_root_path, "environments", environment_dir),
+                config=spack.context.current().config,
             )
         )
 
@@ -126,7 +128,7 @@ class BootstrapEnvironment(spack.environment.Environment):
         tty.msg(
             "[BOOTSTRAPPING] Spack has missing dependencies, creating a bootstrapping environment"
         )
-        env = spack.tengine.make_environment()
+        env = spack.tengine.make_environment(spack.context.current().config)
         template = env.get_template("bootstrap/spack.yaml")
         context = {
             "python_spec": f"{spec_for_current_python()}+ctypes",
@@ -174,7 +176,9 @@ def download_and_trust_key():
     with open(fingerprint_file, "r", encoding="utf-8") as f:
         fingerprint, key_endpoint = f.readline().strip("\n").split(";")
     fingerprint = fingerprint.strip().upper()
-    with spack.stage.stage_from_config(key_endpoint, config=spack.config.CONFIG) as stage:
+    with spack.stage.stage_from_config(
+        key_endpoint, config=spack.config.CONFIG, client=spack.context.current().network
+    ) as stage:
         try:
             stage.fetch()
         except spack.error.FetchError as e:

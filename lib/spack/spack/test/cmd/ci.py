@@ -17,6 +17,7 @@ import spack.cmd
 import spack.cmd.ci
 import spack.concretize
 import spack.config
+import spack.context
 import spack.environment as ev
 import spack.main
 import spack.paths
@@ -125,9 +126,9 @@ def ci_generate_test(
         try:
             spack_yaml = tmp_path / "spack.yaml"
             spack_yaml.write_text(spack_yaml_content)
-            ev.create("test", init_file=spack_yaml, with_view=False)
+            ev.create("test", init_file=spack_yaml, with_view=False, ctx=spack.context.current())
             outputfile = tmp_path / ".gitlab-ci.yml"
-            with ev.read("test"):
+            with ev.read("test", ctx=spack.context.current()):
                 output = ci_cmd(
                     "generate",
                     "--output-file",
@@ -599,7 +600,7 @@ spack:
 """
         )
 
-    with ev.Environment(env_dir) as env:
+    with ev.Environment(env_dir, ctx=spack.context.current()) as env:
         env.concretize()
         env.write()
 
@@ -802,7 +803,7 @@ spack:
 
     with working_dir(tmp_path):
         env_cmd("create", "test", "./spack.yaml")
-        with ev.read("test") as env:
+        with ev.read("test", ctx=spack.context.current()) as env:
             env.concretize()
 
             # Create environment variables as gitlab would do it
@@ -874,7 +875,7 @@ spack:
 """
             )
         env_cmd("create", "test", "./spack.yaml")
-        with ev.read("test") as current_env:
+        with ev.read("test", ctx=spack.context.current()) as current_env:
             current_env.concretize()
             install_cmd("--keep-stage")
 
@@ -884,8 +885,11 @@ spack:
             with open(json_path, "w", encoding="utf-8") as ypfd:
                 ypfd.write(spec_json)
 
+            ctx = spack.context.current()
             for s in concrete_spec.traverse():
-                ci.push_to_build_cache(s, mirror_url, True)
+                ci.push_to_build_cache(
+                    s, mirror_url, True, config=ctx.config, client=ctx.network, store=ctx.store
+                )
 
             # Now test the --prune-dag (default) option of spack ci generate
             mirror_cmd("add", "test-ci", mirror_url)
@@ -941,7 +945,11 @@ spack:
             mirror_metadata = spack.binary_distribution.MirrorMetadata(mirror_url, layout_version)
             client = spack.util.web.NetworkClient.from_config(spack.config.CONFIG)
             index_fetcher = spack.binary_distribution.DefaultIndexHandler(
-                mirror_metadata, None, urlopen=client.urlopen
+                mirror_metadata,
+                None,
+                urlopen=client.urlopen,
+                config=spack.config.CONFIG,
+                client=client,
             )
             result = index_fetcher.conditional_fetch()
             spack.vendor.jsonschema.validate(json.loads(result.data), db_idx_schema)
@@ -951,7 +959,7 @@ spack:
 
             logs_dir = scratch / "logs_dir"
             logs_dir.mkdir()
-            ci.copy_stage_logs_to_artifacts(concrete_spec, str(logs_dir))
+            ci.copy_stage_logs_to_artifacts(concrete_spec, str(logs_dir), store=ctx.store)
             assert "spack-build-out.txt.gz" in os.listdir(logs_dir)
 
 
@@ -963,7 +971,10 @@ def test_push_to_build_cache_exceptions(monkeypatch, tmp_path: pathlib.Path, cap
 
     # Input doesn't matter, as we are faking exceptional output
     url = tmp_path.as_uri()
-    ci.push_to_build_cache(spack.spec.Spec(), url, False)
+    ctx = spack.context.current()
+    ci.push_to_build_cache(
+        spack.spec.Spec(), url, False, config=ctx.config, client=ctx.network, store=ctx.store
+    )
     assert f"Problem writing to {url}: Error: Access Denied" in capfd.readouterr().err
 
 
@@ -1146,8 +1157,8 @@ spack:
 
     with working_dir(tmp_path):
         env_cmd("create", "test", "./spack.yaml")
-        with ev.read("test"):
-            concrete_spec = spack.concretize.concretize_one("callpath")
+        with ev.read("test", ctx=spack.context.current()):
+            concrete_spec = spack.concretize.concretize_one("callpath", spack.context.current())
             with open(tmp_path / "spec.json", "w", encoding="utf-8") as f:
                 f.write(concrete_spec.to_json())
 
@@ -1212,7 +1223,7 @@ spack:
     #                     -> libdwarf -> libelf
     #          -> mpich
     env_hashes = {}
-    with ev.read("test") as active_env:
+    with ev.read("test", ctx=spack.context.current()) as active_env:
         active_env.concretize()
         for s in active_env.all_specs():
             env_hashes[s.name] = s.dag_hash()
@@ -1268,7 +1279,7 @@ spack:
     with working_dir(tmp_path):
         env_cmd("create", "test", "./spack.yaml")
 
-        with ev.read("test"):
+        with ev.read("test", ctx=spack.context.current()):
             # Check the 'generate' subcommand
             expect = "spack ci generate requires a mirror named 'buildcache-destination'"
             with pytest.raises(ci.SpackCIError, match=expect):
@@ -1288,10 +1299,12 @@ def test_ci_generate_read_broken_specs_url(
     ci_base_environment,
 ):
     """Verify that `broken-specs-url` works as intended"""
-    spec_a = spack.concretize.concretize_one("pkg-a")
+    spec_a = spack.concretize.concretize_one("pkg-a", spack.context.current())
     a_dag_hash = spec_a.dag_hash()
 
-    spec_flattendeps = spack.concretize.concretize_one("dependent-install")
+    spec_flattendeps = spack.concretize.concretize_one(
+        "dependent-install", spack.context.current()
+    )
     flattendeps_dag_hash = spec_flattendeps.dag_hash()
 
     broken_specs_url = tmp_path.as_uri()
@@ -1301,7 +1314,14 @@ def test_ci_generate_read_broken_specs_url(
     job_stack = "job_stack"
     a_job_url = "a_job_url"
     ci.write_broken_spec(
-        broken_spec_a_url, spec_a.name, job_stack, a_job_url, "pipeline_url", spec_a.to_dict()
+        broken_spec_a_url,
+        spec_a.name,
+        job_stack,
+        a_job_url,
+        "pipeline_url",
+        spec_a.to_dict(),
+        config=spack.config.CONFIG,
+        client=spack.context.current().network,
     )
 
     # Test that `spack ci generate` notices this broken spec and fails.
@@ -1332,7 +1352,7 @@ spack:
 
     with working_dir(tmp_path):
         env_cmd("create", "test", "./spack.yaml")
-        with ev.read("test"):
+        with ev.read("test", ctx=spack.context.current()):
             # Check output of the 'generate' subcommand
             output = ci_cmd("generate", fail_on_error=False)
             assert "known to be broken" in output
@@ -1429,12 +1449,12 @@ spack:
 """
         )
 
-    with working_dir(tmp_path), ev.Environment(".") as env:
+    with working_dir(tmp_path), ev.Environment(".", ctx=spack.context.current()) as env:
         env.concretize()
         env.write()
 
     def fake_download_and_extract_artifacts(url, work_dir, *, urlopen, merge_commit_test=True):
-        with working_dir(tmp_path), ev.Environment(".") as env:
+        with working_dir(tmp_path), ev.Environment(".", ctx=spack.context.current()) as env:
             if not os.path.exists(repro_dir):
                 repro_dir.mkdir()
 
@@ -1682,13 +1702,17 @@ spack:
     # Ensure the relocated concrete env includes point to the same location
     rel_conc_path = env_manifest["spack"]["include"][0]
     abs_conc_path = (conc_env_path / rel_conc_path).absolute().resolve()
-    assert str(abs_conc_path) == os.path.join(ev.as_env_dir("test"), "gitlab", "configs")
+    assert str(abs_conc_path) == os.path.join(
+        ev.as_env_dir("test", config=spack.config.CONFIG), "gitlab", "configs"
+    )
 
     # Ensure relative path include with "path" correctly updated
     # Ensure the relocated concrete env includes point to the same location
     rel_conc_path = env_manifest["spack"]["include"][1]["path"]
     abs_conc_path = (conc_env_path / rel_conc_path).absolute().resolve()
-    assert str(abs_conc_path) == os.path.join(ev.as_env_dir("test"), "gitlab", "configs")
+    assert str(abs_conc_path) == os.path.join(
+        ev.as_env_dir("test", config=spack.config.CONFIG), "gitlab", "configs"
+    )
 
     # Ensure absolute path is unchanged
     # Ensure the relocated concrete env includes point to the same location
@@ -1731,7 +1755,7 @@ spack:
 """
         )
 
-    with ev.Environment(tmp_path):
+    with ev.Environment(tmp_path, ctx=spack.context.current()):
         ci_cmd("generate", "--output-file", str(tmp_path / ".gitlab-ci.yml"))
 
     with open(tmp_path / ".gitlab-ci.yml", encoding="utf-8") as f:
@@ -1761,7 +1785,7 @@ spack:
 """
         )
 
-    spec_a = spack.concretize.concretize_one("pkg-a")
+    spec_a = spack.concretize.concretize_one("pkg-a", spack.context.current())
 
     return gitlab_generator.get_job_name(spec_a)
 
@@ -1786,7 +1810,7 @@ def test_ci_dynamic_mapping_empty(
         env_cmd("create", "test", "./spack.yaml")
         outputfile = str(tmp_path / ".gitlab-ci.yml")
 
-        with ev.read("test"):
+        with ev.read("test", ctx=spack.context.current()):
             output = ci_cmd("generate", "--output-file", outputfile)
             assert "Response missing required keys: ['variables']" in output
 
@@ -1815,7 +1839,7 @@ def test_ci_dynamic_mapping_full(
         env_cmd("create", "test", "./spack.yaml")
         outputfile = str(tmp_path / ".gitlab-ci.yml")
 
-        with ev.read("test"):
+        with ev.read("test", ctx=spack.context.current()):
             ci_cmd("generate", "--output-file", outputfile)
 
             with open(outputfile, encoding="utf-8") as of:
@@ -1947,7 +1971,7 @@ spack:
     with open(pipeline_manifest_path, encoding="utf-8") as fd:
         manifest_data = json.load(fd)
 
-    with ev.read("test") as active_env:
+    with ev.read("test", ctx=spack.context.current()) as active_env:
         active_env.concretize()
         for s in active_env.all_specs():
             assert s.dag_hash() in manifest_data
@@ -2103,9 +2127,12 @@ def test_ci_validate_standard_versions_valid(
 ):
     spec = spack.spec.Spec("diff-test")
     pkg = mock_packages.get_pkg_class(spec.name)(spec)
+    pkg.context = spack.context.current()
     version_list = [spack.version.Version(v) for v in versions]
 
-    assert spack.cmd.ci.validate_standard_versions(pkg, version_list, spack.config.CONFIG)
+    assert spack.cmd.ci.validate_standard_versions(
+        pkg, version_list, spack.config.CONFIG, client=spack.context.current().network
+    )
 
     out, err = capfd.readouterr()
     for version in versions:
@@ -2118,9 +2145,15 @@ def test_ci_validate_standard_versions_invalid(
 ):
     spec = spack.spec.Spec("diff-test")
     pkg = mock_packages.get_pkg_class(spec.name)(spec)
+    pkg.context = spack.context.current()
     version_list = [spack.version.Version(v) for v in versions]
 
-    assert spack.cmd.ci.validate_standard_versions(pkg, version_list, spack.config.CONFIG) is False
+    assert (
+        spack.cmd.ci.validate_standard_versions(
+            pkg, version_list, spack.config.CONFIG, client=spack.context.current().network
+        )
+        is False
+    )
 
     out, err = capfd.readouterr()
     for version in versions:
@@ -2133,9 +2166,15 @@ def test_ci_validate_standard_versions_invalid_url(
 ):
     spec = spack.spec.Spec("diff-test")
     pkg = spack.repo.PATH.get_pkg_class(spec.name)(spec)
+    pkg.context = spack.context.current()
     version_list = [spack.version.Version(v) for v in versions]
 
-    assert spack.cmd.ci.validate_standard_versions(pkg, version_list, spack.config.CONFIG) is False
+    assert (
+        spack.cmd.ci.validate_standard_versions(
+            pkg, version_list, spack.config.CONFIG, client=spack.context.current().network
+        )
+        is False
+    )
 
     out, err = capfd.readouterr()
     assert "No valid URLs found for diff-test@2.1.4" in err
@@ -2149,10 +2188,16 @@ def test_ci_validate_standard_versions_invalid_both(
 ):
     spec = spack.spec.Spec("diff-test")
     pkg = spack.repo.PATH.get_pkg_class(spec.name)(spec)
+    pkg.context = spack.context.current()
     versions = ["2.1.4", "2.1.5"]
     version_list = [spack.version.Version(v) for v in versions]
 
-    assert spack.cmd.ci.validate_standard_versions(pkg, version_list, spack.config.CONFIG) is False
+    assert (
+        spack.cmd.ci.validate_standard_versions(
+            pkg, version_list, spack.config.CONFIG, client=spack.context.current().network
+        )
+        is False
+    )
 
     out, err = capfd.readouterr()
     assert "No valid URLs found for diff-test@2.1.4" in err
@@ -2166,6 +2211,7 @@ def test_ci_validate_git_versions_valid(
     spec = spack.spec.Spec("diff-test")
     pkg_class = mock_packages.get_pkg_class(spec.name)
     pkg = pkg_class(spec)
+    pkg.context = spack.context.current()
     version_list = [spack.version.Version(v) for v, _ in versions]
 
     repo_path, filename, commits = mock_git_version_info
@@ -2176,7 +2222,9 @@ def test_ci_validate_git_versions_valid(
     monkeypatch.setattr(pkg_class, "git", repo_path)
     monkeypatch.setattr(pkg_class, "versions", version_commit_dict)
 
-    assert spack.cmd.ci.validate_git_versions(pkg, version_list, spack.config.CONFIG)
+    assert spack.cmd.ci.validate_git_versions(
+        pkg, version_list, spack.config.CONFIG, client=spack.context.current().network
+    )
 
     out, err = capfd.readouterr()
     for version in version_list:
@@ -2190,6 +2238,7 @@ def test_ci_validate_git_versions_bad_tag(
     spec = spack.spec.Spec("diff-test")
     pkg_class = mock_packages.get_pkg_class(spec.name)
     pkg = pkg_class(spec)
+    pkg.context = spack.context.current()
     version_list = [spack.version.Version(v) for v, _ in versions]
 
     repo_path, filename, commits = mock_git_version_info
@@ -2200,7 +2249,12 @@ def test_ci_validate_git_versions_bad_tag(
     monkeypatch.setattr(pkg_class, "git", repo_path)
     monkeypatch.setattr(pkg_class, "versions", version_commit_dict)
 
-    assert spack.cmd.ci.validate_git_versions(pkg, version_list, spack.config.CONFIG) is False
+    assert (
+        spack.cmd.ci.validate_git_versions(
+            pkg, version_list, spack.config.CONFIG, client=spack.context.current().network
+        )
+        is False
+    )
 
     out, err = capfd.readouterr()
     for version in version_list:
@@ -2214,6 +2268,7 @@ def test_ci_validate_git_versions_invalid(
     spec = spack.spec.Spec("diff-test")
     pkg_class = mock_packages.get_pkg_class(spec.name)
     pkg = pkg_class(spec)
+    pkg.context = spack.context.current()
     version_list = [spack.version.Version(v) for v, _ in versions]
 
     repo_path, filename, commits = mock_git_version_info
@@ -2228,7 +2283,12 @@ def test_ci_validate_git_versions_invalid(
     monkeypatch.setattr(pkg_class, "git", repo_path)
     monkeypatch.setattr(pkg_class, "versions", version_commit_dict)
 
-    assert spack.cmd.ci.validate_git_versions(pkg, version_list, spack.config.CONFIG) is False
+    assert (
+        spack.cmd.ci.validate_git_versions(
+            pkg, version_list, spack.config.CONFIG, client=spack.context.current().network
+        )
+        is False
+    )
 
     out, err = capfd.readouterr()
     for version in version_list:
@@ -2244,7 +2304,7 @@ def mock_packages_path(path):
 
 @pytest.fixture
 def verify_standard_versions_valid(monkeypatch):
-    def validate_standard_versions(pkg, versions, config):
+    def validate_standard_versions(pkg, versions, config, *, client):
         for version in versions:
             print(f"Validated {pkg.name}@{version}")
         return True
@@ -2254,7 +2314,7 @@ def verify_standard_versions_valid(monkeypatch):
 
 @pytest.fixture
 def verify_git_versions_valid(monkeypatch):
-    def validate_git_versions(pkg, versions, config):
+    def validate_git_versions(pkg, versions, config, *, client):
         for version in versions:
             print(f"Validated {pkg.name}@{version}")
         return True
@@ -2264,7 +2324,7 @@ def verify_git_versions_valid(monkeypatch):
 
 @pytest.fixture
 def verify_standard_versions_invalid(monkeypatch):
-    def validate_standard_versions(pkg, versions, config):
+    def validate_standard_versions(pkg, versions, config, *, client):
         for version in versions:
             print(f"Invalid checksum found {pkg.name}@{version}")
         return False
@@ -2274,7 +2334,7 @@ def verify_standard_versions_invalid(monkeypatch):
 
 @pytest.fixture
 def verify_standard_versions_invalid_duplicates(monkeypatch):
-    def validate_standard_versions(pkg, versions, config):
+    def validate_standard_versions(pkg, versions, config, *, client):
         for version in versions:
             if str(version) == "2.1.7":
                 print(f"Validated {pkg.name}@{version}")
@@ -2287,7 +2347,7 @@ def verify_standard_versions_invalid_duplicates(monkeypatch):
 
 @pytest.fixture
 def verify_git_versions_invalid(monkeypatch):
-    def validate_git_versions(pkg, versions, config):
+    def validate_git_versions(pkg, versions, config, *, client):
         for version in versions:
             print(f"Invalid commit for {pkg.name}@{version}")
         return False

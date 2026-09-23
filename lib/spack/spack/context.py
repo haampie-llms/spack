@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     import spack.binary_distribution
+    import spack.compilers.libraries
     import spack.config
     import spack.environment
     import spack.repo
@@ -71,7 +72,14 @@ class SpackContext:
         """Buildcache index."""
         import spack.binary_distribution
 
-        return spack.binary_distribution.BinaryIndexCache(config=self.config)
+        return spack.binary_distribution.BinaryIndexCache(config=self.config, client=self.network)
+
+    @functools.cached_property
+    def compiler_cache(self) -> "spack.compilers.libraries.CompilerCache":
+        """Cache for compiler output (implicit rpaths, libc, ...)."""
+        import spack.compilers.libraries
+
+        return spack.compilers.libraries.FileCompilerCache(self.misc_cache)
 
     @functools.cached_property
     def network(self) -> "spack.util.web.NetworkClient":
@@ -131,6 +139,12 @@ class _ProcessContext(SpackContext):
         import spack.binary_distribution
 
         return spack.binary_distribution.BINARY_INDEX
+
+    @property  # type: ignore[override]
+    def compiler_cache(self) -> "spack.compilers.libraries.CompilerCache":
+        import spack.compilers.libraries
+
+        return spack.compilers.libraries.FileCompilerCache(self.misc_cache)
 
     def __reduce__(self):
         return _ProcessContext, ()

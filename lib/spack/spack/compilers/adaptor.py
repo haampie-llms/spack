@@ -2,13 +2,15 @@
 #
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
 import enum
-from typing import Dict, List
+from typing import TYPE_CHECKING, Dict, List
 
-import spack.repo
 import spack.spec
 from spack.util import lang
 
 from .libraries import CompilerPropertyDetector
+
+if TYPE_CHECKING:
+    import spack.package_base
 
 
 class Languages(enum.Enum):
@@ -23,7 +25,9 @@ class CompilerAdaptor:
     """
 
     def __init__(
-        self, compiled_spec: spack.spec.Spec, compilers: Dict[Languages, spack.spec.Spec]
+        self,
+        compiled_spec: "spack.package_base.PackageBase",
+        compilers: Dict[Languages, spack.spec.Spec],
     ) -> None:
         if not compilers:
             raise AttributeError(f"{compiled_spec} has no 'compiler' attribute")
@@ -75,14 +79,14 @@ class CompilerAdaptor:
         return next(iter(self.compilers.values())).version
 
     def implicit_rpaths(self) -> List[str]:
+        ctx = self.compiled_spec.context
         result, seen = [], set()
         for compiler in self.compilers.values():
             if compiler in seen:
                 continue
             seen.add(compiler)
-            result.extend(
-                CompilerPropertyDetector(compiler, repo=spack.repo.PATH).implicit_rpaths()
-            )
+            detector = CompilerPropertyDetector(compiler, repo=ctx.repo, cache=ctx.compiler_cache)
+            result.extend(detector.implicit_rpaths())
         return result
 
     @property

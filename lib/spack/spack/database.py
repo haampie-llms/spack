@@ -42,6 +42,7 @@ from typing import (
 )
 
 import spack
+import spack.context
 import spack.repo
 
 try:
@@ -928,7 +929,7 @@ class Database:
         # Pass 4: reconstruct the virtual data that spec formats before v6 omit
         if spec_reader.SPEC_VERSION < 6:
             spack.repo.reconstruct_virtuals(
-                [rec.spec for rec in data.values()], repo=spack.repo.PATH
+                [rec.spec for rec in data.values()], repo=spack.context.current().repo
             )
 
         self._data = data

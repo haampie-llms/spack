@@ -215,7 +215,7 @@ def test_shebang_interpreter_regex(shebang, interpreter):
 
 
 def test_shebang_handling(script_dir, sbang_line):
-    sbang.filter_shebangs_in_directory(script_dir.tempdir)
+    sbang.filter_shebangs_in_directory(script_dir.tempdir, spack.store.STORE)
 
     # Make sure this is untouched
     with open(script_dir.short_shebang, "r", encoding="utf-8") as f:
@@ -404,7 +404,7 @@ def test_sbang_hook_skips_nonexecutable_blobs(tmp_path: pathlib.Path):
     with open(file, "wb") as f:
         f.write(contents)
 
-    sbang.filter_shebangs_in_directory(str(tmp_path))
+    sbang.filter_shebangs_in_directory(str(tmp_path), spack.store.STORE)
 
     # Make sure there is no sbang shebang.
     with open(file, "rb") as f:

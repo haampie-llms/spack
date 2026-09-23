@@ -16,6 +16,7 @@ import pytest
 
 import spack.binary_distribution
 import spack.concretize
+import spack.context
 import spack.deptypes as dt
 import spack.error
 import spack.install_test
@@ -197,7 +198,7 @@ def setup_install_test(source_paths, test_root):
 )
 def test_cache_extra_sources(install_mockery, spec, sources, extras, expect):
     """Test the package's cache extra test sources helper function."""
-    s = spack.concretize.concretize_one(spec)
+    s = spack.concretize.concretize_one(spec, spack.context.current())
 
     source_path = s.package.stage.source_path
     srcs = [fs.join_path(source_path, src) for src in sources]
@@ -235,7 +236,7 @@ def test_cache_extra_sources(install_mockery, spec, sources, extras, expect):
 
 
 def test_cache_extra_sources_fails(install_mockery, tmp_path: pathlib.Path):
-    s = spack.concretize.concretize_one("pkg-a")
+    s = spack.concretize.concretize_one("pkg-a", spack.context.current())
 
     with pytest.raises(InstallError) as exc_info:
         spack.install_test.cache_extra_test_sources(s.package, [str(tmp_path), "no-such-file"])
@@ -275,6 +276,7 @@ def test_package_license():
     )
 
     pkg = LicensedPackage(spack.spec.Spec("licensed-package"))
+    pkg.context = spack.context.current()
     assert pkg.global_license_file is None
 
     pkg.license_files = ["license.txt"]
@@ -320,7 +322,7 @@ def test_package_test_no_compilers(mock_packages, monkeypatch, capfd):
 
 def test_package_subscript(config, mock_packages):
     """Tests that we can use the subscript notation on packages, and that it returns a package"""
-    root = spack.concretize.concretize_one("mpileaks")
+    root = spack.concretize.concretize_one("mpileaks", spack.context.current())
     root_pkg = root.package
 
     # Subscript of a virtual
@@ -332,7 +334,7 @@ def test_package_subscript(config, mock_packages):
 
 
 def test_deserialize_preserves_package_attribute(config, mock_packages):
-    x = spack.concretize.concretize_one("mpileaks").package
+    x = spack.concretize.concretize_one("mpileaks", spack.context.current()).package
     assert x.spec._package is x
 
     y = spack.subprocess_context.deserialize(spack.subprocess_context.serialize(x))
@@ -341,7 +343,7 @@ def test_deserialize_preserves_package_attribute(config, mock_packages):
 
 @pytest.mark.require_provenance
 def test_git_provenance_commit_version(config, mock_packages):
-    spec = spack.concretize.concretize_one("git-ref-package@stable")
+    spec = spack.concretize.concretize_one("git-ref-package@stable", spack.context.current())
     assert spec.satisfies(f"commit={'c' * 40}")
 
 
@@ -360,14 +362,14 @@ def test_git_provenance_find_commit_ls_remote(
     spec_str = f"git-test-commit@{version}"
 
     if pre_stage:
-        spack.concretize.concretize_one(spec_str).package.do_stage(False)
+        spack.concretize.concretize_one(spec_str, spack.context.current()).package.do_stage(False)
     else:
         # explicitly disable ability to use stage or mirror, force url path
         monkeypatch.setattr(
             spack.package_base.PackageBase, "do_fetch", lambda *args, **kwargs: None
         )
 
-    spec = spack.concretize.concretize_one(spec_str)
+    spec = spack.concretize.concretize_one(spec_str, spack.context.current())
 
     if pre_stage:
         # confirmation that we actually had an expanded stage to query with ls-remote
@@ -397,7 +399,7 @@ def test_git_provenance_cant_resolve_commit(
     monkeypatch.setattr(spack.package_base.PackageBase, "git", repo_path, raising=False)
     monkeypatch.setattr(mock_packages.get_pkg_class("git-ref-package"), "git", repo_path)
     monkeypatch.setattr(spack.package_base.PackageBase, "do_fetch", lambda *args, **kwargs: None)
-    spec = spack.concretize.concretize_one("git-ref-package@develop")
+    spec = spack.concretize.concretize_one("git-ref-package@develop", spack.context.current())
     captured = capfd.readouterr()
     assert "commit" not in spec.variants
     assert "Warning: Unable to resolve the git commit" in captured.err

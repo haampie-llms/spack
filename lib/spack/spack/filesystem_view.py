@@ -14,12 +14,12 @@ from typing import Callable, Dict, List, Optional
 from spack.vendor.typing_extensions import Literal
 
 import spack.config
+import spack.context
 import spack.directory_layout
 import spack.projections
 import spack.relocate
 import spack.schema.projections
 import spack.spec
-import spack.store
 import spack.util.spack_json as s_json
 import spack.util.spack_yaml as s_yaml
 from spack.error import SpackError
@@ -87,7 +87,7 @@ def view_copy(
     elif spack.relocate.is_binary(dst):
         spack.relocate.relocate_text_bin(binaries=[dst], prefix_to_prefix=prefix_to_projection)
     else:
-        prefix_to_projection[spack.store.STORE.layout.root] = view._root
+        prefix_to_projection[view.layout.root] = view._root
         spack.relocate.relocate_text(files=[dst], prefix_to_prefix=prefix_to_projection)
 
     try:
@@ -426,7 +426,7 @@ class YamlFilesystemView(FilesystemView):
             # check if this spec owns a file of that name (through the
             # manifest in the metadata dir, which we have in the view).
             manifest_file = os.path.join(
-                self.get_path_meta_folder(spec), spack.store.STORE.layout.manifest_file_name
+                self.get_path_meta_folder(spec), self.layout.manifest_file_name
             )
             try:
                 with open(manifest_file, "r", encoding="utf-8") as f:
@@ -545,7 +545,9 @@ class YamlFilesystemView(FilesystemView):
         if spec.package.extendee_spec:
             locator_spec = spec.package.extendee_spec
 
-        proj = spack.projections.get_projection(self.projections, locator_spec)
+        proj = spack.projections.get_projection(
+            self.projections, locator_spec, spack.context.current().config
+        )
         if proj:
             return os.path.join(self._root, locator_spec.format_path(proj))
         return self._root
@@ -553,16 +555,14 @@ class YamlFilesystemView(FilesystemView):
     def get_all_specs(self):
         md_dirs = []
         for root, dirs, files in os.walk(self._root):
-            if spack.store.STORE.layout.metadata_dir in dirs:
-                md_dirs.append(os.path.join(root, spack.store.STORE.layout.metadata_dir))
+            if self.layout.metadata_dir in dirs:
+                md_dirs.append(os.path.join(root, self.layout.metadata_dir))
 
         specs = []
         for md_dir in md_dirs:
             if os.path.exists(md_dir):
                 for name_dir in os.listdir(md_dir):
-                    filename = os.path.join(
-                        md_dir, name_dir, spack.store.STORE.layout.spec_file_name
-                    )
+                    filename = os.path.join(md_dir, name_dir, self.layout.spec_file_name)
                     spec = get_spec_from_file(filename)
                     if spec:
                         specs.append(spec)
@@ -580,18 +580,18 @@ class YamlFilesystemView(FilesystemView):
         "Get path to meta folder for either spec or spec name."
         return os.path.join(
             self.get_projection_for_spec(spec),
-            spack.store.STORE.layout.metadata_dir,
+            self.layout.metadata_dir,
             getattr(spec, "name", spec),
         )
 
     def get_spec(self, spec):
         dotspack = self.get_path_meta_folder(spec)
-        filename = os.path.join(dotspack, spack.store.STORE.layout.spec_file_name)
+        filename = os.path.join(dotspack, self.layout.spec_file_name)
 
         return get_spec_from_file(filename)
 
     def link_meta_folder(self, spec):
-        src = spack.store.STORE.layout.metadata_path(spec)
+        src = self.layout.metadata_path(spec)
         tgt = self.get_path_meta_folder(spec)
 
         tree = LinkTree(src)
@@ -710,7 +710,7 @@ class SimpleFilesystemView(FilesystemView):
 
         # Ignore spack meta data folder.
         def skip_list(file):
-            return os.path.basename(file) == spack.store.STORE.layout.metadata_dir
+            return os.path.basename(file) == self.layout.metadata_dir
 
         # Determine if the root is on a case-insensitive filesystem
         normalize_paths = is_folder_on_case_insensitive_filesystem(self._root)
@@ -772,15 +772,13 @@ class SimpleFilesystemView(FilesystemView):
 
     def relative_metadata_dir_for_spec(self, spec):
         return os.path.join(
-            self.get_relative_projection_for_spec(spec),
-            spack.store.STORE.layout.metadata_dir,
-            spec.name,
+            self.get_relative_projection_for_spec(spec), self.layout.metadata_dir, spec.name
         )
 
     def link_metadata(self, specs):
         prefix_and_projection = [
             (
-                os.path.join(spec.package.view_source(), spack.store.STORE.layout.metadata_dir),
+                os.path.join(spec.package.view_source(), self.layout.metadata_dir),
                 self.relative_metadata_dir_for_spec(spec),
             )
             for spec in specs
@@ -809,7 +807,9 @@ class SimpleFilesystemView(FilesystemView):
         if spec.package.extendee_spec:
             spec = spec.package.extendee_spec
 
-        p = spack.projections.get_projection(self.projections, spec)
+        p = spack.projections.get_projection(
+            self.projections, spec, spack.context.current().config
+        )
         return spec.format_path(p) if p else ""
 
     def get_projection_for_spec(self, spec):
@@ -823,7 +823,9 @@ class SimpleFilesystemView(FilesystemView):
         if spec.package.extendee_spec:
             spec = spec.package.extendee_spec
 
-        proj = spack.projections.get_projection(self.projections, spec)
+        proj = spack.projections.get_projection(
+            self.projections, spec, spack.context.current().config
+        )
         if proj:
             return os.path.join(self._root, spec.format_path(proj))
         return self._root

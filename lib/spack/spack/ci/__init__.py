@@ -13,7 +13,7 @@ import subprocess
 import tempfile
 import zipfile
 from collections import namedtuple
-from typing import Callable, Dict, Iterable, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Optional, Set, Tuple
 from urllib.request import Request
 
 import spack
@@ -57,6 +57,9 @@ from .generator_registry import UnknownGeneratorException, get_generator
 # Import any modules with generator functions from here, so they get
 # registered without introducing any import cycles.
 from .gitlab import generate_gitlab_yaml  # noqa: F401
+
+if TYPE_CHECKING:
+    import spack.context
 
 spack_gpg = spack.main.SpackCommand("gpg")
 spack_compiler = spack.main.SpackCommand("compiler")
@@ -262,17 +265,27 @@ def create_unaffected_pruner(affected_specs: Set[spack.spec.Spec]) -> PrunerCall
     return rebuild_filter
 
 
-def create_already_built_pruner(check_index_only: bool = True) -> PrunerCallback:
+def create_already_built_pruner(
+    check_index_only: bool = True,
+    *,
+    binary_index: spack.binary_distribution.BinaryIndexCache,
+    config: cfg.Configuration,
+    client: web_util.NetworkClient,
+) -> PrunerCallback:
     """Return a filter that prunes specs already present on any configured
     mirrors"""
     try:
-        spack.binary_distribution.BINARY_INDEX.update(config=cfg.CONFIG)
+        binary_index.update(config=config)
     except spack.binary_distribution.FetchCacheError as e:
         tty.warn(e)
 
     def rebuild_filter(s: spack.spec.Spec) -> RebuildDecision:
         spec_locations = spack.binary_distribution.get_mirrors_for_spec(
-            spec=s, index_only=check_index_only
+            spec=s,
+            index_only=check_index_only,
+            binary_index=binary_index,
+            config=config,
+            client=client,
         )
 
         if not spec_locations:
@@ -346,7 +359,9 @@ def prune_pipeline(
                 tty.msg(_format_pruning_message(specs[key], True, reasons[key]))
 
 
-def check_for_broken_specs(pipeline_specs: List[spack.spec.Spec], broken_specs_url: str) -> bool:
+def check_for_broken_specs(
+    pipeline_specs: List[spack.spec.Spec], broken_specs_url: str, *, client: web_util.NetworkClient
+) -> bool:
     """Check the pipeline specs against the list of known broken specs and return
     True if there were any matches, False otherwise."""
     if broken_specs_url.startswith("http"):
@@ -355,7 +370,6 @@ def check_for_broken_specs(pipeline_specs: List[spack.spec.Spec], broken_specs_u
         tty.msg("Cannot use an http(s) url for broken specs, ignoring")
         return False
 
-    client = web_util.NetworkClient.from_config(cfg.CONFIG)
     broken_spec_urls = web_util.list_url(broken_specs_url, client=client)
 
     if broken_spec_urls is None:
@@ -369,21 +383,25 @@ def check_for_broken_specs(pipeline_specs: List[spack.spec.Spec], broken_specs_u
 
     if known_broken_specs_encountered:
         tty.error("This pipeline generated hashes known to be broken on develop:")
-        display_broken_spec_messages(broken_specs_url, known_broken_specs_encountered)
+        display_broken_spec_messages(
+            broken_specs_url, known_broken_specs_encountered, client=client
+        )
         return True
 
     return False
 
 
-def collect_pipeline_options(env: ev.Environment, args) -> PipelineOptions:
+def collect_pipeline_options(
+    env: ev.Environment, args, ctx: "spack.context.SpackContext"
+) -> PipelineOptions:
     """Gather pipeline options from cli args, spack environment, and
     os environment variables"""
-    pipeline_mirrors = spack.mirrors.mirror.MirrorCollection.from_config(cfg.CONFIG, binary=True)
+    pipeline_mirrors = spack.mirrors.mirror.MirrorCollection.from_config(ctx.config, binary=True)
     if "buildcache-destination" not in pipeline_mirrors:
         raise SpackCIError("spack ci generate requires a mirror named 'buildcache-destination'")
 
     buildcache_destination = pipeline_mirrors["buildcache-destination"]
-    options = PipelineOptions(env, buildcache_destination)
+    options = PipelineOptions(env, buildcache_destination, ctx=ctx)
 
     options.env = env
     options.artifacts_root = args.artifacts_root
@@ -394,12 +412,13 @@ def collect_pipeline_options(env: ev.Environment, args) -> PipelineOptions:
     options.check_index_only = args.index_only
     options.forward_variables = args.forward_variable or []
 
-    ci_config = cfg.CONFIG.get("ci")
+    ci_config = ctx.config.get("ci")
 
-    cdash_config = cfg.CONFIG.get("cdash")
+    cdash_config = ctx.config.get("cdash")
     if "build-group" in cdash_config:
-        client = web_util.NetworkClient.from_config(cfg.CONFIG)
-        options.cdash_handler = CDashHandler(cdash_config, urlopen=client.urlopen)
+        options.cdash_handler = CDashHandler(
+            cdash_config, urlopen=ctx.network.urlopen, config=ctx.config
+        )
 
     dependent_depth = os.environ.get("SPACK_PRUNE_UNTOUCHED_DEPENDENT_DEPTH", None)
     if dependent_depth is not None:
@@ -446,7 +465,10 @@ def collect_pipeline_options(env: ev.Environment, args) -> PipelineOptions:
 
 
 def get_unaffected_pruners(
-    env: ev.Environment, untouched_pruning_dependent_depth: Optional[int]
+    env: ev.Environment,
+    untouched_pruning_dependent_depth: Optional[int],
+    *,
+    repo: spack.repo.RepoPath,
 ) -> Optional[PrunerCallback]:
 
     # If the stack env has changed, do not apply unaffected pruning
@@ -459,15 +481,15 @@ def get_unaffected_pruners(
     # it assumes all configured repos are merge commits that contain relevant
     # changes to run CI on.
     affected_pkgs: Set[str] = set()
-    for repo in spack.repo.PATH.repos:
-        rev1, rev2 = get_change_revisions(repo.root)
+    for single_repo in repo.repos:
+        rev1, rev2 = get_change_revisions(single_repo.root)
         if not (rev1 and rev2):
             continue
 
-        tty.debug(f"repo {repo.namespace}: revisions rev1={rev1}, rev2={rev2}")
+        tty.debug(f"repo {single_repo.namespace}: revisions rev1={rev1}, rev2={rev2}")
 
-        repo_affected_pkgs = compute_affected_packages(repo, rev1=rev1, rev2=rev2)
-        tty.debug(f"repo {repo.namespace}: affected pkgs")
+        repo_affected_pkgs = compute_affected_packages(single_repo, rev1=rev1, rev2=rev2)
+        tty.debug(f"repo {single_repo.namespace}: affected pkgs")
         for p in repo_affected_pkgs:
             tty.debug(f"  {p}")
 
@@ -487,7 +509,7 @@ def get_unaffected_pruners(
     return create_unaffected_pruner(affected_specs)
 
 
-def generate_pipeline(env: ev.Environment, args) -> None:
+def generate_pipeline(env: ev.Environment, args, ctx: "spack.context.SpackContext") -> None:
     """Given an environment and the command-line args, generate a pipeline.
 
     Arguments:
@@ -497,15 +519,16 @@ def generate_pipeline(env: ev.Environment, args) -> None:
             pipeline generator.
         args: (spack.main.SpackArgumentParser): Parsed arguments from the command
             line.
+        ctx: resources the pipeline is generated with
     """
     with env.write_transaction():
         env.concretize(ui=TerminalUI())
         env.write()
 
-    options = collect_pipeline_options(env, args)
+    options = collect_pipeline_options(env, args, ctx)
 
     # Get the joined "ci" config with all of the current scopes resolved
-    ci_config = cfg.CONFIG.get("ci")
+    ci_config = ctx.config.get("ci")
     if not ci_config:
         raise SpackCIError("Environment does not have a `ci` configuration")
 
@@ -533,7 +556,9 @@ def generate_pipeline(env: ev.Environment, args) -> None:
         # pruning.  Otherwise, list the names of all packages touched between
         # rev1 and rev2, and prune from the pipeline any node whose spec has a
         # packagen name not in that list.
-        unaffected_pruner = get_unaffected_pruners(env, options.untouched_pruning_dependent_depth)
+        unaffected_pruner = get_unaffected_pruners(
+            env, options.untouched_pruning_dependent_depth, repo=ctx.repo
+        )
         if unaffected_pruner:
             tty.info("Enabling Unaffected Pruner")
             pruning_filters.append(unaffected_pruner)
@@ -542,7 +567,12 @@ def generate_pipeline(env: ev.Environment, args) -> None:
     if options.prune_up_to_date:
         tty.info("Enabling Up-to-date Pruner")
         pruning_filters.append(
-            create_already_built_pruner(check_index_only=options.check_index_only)
+            create_already_built_pruner(
+                check_index_only=options.check_index_only,
+                binary_index=ctx.binary_index,
+                config=ctx.config,
+                client=ctx.network,
+            )
         )
 
     # Possibly prune specs that are external
@@ -559,19 +589,20 @@ def generate_pipeline(env: ev.Environment, args) -> None:
     # If this is configured, spack will fail "spack ci generate" if it
     # generates any hash which exists under the broken specs url.
     if options.broken_specs_url and not options.pipeline_type == PipelineType.COPY_ONLY:
-        broken = check_for_broken_specs(pipeline_specs, options.broken_specs_url)
+        broken = check_for_broken_specs(
+            pipeline_specs, options.broken_specs_url, client=ctx.network
+        )
         if broken and not rebuild_everything:
             raise SpackCIError("spack ci generate failed broken specs check")
 
-    client = web_util.NetworkClient.from_config(cfg.CONFIG)
-    spack_ci_config = SpackCIConfig(ci_config, urlopen=client.urlopen)
+    spack_ci_config = SpackCIConfig(ci_config, urlopen=ctx.network.urlopen)
     spack_ci_config.init_pipeline_jobs(pipeline)
 
     # Format the pipeline using the formatter specified in the configs
     generate_method(pipeline, spack_ci_config, options)
 
     # Use all unpruned specs to populate the build group for this set
-    cdash_config = cfg.CONFIG.get("cdash")
+    cdash_config = ctx.config.get("cdash")
     if options.cdash_handler and options.cdash_handler.auth_token:
         options.cdash_handler.create_buildgroup()
     elif cdash_config:
@@ -635,7 +666,15 @@ def can_verify_binaries():
     return len(gpg_util.public_keys()) >= 1
 
 
-def push_to_build_cache(spec: spack.spec.Spec, mirror_url: str, sign_binaries: bool) -> bool:
+def push_to_build_cache(
+    spec: spack.spec.Spec,
+    mirror_url: str,
+    sign_binaries: bool,
+    *,
+    config: cfg.Configuration,
+    client: web_util.NetworkClient,
+    store: spack.store.Store,
+) -> bool:
     """Push one or more binary packages to the mirror.
 
     Arguments:
@@ -643,12 +682,17 @@ def push_to_build_cache(spec: spack.spec.Spec, mirror_url: str, sign_binaries: b
         spec: Installed spec to push
         mirror_url: URL of target mirror
         sign_binaries: If True, spack will attempt to sign binary package before pushing.
+        config: configuration for temporary files
+        client: network client used to push
+        store: store the spec is installed in
     """
     tty.debug(f"Pushing to build cache ({'signed' if sign_binaries else 'unsigned'})")
     signing_key = spack.binary_distribution.select_signing_key() if sign_binaries else None
     mirror = spack.mirrors.mirror.Mirror.from_url(mirror_url)
     try:
-        with spack.binary_distribution.make_uploader(mirror, signing_key=signing_key) as uploader:
+        with spack.binary_distribution.make_uploader(
+            mirror, signing_key=signing_key, config=config, client=client, store=store
+        ) as uploader:
             uploader.push_or_raise([spec])
         return True
     except spack.binary_distribution.PushToBuildCacheError as e:
@@ -656,7 +700,9 @@ def push_to_build_cache(spec: spack.spec.Spec, mirror_url: str, sign_binaries: b
         return False
 
 
-def copy_stage_logs_to_artifacts(job_spec: spack.spec.Spec, job_log_dir: str) -> None:
+def copy_stage_logs_to_artifacts(
+    job_spec: spack.spec.Spec, job_log_dir: str, *, store: spack.store.Store
+) -> None:
     """Copy selected build stage file(s) to the given artifacts directory
 
     Looks for build logs in the stage directory of the given
@@ -666,13 +712,14 @@ def copy_stage_logs_to_artifacts(job_spec: spack.spec.Spec, job_log_dir: str) ->
     Parameters:
         job_spec: spec associated with spack install log
         job_log_dir: path into which build log should be copied
+        store: store the spec is installed in
     """
     tty.debug(f"job spec: {job_spec}")
     if not job_spec.concrete:
         tty.warn("Cannot copy artifacts for non-concrete specs")
         return
 
-    package_metadata_root = pathlib.Path(spack.store.STORE.layout.metadata_path(job_spec))
+    package_metadata_root = pathlib.Path(store.layout.metadata_path(job_spec))
     if not os.path.isdir(package_metadata_root):
         # Fallback to using the stage directory
         job_pkg = job_spec.package
@@ -881,7 +928,7 @@ def setup_spack_repro_version(
     return True
 
 
-def reproduce_ci_job(url, work_dir, autostart, gpg_url, runtime, use_local_head):
+def reproduce_ci_job(url, work_dir, autostart, gpg_url, runtime, use_local_head, *, client):
     """Given a url to gitlab artifacts.zip from a failed ``spack ci rebuild`` job,
     attempt to setup an environment in which the failure can be reproduced
     locally.  This entails the following:
@@ -899,7 +946,6 @@ def reproduce_ci_job(url, work_dir, autostart, gpg_url, runtime, use_local_head)
         raise SpackError(f"Cannot run reproducer in non-empty working dir:\n  {work_dir}")
 
     platform_script_ext = "ps1" if IS_WINDOWS else "sh"
-    client = web_util.NetworkClient.from_config(cfg.CONFIG)
     artifact_root = download_and_extract_artifacts(url, work_dir, urlopen=client.urlopen)
 
     gpg_path = None
@@ -1274,7 +1320,13 @@ if ($LASTEXITCODE -ne 0){{
 
 
 def create_buildcache(
-    input_spec: spack.spec.Spec, *, destination_mirror_urls: List[str], sign_binaries: bool = False
+    input_spec: spack.spec.Spec,
+    *,
+    destination_mirror_urls: List[str],
+    sign_binaries: bool = False,
+    config: cfg.Configuration,
+    client: web_util.NetworkClient,
+    store: spack.store.Store,
 ) -> List[PushResult]:
     """Create the buildcache at the provided mirror(s).
 
@@ -1282,26 +1334,38 @@ def create_buildcache(
         input_spec: Installed spec to package and push
         destination_mirror_urls: List of urls to push to
         sign_binaries: Whether or not to sign buildcache entry
+        config: configuration for temporary files
+        client: network client used to push
+        store: store the spec is installed in
 
     Returns: A list of PushResults, indicating success or failure.
     """
     results = []
 
     for mirror_url in destination_mirror_urls:
-        results.append(
-            PushResult(
-                success=push_to_build_cache(input_spec, mirror_url, sign_binaries), url=mirror_url
-            )
+        success = push_to_build_cache(
+            input_spec, mirror_url, sign_binaries, config=config, client=client, store=store
         )
+        results.append(PushResult(success=success, url=mirror_url))
 
     return results
 
 
-def write_broken_spec(url, pkg_name, stack_name, job_url, pipeline_url, spec_dict):
+def write_broken_spec(
+    url,
+    pkg_name,
+    stack_name,
+    job_url,
+    pipeline_url,
+    spec_dict,
+    *,
+    config: cfg.Configuration,
+    client: web_util.NetworkClient,
+):
     """Given a url to write to and the details of the failed job, write an entry
     in the broken specs list.
     """
-    with tempfile.TemporaryDirectory(dir=spack.stage.stage_root(cfg.CONFIG)) as tmpdir:
+    with tempfile.TemporaryDirectory(dir=spack.stage.stage_root(config)) as tmpdir:
         file_path = os.path.join(tmpdir, "broken.txt")
 
         broken_spec_details = {
@@ -1318,11 +1382,7 @@ def write_broken_spec(url, pkg_name, stack_name, job_url, pipeline_url, spec_dic
             with open(file_path, "w", encoding="utf-8") as fd:
                 syaml.dump(broken_spec_details, fd)
             web_util.push_to_url(
-                file_path,
-                url,
-                keep_original=False,
-                content_type="text/plain",
-                client=web_util.NetworkClient.from_config(cfg.CONFIG),
+                file_path, url, keep_original=False, content_type="text/plain", client=client
             )
         except Exception as err:
             # If there is an S3 error (e.g., access denied or connection
@@ -1332,12 +1392,11 @@ def write_broken_spec(url, pkg_name, stack_name, job_url, pipeline_url, spec_dic
             tty.warn(msg)
 
 
-def read_broken_spec(broken_spec_url):
+def read_broken_spec(broken_spec_url, *, client: web_util.NetworkClient):
     """Read data from broken specs file located at the url, return as a yaml
     object.
     """
     try:
-        client = web_util.NetworkClient.from_config(cfg.CONFIG)
         broken_spec_contents = web_util.read_text(broken_spec_url, client=client)
     except web_util.SpackWebError:
         tty.warn(f"Unable to read broken spec from {broken_spec_url}")
@@ -1346,11 +1405,13 @@ def read_broken_spec(broken_spec_url):
     return syaml.load(broken_spec_contents)
 
 
-def display_broken_spec_messages(base_url, hashes):
+def display_broken_spec_messages(base_url, hashes, *, client: web_util.NetworkClient):
     """Fetch the broken spec file for each of the hashes under the base_url and
     print a message with some details about each one.
     """
-    broken_specs = [(h, read_broken_spec(url_util.join(base_url, h))) for h in hashes]
+    broken_specs = [
+        (h, read_broken_spec(url_util.join(base_url, h), client=client)) for h in hashes
+    ]
     for spec_hash, broken_spec in [tup for tup in broken_specs if tup[1]]:
         details = broken_spec["broken-spec"]
         if "job-name" in details:

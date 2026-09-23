@@ -4,6 +4,7 @@
 import pytest
 
 import spack.concretize
+import spack.context
 import spack.spec
 
 
@@ -60,7 +61,7 @@ import spack.spec
 )
 def test_conditional_mpi_dependency(abstract_spec, expected, not_expected, config, mock_packages):
     """Test concretizing conditional mpi dependencies."""
-    concrete = spack.concretize.concretize_one(abstract_spec)
+    concrete = spack.concretize.concretize_one(abstract_spec, spack.context.current())
 
     for x in expected:
         assert concrete.satisfies(x), x
@@ -81,13 +82,13 @@ def test_conditional_compilers(c, cxx, fortran, mutable_config, mock_packages, c
     # Abstract spec parametrized to depend/not on c/cxx/fortran
     # and with conditional dependencies for each on the less preferred gcc
     abstract = spack.spec.Spec(f"conditional-languages c={c} cxx={cxx} fortran={fortran}")
-    concrete_unconstrained = spack.concretize.concretize_one(abstract)
+    concrete_unconstrained = spack.concretize.concretize_one(abstract, spack.context.current())
     abstract.constrain(
         "^[when='%c' virtuals=c]gcc@10.3.1 "
         "^[when='%cxx' virtuals=cxx]gcc@10.3.1 "
         "^[when='%fortran' virtuals=fortran]gcc@10.3.1"
     )
-    concrete = spack.concretize.concretize_one(abstract)
+    concrete = spack.concretize.concretize_one(abstract, spack.context.current())
 
     # We should get the dependency we specified for each language we enabled
     assert concrete.satisfies("%[virtuals=c]gcc@10.3.1") == c

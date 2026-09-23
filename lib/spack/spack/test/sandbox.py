@@ -16,6 +16,7 @@ import tempfile
 from typing import List, Tuple
 
 import spack.concretize
+import spack.context
 import spack.sandbox
 import spack.store
 from spack.installer.build import _enable_sandbox
@@ -143,7 +144,7 @@ def test_enable_sandbox_paths(
     mock_sandbox = MockSandbox()
     monkeypatch.setattr(spack.sandbox, "get_sandbox", lambda: mock_sandbox)
 
-    spec = spack.concretize.concretize_one("dependent-install")
+    spec = spack.concretize.concretize_one("dependent-install", spack.context.current())
 
     # Create prefix directories so resolved.exists() passes
     pathlib.Path(spec.prefix).mkdir(parents=True, exist_ok=True)
@@ -173,7 +174,7 @@ def test_enable_sandbox_paths(
         "allow_network": True,
     }
 
-    _enable_sandbox(config, spec, str(stage_path))
+    _enable_sandbox(config, spec, str(stage_path), temporary_store)
 
     allow_read_resolved = [c[1] for c in mock_sandbox.read_calls]
     for dep in spec.traverse(root=False):

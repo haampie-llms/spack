@@ -8,6 +8,7 @@ import os
 import pytest
 
 import spack.concretize
+import spack.context
 import spack.directives_meta
 import spack.paths
 import spack.repo
@@ -98,8 +99,8 @@ def test_all_same_but_install(mock_packages: RepoPath, config):
 
 
 def test_content_hash_all_same_but_patch_contents(mock_packages: RepoPath, config):
-    spec1 = spack.concretize.concretize_one("hash-test1@1.1")
-    spec2 = spack.concretize.concretize_one("hash-test2@1.1")
+    spec1 = spack.concretize.concretize_one("hash-test1@1.1", spack.context.current())
+    spec2 = spack.concretize.concretize_one("hash-test2@1.1", spack.context.current())
     compare_hash_sans_name(mock_packages, False, spec1, spec2)
 
 
@@ -137,8 +138,8 @@ def test_package_hash_of_shadowed_package(mock_packages: RepoPath, config, repo_
 
 
 def test_content_hash_different_variants(mock_packages: RepoPath, config):
-    spec1 = spack.concretize.concretize_one("hash-test1@1.2 +variantx")
-    spec2 = spack.concretize.concretize_one("hash-test2@1.2 ~variantx")
+    spec1 = spack.concretize.concretize_one("hash-test1@1.2 +variantx", spack.context.current())
+    spec2 = spack.concretize.concretize_one("hash-test2@1.2 ~variantx", spack.context.current())
     compare_hash_sans_name(mock_packages, True, spec1, spec2)
 
 
@@ -152,19 +153,19 @@ def test_content_hash_cannot_get_details_from_ast(mock_packages: RepoPath, confi
     differ where Spack includes a phase on account of AST-examination
     failure.
     """
-    spec3 = spack.concretize.concretize_one("hash-test1@1.7")
-    spec4 = spack.concretize.concretize_one("hash-test3@1.7")
+    spec3 = spack.concretize.concretize_one("hash-test1@1.7", spack.context.current())
+    spec4 = spack.concretize.concretize_one("hash-test3@1.7", spack.context.current())
     compare_hash_sans_name(mock_packages, False, spec3, spec4)
 
 
 def test_content_hash_all_same_but_archive_hash(mock_packages: RepoPath, config):
-    spec1 = spack.concretize.concretize_one("hash-test1@1.3")
-    spec2 = spack.concretize.concretize_one("hash-test2@1.3")
+    spec1 = spack.concretize.concretize_one("hash-test1@1.3", spack.context.current())
+    spec2 = spack.concretize.concretize_one("hash-test2@1.3", spack.context.current())
     compare_hash_sans_name(mock_packages, False, spec1, spec2)
 
 
 def test_content_hash_parse_dynamic_function_call(mock_packages, config):
-    spec = spack.concretize.concretize_one("hash-test4")
+    spec = spack.concretize.concretize_one("hash-test4", spack.context.current())
     spec.package.content_hash(repo=spack.repo.PATH)
 
 

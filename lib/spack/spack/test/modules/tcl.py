@@ -10,6 +10,7 @@ import spack.vendor.archspec.cpu
 
 import spack.concretize
 import spack.config
+import spack.context
 import spack.modules.common
 import spack.modules.error
 import spack.modules.tcl
@@ -427,7 +428,7 @@ class TestTcl:
         assert len([x for x in content if "setenv FOOBAR" in x]) == 1
         assert len([x for x in content if "setenv FOOBAR {mpileaks}" in x]) == 1
 
-        spec = spack.concretize.concretize_one("mpileaks")
+        spec = spack.concretize.concretize_one("mpileaks", spack.context.current())
         content = modulefile_content(spec["callpath"])
 
         assert len([x for x in content if "setenv FOOBAR" in x]) == 1
@@ -486,14 +487,14 @@ class TestTcl:
         # the tests database
         mpileaks_specs = mutable_database.query("mpileaks")
         for item in mpileaks_specs:
-            writer = writer_cls.from_spec(item, "default")
+            writer = writer_cls.from_spec(item, "default", ctx=spack.context.current())
             assert not writer.conf.excluded
 
         # callpath is a dependency of mpileaks, and has been pulled
         # in implicitly
         callpath_specs = mutable_database.query("callpath")
         for item in callpath_specs:
-            writer = writer_cls.from_spec(item, "default")
+            writer = writer_cls.from_spec(item, "default", ctx=spack.context.current())
             assert writer.conf.excluded
 
     @pytest.mark.regression("12105")
@@ -501,13 +502,13 @@ class TestTcl:
         module_configuration("exclude_implicits")
 
         # mpileaks is defined as explicit with explicit argument set on writer
-        mpileaks_spec = spack.concretize.concretize_one("mpileaks")
-        writer = writer_cls.from_spec(mpileaks_spec, "default", True)
+        mpileaks_spec = spack.concretize.concretize_one("mpileaks", spack.context.current())
+        writer = writer_cls.from_spec(mpileaks_spec, "default", True, ctx=spack.context.current())
         assert not writer.conf.excluded
 
         # callpath is defined as implicit with explicit argument set on writer
-        callpath_spec = spack.concretize.concretize_one("callpath")
-        writer = writer_cls.from_spec(callpath_spec, "default", False)
+        callpath_spec = spack.concretize.concretize_one("callpath", spack.context.current())
+        writer = writer_cls.from_spec(callpath_spec, "default", False, ctx=spack.context.current())
         assert writer.conf.excluded
 
     @pytest.mark.regression("9624")
@@ -541,10 +542,10 @@ class TestTcl:
         """Tests the addition and removal of hide command in modulerc."""
         module_configuration("hide_implicits")
 
-        spec = spack.concretize.concretize_one("mpileaks@2.3")
+        spec = spack.concretize.concretize_one("mpileaks@2.3", spack.context.current())
 
         # mpileaks is defined as implicit, thus hide command should appear in modulerc
-        writer = writer_cls.from_spec(spec, "default", False)
+        writer = writer_cls.from_spec(spec, "default", False, ctx=spack.context.current())
         writer.write()
         assert os.path.exists(writer.layout.modulerc)
         with open(writer.layout.modulerc, encoding="utf-8") as f:
@@ -561,7 +562,7 @@ class TestTcl:
 
         # when mpileaks becomes explicit, its file name changes (hash_length = 0), meaning an
         # extra module file is created; the old one still exists and remains hidden.
-        writer = writer_cls.from_spec(spec, "default", True)
+        writer = writer_cls.from_spec(spec, "default", True, ctx=spack.context.current())
         writer.write()
         assert os.path.exists(writer.layout.modulerc)
         with open(writer.layout.modulerc, encoding="utf-8") as f:
@@ -571,13 +572,13 @@ class TestTcl:
 
         # after removing both the implicit and explicit module, the modulerc file would be empty
         # and should be removed.
-        writer_cls.from_spec(spec, "default", False).remove()
-        writer_cls.from_spec(spec, "default", True).remove()
+        writer_cls.from_spec(spec, "default", False, ctx=spack.context.current()).remove()
+        writer_cls.from_spec(spec, "default", True, ctx=spack.context.current()).remove()
         assert not os.path.exists(writer.layout.modulerc)
         assert not os.path.exists(writer.layout.filename)
 
         # implicit module is removed
-        writer = writer_cls.from_spec(spec, "default", False)
+        writer = writer_cls.from_spec(spec, "default", False, ctx=spack.context.current())
         writer.write()
         assert os.path.exists(writer.layout.filename)
         assert os.path.exists(writer.layout.modulerc)
@@ -586,13 +587,17 @@ class TestTcl:
         assert not os.path.exists(writer.layout.filename)
 
         # three versions of mpileaks are implicit
-        writer = writer_cls.from_spec(spec, "default", False)
+        writer = writer_cls.from_spec(spec, "default", False, ctx=spack.context.current())
         writer.write(overwrite=True)
-        spec_alt1 = spack.concretize.concretize_one("mpileaks@2.2")
-        spec_alt2 = spack.concretize.concretize_one("mpileaks@2.1")
-        writer_alt1 = writer_cls.from_spec(spec_alt1, "default", False)
+        spec_alt1 = spack.concretize.concretize_one("mpileaks@2.2", spack.context.current())
+        spec_alt2 = spack.concretize.concretize_one("mpileaks@2.1", spack.context.current())
+        writer_alt1 = writer_cls.from_spec(
+            spec_alt1, "default", False, ctx=spack.context.current()
+        )
         writer_alt1.write(overwrite=True)
-        writer_alt2 = writer_cls.from_spec(spec_alt2, "default", False)
+        writer_alt2 = writer_cls.from_spec(
+            spec_alt2, "default", False, ctx=spack.context.current()
+        )
         writer_alt2.write(overwrite=True)
         assert os.path.exists(writer.layout.modulerc)
         with open(writer.layout.modulerc, encoding="utf-8") as f:

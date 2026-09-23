@@ -7,6 +7,7 @@ from collections import Counter
 
 import spack.caches
 import spack.config
+import spack.context
 import spack.repo
 import spack.spec
 import spack.util.spack_yaml as syaml
@@ -18,7 +19,7 @@ from spack.util import tty
 from spack.util.filesystem import mkdirp
 
 
-def get_all_versions(specs):
+def get_all_versions(specs, *, repo: spack.repo.RepoPath):
     """Given a set of initial specs, return a new set of specs that includes
     each version of each package in the original set.
 
@@ -28,7 +29,7 @@ def get_all_versions(specs):
     """
     version_specs = []
     for spec in specs:
-        pkg_cls = spack.repo.PATH.get_pkg_class(spec.name)
+        pkg_cls = repo.get_pkg_class(spec.name)
         # Skip any package that has no known versions.
         if not pkg_cls.versions:
             tty.msg("No safe (checksummed) versions for package %s" % pkg_cls.name)
@@ -109,9 +110,9 @@ def get_mirror_cache(path, skip_unstable_versions=False):
     return mirror_cache
 
 
-def add(mirror: Mirror, scope=None):
+def add(mirror: Mirror, scope=None, *, config: spack.config.Configuration):
     """Add a named mirror in the given scope"""
-    mirrors = spack.config.CONFIG.get("mirrors", scope=scope)
+    mirrors = config.get("mirrors", scope=scope)
     if not mirrors:
         mirrors = syaml.syaml_dict()
 
@@ -121,17 +122,17 @@ def add(mirror: Mirror, scope=None):
     items = [(n, u) for n, u in mirrors.items()]
     items.insert(0, (mirror.name, mirror.to_dict()))
     mirrors = syaml.syaml_dict(items)
-    spack.config.CONFIG.set("mirrors", mirrors, scope=scope)
+    config.set("mirrors", mirrors, scope=scope)
 
 
-def remove(name, scope):
+def remove(name, scope, *, config: spack.config.Configuration):
     """Remove the named mirror in the given scope"""
-    mirrors = spack.config.CONFIG.get("mirrors", scope=scope)
+    mirrors = config.get("mirrors", scope=scope)
     if not mirrors:
         mirrors = syaml.syaml_dict()
 
     removed = mirrors.pop(name, False)
-    spack.config.CONFIG.set("mirrors", mirrors, scope=scope)
+    config.set("mirrors", mirrors, scope=scope)
     return bool(removed)
 
 
@@ -191,7 +192,11 @@ class MirrorStatsForAllSpecs:
 
 
 def create_mirror_from_package_object(
-    pkg_obj, mirror_cache: "spack.caches.MirrorCache", mirror_stats: MirrorStatsForOneSpec
+    pkg_obj,
+    mirror_cache: "spack.caches.MirrorCache",
+    mirror_stats: MirrorStatsForOneSpec,
+    *,
+    config: spack.config.Configuration,
 ) -> bool:
     """Add a single package object to a mirror.
 
@@ -202,6 +207,7 @@ def create_mirror_from_package_object(
         pkg_obj (spack.package_base.PackageBase): package object with to be added.
         mirror_cache: mirror where to add the spec.
         mirror_stats: statistics on the current mirror
+        config: configuration with the debug setting
 
     Return:
         True if the spec was added successfully, False otherwise
@@ -222,7 +228,7 @@ def create_mirror_from_package_object(
         except Exception as e:
             pkg_obj.stage.destroy()
             if num_retries + 1 == max_retries:
-                if spack.config.CONFIG.get("config:debug"):
+                if config.get("config:debug"):
                     traceback.print_exc()
                 else:
                     tty.warn(
@@ -235,7 +241,8 @@ def create_mirror_from_package_object(
 
 def require_mirror_name(mirror_name):
     """Find a mirror by name and raise if it does not exist"""
-    mirror = MirrorCollection.from_config(spack.config.CONFIG).get(mirror_name)
+    # Entry point for argparse type conversions, which have no context
+    mirror = MirrorCollection.from_config(spack.context.current().config).get(mirror_name)
     if not mirror:
         raise ValueError(f'no mirror named "{mirror_name}"')
     return mirror

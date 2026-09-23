@@ -9,6 +9,7 @@ import sys
 import pytest
 
 import spack.concretize
+import spack.context
 import spack.main
 import spack.util.spack_yaml as s_yaml
 from spack.installer import PackageInstaller
@@ -216,7 +217,7 @@ def test_view_files_not_ignored(
     cmd,
     with_projection,
 ):
-    spec = spack.concretize.concretize_one("view-not-ignored")
+    spec = spack.concretize.concretize_one("view-not-ignored", spack.context.current())
     pkg = spec.package
     PackageInstaller([pkg], explicit=True).install()
     pkg.assert_installed(spec.prefix)

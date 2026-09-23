@@ -74,6 +74,7 @@ def change(parser, args, ctx: spack.context.SpackContext):
                         list_name=args.list_name,
                         match_spec=match_spec,
                         allow_changing_multiple_specs=args.all,
+                        repo=ctx.repo,
                     )
             except (ValueError, spack.environment.SpackEnvironmentError) as e:
                 msg = "Cannot change abstract specs."

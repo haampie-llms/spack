@@ -8,6 +8,7 @@ import pytest
 
 import spack.cmd.diff
 import spack.concretize
+import spack.context
 import spack.main
 import spack.paths
 import spack.repo
@@ -39,8 +40,8 @@ def test_repo(config):
 
 
 def test_diff_ignore(test_repo):
-    specA = spack.concretize.concretize_one("p1+usev1")
-    specB = spack.concretize.concretize_one("p1~usev1")
+    specA = spack.concretize.concretize_one("p1+usev1", spack.context.current())
+    specB = spack.concretize.concretize_one("p1~usev1", spack.context.current())
 
     c1 = spack.cmd.diff.compare_specs(specA, specB, spack.repo.PATH, to_string=False)
 
@@ -62,8 +63,8 @@ def test_diff_ignore(test_repo):
 
     # Check ignoring changes on multiple packages
 
-    specA = spack.concretize.concretize_one("p1+usev1 ^p3+p3var")
-    specA = spack.concretize.concretize_one("p1~usev1 ^p3~p3var")
+    specA = spack.concretize.concretize_one("p1+usev1 ^p3+p3var", spack.context.current())
+    specA = spack.concretize.concretize_one("p1~usev1 ^p3~p3var", spack.context.current())
 
     c3 = spack.cmd.diff.compare_specs(specA, specB, spack.repo.PATH, to_string=False)
     assert find(c3["a_not_b"], "variant_value", ["p3", "p3var"])
@@ -78,8 +79,8 @@ def test_diff_ignore(test_repo):
 def test_diff_cmd(install_mockery, mock_fetch, mock_archive, mock_packages):
     """Test that we can install two packages and diff them"""
 
-    specA = spack.concretize.concretize_one("mpileaks")
-    specB = spack.concretize.concretize_one("mpileaks+debug")
+    specA = spack.concretize.concretize_one("mpileaks", spack.context.current())
+    specB = spack.concretize.concretize_one("mpileaks+debug", spack.context.current())
 
     # Specs should be the same as themselves
     c = spack.cmd.diff.compare_specs(specA, specA, spack.repo.PATH, to_string=True)
@@ -105,7 +106,7 @@ def test_diff_cmd(install_mockery, mock_fetch, mock_archive, mock_packages):
 def test_diff_runtimes(install_mockery, mock_fetch, mock_archive, mock_packages):
     """Test that we can install two packages and diff them"""
 
-    specA = spack.concretize.concretize_one("mpileaks")
+    specA = spack.concretize.concretize_one("mpileaks", spack.context.current())
     specB = specA.copy()
     specB["gcc-runtime"].versions = spack.version.VersionList([spack.version.Version("0.0.0")])
 

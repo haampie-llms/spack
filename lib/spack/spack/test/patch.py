@@ -12,6 +12,7 @@ import sys
 import pytest
 
 import spack.concretize
+import spack.context
 import spack.deptypes as dt
 import spack.error
 import spack.fetch_strategy
@@ -27,6 +28,7 @@ from spack.stage import stage_from_config
 from spack.test.conftest import MockStageRoot
 from spack.util.executable import Executable
 from spack.util.filesystem import mkdirp, touch, working_dir
+from spack.util.web import NetworkClient
 
 # various sha256 sums (using variables for legibility)
 # many file based shas will differ between Windows and other platforms
@@ -95,11 +97,12 @@ data_path = os.path.join(spack.paths.test_path, "data", "patch")
 def test_url_patch(mock_packages, mock_patch_stage, filename, sha256, archive_sha256, config):
     # Make a patch object
     url = url_util.path_to_file_url(filename)
-    s = spack.concretize.concretize_one("patch")
+    s = spack.concretize.concretize_one("patch", spack.context.current())
 
     # make a stage
+    client = NetworkClient.from_config(config)
     with stage_from_config(
-        url, config=config
+        url, config=config, client=client
     ) as stage:  # TODO: url isn't used; maybe refactor Stage
         stage.mirror_path = mock_patch_stage
 
@@ -126,7 +129,7 @@ third line
                 )
         # apply the patch and compare files
         patch = spack.patch.UrlPatch(s.package, url, sha256=sha256, archive_sha256=archive_sha256)
-        patch_stage = stage_from_config(patch.fetcher(), config=config)
+        patch_stage = stage_from_config(patch.fetcher(), config=config, client=client)
         with patch_stage:
             patch_stage.create()
             patch_stage.fetch()
@@ -146,7 +149,7 @@ third line
         patch = spack.patch.UrlPatch(
             s.package, url, sha256=sha256, archive_sha256=archive_sha256, reverse=True
         )
-        patch_stage = stage_from_config(patch.fetcher(), config=config)
+        patch_stage = stage_from_config(patch.fetcher(), config=config, client=client)
         with patch_stage:
             patch_stage.create()
             patch_stage.fetch()
@@ -165,7 +168,7 @@ third line
 
 def test_patch_in_spec(mock_packages, config):
     """Test whether patches in a package appear in the spec."""
-    spec = spack.concretize.concretize_one("patch")
+    spec = spack.concretize.concretize_one("patch", spack.context.current())
     assert "patches" in list(spec.variants.keys())
 
     # Here the order is bar, foo, baz. Note that MV variants order
@@ -180,7 +183,7 @@ def test_patch_in_spec(mock_packages, config):
 
 def test_stale_patch_cache_falls_back_to_fresh(mock_packages: RepoPath, config):
     """spec.patches returns correct patches even when the stale in-memory cache is wrong."""
-    spec = spack.concretize.concretize_one("patch@=1.0")
+    spec = spack.concretize.concretize_one("patch@=1.0", spack.context.current())
     pkg_cls = mock_packages.get_pkg_class("patch")
 
     # Inject a stale PatchCache: foo_sha256 points to a non-existent patch file
@@ -199,10 +202,12 @@ def test_stale_patch_cache_falls_back_to_fresh(mock_packages: RepoPath, config):
     mock_packages._patch_index = stale_cache
     mock_packages._index_is_fresh = False
 
-    patches = spec.patches
+    patches = spec.patches_from(spack.repo.PATH)
 
     assert len(patches) == 2
-    assert {p.relative_path for p in patches} == {"foo.patch", "baz.patch"}
+    file_patches = [p for p in patches if isinstance(p, spack.patch.FilePatch)]
+    assert len(file_patches) == 2
+    assert {p.relative_path for p in file_patches} == {"foo.patch", "baz.patch"}
 
 
 def test_patch_mixed_versions_subset_constraint(mock_packages, config):
@@ -210,15 +215,15 @@ def test_patch_mixed_versions_subset_constraint(mock_packages, config):
     a patch applied to a version range of x.y.z versions is not applied to
     an x.y version.
     """
-    spec1 = spack.concretize.concretize_one("patch@1.0.1")
+    spec1 = spack.concretize.concretize_one("patch@1.0.1", spack.context.current())
     assert biz_sha256 in spec1.variants["patches"].value
 
-    spec2 = spack.concretize.concretize_one("patch@=1.0")
+    spec2 = spack.concretize.concretize_one("patch@=1.0", spack.context.current())
     assert biz_sha256 not in spec2.variants["patches"].value
 
 
 def test_patch_order(mock_packages, config):
-    spec = spack.concretize.concretize_one("dep-diamond-patch-top")
+    spec = spack.concretize.concretize_one("dep-diamond-patch-top", spack.context.current())
 
     mid2_sha256 = (
         "mid21234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234"
@@ -301,7 +306,7 @@ def test_nested_directives(mock_packages: RepoPath):
 @pytest.mark.not_on_windows("Test requires Autotools")
 def test_patched_dependency(mock_packages, install_mockery, mock_fetch):
     """Test whether patched dependencies work."""
-    spec = spack.concretize.concretize_one("patch-a-dependency")
+    spec = spack.concretize.concretize_one("patch-a-dependency", spack.context.current())
     assert "patches" in list(spec["libelf"].variants.keys())
 
     # make sure the patch makes it into the dependency spec
@@ -341,7 +346,9 @@ def test_patch_failure_develop_spec_exits_gracefully(
 ):
     """ensure that a failing patch does not trigger exceptions for develop specs"""
 
-    spec = spack.concretize.concretize_one(f"patch-a-dependency ^libelf dev_path={tmp_path}")
+    spec = spack.concretize.concretize_one(
+        f"patch-a-dependency ^libelf dev_path={tmp_path}", spack.context.current()
+    )
     libelf = spec["libelf"]
     assert "patches" in list(libelf.variants.keys())
     pkg = libelf.package
@@ -357,7 +364,7 @@ def test_patch_failure_restages(mock_packages, install_mockery, mock_fetch):
     ensure that a failing patch does not trigger exceptions
     for non-develop specs and the source gets restaged
     """
-    spec = spack.concretize.concretize_one("patch-a-dependency")
+    spec = spack.concretize.concretize_one("patch-a-dependency", spack.context.current())
     pkg = spec["libelf"].package
     with pkg.stage:
         bad_patch_indicator = trigger_bad_patch(pkg)
@@ -368,7 +375,7 @@ def test_patch_failure_restages(mock_packages, install_mockery, mock_fetch):
 
 def test_multiple_patched_dependencies(mock_packages, config):
     """Test whether multiple patched dependencies work."""
-    spec = spack.concretize.concretize_one("patch-several-dependencies")
+    spec = spack.concretize.concretize_one("patch-several-dependencies", spack.context.current())
 
     # basic patch on libelf
     assert "patches" in list(spec["libelf"].variants.keys())
@@ -383,7 +390,9 @@ def test_multiple_patched_dependencies(mock_packages, config):
 
 def test_conditional_patched_dependencies(mock_packages, config):
     """Test whether conditional patched dependencies work."""
-    spec = spack.concretize.concretize_one("patch-several-dependencies @1.0")
+    spec = spack.concretize.concretize_one(
+        "patch-several-dependencies @1.0", spack.context.current()
+    )
 
     # basic patch on libelf
     assert "patches" in list(spec["libelf"].variants.keys())
@@ -424,7 +433,9 @@ def check_multi_dependency_patch_specs(
     assert baz_sha256 in libdwarf.variants["patches"].value
 
     def get_patch(spec, ending):
-        return next(p for p in spec.patches if p.path_or_url.endswith(ending))
+        return next(
+            p for p in spec.patches_from(spack.repo.PATH) if p.path_or_url.endswith(ending)
+        )
 
     # make sure file patches are reconstructed properly
     foo_patch = get_patch(libelf, "foo.patch")
@@ -464,7 +475,7 @@ def check_multi_dependency_patch_specs(
 def test_conditional_patched_deps_with_conditions(mock_packages, config):
     """Test whether conditional patched dependencies with conditions work."""
     spec = spack.concretize.concretize_one(
-        Spec("patch-several-dependencies @1.0 ^libdwarf@20111030")
+        Spec("patch-several-dependencies @1.0 ^libdwarf@20111030"), spack.context.current()
     )
 
     libelf = spec["libelf"]
@@ -481,7 +492,7 @@ def test_write_and_read_sub_dags_with_patched_deps(mock_packages, config):
     reading a sub-DAG of a concretized Spec.
     """
     spec = spack.concretize.concretize_one(
-        Spec("patch-several-dependencies @1.0 ^libdwarf@20111030")
+        Spec("patch-several-dependencies @1.0 ^libdwarf@20111030"), spack.context.current()
     )
 
     # write to YAML and read back in -- new specs will *only* contain
@@ -507,7 +518,11 @@ def test_patch_no_file(config):
     patch.path = "test"
     with pytest.raises(spack.error.NoSuchPatchError, match="No such patch:"):
         spack.patch.apply_patch(
-            stage_from_config("https://example.com/foo.patch", config=config).source_path,
+            stage_from_config(
+                "https://example.com/foo.patch",
+                config=config,
+                client=NetworkClient.from_config(config),
+            ).source_path,
             patch.path,
         )
 
@@ -546,7 +561,7 @@ def test_equality():
 
 def test_sha256_setter(mock_packages, mock_patch_stage, config):
     path = os.path.join(data_path, "foo.patch")
-    s = spack.concretize.concretize_one("patch")
+    s = spack.concretize.concretize_one("patch", spack.context.current())
     patch = spack.patch.FilePatch(s.package, path, level=1, working_dir=".")
     patch.sha256 = "abc"
 
@@ -581,11 +596,11 @@ def test_patch_lookup_for_shadowed_package(mock_packages, config, repo_builder):
     with spack.repo.use_repositories(repo_builder.root, override=False) as repos:
         assert repos.repo_for_pkg("patch").namespace == repo_builder.namespace
 
-        spec = spack.concretize.concretize_one("builtin_mock.patch@=1.0")
-        default = spack.concretize.concretize_one("patch")
-        assert spec.patches != default.patches
+        spec = spack.concretize.concretize_one("builtin_mock.patch@=1.0", spack.context.current())
+        default = spack.concretize.concretize_one("patch", spack.context.current())
+        assert spec.patches_from(spack.repo.PATH) != default.patches_from(spack.repo.PATH)
         assert spec.namespace == "builtin_mock"
 
         # raises SpecError if the lookup uses the bare name: the shadowing
         # class's patch index has no such sha256
-        assert {p.sha256 for p in spec.patches} == {foo_sha256, baz_sha256}
+        assert {p.sha256 for p in spec.patches_from(spack.repo.PATH)} == {foo_sha256, baz_sha256}
