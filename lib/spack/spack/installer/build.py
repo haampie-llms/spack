@@ -31,7 +31,6 @@ import spack.builder
 import spack.error
 import spack.hooks
 import spack.mirrors.mirror
-import spack.relocate
 import spack.repo
 import spack.sandbox
 import spack.spec
@@ -345,7 +344,7 @@ def install_from_buildcache(
             timer=timer,
             config=ctx.config,
             store=ctx.store,
-            patchelf=spack.relocate.patchelf_finder(ctx),
+            patchelf=ctx.patchelf,
         )
 
     if spec.spliced:  # overwrite old metadata with new
@@ -702,7 +701,7 @@ def _rewire_no_db(
             spack.binary_distribution.extract_buildcache_tarball(tarball, destination=spec.prefix)
         with timer.measure("relocate"):
             spack.binary_distribution.relocate_package(
-                spec, store=ctx.store, patchelf=spack.relocate.patchelf_finder(ctx)
+                spec, store=ctx.store, patchelf=ctx.patchelf
             )
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)

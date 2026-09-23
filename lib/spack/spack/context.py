@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     import spack.compilers.libraries
     import spack.config
     import spack.environment
+    import spack.relocate
     import spack.repo
     import spack.store
     import spack.util.executable
@@ -165,6 +166,13 @@ class SpackContext:
         import spack.bootstrap
 
         return spack.bootstrap.ensure_patchelf_in_path_or_raise(self)
+
+    @_member
+    def patchelf(self) -> "spack.relocate.PatchelfFinder":
+        """Finds patchelf on its first call, bootstrapping it if needed."""
+        import spack.relocate
+
+        return spack.relocate.patchelf_finder(self)
 
     def ensure_gpg(self) -> "spack.util.executable.Executable":
         """Return gpg, bootstrapping it if needed."""

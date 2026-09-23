@@ -48,7 +48,6 @@ import spack.detection
 import spack.error
 import spack.installer_dispatch
 import spack.mirrors.mirror
-import spack.relocate
 import spack.repo
 import spack.spec
 import spack.store
@@ -236,7 +235,7 @@ class BuildcacheBootstrapper(Bootstrapper):
                 config=ctx.config,
                 client=ctx.network,
                 store=ctx.store,
-                patchelf=spack.relocate.patchelf_finder(ctx),
+                patchelf=ctx.patchelf,
                 gpg=None,
             )
 
