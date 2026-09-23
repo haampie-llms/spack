@@ -10,8 +10,7 @@ access, so an operation only pays for what it reads. Command entry points receiv
 This module imports nothing at runtime, so it can be imported from anywhere.
 """
 
-import functools
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, Generic, Optional, TypeVar, overload
 
 if TYPE_CHECKING:
     import spack.binary_distribution
@@ -24,6 +23,30 @@ if TYPE_CHECKING:
     import spack.util.file_cache
     import spack.util.gpg
     import spack.util.web
+
+T = TypeVar("T")
+
+
+class _member(Generic[T]):
+    """``functools.cached_property`` for Python 3.6 and 3.7: the value is built on first access
+    and stored on the instance."""
+
+    def __init__(self, build: Callable[[Any], T]) -> None:
+        self.build = build
+        self.name = build.__name__
+        self.__doc__ = build.__doc__
+
+    @overload
+    def __get__(self, instance: None, owner: Any = None) -> "_member[T]": ...
+
+    @overload
+    def __get__(self, instance: object, owner: Any = None) -> T: ...
+
+    def __get__(self, instance, owner=None):
+        if instance is None:
+            return self
+        value = instance.__dict__[self.name] = self.build(instance)
+        return value
 
 
 class SpackContext:
@@ -57,21 +80,21 @@ class SpackContext:
         """The environment of the operation, whose scope is part of ``config``."""
         return self._environment
 
-    @functools.cached_property
+    @_member
     def misc_cache(self) -> "spack.util.file_cache.FileCache":
         """Cache for small data (package indexes, ...)."""
         import spack.caches
 
         return spack.caches.misc_cache(config=self.config)
 
-    @functools.cached_property
+    @_member
     def store(self) -> "spack.store.Store":
         """Installed-spec store."""
         import spack.store
 
         return spack.store.create(self.config, repo_provider=self.repo_provider)
 
-    @functools.cached_property
+    @_member
     def repo(self) -> "spack.repo.RepoPath":
         """Package repositories, enabled for importing package modules."""
         import spack.repo
@@ -84,7 +107,7 @@ class SpackContext:
         """Return ``repo``: pass the bound method where the repositories may be needed later."""
         return self.repo
 
-    @functools.cached_property
+    @_member
     def binary_index(self) -> "spack.binary_distribution.BinaryIndexCache":
         """Buildcache index."""
         import spack.binary_distribution
@@ -93,28 +116,28 @@ class SpackContext:
             config=self.config, client=self.network, repo_provider=self.repo_provider
         )
 
-    @functools.cached_property
+    @_member
     def compiler_cache(self) -> "spack.compilers.libraries.CompilerCache":
         """Cache for compiler output (implicit rpaths, libc, ...)."""
         import spack.compilers.libraries
 
         return spack.compilers.libraries.FileCompilerCache(self.misc_cache)
 
-    @functools.cached_property
+    @_member
     def network(self) -> "spack.util.web.NetworkClient":
         """Network settings and the URL opener built from them."""
         import spack.util.web
 
         return spack.util.web.NetworkClient.from_config(self.config)
 
-    @functools.cached_property
+    @_member
     def gpg(self) -> "spack.util.gpg.Gpg":
         """GnuPG, to sign and verify binaries."""
         import spack.util.gpg
 
         return spack.util.gpg.Gpg(self.gpg_home, self)
 
-    @functools.cached_property
+    @_member
     def bootstrap(self) -> "SpackContext":
         """Context to bootstrap Spack's own dependencies in."""
         if self.is_bootstrap:
