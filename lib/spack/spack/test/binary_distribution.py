@@ -18,7 +18,7 @@ import warnings
 from contextlib import closing
 from datetime import datetime
 from pathlib import Path, PurePath
-from typing import Any, Callable, Dict, NamedTuple, Optional
+from typing import IO, Any, Callable, Dict, NamedTuple, Optional, cast
 
 import pytest
 
@@ -2139,3 +2139,97 @@ def test_select_signing_key_shows_fingerprints(monkeypatch):
     monkeypatch.setattr(spack.util.gpg, "signing_keys", lambda *a: keys)
     with pytest.raises(spack.binary_distribution.PickKeyException, match="AAAA\n  BBBB"):
         spack.binary_distribution.select_signing_key()
+
+
+def _tarball_with_all_member_types(path: pathlib.Path, format: int, mode: Any) -> None:
+    long_dir = "prefix/" + "d" * 120
+    with tarfile.open(path, mode=mode, format=format) as tar:
+        for name in ("prefix", long_dir):
+            info = tarfile.TarInfo(name)
+            info.type, info.mode = tarfile.DIRTYPE, 0o755
+            tar.addfile(info)
+        for name, data, file_mode in (
+            (f"{long_dir}/file", b"hello" * 1000, 0o644),
+            ("prefix/exe", b"#!/bin/sh\n", 0o755),
+            ("prefix/empty", b"", 0o644),
+            ("prefix/é", b"unicode", 0o644),
+        ):
+            info = tarfile.TarInfo(name)
+            info.mode, info.size = file_mode, len(data)
+            tar.addfile(info, io.BytesIO(data))
+        for name, type_, linkname in (
+            ("prefix/symlink", tarfile.SYMTYPE, "../" + "t" * 120),
+            ("prefix/hardlink", tarfile.LNKTYPE, f"{long_dir}/file"),
+        ):
+            info = tarfile.TarInfo(name)
+            info.type, info.linkname = type_, linkname
+            tar.addfile(info)
+
+
+@pytest.mark.parametrize("format", [tarfile.PAX_FORMAT, tarfile.GNU_FORMAT, tarfile.USTAR_FORMAT])
+@pytest.mark.parametrize("mode", ["w", "w:gz", "w:bz2", "w:xz"])
+def test_tar_reader_agrees_with_tarfile(format, mode, tmp_path: pathlib.Path):
+    """The tar reader used for extraction reads the same members and data as tarfile."""
+    path = tmp_path / "archive.tar"
+    try:
+        _tarball_with_all_member_types(path, format, mode)
+    except ValueError:
+        pytest.skip("name too long for the ustar format")
+
+    with tarfile.open(path) as tar:
+        expected = [
+            (
+                m.name,
+                m.type,
+                m.mode,
+                m.linkname,
+                cast(IO[bytes], tar.extractfile(m)).read() if m.isreg() else b"",
+            )
+            for m in tar
+        ]
+
+    with closing(spack.binary_distribution._open_decompressed(str(path))) as stream:
+        reader = spack.binary_distribution._TarReader(cast(IO[bytes], stream))
+        actual = [
+            (m.name, m.type, m.mode, m.linkname, b"".join(reader.chunks(7)) if m.isreg() else b"")
+            for m in reader
+        ]
+
+    assert actual == expected
+
+
+def test_tar_reader_skips_unread_data(tmp_path: pathlib.Path):
+    path = tmp_path / "archive.tar"
+    _tarball_with_all_member_types(path, tarfile.PAX_FORMAT, "w")
+    with open(path, "rb") as stream:
+        names = [m.name for m in spack.binary_distribution._TarReader(stream)]
+    with tarfile.open(path) as tar:
+        assert names == tar.getnames()
+
+
+def test_tar_reader_rejects_corrupt_headers(tmp_path: pathlib.Path):
+    path = tmp_path / "archive.tar"
+    _tarball_with_all_member_types(path, tarfile.PAX_FORMAT, "w")
+    data = bytearray(path.read_bytes())
+
+    corrupt = bytearray(data)
+    corrupt[0] ^= 0xFF  # the first header's checksum no longer matches
+    with pytest.raises(ValueError, match="invalid checksum"):
+        list(spack.binary_distribution._TarReader(io.BytesIO(bytes(corrupt))))
+
+    reader = spack.binary_distribution._TarReader(io.BytesIO(bytes(data[:5000])))
+    with pytest.raises(ValueError, match="truncated"):
+        for _ in reader:
+            for _ in reader.chunks():
+                pass
+
+
+def test_tar_reader_rejects_sparse_files():
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w", format=tarfile.PAX_FORMAT) as tar:
+        info = tarfile.TarInfo("prefix/sparse")
+        info.pax_headers = {"GNU.sparse.major": "1", "GNU.sparse.minor": "0"}
+        tar.addfile(info, io.BytesIO(b""))
+    buffer.seek(0)
+    with pytest.raises(ValueError, match="sparse"):
+        list(spack.binary_distribution._TarReader(buffer))
