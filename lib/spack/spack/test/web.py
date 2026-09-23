@@ -666,7 +666,6 @@ def test_get_s3_session_normalizes_method_and_returns_parsed_url(
 ):
     """Verify that "GET" and "HEAD" are treated as "fetch", and everything else
     is treated as "push"."""
-    monkeypatch.setattr(spack.util.s3, "s3_client_cache", {})
     monkeypatch.setenv("_SPACK_TEST_FETCH_SECRET", "fetch-secret")
     monkeypatch.setenv("_SPACK_TEST_PUSH_SECRET", "push-secret")
     mutable_config.set(
@@ -775,9 +774,7 @@ def test_ssl_urllib(
 
         assert mock_cert == mutable_config.get("config:ssl_certs", None)
 
-        ssl_context = spack.util.web.default_ssl_context(
-            spack.util.web.NetworkClient.from_config(mutable_config)
-        )
+        ssl_context = spack.util.web.NetworkClient.from_config(mutable_config).ssl_context
         assert ssl_context.verify_mode == ssl.CERT_REQUIRED
 
 
@@ -1136,3 +1133,19 @@ def test_network_client_pickle_roundtrip(tmp_path: pathlib.Path, inactive_config
     assert restored.connect_timeout == 3
     assert [m.fetch_url for m in restored.mirrors] == ["s3://other-bucket/prefix"]
     assert spack.util.web.read_text(page.as_uri(), client=restored) == "hello"
+
+
+def test_network_client_rebuilds_connections_in_forked_children(monkeypatch, mutable_config):
+    """Tests that a client reuses its connections within a process, and rebuilds them in forked
+    children, since SSL and S3 connections are not fork-safe."""
+    client = spack.util.web.NetworkClient.from_config(mutable_config)
+    ssl_context, urlopen, s3_clients = client.ssl_context, client.urlopen, client.s3_clients
+    assert client.ssl_context is ssl_context
+    assert client.urlopen is urlopen
+    assert client.s3_clients is s3_clients
+
+    pid = os.getpid()
+    monkeypatch.setattr(os, "getpid", lambda: pid + 1)
+    assert client.ssl_context is not ssl_context
+    assert client.urlopen is not urlopen
+    assert client.s3_clients is not s3_clients

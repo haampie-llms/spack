@@ -20,10 +20,10 @@ import spack.database
 import spack.deptypes as dt
 import spack.environment as ev
 import spack.error
-import spack.oci.opener
 import spack.spec
 import spack.test.harness
 import spack.traverse
+import spack.util.web
 from spack.database import Database
 from spack.oci.image import Digest, ImageReference, default_config, default_manifest
 from spack.oci.oci import blob_exists, get_manifest_and_config, upload_blob, upload_manifest
@@ -45,10 +45,10 @@ def _stage_resources():
 @contextmanager
 def oci_servers(*servers: DummyServer):
     urlopen = create_opener(*servers).open
-    old_opener_for = spack.oci.opener.opener_for
-    spack.oci.opener.opener_for = lambda client: urlopen
+    old_oci_urlopen = spack.util.web.NetworkClient.oci_urlopen
+    spack.util.web.NetworkClient.oci_urlopen = property(lambda client: urlopen)  # type: ignore
     yield urlopen
-    spack.oci.opener.opener_for = old_opener_for
+    spack.util.web.NetworkClient.oci_urlopen = old_oci_urlopen  # type: ignore
 
 
 def test_buildcache_push_command(mutable_database: Database):

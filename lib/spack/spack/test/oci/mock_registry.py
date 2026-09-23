@@ -418,9 +418,9 @@ class MockBearerTokenServer(DummyServer):
         return MockHTTPResponse.with_json(200, "OK", body={"token": "private_token"})
 
 
-def create_opener(*servers: DummyServer, credentials_provider=None, auth_headers=None):
+def create_opener(*servers: DummyServer, credentials_provider=None):
     """Creates a mock opener, that can be used to fake requests to a list
-    of servers. ``auth_headers`` is passed to the ``OCIAuthHandler``."""
+    of servers."""
     opener = urllib.request.OpenerDirector()
     handler = DummyServerUrllibHandler()
     for server in servers:
@@ -429,5 +429,5 @@ def create_opener(*servers: DummyServer, credentials_provider=None, auth_headers
     opener.add_handler(urllib.request.HTTPDefaultErrorHandler())
     opener.add_handler(urllib.request.HTTPErrorProcessor())
     if credentials_provider is not None:
-        opener.add_handler(OCIAuthHandler(credentials_provider, auth_headers))
+        opener.add_handler(OCIAuthHandler(credentials_provider))
     return opener
