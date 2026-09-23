@@ -5,13 +5,15 @@
 
 import os
 import sys
+from typing import Dict
 
 import pytest
 
+import spack.binary_distribution
 import spack.error
 import spack.spec
 from spack.config import Configuration
-from spack.installer.base import ExitCode
+from spack.installer.base import TEE_CANCEL, TEE_RESUME, ExitCode
 from spack.installer.core import PackageInstaller, read_connection, write_connection
 from spack.installer.ui import ChangeJobs, SetEcho
 from spack.store import Store
@@ -404,3 +406,138 @@ def test_change_jobs_commands_adjust_parallelism(temporary_store, mock_packages)
     initial = jobs_events[0][2]
     assert ("jobs_changed", initial + 1, initial + 1) in jobs_events
     assert jobs_events[-1][2] == initial  # target restored after the decrease
+
+
+class EarlyBuilds:
+    """Drives builds started before their dependencies like the build process does: they report
+    to wait, and finish once the event loop resumes (TEE_RESUME) or cancels (TEE_CANCEL) them."""
+
+    def __init__(self, launcher: ScriptedLauncher) -> None:
+        self.launcher = launcher
+        self.control: Dict[str, bytes] = {}
+
+    def tick(self) -> None:
+        for request, build in zip(self.launcher.requests, self.launcher.builds):
+            if not request.wait_for_dependencies or build.exitcode is not None:
+                continue
+            conn = build.channels.control_r
+            if conn.poll():
+                data = read_connection(conn, 16)
+                self.control[request.spec.name] = self.control.get(request.spec.name, b"") + data
+                if TEE_RESUME in data:
+                    build.finish()
+                elif TEE_CANCEL in data:
+                    build._exitcode = ExitCode.CANCELLED
+                    build.finish()
+
+
+WAITING = b'{"waiting":true}\n'
+
+
+@pytest.fixture()
+def binaries_for_all_specs(monkeypatch, mutable_config: Configuration, tmp_path):
+    """Every spec is in a configured binary mirror, and jobs are available to start early."""
+    mutable_config.set(
+        "mirrors", {"local": {"url": (tmp_path / "mirror").as_uri(), "binary": True}}
+    )
+    mutable_config.set("config:build_jobs", 4)
+    monkeypatch.setattr(
+        spack.binary_distribution.BINARY_INDEX, "update", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        spack.binary_distribution.BINARY_INDEX, "find_by_hash", lambda h: ["local"]
+    )
+
+
+def test_cache_install_starts_before_dependencies(
+    temporary_store, mock_packages, binaries_for_all_specs
+):
+    """A dependent starts while its dependency is installing, waits without holding a job slot,
+    and is resumed once the dependency is installed."""
+    dep = _make_concrete("dependency-install")
+    root = _make_concrete("dependent-install", deps=[dep])
+    launcher = ScriptedLauncher(
+        {dep.name: Script(hang=True), root.name: Script(raw_state=WAITING, hang=True)}
+    )
+    early = EarlyBuilds(launcher)
+
+    def tick():
+        waiting = ("state_changed", root.dag_hash(), "waiting for dependencies") in ui.events
+        if waiting and launcher.builds[0].exitcode is None:
+            launcher.builds[0].finish()
+        early.tick()
+
+    ui = DrivingUI(tick)
+    _install(launcher, root, ui=ui)
+
+    assert [(r.spec.name, r.wait_for_dependencies) for r in launcher.requests] == [
+        (dep.name, False),
+        (root.name, True),
+    ]
+    assert early.control[root.name] == TEE_RESUME
+    assert _record(temporary_store, dep) and _record(temporary_store, root)
+
+
+@pytest.mark.disable_clean_stage_check  # failed builds keep their log file in the stage root
+def test_cache_install_cancelled_when_dependency_fails(
+    temporary_store, mock_packages, binaries_for_all_specs
+):
+    """A build waiting for a dependency that failed is cancelled, and not reported as failed."""
+    dep = _make_concrete("dependency-install")
+    root = _make_concrete("dependent-install", deps=[dep])
+    launcher = ScriptedLauncher(
+        {
+            dep.name: Script(exitcode=ExitCode.BUILD_ERROR, hang=True),
+            root.name: Script(raw_state=WAITING, hang=True),
+        }
+    )
+    early = EarlyBuilds(launcher)
+
+    def tick():
+        waiting = ("state_changed", root.dag_hash(), "waiting for dependencies") in ui.events
+        if waiting and launcher.builds[0].exitcode is None:
+            launcher.builds[0].finish()
+        early.tick()
+
+    ui = DrivingUI(tick)
+    with pytest.raises(spack.error.InstallError) as exc_info:
+        _install(launcher, root, ui=ui)
+
+    assert early.control[root.name] == TEE_CANCEL
+    assert dep.name in str(exc_info.value) and root.name not in str(exc_info.value)
+    assert ("build_removed", root.dag_hash()) in ui.events
+    assert ("state_changed", root.dag_hash(), "failed") not in ui.events
+    assert _record(temporary_store, root) is None
+
+
+def test_cache_miss_of_early_build_waits_for_dependencies(
+    temporary_store, mock_packages, binaries_for_all_specs
+):
+    """A build started early that misses the build cache is built from source only after its
+    dependencies are installed."""
+    dep = _make_concrete("dependency-install")
+    root = _make_concrete("dependent-install", deps=[dep])
+    launcher = ScriptedLauncher(
+        {
+            dep.name: Script(hang=True),
+            root.name: [Script(exitcode=ExitCode.BUILD_CACHE_MISS), Script()],
+        }
+    )
+    requests_when_dep_finished = []
+
+    def tick():
+        if len(launcher.requests) == 2 and launcher.builds[0].exitcode is None:
+            requests_when_dep_finished.append(len(launcher.requests))
+            launcher.builds[0].finish()
+
+    _install(launcher, root, ui=DrivingUI(tick))
+
+    assert requests_when_dep_finished == [2]
+    assert [
+        (r.spec.name, r.install_policy, r.wait_for_dependencies) for r in launcher.requests
+    ] == [
+        (dep.name, "cache_only", False),
+        (root.name, "cache_only", True),
+        (root.name, "source_only", False),
+    ]
+    assert _record(temporary_store, root)

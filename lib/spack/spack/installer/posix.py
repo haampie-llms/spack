@@ -212,7 +212,6 @@ class PosixTee(Tee):
         Thread exit is triggered by EOF or by reading TEE_STOP from control."""
         control_r = self.control_r.fileno()
         parent_w = self.parent.fileno()
-        echo_on = False
         stop = False
         selector = selectors.DefaultSelector()
         selector.register(log_r, selectors.EVENT_READ)
@@ -233,7 +232,7 @@ class PosixTee(Tee):
                                 return
                             log_file.write(data)
                             log_file.flush()
-                            if echo_on:
+                            if self.echo:
                                 parent.write(data)
                                 parent.flush()
 
@@ -244,7 +243,7 @@ class PosixTee(Tee):
                                 selector.unregister(control_r)
                                 stop = True
                             else:
-                                echo_on = control_data == b"1"
+                                self._control(control_data)
         except OSError:  # do not raise
             pass
         finally:

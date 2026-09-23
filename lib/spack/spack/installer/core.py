@@ -35,6 +35,8 @@ from spack.installer.base import (
     OUTPUT_BUFFER_SIZE,
     SIGWINCH_EVENT,
     STDIN_EVENT,
+    TEE_CANCEL,
+    TEE_RESUME,
     BaseTerminalState,
     ExitCode,
     FdInfo,
@@ -268,6 +270,19 @@ class PackageInstaller:
         #: specs awaiting build-dep expansion (deferred until DB read lock is available)
         self.pending_expansions: List[str] = []
 
+        #: Specs that may be installed from a build cache before their dependencies are
+        #: installed, dependencies first. Set in install().
+        self.early_candidates: List[str] = []
+        #: Builds started early that wait for their dependencies without holding a job slot
+        self.waiting: Set[str] = set()
+        #: Waiting builds whose dependencies are installed, to resume when a job slot is free
+        self.resumable: List[str] = []
+        #: Builds started early that were told to continue, or to give up
+        self.resumed: Set[str] = set()
+        self.cancelled: Set[str] = set()
+        #: Builds that reported to wait for their dependencies, for the event loop to process
+        self.newly_waiting: List[str] = []
+
         self.verbose = verbose
         self.running_builds: Dict[str, ChildInfo] = {}
         self.log_paths: Dict[str, str] = {}
@@ -318,6 +333,17 @@ class PackageInstaller:
             for s in self.build_graph.nodes.values()
         }
 
+        # Fake installs finish without waiting for dependencies
+        if not self.fake:
+            nodes = spack.traverse.traverse_nodes(
+                list(self.build_graph.nodes.values()), order="topo", key=spack.traverse.by_dag_hash
+            )
+            self.early_candidates = [
+                s.dag_hash()
+                for s in reversed(list(nodes))
+                if s.dag_hash() in self.build_graph.nodes and self._may_start_early(s.dag_hash())
+            ]
+
         self._run_event_loop()
 
     def _run_event_loop(self) -> None:
@@ -352,6 +378,7 @@ class PackageInstaller:
                 blocked = self._schedule_builds(
                     selector, jobserver, retained_read_locks, database_actions
                 )
+                self._schedule_early_builds(selector, jobserver)
                 self._run_ui_commands(jobserver)
                 self._flush_db_if_due(time.monotonic(), database_actions, retained_read_locks)
 
@@ -368,6 +395,8 @@ class PackageInstaller:
                     self.pending_builds
                     and self.capacity
                     and not blocked
+                    or self.resumable
+                    and self.capacity
                     or not jobserver.has_target_parallelism()
                 )
                 jobserver.update_selector(selector, wake_on_jobserver)
@@ -423,6 +452,8 @@ class PackageInstaller:
                         build_id, current_time, jobserver, selector, failures, database_actions
                     )
 
+                self._handle_early_builds(jobserver)
+
                 if failures and self.fail_fast:
                     # Terminate other builds to actually fail fast. We continue in the event loop
                     # waiting for child processes to finish, which may take a little while.
@@ -441,10 +472,14 @@ class PackageInstaller:
                     self._try_expand_build_deps()
 
                 # Try to schedule more builds, acquiring per-spec locks and jobserver tokens.
+                # Resuming waiting builds goes first, since their dependents wait for them.
+                self._resume_waiting_builds(jobserver)
                 if self.capacity and self.pending_builds:
                     blocked = self._schedule_builds(
                         selector, jobserver, retained_read_locks, database_actions
                     )
+                self._schedule_early_builds(selector, jobserver)
+                self._cancel_stuck_builds()
 
                 # Flush finished builds to the database if a write is due. This runs after
                 # scheduling so that a final mark-explicit action does not wait for the next
@@ -483,9 +518,10 @@ class PackageInstaller:
                     pass
 
             # Release our jobserver token for each terminated build and then join.
-            for child in self.running_builds.values():
+            for dag_hash, child in self.running_builds.items():
                 try:
-                    jobserver.release()
+                    if dag_hash not in self.waiting:
+                        jobserver.release()
                     child.proc.join(timeout=30)
                     if child.proc.is_alive():
                         child.proc.kill()
@@ -565,8 +601,15 @@ class PackageInstaller:
         update UI state; defer database insertion if successful; possibly reschedule if failed with
         cache miss; register failures."""
         build = self.running_builds.pop(dag_hash)
-        self.capacity += 1
-        jobserver.release()
+        if dag_hash in self.waiting:
+            # A waiting build holds no job slot
+            self.waiting.remove(dag_hash)
+            if dag_hash in self.resumable:
+                self.resumable.remove(dag_hash)
+        else:
+            self.capacity += 1
+            jobserver.release()
+        self.resumed.discard(dag_hash)
         self.ui.on_jobs_changed(jobserver.num_jobs, jobserver.target_jobs)
         self._drain_child_output(build, selector)
         self._drain_child_state(build, selector)
@@ -594,12 +637,19 @@ class PackageInstaller:
 
         if exitcode == ExitCode.STOPPED_AT_PHASE:
             return  # the user requested early stopping; don't treat as failure
+        elif exitcode == ExitCode.CANCELLED:
+            # Dependencies failed to install; reported like other specs that were not reached.
+            self.report_data.build_records.pop(dag_hash, None)
+            self.ui.on_build_removed(dag_hash)
         elif exitcode == ExitCode.BUILD_CACHE_MISS and user_policy == "auto":
             # Check if we can reschedule this as a source build after a build cache miss. If so,
             # return early without recording a failure.
             self.build_graph.force_source.add(dag_hash)
             self.ui.on_build_removed(dag_hash)
-            if self.build_graph.has_unexpanded_build_deps(dag_hash):
+            if dag_hash in self.build_graph.started_early:
+                # Scheduled again as usual once its dependencies are installed
+                self.build_graph.started_early.remove(dag_hash)
+            elif self.build_graph.has_unexpanded_build_deps(dag_hash):
                 self.pending_expansions.append(dag_hash)
             else:
                 self.pending_builds.append(dag_hash)
@@ -608,6 +658,119 @@ class PackageInstaller:
             # failures may be a consequence of us terminating other builds.
             failures.append(build.spec)
             self.ui.on_state_changed(dag_hash, "failed")
+
+    def _active_builds(self) -> int:
+        """The number of running builds that hold a job slot."""
+        return len(self.running_builds) - len(self.waiting)
+
+    def _may_start_early(self, dag_hash: str) -> bool:
+        """Whether a spec can be installed from a build cache before its dependencies are
+        installed. Only the post-install hooks, which may inspect dependencies, wait for them."""
+        spec = self.build_graph.nodes[dag_hash]
+        return (
+            bool(self.binary_cache_for_spec.get(dag_hash))
+            and not spec.external
+            and spec.build_spec is spec
+            and dag_hash not in self.overwrite
+            and self._effective_install_policy(dag_hash, dag_hash in self.build_graph.roots)
+            == "cache_only"
+        )
+
+    def _schedule_early_builds(
+        self, selector: selectors.BaseSelector, jobserver: JobServerBase
+    ) -> None:
+        """Use spare job slots to install specs from a build cache whose dependencies are not yet
+        installed. Anything out of the ordinary, like a lock held by another process or an
+        existing database record, is left to regular scheduling."""
+        graph = self.build_graph
+        # Waiting processes are idle, but keep their number bounded
+        limit = min(self.capacity, 2 * self.jobs - len(graph.started_early))
+        if limit <= 0 or not self.early_candidates:
+            return
+        # Drop candidates that were started or became ready in the meantime
+        self.early_candidates = [
+            h
+            for h in self.early_candidates
+            if graph.parent_to_child.get(h)
+            and h not in self.running_builds
+            and h not in graph.started_early
+            and h not in graph.force_source
+        ]
+        db = self.store.db
+        with db.try_read_transaction() as acquired:
+            if not acquired:
+                return
+            for dag_hash in list(self.early_candidates):
+                if limit <= 0:
+                    break
+                spec = graph.nodes[dag_hash]
+                lock = self.store.prefix_locker.lock(spec)
+                if not lock.try_acquire_write():
+                    continue
+                _, record = db.query_by_spec_hash(dag_hash)
+                if record is not None or spec.prefix in db._installed_prefixes:
+                    lock.release_write()
+                    continue
+                if self._active_builds() and not jobserver.acquire(1):
+                    lock.release_write()
+                    break
+                self.early_candidates.remove(dag_hash)
+                graph.started_early.add(dag_hash)
+                self._start(selector, jobserver, dag_hash, lock, early=True)
+                limit -= 1
+
+    def _handle_early_builds(self, jobserver: JobServerBase) -> None:
+        """Process builds that started early and now wait for their dependencies, and builds
+        whose dependencies got installed."""
+        for dag_hash in self.newly_waiting:
+            if dag_hash not in self.running_builds or dag_hash in self.resumed:
+                continue  # finished, or told to continue before it waited
+            # Give up the job slot while waiting
+            self.waiting.add(dag_hash)
+            self.capacity += 1
+            jobserver.release()
+            self.ui.on_state_changed(dag_hash, "waiting for dependencies")
+        self.newly_waiting.clear()
+
+        for dag_hash in self.build_graph.ready_early:
+            if dag_hash in self.waiting:
+                self.resumable.append(dag_hash)
+            elif dag_hash in self.running_builds:
+                # Still installing and holding its job slot: continue once done
+                self._send_control(dag_hash, TEE_RESUME)
+                self.resumed.add(dag_hash)
+        self.build_graph.ready_early.clear()
+
+    def _resume_waiting_builds(self, jobserver: JobServerBase) -> None:
+        """Let waiting builds whose dependencies are installed continue, as job slots allow."""
+        while self.resumable and self.capacity:
+            if self._active_builds() and not jobserver.acquire(1):
+                break
+            dag_hash = self.resumable.pop(0)
+            self.waiting.remove(dag_hash)
+            self.capacity -= 1
+            self._send_control(dag_hash, TEE_RESUME)
+            self.resumed.add(dag_hash)
+
+    def _cancel_stuck_builds(self) -> None:
+        """Cancel waiting builds when nothing else can make progress: their dependencies failed
+        to install."""
+        if (
+            self.waiting
+            and len(self.waiting) == len(self.running_builds)
+            and not self.resumable
+            and not self.pending_builds
+            and not self.pending_expansions
+        ):
+            for dag_hash in self.waiting - self.cancelled:
+                self._send_control(dag_hash, TEE_CANCEL)
+                self.cancelled.add(dag_hash)
+
+    def _send_control(self, dag_hash: str, data: bytes) -> None:
+        try:
+            write_connection(self.running_builds[dag_hash].control_w_conn, data)
+        except OSError:
+            pass
 
     def _try_expand_build_deps(self) -> None:
         """Try to expand build deps for specs with cache misses. Non-blocking: returns immediately
@@ -704,7 +867,7 @@ class PackageInstaller:
             overwrite=self.overwrite,
             overwrite_time=self.overwrite_time,
             capacity=self.capacity,
-            needs_jobserver_token=bool(self.running_builds),
+            needs_jobserver_token=self._active_builds() > 0,
             jobserver=jobserver,
             explicit=self.explicit,
         )
@@ -718,7 +881,7 @@ class PackageInstaller:
         # Specs we can start building ourselves.
         for dag_hash, lock in result.to_start:
             self._start(selector, jobserver, dag_hash, lock)
-        self.ui.on_blocked_changed(blocked and not self.running_builds)
+        self.ui.on_blocked_changed(blocked and not self._active_builds())
         return blocked
 
     def _effective_install_policy(self, dag_hash: str, is_root: bool) -> InstallPolicy:
@@ -743,6 +906,7 @@ class PackageInstaller:
         jobserver: JobServerBase,
         dag_hash: str,
         prefix_lock: spack.util.lock.Lock,
+        early: bool = False,
     ) -> None:
         self.capacity -= 1
         explicit = dag_hash in self.explicit
@@ -783,6 +947,7 @@ class PackageInstaller:
             log_path=self.log_paths[dag_hash],
             stop_before=self.stop_before if is_root else None,
             stop_at=self.stop_at if is_root else None,
+            wait_for_dependencies=early,
         )
         child_info = self.launcher(request, jobserver)
         child_info.prefix_lock = prefix_lock
@@ -909,5 +1074,7 @@ class PackageInstaller:
                 self.ui.on_progress(dag_hash, message["progress"], message["total"])
             elif "installed_from_binary_cache" in message:
                 child_info.spec.package.installed_from_binary_cache = True
+            elif "waiting" in message:
+                self.newly_waiting.append(dag_hash)
 
         return True

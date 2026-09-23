@@ -103,6 +103,10 @@ class BuildGraph:
         self.pruned: Set[str] = set()
         self.done: Set[str] = set()
         self.force_source: Set[str] = set()
+        #: Specs whose build was started before their dependencies were installed
+        self.started_early: Set[str] = set()
+        #: Specs started early whose dependencies have since been installed
+        self.ready_early: List[str] = []
         stack: List[Tuple[spack.spec.Spec, InstallPolicy]] = [
             (s, root_policy) for s in self.nodes.values()
         ]
@@ -238,7 +242,11 @@ class BuildGraph:
             children = self.parent_to_child[parent]
             children.remove(dag_hash)
             if not children:
-                pending_builds.append(parent)
+                if parent in self.started_early:
+                    self.started_early.remove(parent)
+                    self.ready_early.append(parent)
+                else:
+                    pending_builds.append(parent)
 
     def has_unexpanded_build_deps(self, dag_hash: str) -> bool:
         return bool(self.get_unexpanded_build_deps(dag_hash))

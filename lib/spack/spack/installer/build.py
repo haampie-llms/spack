@@ -21,7 +21,7 @@ import tempfile
 import traceback
 from gzip import GzipFile
 from multiprocessing import Process
-from typing import TYPE_CHECKING, List, NamedTuple, Optional
+from typing import TYPE_CHECKING, Callable, List, NamedTuple, Optional
 
 from spack.vendor.typing_extensions import Protocol
 
@@ -294,6 +294,12 @@ def send_progress(current: int, total: int, state_pipe: io.TextIOWrapper) -> Non
     state_pipe.write("\n")
 
 
+def send_waiting(state_pipe: io.TextIOWrapper) -> None:
+    """Send a notification that the build waits for its dependencies to be installed."""
+    json.dump({"waiting": True}, state_pipe, separators=(",", ":"))
+    state_pipe.write("\n")
+
+
 def send_installed_from_binary_cache(state_pipe: io.TextIOWrapper) -> None:
     """Send a notification that the package was installed from binary cache."""
     json.dump({"installed_from_binary_cache": True}, state_pipe, separators=(",", ":"))
@@ -382,9 +388,9 @@ class PrefixPivoter:
             return
 
         # Failure handling:
-        if self.keep_prefix and not issubclass(exc_type, BinaryCacheMiss):
-            # Leave the failed prefix in place, discard the backup. Except for binary cache misses,
-            # which is a scheduling failure and not a build failure.
+        if self.keep_prefix and not issubclass(exc_type, (BinaryCacheMiss, BuildCancelled)):
+            # Leave the failed prefix in place, discard the backup. Except for binary cache misses
+            # and cancelled builds, which are scheduling failures and not build failures.
             if self.tmp_prefix is not None:
                 self._rmtree_ignore_errors(self.tmp_prefix)
         elif self.tmp_prefix is not None:
@@ -436,6 +442,9 @@ class BuildRequest(NamedTuple):
     log_path: str
     stop_before: Optional[str]
     stop_at: Optional[str]
+    #: Started before its dependencies are installed: install from a build cache, and wait for
+    #: the parent to resume the build before running post-install hooks.
+    wait_for_dependencies: bool = False
 
 
 def worker_function(
@@ -524,11 +533,23 @@ def worker_function(
     state_stream = make_state_stream(state)
     exit_code = ExitCode.SUCCESS
 
+    def wait_for_dependencies() -> None:
+        send_waiting(state_stream)
+        parent = os.getppid()
+        while not tee.resume_event.wait(1.0):
+            if os.getppid() != parent:
+                break
+        if not tee.resumed:
+            raise BuildCancelled(f"Dependencies of {spec} were not installed")
+        send_state("finalizing", state_stream)
+
     try:
         with PrefixPivoter(spec.prefix, request.keep_prefix):
-            _install(request, state_stream, spack.store.STORE)
+            _install(request, state_stream, spack.store.STORE, wait_for_dependencies)
     except spack.error.StopPhase:
         exit_code = ExitCode.STOPPED_AT_PHASE
+    except BuildCancelled:
+        exit_code = ExitCode.CANCELLED
     except ProcessError as e:
         print(e, file=sys.stderr)
         exit_code = ExitCode.BUILD_ERROR
@@ -683,7 +704,10 @@ def _rewire_no_db(
 
 
 def _install(
-    request: BuildRequest, state_stream: io.TextIOWrapper, store: spack.store.Store
+    request: BuildRequest,
+    state_stream: io.TextIOWrapper,
+    store: spack.store.Store,
+    wait_for_dependencies: Callable[[], None] = lambda: None,
 ) -> None:
     """Install a spec from build cache or source."""
     spec, explicit, install_policy = request.spec, request.explicit, request.install_policy
@@ -704,6 +728,9 @@ def _install(
     # Try to install from buildcache, unless user asked for source only
     if install_policy != "source_only":
         if install_from_buildcache(request.mirrors, spec, request.unsigned, state_stream, timer):
+            if request.wait_for_dependencies:
+                with timer.measure("wait"):
+                    wait_for_dependencies()
             _post_install(pkg, spec, explicit, timer, cache=True)
             return
         elif install_policy == "cache_only":
@@ -864,3 +891,7 @@ def start_build(request: BuildRequest, jobserver: JobServerBase) -> ChildInfo:
 
 class BinaryCacheMiss(spack.error.SpackError):
     pass
+
+
+class BuildCancelled(spack.error.SpackError):
+    """The parent cancelled a build that waited for dependencies that failed to install."""

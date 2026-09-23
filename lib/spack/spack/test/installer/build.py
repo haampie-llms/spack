@@ -7,7 +7,12 @@ import pathlib
 
 import pytest
 
-from spack.installer.build import OVERWRITE_GARBAGE_SUFFIX, BinaryCacheMiss, PrefixPivoter
+from spack.installer.build import (
+    OVERWRITE_GARBAGE_SUFFIX,
+    BinaryCacheMiss,
+    BuildCancelled,
+    PrefixPivoter,
+)
 
 
 @pytest.fixture
@@ -160,6 +165,16 @@ class TestPrefixPivoter:
         assert (existing_prefix / "old_file").read_text() == "old content"
         assert not (existing_prefix / "partial_file").exists()
         assert len(list(tmp_path.iterdir())) == 1
+
+    def test_cancelled_build_with_keep_prefix_removes_prefix(self, tmp_path: pathlib.Path):
+        """A build cancelled because its dependencies failed does not keep its prefix."""
+        prefix = tmp_path / "new_prefix"
+        with pytest.raises(BuildCancelled), PrefixPivoter(str(prefix), keep_prefix=True):
+            prefix.mkdir()
+            (prefix / "extracted_file").write_text("extracted")
+            raise BuildCancelled("dependencies failed")
+
+        assert not list(tmp_path.iterdir())
 
 
 class FailingPrefixPivoter(PrefixPivoter):

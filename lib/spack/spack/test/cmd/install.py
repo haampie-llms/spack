@@ -22,9 +22,11 @@ import spack.config
 import spack.environment as ev
 import spack.error
 import spack.hooks.sbom_generate
+import spack.installer.core
 import spack.old_installer
 import spack.package_base
 import spack.reporters.cdash
+import spack.store
 import spack.util.filesystem as fs
 from spack.config import Configuration
 from spack.error import SpackError, SpecSyntaxError
@@ -1156,6 +1158,43 @@ def test_install_use_buildcache(
     # Alternative to --cache-only (always) or --no-cache (never)
     for opt in ["auto", "only", "never"]:
         install_use_buildcache(opt)
+
+
+@pytest.mark.not_on_windows("Buildcache not supported on windows")
+def test_install_from_buildcache_before_dependencies(
+    mutable_mock_env_path,
+    mock_packages,
+    mock_fetch,
+    mock_archive,
+    mock_binary_index,
+    tmp_path: pathlib.Path,
+    install_mockery,
+    mutable_config: Configuration,
+    monkeypatch,
+):
+    """Build cache installs start before their dependencies are installed, and finish after."""
+    mutable_config.set("config:installer", "new")
+    install("dependent-install")
+    buildcache("push", "-u", "--update-index", str(tmp_path / "mirror"), "dependent-install")
+    uninstall("-y", "-a")
+    mirror("add", "test-mirror", (tmp_path / "mirror").as_uri())
+
+    started_early = []
+    start = spack.installer.core.PackageInstaller._start
+
+    def _start(self, selector, jobserver, dag_hash, prefix_lock, early=False):
+        if early:
+            started_early.append(self.build_graph.nodes[dag_hash].name)
+        return start(self, selector, jobserver, dag_hash, prefix_lock, early)
+
+    monkeypatch.setattr(spack.installer.core.PackageInstaller, "_start", _start)
+    install("--no-check-signature", "--cache-only", "dependent-install")
+
+    assert started_early == ["dependent-install"]
+    dependent = spack.store.STORE.db.query_one("dependent-install")
+    dependency = spack.store.STORE.db.query_one("dependency-install")
+    assert dependent is not None and dependency is not None
+    assert os.path.exists(dependent.package.install_log_path)
 
 
 @pytest.mark.not_on_windows("Windows logger I/O operation on closed file when install fails")

@@ -36,6 +36,10 @@ OUTPUT_BUFFER_SIZE = 32768
 #: Control byte that stops the tee thread
 TEE_STOP = b"2"
 
+#: Control bytes that let a build waiting for its dependencies continue, or give up
+TEE_RESUME = b"3"
+TEE_CANCEL = b"4"
+
 
 class ExitCode:
     SUCCESS = 0
@@ -44,6 +48,8 @@ class ExitCode:
     STOPPED_AT_PHASE = 3
     #: Exit code used by the child process to signal a binary cache miss (no source fallback)
     BUILD_CACHE_MISS = 4
+    #: Exit code used by the child process when it was cancelled while waiting for dependencies
+    CANCELLED = 5
 
 
 #: How often the event loop should wake up to poll for a background-to-foreground transition
@@ -334,6 +340,11 @@ class Tee(abc.ABC):
         self.control_w = control_w
         #: The path of the log file
         self.log_path = log_path
+        #: Set when the parent sends TEE_RESUME or TEE_CANCEL; ``resumed`` tells which
+        self.resume_event = threading.Event()
+        self.resumed = False
+        #: Whether to forward output to the parent
+        self.echo = False
         log_file = open(self.log_path, "ab")
         r, w = os.pipe()
         self.tee_thread = threading.Thread(target=self.run, args=(r, log_file), daemon=True)
@@ -341,6 +352,14 @@ class Tee(abc.ABC):
         self.saved_fds = redirect_stdio(w)
         self._setup_handles()
         os.close(w)
+
+    def _control(self, data: bytes) -> None:
+        """Handle a control byte other than TEE_STOP from the parent."""
+        if data == TEE_RESUME or data == TEE_CANCEL:
+            self.resumed = data == TEE_RESUME
+            self.resume_event.set()
+        else:
+            self.echo = data == b"1"
 
     def _setup_handles(self) -> None:
         pass
