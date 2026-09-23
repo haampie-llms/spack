@@ -24,11 +24,11 @@ pytestmark = pytest.mark.not_on_windows("does not run on windows")
 #: make sure module files are generated for all the tests here
 @pytest.fixture(scope="module", autouse=True)
 def ensure_module_files_are_there(
-    mock_packages_repo, mock_store, mock_configuration_scopes, ctx: SpackContext
+    mock_packages_repo, mock_store_path, mock_configuration_scopes, ctx: SpackContext
 ):
     """Generate module files for module tests."""
     module = spack.test.harness.SpackCommand("module")
-    with spack.test.harness.use_store(ctx, str(mock_store)):
+    with spack.test.harness.use_store(ctx, str(mock_store_path)):
         with spack.test.harness.use_configuration(*mock_configuration_scopes):
             with spack.test.harness.use_repositories(ctx, mock_packages_repo):
                 module("tcl", "refresh", "-y")

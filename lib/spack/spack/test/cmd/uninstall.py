@@ -8,6 +8,7 @@ import os
 import pytest
 
 import spack.cmd.uninstall
+import spack.database
 import spack.environment
 import spack.error
 import spack.repo
@@ -15,7 +16,6 @@ from spack.context import SpackContext
 from spack.database import Database
 from spack.enums import InstallRecordStatus
 from spack.main import SpackCommandError
-from spack.store import Store
 from spack.test.harness import SpackCommand
 from spack.util import tty
 
@@ -111,12 +111,12 @@ def test_correct_installed_dependents(mutable_database: Database, ctx: SpackCont
 
 
 @pytest.mark.db
-def test_recursive_uninstall(mutable_database_store: Store):
+def test_recursive_uninstall(mutable_database: spack.database.Database, ctx: SpackContext):
     """Test recursive uninstall."""
     uninstall("-y", "-a", "--dependents", "callpath")
 
     # query specs with multiple configurations
-    all_specs = mutable_database_store.layout.all_specs()
+    all_specs = ctx.store.layout.all_specs()
     mpileaks_specs = [s for s in all_specs if s.satisfies("mpileaks")]
     callpath_specs = [s for s in all_specs if s.satisfies("callpath")]
     mpi_specs = [s for s in all_specs if s.satisfies("mpi")]
@@ -168,27 +168,35 @@ def test_uninstall_dependents_and_implicit_dependents_mutually_exclusive(mutable
 @pytest.mark.regression("3690")
 @pytest.mark.parametrize("constraint,expected_number_of_specs", [("dyninst", 10), ("libelf", 8)])
 def test_uninstall_spec_with_multiple_roots(
-    constraint, expected_number_of_specs, mutable_database_store: Store
+    constraint,
+    expected_number_of_specs,
+    mutable_database: spack.database.Database,
+    ctx: SpackContext,
 ):
     uninstall("-y", "-a", "--dependents", constraint)
-    all_specs = mutable_database_store.layout.all_specs()
+    all_specs = ctx.store.layout.all_specs()
     assert len(all_specs) == expected_number_of_specs
 
 
 @pytest.mark.db
 @pytest.mark.parametrize("constraint,expected_number_of_specs", [("dyninst", 16), ("libelf", 16)])
 def test_force_uninstall_spec_with_ref_count_not_zero(
-    constraint, expected_number_of_specs, mutable_database_store: Store
+    constraint,
+    expected_number_of_specs,
+    mutable_database: spack.database.Database,
+    ctx: SpackContext,
 ):
     uninstall("-f", "-y", constraint)
-    all_specs = mutable_database_store.layout.all_specs()
+    all_specs = ctx.store.layout.all_specs()
     assert len(all_specs) == expected_number_of_specs
 
 
 @pytest.mark.db
-def test_force_uninstall_and_reinstall_by_hash(mutable_database_store):
+def test_force_uninstall_and_reinstall_by_hash(
+    mutable_database: spack.database.Database, ctx: SpackContext
+):
     """Test forced uninstall and reinstall of old specs."""
-    db = mutable_database_store.db
+    db = mutable_database
     # this is the spec to be removed
     callpath_spec = db.query_one("callpath ^mpich")
     dag_hash = callpath_spec.dag_hash()
@@ -237,7 +245,7 @@ def test_force_uninstall_and_reinstall_by_hash(mutable_database_store):
 
     # BUT, make sure that the removed callpath spec is not in queries
     def db_specs():
-        all_specs = mutable_database_store.layout.all_specs()
+        all_specs = ctx.store.layout.all_specs()
         return (
             all_specs,
             [s for s in all_specs if s.satisfies("mpileaks")],
