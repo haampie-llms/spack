@@ -498,7 +498,7 @@ def _config_mutator(method):
 
     @functools.wraps(method)
     def _method(self, *args, **kwargs):
-        self._get_config_memoized.cache_clear()
+        self._merged_sections.clear()
         return method(self, *args, **kwargs)
 
     return _method
@@ -522,6 +522,13 @@ class Configuration:
         # substitutions do not need to import spack.environment (avoiding a circular
         # import).
         self.env_path: Optional[str] = None
+        #: Memo of ``_get_config_memoized``, cleared by ``@_config_mutator`` methods
+        self._merged_sections: Dict[tuple, Tuple[YamlConfigDict, Any]] = {}
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["_merged_sections"] = {}
+        return state
 
     def highest(self) -> ConfigScope:
         """Scope with the highest precedence"""
@@ -795,7 +802,6 @@ class Configuration:
         """Return a list of scopes that have not been overridden by include::."""
         return self._filter_overridden([s for s in self.scopes.values()])
 
-    @lang.memoized
     def _get_config_memoized(
         self, section: str, scope: Optional[str], _merged_scope: Optional[str] = None
     ) -> Tuple[YamlConfigDict, Any]:
@@ -804,6 +810,18 @@ class Configuration:
         Note that the memoization cache for this function is cleared whenever
         any function decorated with ``@_config_mutator`` is called.
         """
+        key = (section, scope, _merged_scope)
+        try:
+            return self._merged_sections[key]
+        except KeyError:
+            pass
+        result = self._merge_section(section, scope, _merged_scope)
+        self._merged_sections[key] = result
+        return result
+
+    def _merge_section(
+        self, section: str, scope: Optional[str], _merged_scope: Optional[str]
+    ) -> Tuple[YamlConfigDict, Any]:
         _validate_section_name(section)
 
         if scope is not None and _merged_scope is not None:
