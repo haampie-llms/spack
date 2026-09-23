@@ -153,6 +153,7 @@ def test_changed_files_all_files(mock_packages: RepoPath, ctx: SpackContext):
     assert not any(f.startswith(spack.paths.vendor_path) for f in files)
 
 
+@pytest.mark.usefixtures("config")
 def test_bad_root(tmp_path: pathlib.Path):
     """Ensure that `spack style` doesn't run on non-spack directories."""
     output = style("--root", str(tmp_path), fail_on_error=False)
@@ -286,6 +287,7 @@ def test_style_with_ruff_format(ruff_package_with_errors):
     assert "spack style found errors" in output
 
 
+@pytest.mark.usefixtures("config")
 def test_skip_tools():
     output = style("--skip", "import,ruff-check,ruff-format,mypy")
     assert "Nothing to run" in output

@@ -4,6 +4,8 @@
 
 import platform
 
+import pytest
+
 import spack
 import spack.cmd.debug
 import spack.platforms
@@ -16,6 +18,7 @@ from spack.test.harness import SpackCommand
 debug = SpackCommand("debug")
 
 
+@pytest.mark.usefixtures("config")
 def test_report():
     out = debug("report")
     host_platform = spack.platforms.host()

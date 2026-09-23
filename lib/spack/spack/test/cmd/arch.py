@@ -2,9 +2,13 @@
 #
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
+import pytest
+
 from spack.test.harness import SpackCommand
 
 arch = SpackCommand("arch")
+
+pytestmark = pytest.mark.usefixtures("config")
 
 
 def test_arch():

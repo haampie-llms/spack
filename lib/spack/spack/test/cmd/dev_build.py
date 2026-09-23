@@ -138,6 +138,7 @@ def test_dev_build_fails_already_installed(
         assert "Already installed in %s" % spec.prefix in output
 
 
+@pytest.mark.usefixtures("config")
 def test_dev_build_fails_no_spec():
     output = dev_build(fail_on_error=False)
     assert "requires a package spec argument" in output

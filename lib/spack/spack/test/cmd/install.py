@@ -837,6 +837,7 @@ def test_install_no_add_in_env(
         assert not any([s.name == "bowtie" for s in e.uninstalled_specs()])
 
 
+@pytest.mark.usefixtures("config")
 def test_install_help_does_not_show_cdash_options():
     """
     Make sure `spack install --help` does not describe CDash arguments
@@ -844,6 +845,7 @@ def test_install_help_does_not_show_cdash_options():
     assert "CDash URL" not in install("--help")
 
 
+@pytest.mark.usefixtures("config")
 def test_install_help_cdash():
     """Make sure `spack install --help-cdash` describes CDash arguments"""
     install_cmd = SpackCommand("install")
@@ -884,6 +886,7 @@ def test_cdash_configure_warning(
         assert "foo: No such file or directory" in content
 
 
+@pytest.mark.usefixtures("config")
 def test_install_fails_no_args(tmp_path: pathlib.Path):
     # ensure no spack.yaml in directory
     with fs.working_dir(str(tmp_path)):
@@ -895,6 +898,7 @@ def test_install_fails_no_args(tmp_path: pathlib.Path):
     assert "using the `spack.yaml` in this directory" not in output
 
 
+@pytest.mark.usefixtures("config")
 def test_install_fails_no_args_suggests_env_activation(tmp_path: pathlib.Path):
     # ensure spack.yaml in directory
     (tmp_path / "spack.yaml").touch()

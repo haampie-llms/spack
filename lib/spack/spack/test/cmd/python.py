@@ -12,6 +12,8 @@ from spack.test.harness import SpackCommand
 
 python = SpackCommand("python")
 
+pytestmark = pytest.mark.usefixtures("config")
+
 
 def test_python():
     out = python("-c", "import spack; print(spack.spack_version)")

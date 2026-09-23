@@ -137,6 +137,7 @@ _cmd-spack-install:
         assert (":ref:`More documentation <cmd-spack-%s>`" % name) not in out
 
 
+@pytest.mark.usefixtures("config")
 def test_rst_with_header(tmp_path: pathlib.Path):
     local_commands = spack.test.harness.SpackCommand("commands")
     fake_header = "this is a header!\n\n"
@@ -241,6 +242,7 @@ def test_fish_completion():
     assert "__fish_spack_using_command compiler add" in out2
 
 
+@pytest.mark.usefixtures("config")
 @pytest.mark.parametrize("shell", ["bash", "fish"])
 def test_update_completion_arg(shell, tmp_path: pathlib.Path, monkeypatch):
     """Test the update completion flag."""

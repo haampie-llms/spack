@@ -228,6 +228,7 @@ def test_pkg_changed(builtin_mock_copy: spack.repo.Repo):
         pkg("changed", "--type", "foo")
 
 
+@pytest.mark.usefixtures("config")
 def test_pkg_fails_when_not_git_repo(monkeypatch):
     monkeypatch.setattr(spack.cmd, "spack_is_git_repo", lambda: False)
     with pytest.raises(spack.main.SpackCommandError):
