@@ -90,7 +90,6 @@ import spack.enums
 import spack.error
 import spack.paths
 import spack.platforms
-import spack.repo
 import spack.spec_parser
 import spack.traverse
 import spack.util.filesystem as fs
@@ -112,6 +111,7 @@ from .enums import PropagationPolicy
 if TYPE_CHECKING:
     import spack.package_base
     import spack.patch
+    import spack.repo
 
 SPEC_FORMAT_RE = re.compile(
     r"(?:"  # this is one big or, with matches ordered by priority
@@ -3200,7 +3200,7 @@ class Spec:
                 substitute_abstract_variants(spec, repo=repo)
 
     @staticmethod
-    def ensure_valid_variants(spec: "Spec", *, repo: spack.repo.RepoPath) -> None:
+    def ensure_valid_variants(spec: "Spec", *, repo: "spack.repo.RepoPath") -> None:
         """Ensures that the variant attached to the given spec are valid.
 
         Raises:
@@ -5579,7 +5579,7 @@ def reconstruct_virtuals(
     if repo_provider is None:
         tty.debug(f"no repositories to reconstruct the virtuals of spec format v{version}")
         return
-    spack.repo.reconstruct_virtuals(specs, repo=repo_provider())
+    repo_provider().reconstruct_virtuals(specs)
 
 
 @register_reader
@@ -5896,11 +5896,11 @@ def rehash_mutated(specs: Iterable[Spec], *, repo: "spack.repo.RepoPath") -> Non
     for parent in parents:
         parent._mark_root_concrete(False)
         parent.clear_caches()
-    spack.repo.freeze_provided_virtuals(parents, repo=repo)
+    repo.freeze_provided_virtuals(parents)
     assign_hashes(parents, repo=repo)
 
 
-def _inject_patches_variant(root: Spec, *, repo: spack.repo.RepoPath) -> None:
+def _inject_patches_variant(root: Spec, *, repo: "spack.repo.RepoPath") -> None:
     # This dictionary will store object IDs rather than Specs as keys
     # since the Spec __hash__ will change as patches are added to them
     spec_to_patches: Dict[int, Set["spack.patch.Patch"]] = {}

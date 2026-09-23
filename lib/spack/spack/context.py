@@ -146,6 +146,18 @@ class SpackContext:
 
         return spack.bootstrap.config.bootstrap_context(self)
 
+    def environment_dir(self, name_or_dir: str) -> str:
+        """Directory of the environment with the given name, or in the given directory."""
+        import spack.environment
+
+        return spack.environment.as_env_dir(name_or_dir, config=self.config)
+
+    def read_environment(self, name_or_dir: str) -> "spack.environment.Environment":
+        """Read the environment with the given name, or in the given directory."""
+        import spack.environment
+
+        return spack.environment.environment_from_name_or_dir(name_or_dir, ctx=self)
+
     def ensure_clingo(self) -> None:
         """Make the clingo module importable, bootstrapping it if needed."""
         import spack.bootstrap
