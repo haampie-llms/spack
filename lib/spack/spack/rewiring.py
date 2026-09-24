@@ -11,22 +11,22 @@ import spack.hooks
 import spack.store
 
 
-def rewire(spliced_spec):
+def rewire(spliced_spec, store: spack.store.Store):
     """Given a spliced spec, this function conducts all the rewiring on all
     nodes in the DAG of that spec."""
     assert spliced_spec.spliced
     for spec in spliced_spec.traverse(order="post", root=True):
-        if not spack.store.STORE.db.installed(spec.build_spec):
+        if not store.db.installed(spec.build_spec):
             # TODO: May want to change this at least for the root spec...
             # TODO: Also remember to import PackageInstaller
             # PackageInstaller([spec.build_spec.package]).install()
             raise PackageNotInstalledError(spliced_spec, spec.build_spec, spec)
-        if spec.build_spec is not spec and not spack.store.STORE.db.installed(spec):
+        if spec.build_spec is not spec and not store.db.installed(spec):
             explicit = spec is spliced_spec
-            rewire_node(spec, explicit)
+            rewire_node(spec, explicit, store)
 
 
-def rewire_node(spec, explicit):
+def rewire_node(spec, explicit, store: spack.store.Store):
     """This function rewires a single node, worrying only about references to
     its subgraph. Binaries, text, and links are all changed in accordance with
     the splice. The resulting package is then 'installed.'"""
@@ -34,15 +34,15 @@ def rewire_node(spec, explicit):
 
     # Copy spec.build_spec.prefix to spec.prefix through a temporary tarball
     tarball = os.path.join(tempdir, f"{spec.dag_hash()}.tar.gz")
-    spack.binary_distribution.create_tarball(spec.build_spec, tarball, store=spack.store.STORE)
+    spack.binary_distribution.create_tarball(spec.build_spec, tarball, store=store)
 
     spack.hooks.pre_install(spec)
     spack.binary_distribution.extract_buildcache_tarball(tarball, destination=spec.prefix)
-    spack.binary_distribution.relocate_package(spec, store=spack.store.STORE)
+    spack.binary_distribution.relocate_package(spec, store=store)
 
     # run post install hooks and add to db
     spack.hooks.post_install(spec, explicit)
-    spack.store.STORE.db.add(spec, explicit=explicit)
+    store.db.add(spec, explicit=explicit)
 
 
 class RewireError(spack.error.SpackError):

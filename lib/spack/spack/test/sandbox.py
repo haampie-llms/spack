@@ -179,7 +179,7 @@ def test_enable_sandbox_paths(
         "allow_network": True,
     }
 
-    _enable_sandbox(config, spec, str(stage_path))
+    _enable_sandbox(config, spec, str(stage_path), ctx.store)
 
     allow_read_resolved = [c[1] for c in mock_sandbox.read_calls]
     for dep in spec.traverse(root=False):

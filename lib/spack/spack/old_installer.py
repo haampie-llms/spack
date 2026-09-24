@@ -623,7 +623,7 @@ def log(pkg: "spack.package_base.PackageBase") -> None:
                 err.write(errors.getvalue())
             tty.warn(f"Errors occurred when archiving files.\n\tSee: {error_file}")
 
-    dump_packages(pkg.spec, packages_dir)
+    dump_packages(pkg.spec, packages_dir, pkg.context)
 
 
 def package_id(spec: "spack.spec.Spec") -> str:
@@ -2754,7 +2754,9 @@ def deprecate(spec: "spack.spec.Spec", deprecator: "spack.spec.Spec", link_fn) -
         deprecate(deprecated, deprecator, link_fn)
 
     # Now that we've handled metadata, uninstall and replace with link
-    spack.package_base.PackageBase.uninstall_by_spec(spec, force=True, deprecator=deprecator)
+    spack.package_base.PackageBase.uninstall_by_spec(
+        spec, spack.store.STORE, force=True, deprecator=deprecator
+    )
     link_fn(deprecator.prefix, spec.prefix)
 
 

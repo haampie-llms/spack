@@ -3,10 +3,7 @@
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
 import spack.binary_distribution
-import spack.config
 import spack.mirrors.mirror
-import spack.store
-import spack.util.web
 from spack.util import tty
 
 
@@ -23,8 +20,9 @@ def post_install(spec, explicit):
         return
 
     # Push the package to all autopush mirrors
+    ctx = pkg.context
     for mirror in spack.mirrors.mirror.MirrorCollection.from_config(
-        spack.config.CONFIG, binary=True, autopush=True
+        ctx.config, binary=True, autopush=True
     ).values():
         if not mirror.matches_binary(spec, direction="push"):
             tty.debug(
@@ -37,9 +35,9 @@ def post_install(spec, explicit):
             mirror=mirror,
             force=True,
             signing_key=signing_key,
-            config=spack.config.CONFIG,
-            client=spack.util.web.NetworkClient.from_config(spack.config.CONFIG),
-            store=spack.store.STORE,
+            config=ctx.config,
+            client=ctx.network,
+            store=ctx.store,
         ) as uploader:
             uploader.push_or_raise([spec])
         tty.msg(f"{spec.name}: Pushed to build cache: '{mirror.name}'")

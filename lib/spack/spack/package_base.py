@@ -19,7 +19,20 @@ import sys
 import textwrap
 import time
 import traceback
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Type, TypeVar, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+)
 
 from spack.vendor.typing_extensions import Literal
 
@@ -70,10 +83,23 @@ from spack.version import (
     is_git_version,
 )
 
+if TYPE_CHECKING:
+    import spack.context
+
 FLAG_HANDLER_RETURN_TYPE = Tuple[
     Optional[Iterable[str]], Optional[Iterable[str]], Optional[Iterable[str]]
 ]
 FLAG_HANDLER_TYPE = Callable[[str, Iterable[str]], FLAG_HANDLER_RETURN_TYPE]
+
+
+#: Context of packages that were not given one, set by ``spack.main`` (transitional)
+default_context: Optional[Callable[[], "spack.context.SpackContext"]] = None
+
+
+def global_license_dir(config: spack.config.Configuration) -> str:
+    """Returns the directory where license files for all packages are stored."""
+    return spack.config.canonicalize_path(config.get("config:license_dir"), config=config)
+
 
 #: Filename for the Spack build/install log.
 _spack_build_logfile = "spack-build-out.txt"
@@ -700,6 +726,9 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
     #: TestSuite instance used to manage stand-alone tests for 1+ specs.
     test_suite: Optional[Any] = None
 
+    #: Resources of the operation the package belongs to, set when attached to its spec
+    _context: Optional["spack.context.SpackContext"] = None
+
     def __init__(self, spec: spack.spec.Spec) -> None:
         # this determines how the package should be built.
         self.spec = spec
@@ -731,6 +760,19 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
 
     def __getitem__(self, key: str) -> "PackageBase":
         return self.spec[key].package
+
+    @property
+    def context(self) -> "spack.context.SpackContext":
+        """Configuration, store, repositories, ... the package reads."""
+        if self._context is None:
+            if default_context is None:
+                raise PackageError(f"package {self.name} has no context")
+            self._context = default_context()
+        return self._context
+
+    @context.setter
+    def context(self, ctx: "spack.context.SpackContext") -> None:
+        self._context = ctx
 
     @classmethod
     def dependency_names(cls):
@@ -865,12 +907,10 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
             cls._name = spack.util.naming.pkg_dir_to_pkg_name(pkg_module, version)
         return cls._name
 
-    @classproperty
-    def global_license_dir(cls):
+    @property
+    def global_license_dir(self):
         """Returns the directory where license files for all packages are stored."""
-        return spack.config.canonicalize_path(
-            spack.config.CONFIG.get("config:license_dir"), config=spack.config.CONFIG
-        )
+        return global_license_dir(self.context.config)
 
     @property
     def global_license_file(self):
@@ -991,7 +1031,7 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
         Method for checking for source code changes to trigger rebuild/reinstall
         """
         dev_path_var = self.spec.variants.get("dev_path", None)
-        _, record = spack.store.STORE.db.query_by_spec_hash(self.spec.dag_hash())
+        _, record = self.context.store.db.query_by_spec_hash(self.spec.dag_hash())
         assert dev_path_var and record, "dev_path variant and record must be present"
         return fsys.recursive_mtime_greater_than(dev_path_var.value, record.installation_time)
 
@@ -1022,7 +1062,7 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
         return False
 
     @classmethod
-    def _resolve_git_provenance(cls, spec) -> None:
+    def _resolve_git_provenance(cls, spec, ctx: "spack.context.SpackContext") -> None:
         # early return cases, don't overwrite user intention
         # commit pre-assigned or develop specs don't need commits changed
         # since this would create un-necessary churn
@@ -1054,6 +1094,7 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
 
         # construct a package instance to get fetch/staging together
         pkg_instance = cls(spec.copy())
+        pkg_instance.context = ctx
 
         try:
             pkg_instance.do_fetch(mirror_only=True)
@@ -1076,7 +1117,7 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
         Base implementation will look up git commits when appropriate.
         Packages may override this implementation for custom implementations
         """
-        self._resolve_git_provenance(self.spec)
+        self._resolve_git_provenance(self.spec, self.context)
 
     def all_urls_for_version(self, version: StandardVersion) -> List[str]:
         """Return all URLs derived from version_urls(), url, urls, and
@@ -1158,7 +1199,7 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
             version: The version for which a URL is sought.
         """
         urls = self.all_urls_for_version(version)
-        client = spack.util.web.NetworkClient.from_config(spack.config.CONFIG)
+        client = self.context.network
 
         for u in urls:
             if spack.util.web.url_exists(u, client=client):
@@ -1172,18 +1213,18 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
             resource.fetcher,
             root=root_stage,
             resource=resource,
-            config=spack.config.CONFIG,
+            config=self.context.config,
+            client=self.context.network,
             name=self._resource_stage(resource),
             mirror_paths=spack.mirrors.layout.default_mirror_layout(
                 resource.fetcher,
                 os.path.join(self.name, pretty_resource_name),
-                repo=spack.repo.PATH,
+                repo=self.context.repo,
             ),
             mirrors=spack.mirrors.mirror.MirrorCollection.from_config(
-                spack.config.CONFIG, source=True
+                self.context.config, source=True
             ).values(),
             path=self.path,
-            client=spack.util.web.NetworkClient.from_config(spack.config.CONFIG),
         )
 
     def _download_search(self):
@@ -1195,22 +1236,22 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
         format_string = "{name}-{version}"
         pretty_name = self.spec.format_path(format_string)
         mirror_paths = spack.mirrors.layout.default_mirror_layout(
-            fetcher, os.path.join(self.name, pretty_name), self.spec, repo=spack.repo.PATH
+            fetcher, os.path.join(self.name, pretty_name), self.spec, repo=self.context.repo
         )
         # Construct a path where the stage should build..
         s = self.spec
-        stage_name = stg.compute_stage_name(s, config=spack.config.CONFIG)
+        stage_name = stg.compute_stage_name(s, config=self.context.config)
         stage = stg.stage_from_config(
             fetcher,
-            config=spack.config.CONFIG,
+            config=self.context.config,
+            client=self.context.network,
             mirror_paths=mirror_paths,
             mirrors=spack.mirrors.mirror.MirrorCollection.from_config(
-                spack.config.CONFIG, source=True
+                self.context.config, source=True
             ).values(),
             name=stage_name,
             path=self.path,
             search_fn=self._download_search,
-            client=spack.util.web.NetworkClient.from_config(spack.config.CONFIG),
         )
         return stage
 
@@ -1231,7 +1272,7 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
         dev_path_var = self.spec.variants.get("dev_path", None)
         if dev_path_var:
             dev_path = dev_path_var.value
-            link_format = spack.config.CONFIG.get("config:develop_stage_link")
+            link_format = self.context.config.get("config:develop_stage_link")
             if not link_format:
                 link_format = "build-{arch}-{hash:7}"
             if link_format == "None":
@@ -1239,10 +1280,10 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
             else:
                 stage_link = self.spec.format_path(link_format)
             source_stage = stg.develop_stage_from_config(
-                stg.compute_stage_name(self.spec, config=spack.config.CONFIG),
+                stg.compute_stage_name(self.spec, config=self.context.config),
                 dev_path,
                 stage_link,
-                config=spack.config.CONFIG,
+                config=self.context.config,
             )
         else:
             source_stage = self._make_root_stage(self.fetcher)
@@ -1265,22 +1306,22 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
             name = f"{os.path.basename(patch.url)}-{fetch_digest[:7]}"
             per_package_ref = os.path.join(patch.owner.split(".")[-1], name)
             mirror_ref = spack.mirrors.layout.default_mirror_layout(
-                fetcher, per_package_ref, repo=spack.repo.PATH
+                fetcher, per_package_ref, repo=self.context.repo
             )
 
             return stg.stage_from_config(
                 fetcher,
-                config=spack.config.CONFIG,
+                config=self.context.config,
+                client=self.context.network,
                 name=f"{stg.stage_prefix}-{uniqe_part}-patch-{fetch_digest}",
                 mirror_paths=mirror_ref,
                 mirrors=spack.mirrors.mirror.MirrorCollection.from_config(
-                    spack.config.CONFIG, source=True
+                    self.context.config, source=True
                 ).values(),
-                client=spack.util.web.NetworkClient.from_config(spack.config.CONFIG),
             )
 
         if self.spec.concrete:
-            patches = self.spec.patches
+            patches = self.spec.patches_from(self.context.repo)
             uniqe_part = self.spec.dag_hash(7)
         else:
             # The only code path that gets here is `spack mirror create --all`,
@@ -1333,7 +1374,7 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
     @property
     def metadata_dir(self):
         """Return the install metadata directory."""
-        return spack.store.STORE.layout.metadata_path(self.spec)
+        return self.context.store.layout.metadata_path(self.spec)
 
     @property
     def install_env_path(self):
@@ -1609,7 +1650,7 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
         Removes the prefix for a package along with any empty parent
         directories
         """
-        spack.store.STORE.layout.remove_install_directory(self.spec)
+        self.context.store.layout.remove_install_directory(self.spec)
 
     @property
     def download_instr(self) -> str:
@@ -1634,7 +1675,7 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
             tty.debug("No fetch required for {0}".format(self.name))
             return
 
-        checksum = spack.config.CONFIG.get("config:checksum")
+        checksum = self.context.config.get("config:checksum")
         if (
             checksum
             and (self.version not in self.versions)
@@ -1678,7 +1719,7 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
         self.stage.create()
 
         # Fetch/expand any associated code.
-        user_dev_path = spack.config.CONFIG.get(f"develop:{self.name}:path", None)
+        user_dev_path = self.context.config.get(f"develop:{self.name}:path", None)
         skip = user_dev_path and os.path.exists(user_dev_path)
         if skip:
             tty.debug("Skipping staging because develop path exists")
@@ -1701,7 +1742,7 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
         has_patch_fun = hasattr(self, "patch") and callable(self.patch)
 
         # Get the patches from the spec (this is a shortcut for the MV-variant)
-        patches = self.spec.patches
+        patches = self.spec.patches_from(self.context.repo)
 
         # If there are no patches, note it.
         if not patches and not has_patch_fun:
@@ -2155,24 +2196,24 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
             raise NotImplementedError(msg)
 
     @staticmethod
-    def uninstall_by_spec(spec, force=False, deprecator=None):
+    def uninstall_by_spec(spec, store: spack.store.Store, force=False, deprecator=None):
         if not os.path.isdir(spec.prefix):
             # prefix may not exist, but DB may be inconsistent. Try to fix by
             # removing, but omit hooks.
-            specs = spack.store.STORE.db.query(spec, installed=True)
+            specs = store.db.query(spec, installed=True)
             if specs:
                 if deprecator:
-                    spack.store.STORE.db.deprecate(specs[0], deprecator)
+                    store.db.deprecate(specs[0], deprecator)
                     tty.debug("Deprecating stale DB entry for {0}".format(spec.short_spec))
                 else:
-                    spack.store.STORE.db.remove(specs[0])
+                    store.db.remove(specs[0])
                     tty.debug("Removed stale DB entry for {0}".format(spec.short_spec))
                 return
             else:
                 raise InstallError(str(spec) + " is not installed.")
 
         if not force:
-            dependents = spack.store.STORE.db.installed_relatives(
+            dependents = store.db.installed_relatives(
                 spec, direction="parents", transitive=True, deptype=("link", "run")
             )
             if dependents:
@@ -2185,7 +2226,7 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
             pkg = None
 
         # Pre-uninstall hook runs first.
-        with spack.store.STORE.prefix_locker.write_lock(spec):
+        with store.prefix_locker.write_lock(spec):
             if pkg is not None:
                 try:
                     spack.hooks.pre_uninstall(spec)
@@ -2211,17 +2252,17 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
                 tty.debug(msg.format(spec.short_spec))
                 # test if spec is already deprecated, not whether we want to
                 # deprecate it now
-                deprecated = bool(spack.store.STORE.db.deprecator(spec))
-                spack.store.STORE.layout.remove_install_directory(spec, deprecated)
+                deprecated = bool(store.db.deprecator(spec))
+                store.layout.remove_install_directory(spec, deprecated)
             # Delete DB entry
             if deprecator:
                 msg = "deprecating DB entry [{0}] in favor of [{1}]"
                 tty.debug(msg.format(spec.short_spec, deprecator.short_spec))
-                spack.store.STORE.db.deprecate(spec, deprecator)
+                store.db.deprecate(spec, deprecator)
             else:
                 msg = "Deleting DB entry [{0}]"
                 tty.debug(msg.format(spec.short_spec))
-                spack.store.STORE.db.remove(spec)
+                store.db.remove(spec)
 
         if pkg is not None:
             try:
@@ -2245,14 +2286,14 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
     def do_uninstall(self, force=False):
         """Uninstall this package by spec."""
         # delegate to instance-less method.
-        PackageBase.uninstall_by_spec(self.spec, force)
+        PackageBase.uninstall_by_spec(self.spec, self.context.store, force)
 
     def view(self):
         """Create a view with the prefix of this package as the root.
         Extensions added to this view will modify the installation prefix of
         this package.
         """
-        return YamlFilesystemView(self.prefix, spack.store.STORE.layout)
+        return YamlFilesystemView(self.prefix, self.context.store.layout)
 
     def do_restage(self):
         """Reverts expanded/checked out source to a pristine state."""
@@ -2318,7 +2359,7 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
                 self.list_depth,
                 concurrency,
                 reference_package=self,
-                client=spack.util.web.NetworkClient.from_config(spack.config.CONFIG),
+                client=self.context.network,
             )
         except spack.util.web.NoNetworkConnectionError as e:
             tty.die("Package.fetch_versions couldn't connect to:", e.url, e.message)

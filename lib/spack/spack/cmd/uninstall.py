@@ -232,7 +232,7 @@ def do_uninstall(specs: List[spack.spec.Spec], *, store: spack.store.Store, forc
         specs, order="topo", direction="children", root=True, cover="nodes", deptype="all"
     ):
         if s.dag_hash() in hashes_to_remove:
-            spack.package_base.PackageBase.uninstall_by_spec(s, force=force)
+            spack.package_base.PackageBase.uninstall_by_spec(s, store, force=force)
 
 
 def get_uninstall_list(

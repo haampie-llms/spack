@@ -9,6 +9,7 @@ import sys
 import pytest
 
 import spack.concretize
+import spack.context
 import spack.database
 import spack.install_test
 import spack.spec
@@ -46,7 +47,9 @@ def test_test_log_name(mock_packages, config, ctx: SpackContext):
 
     test_name = "test_name"
 
-    test_suite = spack.install_test.TestSuite([spec], test_name)
+    test_suite = spack.install_test.TestSuite(
+        [spec], test_name, stage_root=spack.install_test.get_test_stage_dir(ctx.config)
+    )
     logfile = test_suite.log_file_for_spec(spec)
 
     assert test_suite.stage in logfile
@@ -59,7 +62,7 @@ def test_test_ensure_stage(mock_test_stage, mock_packages, ctx: SpackContext):
 
     test_name = "test_name"
 
-    test_suite = spack.install_test.TestSuite([spec], test_name)
+    test_suite = spack.install_test.TestSuite([spec], test_name, stage_root=mock_test_stage)
     test_suite.ensure_stage()
 
     assert os.path.isdir(test_suite.stage)
@@ -72,7 +75,7 @@ def test_write_test_result(mock_packages, mock_test_stage, ctx: SpackContext):
     result = spack.install_test.TestStatus.PASSED
     test_name = "write-test"
 
-    test_suite = spack.install_test.TestSuite([spec], test_name)
+    test_suite = spack.install_test.TestSuite([spec], test_name, stage_root=mock_test_stage)
     test_suite.ensure_stage()
     results_file = test_suite.results_file
     test_suite.write_test_result(spec, result)
@@ -89,7 +92,7 @@ def test_write_test_result(mock_packages, mock_test_stage, ctx: SpackContext):
 def test_test_not_installed(mock_packages, install_mockery, mock_test_stage, ctx: SpackContext):
     """Attempt to perform stand-alone test for not_installed package."""
     spec = spack.concretize.concretize_one("trivial-smoke-test", ctx)
-    test_suite = spack.install_test.TestSuite([spec])
+    test_suite = spack.install_test.TestSuite([spec], stage_root=mock_test_stage)
 
     test_suite()
 
@@ -117,7 +120,7 @@ def test_test_external(
 
     monkeypatch.setattr(spack.database.Database, "installed", _true)
 
-    test_suite = spack.install_test.TestSuite([spec])
+    test_suite = spack.install_test.TestSuite([spec], stage_root=mock_test_stage)
     test_suite(**arguments)
 
     ensure_results(test_suite.results_file, str(status))
@@ -134,7 +137,7 @@ def test_test_stage_caches(mock_packages, install_mockery, mock_test_stage, ctx:
             _ = test_suite.current_test_data_dir
 
     spec = spack.concretize.concretize_one("libelf", ctx)
-    test_suite = spack.install_test.TestSuite([spec], "test-cache")
+    test_suite = spack.install_test.TestSuite([spec], "test-cache", stage_root=mock_test_stage)
 
     # Check no current specs yield failure
     ensure_current_cache_fail(test_suite)
@@ -152,7 +155,7 @@ def test_test_stage_caches(mock_packages, install_mockery, mock_test_stage, ctx:
 
 def test_test_spec_run_once(mock_packages, install_mockery, mock_test_stage, ctx: SpackContext):
     spec = spack.concretize.concretize_one("libelf", ctx)
-    test_suite = spack.install_test.TestSuite([spec], "test-dups")
+    test_suite = spack.install_test.TestSuite([spec], "test-dups", stage_root=mock_test_stage)
     (test_suite.specs[0]).package.test_suite = test_suite
 
     with pytest.raises(spack.install_test.TestSuiteFailure):
@@ -165,7 +168,7 @@ def test_test_spec_passes(
 ):
     spec = spack.concretize.concretize_one("simple-standalone-test", ctx)
     monkeypatch.setattr(spack.database.Database, "installed", _true)
-    test_suite = spack.install_test.TestSuite([spec])
+    test_suite = spack.install_test.TestSuite([spec], stage_root=mock_test_stage)
     test_suite()
 
     ensure_results(test_suite.results_file, "PASSED")
@@ -173,13 +176,13 @@ def test_test_spec_passes(
     ensure_results(test_suite.log_file_for_spec(spec), "standalone-ifc", present=False)
 
 
-def test_get_test_suite():
-    assert not spack.install_test.get_test_suite("nothing")
+def test_get_test_suite(ctx: SpackContext):
+    assert not spack.install_test.get_test_suite("nothing", ctx.config)
 
 
-def test_get_test_suite_no_name(mock_packages, mock_test_stage):
+def test_get_test_suite_no_name(mock_packages, mock_test_stage, ctx: SpackContext):
     with pytest.raises(spack.install_test.TestSuiteNameError) as exc_info:
-        spack.install_test.get_test_suite("")
+        spack.install_test.get_test_suite("", ctx.config)
 
     assert "name is required" in str(exc_info)
 
@@ -190,19 +193,19 @@ def test_get_test_suite_too_many(mock_packages, mock_test_stage, ctx: SpackConte
 
     def add_suite(package):
         spec = spack.concretize.concretize_one(package, ctx)
-        suite = spack.install_test.TestSuite([spec], name)
+        suite = spack.install_test.TestSuite([spec], name, stage_root=mock_test_stage)
         suite.ensure_stage()
         spack.install_test.write_test_suite_file(suite)
         test_suites.append(suite)
 
     add_suite("libdwarf")
-    suite = spack.install_test.get_test_suite(name)
+    suite = spack.install_test.get_test_suite(name, ctx.config)
     assert suite is not None
     assert suite.alias == name
 
     add_suite("libelf")
     with pytest.raises(spack.install_test.TestSuiteNameError) as exc_info:
-        spack.install_test.get_test_suite(name)
+        spack.install_test.get_test_suite(name, ctx.config)
     assert "many suites named" in str(exc_info)
 
 
@@ -257,31 +260,33 @@ def test_test_virtuals():
         assert v_names.count(name) == number, "Expected {0} of '{1}'".format(number, name)
 
 
-def test_package_copy_test_files_fails(mock_packages):
+def test_package_copy_test_files_fails(mock_packages, ctx: spack.context.SpackContext):
     """Confirm copy_test_files fails as expected without package or test_suite."""
     vspec = spack.spec.Spec("something")
 
     # Try without a package
     with pytest.raises(spack.install_test.TestSuiteError) as exc_info:
-        spack.install_test.copy_test_files(None, vspec)
+        spack.install_test.copy_test_files(None, vspec)  # type: ignore[arg-type]
     assert "without a package" in str(exc_info)
 
     # Try with a package without a test suite
-    MyPackage = collections.namedtuple("MyPackage", ["name", "spec", "test_suite"])
-    pkg = MyPackage("SomePackage", vspec, None)
+    MyPackage = collections.namedtuple("MyPackage", ["name", "spec", "test_suite", "context"])
+    pkg = MyPackage("SomePackage", vspec, None, ctx)
 
     with pytest.raises(spack.install_test.TestSuiteError) as exc_info:
-        spack.install_test.copy_test_files(pkg, vspec)
+        spack.install_test.copy_test_files(pkg, vspec)  # type: ignore[arg-type]
     assert "test suite is missing" in str(exc_info)
 
 
-def test_package_copy_test_files_skips(mock_packages, ensure_debug, capfd):
+def test_package_copy_test_files_skips(
+    mock_packages, ensure_debug, capfd, ctx: spack.context.SpackContext
+):
     """Confirm copy_test_files errors as expected if no package class found."""
     # Try with a non-concrete spec and package with a test suite
     MockSuite = collections.namedtuple("MockSuite", ["specs"])
-    MyPackage = collections.namedtuple("MyPackage", ["name", "spec", "test_suite"])
+    MyPackage = collections.namedtuple("MyPackage", ["name", "spec", "test_suite", "context"])
     vspec = spack.spec.Spec("something")
-    pkg = MyPackage("SomePackage", vspec, MockSuite([]))
+    pkg = MyPackage("SomePackage", vspec, MockSuite([]), ctx)
     spack.install_test.copy_test_files(pkg, vspec)  # type: ignore[arg-type]
     out = capfd.readouterr()[1]
     assert "skipping test data copy" in out

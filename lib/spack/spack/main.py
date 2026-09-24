@@ -37,6 +37,7 @@ import spack.environment
 import spack.environment as ev
 import spack.environment.environment
 import spack.error
+import spack.package_base
 import spack.paths
 import spack.platforms
 import spack.solver.asp
@@ -57,6 +58,9 @@ stat_names = pstats.Stats.sort_arg_dict_default
 levels = ["short", "long"]
 
 #: intro text for help at different levels
+# Packages created without a context read the process globals (transitional)
+spack.package_base.default_context = spack.context.default
+
 intro_by_level = {"short": "Common spack commands:", "long": "Commands:"}
 
 #: control top-level spack options shown in basic vs. advanced help

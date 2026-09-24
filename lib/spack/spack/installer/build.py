@@ -28,7 +28,6 @@ from spack.vendor.typing_extensions import Protocol
 import spack.binary_distribution
 import spack.build_environment
 import spack.builder
-import spack.caches
 import spack.config
 import spack.error
 import spack.hooks
@@ -43,7 +42,6 @@ import spack.util.filesystem as fs
 import spack.util.lock
 import spack.util.timer
 import spack.util.tty
-import spack.util.web
 from spack.installer.base import (
     ExitCode,
     FdInfo,
@@ -177,7 +175,7 @@ class ChildInfo:
         return exit_code
 
 
-def dump_packages(spec: spack.spec.Spec, path: str) -> None:
+def dump_packages(spec: spack.spec.Spec, path: str, ctx: "spack.context.SpackContext") -> None:
     """
     Dump all package information for a spec and its dependencies.
 
@@ -188,6 +186,7 @@ def dump_packages(spec: spack.spec.Spec, path: str) -> None:
     Args:
         spec: the Spack spec whose package information is to be dumped
         path: the path to the build packages directory
+        ctx: context with the store the dependencies are installed in and the repositories
     """
     fs.mkdirp(path)
 
@@ -200,7 +199,7 @@ def dump_packages(spec: spack.spec.Spec, path: str) -> None:
         if node is not spec:
             # Locate the dependency package in the install tree and find
             # its provenance information.
-            source = spack.store.STORE.layout.build_packages_path(node)
+            source = ctx.store.layout.build_packages_path(node)
             source_repo_root = os.path.join(source, node.namespace)
 
             # If there's no provenance installed for the package, skip it.
@@ -215,7 +214,7 @@ def dump_packages(spec: spack.spec.Spec, path: str) -> None:
 
             # Create a source repo and get the pkg directory out of it.
             try:
-                source_repo = spack.repo.from_path(source_repo_root, cache=spack.caches.MISC_CACHE)
+                source_repo = spack.repo.from_path(source_repo_root, cache=ctx.misc_cache)
                 source_pkg_dir = source_repo.dirname_for_package_name(node.name)
             except spack.repo.RepoError as err:
                 spack.util.tty.debug(f"Failed to create source repo for {node.name}: {str(err)}")
@@ -223,16 +222,16 @@ def dump_packages(spec: spack.spec.Spec, path: str) -> None:
                 spack.util.tty.warn(f"Warning: Couldn't copy in provenance for {node.name}")
 
         # Create a destination repository
-        pkg_api = spack.repo.PATH.get_repo(node.namespace).package_api
+        pkg_api = ctx.repo.get_repo(node.namespace).package_api
         repo_root = os.path.join(path, node.namespace) if pkg_api < (2, 0) else path
-        repo = spack.repo.create_or_construct(
-            repo_root, namespace=node.namespace, package_api=pkg_api, cache=spack.caches.MISC_CACHE
+        dest_repo = spack.repo.create_or_construct(
+            repo_root, namespace=node.namespace, package_api=pkg_api, cache=ctx.misc_cache
         )
 
         # Get the location of the package in the dest repo.
-        dest_pkg_dir = repo.dirname_for_package_name(node.name)
+        dest_pkg_dir = dest_repo.dirname_for_package_name(node.name)
         if node is spec:
-            spack.repo.PATH.dump_provenance(node, dest_pkg_dir)
+            ctx.repo.dump_provenance(node, dest_pkg_dir)
         elif source_pkg_dir:
             fs.install_tree(source_pkg_dir, dest_pkg_dir)
 
@@ -268,8 +267,8 @@ def _do_fake_install(pkg: "spack.package_base.PackageBase") -> None:
     # Install fake man page
     fs.mkdirp(pkg.prefix.man.man1)
 
-    packages_dir = spack.store.STORE.layout.build_packages_path(pkg.spec)
-    dump_packages(pkg.spec, packages_dir)
+    packages_dir = pkg.context.store.layout.build_packages_path(pkg.spec)
+    dump_packages(pkg.spec, packages_dir, pkg.context)
 
 
 def _write_timer_json(
@@ -309,11 +308,12 @@ def install_from_buildcache(
     state_stream: io.TextIOWrapper,
     timer: spack.util.timer.BaseTimer = spack.util.timer.NULL_TIMER,
 ) -> bool:
+    ctx = spec.package.context
     # Skip if no configured mirror accepts this spec (select/exclude filters)
     if not any(
         m.matches_binary(spec, direction="fetch")
         for m in spack.mirrors.mirror.MirrorCollection.from_config(
-            spack.config.CONFIG, binary=True
+            ctx.config, binary=True
         ).values()
     ):
         return False
@@ -322,11 +322,7 @@ def install_from_buildcache(
     try:
         with timer.measure("fetch"):
             tarball_stage = spack.binary_distribution.download_tarball(
-                spec.build_spec,
-                unsigned,
-                mirrors,
-                config=spack.config.CONFIG,
-                client=spack.util.web.NetworkClient.from_config(spack.config.CONFIG),
+                spec.build_spec, unsigned, mirrors, config=ctx.config, client=ctx.network
             )
     except spack.binary_distribution.NoConfiguredBinaryMirrors:
         return False
@@ -337,16 +333,11 @@ def install_from_buildcache(
     send_state("relocating", state_stream)
     with timer.measure("install"):
         spack.binary_distribution.extract_tarball(
-            spec,
-            tarball_stage,
-            force=False,
-            timer=timer,
-            config=spack.config.CONFIG,
-            store=spack.store.STORE,
+            spec, tarball_stage, force=False, timer=timer, config=ctx.config, store=ctx.store
         )
 
     if spec.spliced:  # overwrite old metadata with new
-        spack.store.STORE.layout.write_spec(spec, spack.store.STORE.layout.spec_file_path(spec))
+        ctx.store.layout.write_spec(spec, ctx.store.layout.spec_file_path(spec))
 
     # now a block of curious things follow that should be fixed.
     pkg = spec.package
@@ -542,7 +533,7 @@ def worker_function(
 
     try:
         with PrefixPivoter(spec.prefix, request.keep_prefix):
-            _install(request, state_stream, spack.store.STORE)
+            _install(request, state_stream, spec.package.context.store)
     except spack.error.StopPhase:
         exit_code = ExitCode.STOPPED_AT_PHASE
     except ProcessError as e:
@@ -600,9 +591,7 @@ def _archive_build_metadata(pkg: "spack.package_base.PackageBase") -> None:
     # Archive package-specific files matched by archive_files glob patterns
     try:
         with fs.working_dir(pkg.stage.path):
-            target_dir = os.path.join(
-                spack.store.STORE.layout.metadata_path(pkg.spec), "archived-files"
-            )
+            target_dir = os.path.join(pkg.metadata_dir, "archived-files")
             errors = io.StringIO()
             for glob_expr in spack.builder.create(pkg).archive_files:
                 abs_expr = os.path.realpath(glob_expr)
@@ -629,18 +618,21 @@ def _archive_build_metadata(pkg: "spack.package_base.PackageBase") -> None:
         spack.util.tty.debug(e)
 
     try:
-        packages_dir = spack.store.STORE.layout.build_packages_path(pkg.spec)
-        dump_packages(pkg.spec, packages_dir)
+        store = pkg.context.store
+        packages_dir = store.layout.build_packages_path(pkg.spec)
+        dump_packages(pkg.spec, packages_dir, pkg.context)
     except Exception as e:
         spack.util.tty.debug(e)
 
     try:
-        spack.store.STORE.layout.write_host_environment(pkg.spec)
+        pkg.context.store.layout.write_host_environment(pkg.spec)
     except Exception as e:
         spack.util.tty.debug(e)
 
 
-def _enable_sandbox(config: dict, spec: spack.spec.Spec, stage_path: str) -> None:
+def _enable_sandbox(
+    config: dict, spec: spack.spec.Spec, stage_path: str, store: spack.store.Store
+) -> None:
     if not config.get("enable", False):
         return
 
@@ -662,8 +654,8 @@ def _enable_sandbox(config: dict, spec: spack.spec.Spec, stage_path: str) -> Non
     sandbox.allow_write(os.devnull)
 
     # Allow read access to sbang, which might be needed to run build scripts.
-    sandbox.allow_read(os.path.join(spack.store.STORE.unpadded_root, "bin", "sbang"))
-    for upstream_db in spack.store.STORE.upstreams or []:
+    sandbox.allow_read(os.path.join(store.unpadded_root, "bin", "sbang"))
+    for upstream_db in store.upstreams or []:
         sandbox.allow_read(os.path.join(upstream_db.root, "bin", "sbang"))
 
     # User-configured paths
@@ -679,22 +671,22 @@ def _enable_sandbox(config: dict, spec: spack.spec.Spec, stage_path: str) -> Non
 
 
 def _rewire_no_db(
-    spec: spack.spec.Spec, timer: spack.util.timer.BaseTimer = spack.util.timer.NULL_TIMER
+    spec: spack.spec.Spec,
+    store: spack.store.Store,
+    timer: spack.util.timer.BaseTimer = spack.util.timer.NULL_TIMER,
 ) -> None:
     """Rewire a spliced spec from its build_spec prefix, without writing to the database."""
     tmpdir = tempfile.mkdtemp()
     try:
         with timer.measure("setup"):
             tarball = os.path.join(tmpdir, f"{spec.dag_hash()}.tar.gz")
-            spack.binary_distribution.create_tarball(
-                spec.build_spec, tarball, store=spack.store.STORE
-            )
+            spack.binary_distribution.create_tarball(spec.build_spec, tarball, store=store)
         with timer.measure("pre-install"):
             spack.hooks.pre_install(spec)
         with timer.measure("extract"):
             spack.binary_distribution.extract_buildcache_tarball(tarball, destination=spec.prefix)
         with timer.measure("relocate"):
-            spack.binary_distribution.relocate_package(spec, store=spack.store.STORE)
+            spack.binary_distribution.relocate_package(spec, store=store)
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -731,7 +723,7 @@ def _install(
     if spec.build_spec is not spec:
         if install_policy == "source_only":
             send_state("rewiring", state_stream)
-            _rewire_no_db(spec, timer)
+            _rewire_no_db(spec, store, timer)
             _post_install(pkg, spec, explicit, timer, cache=False)
             return
         # Binary cache was the only option; signal miss for force_source expansion.
@@ -798,7 +790,7 @@ def _install(
         if stop_at is not None and stop_at not in builder.phases:
             raise spack.error.InstallError(f"'{stop_at}' is not a valid phase for {pkg.name}")
 
-        _enable_sandbox(spack.config.CONFIG.get("config:sandbox", {}), spec, stage.path)
+        _enable_sandbox(pkg.context.config.get("config:sandbox", {}), spec, stage.path, store)
 
         for phase in builder:
             if stop_before is not None and phase.name == stop_before:

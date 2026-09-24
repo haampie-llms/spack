@@ -11,7 +11,6 @@ from typing import Dict, Iterable, List, Optional
 import spack.vendor.macholib.mach_o
 import spack.vendor.macholib.MachO
 
-import spack.store
 import spack.util.filesystem as fs
 import spack.util.lang
 from spack.util import elf, executable, tty
@@ -319,7 +318,7 @@ def is_macho_binary(path: str) -> bool:
         return False
 
 
-def fixup_macos_rpath(root, filename):
+def fixup_macos_rpath(root, filename, store_root):
     """Apply rpath fixups to the given file.
 
     Args:
@@ -347,9 +346,8 @@ def fixup_macos_rpath(root, filename):
     args = []
 
     # Check dependencies for non-rpath entries
-    spack_root = spack.store.STORE.layout.root
     for name in deps:
-        if name.startswith(spack_root):
+        if name.startswith(store_root):
             tty.debug("Spack-installed dependency for {0}: {1}".format(abspath, name))
             (dirname, basename) = os.path.split(name)
             if dirname != root or dirname in rpaths:
@@ -414,6 +412,7 @@ def fixup_macos_rpaths(spec):
 
     libs = frozenset(["lib", "lib64", "libexec", "plugins", "Library", "Frameworks"])
     prefix = spec.prefix
+    store_root = spec.package.context.store.layout.root
 
     if not os.path.exists(prefix):
         raise RuntimeError(
@@ -427,7 +426,7 @@ def fixup_macos_rpaths(spec):
         dirs[:] = set(dirs) & libs
         for name in files:
             try:
-                needed_fix = fixup_macos_rpath(root, name)
+                needed_fix = fixup_macos_rpath(root, name, store_root)
             except Exception as e:
                 tty.warn("Failed to apply library fixups to: {0}/{1}: {2!s}".format(root, name, e))
                 needed_fix = False

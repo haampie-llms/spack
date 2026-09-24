@@ -3420,7 +3420,7 @@ def _specs_with_commits(spec, *, ctx: "spack.context.SpackContext"):
         if "commit" not in spec.variants and spec.version.commit_sha:
             spec.variants.set(vt.SingleValuedVariant("commit", spec.version.commit_sha))
 
-    pkg_class._resolve_git_provenance(spec)
+    pkg_class._resolve_git_provenance(spec, ctx)
 
     if "commit" not in spec.variants:
         if not spec.is_develop:

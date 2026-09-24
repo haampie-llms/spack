@@ -14,7 +14,6 @@ import sys
 import time
 from typing import Callable, Dict, Generator, List, NamedTuple, Optional, TextIO, Union
 
-import spack.config
 import spack.util.tty.color as coloring
 from spack.util.lang import pretty_duration
 from spack.util.log_parse import write_log_context
@@ -182,6 +181,7 @@ class TerminalUI(InstallerUI):
         verbose: bool = False,
         filter_padding: bool = False,
         show_log_on_error: bool = False,
+        term_title: bool = True,
     ) -> None:
         super().__init__()
         self.reads_terminal_input = True
@@ -230,7 +230,7 @@ class TerminalUI(InstallerUI):
         self.filter_padding = filter_padding
         #: When True, suppress all terminal output (process is in background).
         self.headless = False
-        self.term_title = spack.config.CONFIG.get("config:install_status", True) and self.is_tty
+        self.term_title = term_title and self.is_tty
 
     def on_resize(self) -> None:
         """Refresh cached terminal size and trigger a redraw."""

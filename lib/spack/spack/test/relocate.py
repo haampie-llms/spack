@@ -1,11 +1,13 @@
 # Copyright Spack Project Developers. See COPYRIGHT file for details.
 #
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
+import functools
 import pathlib
 import re
 import shutil
 import subprocess
 import tempfile
+from typing import List
 
 import pytest
 
@@ -13,6 +15,7 @@ import spack.platforms
 import spack.relocate
 import spack.util.executable
 from spack import relocate_text
+from spack.context import SpackContext
 
 pytestmark = pytest.mark.not_on_windows("Tests fail on Windows")
 
@@ -192,7 +195,7 @@ def test_relocate_text_bin_raise_if_new_prefix_is_longer(tmp_path: pathlib.Path)
 
 
 @pytest.mark.requires_executables("install_name_tool", "cc")
-def test_fixup_macos_rpaths(make_dylib, make_object_file):
+def test_fixup_macos_rpaths(make_dylib, make_object_file, ctx: SpackContext):
     # Get Apple Clang major version for XCode 15+ linker behavior
     try:
         result = subprocess.check_output(["cc", "--version"], universal_newlines=True)
@@ -205,9 +208,11 @@ def test_fixup_macos_rpaths(make_dylib, make_object_file):
 
     # For each of these tests except for the "correct" case, the first fixup
     # should make changes, and the second fixup should be a null-op.
-    fixup_rpath = spack.relocate.fixup_macos_rpath
+    fixup_rpath = functools.partial(
+        spack.relocate.fixup_macos_rpath, store_root=ctx.store.layout.root
+    )
 
-    no_rpath = []
+    no_rpath: List[str] = []
     duplicate_rpaths = ["/usr", "/usr"]
     bad_rpath = ["/nonexistent/path"]
 

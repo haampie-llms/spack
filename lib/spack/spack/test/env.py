@@ -13,7 +13,6 @@ import pytest
 
 import spack.concretize
 import spack.config
-import spack.context
 import spack.environment as ev
 import spack.package_base
 import spack.platforms
@@ -2200,7 +2199,7 @@ spack:
             with pytest.raises(ev.SpackEnvironmentConfigError, match=r"among groups: alpha, beta"):
                 e.concretize()
 
-    def test_from_lockfile_preserves_groups(self, tmp_path, ctx: spack.context.SpackContext):
+    def test_from_lockfile_preserves_groups(self, tmp_path, ctx: SpackContext):
         """Tests that EnvironmentManifestFile.from_lockfile reconstructs groups correctly
         from a v7 lockfile that contains group information in its roots.
         """
@@ -2223,9 +2222,7 @@ spack:
         assert manifest.user_specs(group="default") == ["mpileaks", "libelf"]
         assert manifest.user_specs(group="compilers") == ["gcc@14"]
 
-    def test_from_lockfile_without_groups_stays_default(
-        self, tmp_path, ctx: spack.context.SpackContext
-    ):
+    def test_from_lockfile_without_groups_stays_default(self, tmp_path, ctx: SpackContext):
         """Tests that a lockfile without group info (v6 and earlier) reconstructs all specs
         into the default group only.
         """
