@@ -969,15 +969,6 @@ def _main(argv=None):
     parser.config = config
     ctx = spack.context.SpackContext(config)
 
-    if (
-        sys.platform == "darwin"
-        and multiprocessing.get_start_method(allow_none=True) is None
-        and config.get("config:installer") == "new"
-    ):
-        # Forkserver is significantly faster than spawn. This has to be configured once and early
-        # in the process.
-        multiprocessing.set_start_method("forkserver")
-
     # Just print help and exit if run with no arguments at all
     no_args = (len(sys.argv) == 1) if argv is None else (len(argv) == 0)
     if no_args:
@@ -1137,6 +1128,10 @@ def main(argv=None):
             the executable name. If None, parses from sys.argv.
 
     """
+    if sys.platform == "darwin" and multiprocessing.get_start_method(allow_none=True) is None:
+        # Forkserver is significantly faster than spawn. This has to be configured once and early
+        # in the process.
+        multiprocessing.set_start_method("forkserver")
     # When using the forkserver start method, preload the following modules to improve startup
     # time of child processes.
     multiprocessing.set_forkserver_preload(["spack.main", "spack.package", "spack.installer"])
