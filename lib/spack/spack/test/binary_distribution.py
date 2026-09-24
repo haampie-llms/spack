@@ -226,7 +226,9 @@ def test_download_tarball_reports_signature_verification_failure(
             pass
 
     monkeypatch.setattr(
-        spack.mirrors.mirror, "MirrorCollection", lambda binary=True: {"test": MockMirror()}
+        spack.mirrors.mirror.MirrorCollection,
+        "from_config",
+        lambda config, binary=True: {"test": MockMirror()},
     )
     monkeypatch.setattr(
         spack.binary_distribution,
@@ -358,7 +360,10 @@ def test_push_index_keeps_records_of_other_formats(tmp_path: pathlib.Path, view:
     metadata = spack.url_buildcache.MirrorMetadata(
         mirror_url, spack.binary_distribution.CURRENT_BUILD_CACHE_LAYOUT_VERSION, view
     )
-    result = spack.binary_distribution.DefaultIndexHandler(metadata, None).conditional_fetch()
+    client = web_util.NetworkClient.from_config(spack.config.CONFIG)
+    result = spack.binary_distribution.DefaultIndexHandler(
+        metadata, None, urlopen=client.urlopen
+    ).conditional_fetch()
     assert result.hash == new["checksum"]
 
     # An unreadable manifest is replaced
@@ -474,7 +479,7 @@ def test_use_bin_index_with_view(
 
 
 def test_generate_key_index_failure(monkeypatch, tmp_path: pathlib.Path):
-    def list_url(url, recursive=False):
+    def list_url(url, recursive=False, *, client):
         if "fails-listing" in url:
             raise Exception("Couldn't list the directory")
         return ["first.pub", "second.pub"]
@@ -497,7 +502,7 @@ def test_generate_key_index_failure(monkeypatch, tmp_path: pathlib.Path):
 
 
 def test_generate_package_index_failure(monkeypatch, tmp_path: pathlib.Path, capfd):
-    def mock_list_url(url, recursive=False):
+    def mock_list_url(url, recursive=False, *, client):
         raise OSError("Some HTTP error")
 
     monkeypatch.setattr(web_util, "list_url", mock_list_url)
@@ -533,7 +538,7 @@ def test_generate_package_index_push_failure(monkeypatch, tmp_path: pathlib.Path
 
 
 def test_generate_indices_exception(monkeypatch, tmp_path: pathlib.Path, capfd):
-    def mock_list_url(url, recursive=False):
+    def mock_list_url(url, recursive=False, *, client):
         raise OSError("Test Exception handling")
 
     monkeypatch.setattr(web_util, "list_url", mock_list_url)
