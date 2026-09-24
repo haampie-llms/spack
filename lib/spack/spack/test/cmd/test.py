@@ -244,7 +244,7 @@ def test_read_old_results(mock_packages, mock_test_stage):
 def test_test_results_none(mock_packages, mock_test_stage, ctx: SpackContext):
     name = "trivial"
     spec = spack.concretize.concretize_one("trivial-smoke-test", ctx)
-    suite = spack.install_test.TestSuite([spec], name)
+    suite = spack.install_test.TestSuite([spec], name, stage_root=mock_test_stage)
     suite.ensure_stage()
     spack.install_test.write_test_suite_file(suite)
     results = spack_test("results", name)
@@ -259,7 +259,7 @@ def test_test_results_status(mock_packages, mock_test_stage, status, ctx: SpackC
     """Confirm 'spack test results' returns expected status."""
     name = "trivial"
     spec = spack.concretize.concretize_one("trivial-smoke-test", ctx)
-    suite = spack.install_test.TestSuite([spec], name)
+    suite = spack.install_test.TestSuite([spec], name, stage_root=mock_test_stage)
     suite.ensure_stage()
     spack.install_test.write_test_suite_file(suite)
     suite.write_test_result(spec, status)
@@ -282,7 +282,9 @@ def test_report_filename_for_cdash(install_mockery, mock_fetch, ctx: SpackContex
     """Test that the temporary file used to write Testing.xml for CDash is not the upload URL"""
     name = "trivial"
     spec = spack.concretize.concretize_one("trivial-smoke-test", ctx)
-    suite = spack.install_test.TestSuite([spec], name)
+    suite = spack.install_test.TestSuite(
+        [spec], name, stage_root=spack.install_test.get_test_stage_dir(ctx.config)
+    )
     suite.ensure_stage()
 
     parser = argparse.ArgumentParser()

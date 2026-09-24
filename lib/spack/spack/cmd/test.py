@@ -150,7 +150,7 @@ def test_run(args, ctx):
     environment or all installed packages if there is no active environment
     """
     if args.alias:
-        suites = spack.install_test.get_named_test_suites(args.alias)
+        suites = spack.install_test.get_named_test_suites(args.alias, ctx.config)
         if suites:
             tty.die('Test suite "{0}" already exists. Try another alias.'.format(args.alias))
 
@@ -191,7 +191,9 @@ def test_run(args, ctx):
         specs_to_test.extend(matching)
 
     # test_stage_dir
-    test_suite = spack.install_test.TestSuite(specs_to_test, args.alias)
+    test_suite = spack.install_test.TestSuite(
+        specs_to_test, args.alias, stage_root=spack.install_test.get_test_stage_dir(ctx.config)
+    )
     test_suite.ensure_stage()
     tty.msg(f"Spack test {test_suite.name}")
 
@@ -253,7 +255,7 @@ def test_find(args, ctx):  # TODO: merge with status (noargs)
 
     displays aliases for tests that have them, otherwise test suite content hashes
     """
-    test_suites = spack.install_test.get_all_test_suites()
+    test_suites = spack.install_test.get_all_test_suites(ctx.config)
 
     # Filter tests by filter argument
     if args.filter:
@@ -292,13 +294,13 @@ def test_status(args, ctx):
     if args.names:
         test_suites = []
         for name in args.names:
-            test_suite = spack.install_test.get_test_suite(name)
+            test_suite = spack.install_test.get_test_suite(name, ctx.config)
             if test_suite:
                 test_suites.append(test_suite)
             else:
                 tty.msg("No test suite %s found in test stage" % name)
     else:
-        test_suites = spack.install_test.get_all_test_suites()
+        test_suites = spack.install_test.get_all_test_suites(ctx.config)
         if not test_suites:
             tty.msg("No test suites with status to report")
 
@@ -386,12 +388,12 @@ def test_results(args, ctx):
         names, constraints = None, None
 
     if names:
-        test_suites = [spack.install_test.get_test_suite(name) for name in names]
+        test_suites = [spack.install_test.get_test_suite(name, ctx.config) for name in names]
         test_suites = list(filter(lambda ts: ts is not None, test_suites))
         if not test_suites:
             tty.msg("No test suite(s) found in test stage: {0}".format(", ".join(names)))
     else:
-        test_suites = spack.install_test.get_all_test_suites()
+        test_suites = spack.install_test.get_all_test_suites(ctx.config)
         if not test_suites:
             tty.msg("No test suites with results to report")
 
@@ -411,13 +413,13 @@ def test_remove(args, ctx):
     if args.names:
         test_suites = []
         for name in args.names:
-            test_suite = spack.install_test.get_test_suite(name)
+            test_suite = spack.install_test.get_test_suite(name, ctx.config)
             if test_suite:
                 test_suites.append(test_suite)
             else:
                 tty.msg("No test suite %s found in test stage" % name)
     else:
-        test_suites = spack.install_test.get_all_test_suites()
+        test_suites = spack.install_test.get_all_test_suites(ctx.config)
 
     if not test_suites:
         tty.msg("No test suites to remove")

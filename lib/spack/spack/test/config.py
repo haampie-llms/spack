@@ -1111,14 +1111,16 @@ def test_license_dir_config(mutable_config: Configuration, mock_packages: RepoPa
     """Ensure license directory is customizable"""
     expected_dir = spack.paths.default_license_dir
     assert mutable_config.get("config:license_dir") == expected_dir
-    assert spack.package_base.PackageBase.global_license_dir == expected_dir
-    assert mock_packages.get_pkg_class("pkg-a").global_license_dir == expected_dir
+    assert spack.package_base.global_license_dir(mutable_config) == expected_dir
+    pkg = mock_packages.get_pkg_class("pkg-a")(spack.spec.Spec("pkg-a"))
+    pkg.context = SpackContext(mutable_config)
+    assert pkg.global_license_dir == expected_dir
 
     abs_path = str(tmp_path / "foo" / "bar" / "baz")
     mutable_config.set("config:license_dir", abs_path)
     assert mutable_config.get("config:license_dir") == abs_path
-    assert spack.package_base.PackageBase.global_license_dir == abs_path
-    assert mock_packages.get_pkg_class("pkg-a").global_license_dir == abs_path
+    assert spack.package_base.global_license_dir(mutable_config) == abs_path
+    assert pkg.global_license_dir == abs_path
 
 
 @pytest.mark.regression("22547")

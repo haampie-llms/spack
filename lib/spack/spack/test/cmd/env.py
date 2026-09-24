@@ -18,7 +18,6 @@ import pytest
 import spack.cmd.env
 import spack.concretize
 import spack.config
-import spack.context
 import spack.environment as ev
 import spack.error
 import spack.main
@@ -3208,7 +3207,7 @@ spack:
 
 @pytest.mark.parametrize("link_type", ["hardlink", "copy", "symlink"])
 def test_view_link_type(
-    link_type, installed_environment, tmp_path: pathlib.Path, ctx: spack.context.SpackContext
+    link_type, installed_environment, tmp_path: pathlib.Path, ctx: SpackContext
 ):
     view_dir = tmp_path / "view"
     with installed_environment(
@@ -3753,7 +3752,7 @@ spack:
     assert spec.prefix not in contents
 
 
-def test_modules_exist_after_env_install(installed_environment, ctx: spack.context.SpackContext):
+def test_modules_exist_after_env_install(installed_environment, ctx: SpackContext):
     with installed_environment(
         """
 spack:
@@ -4883,7 +4882,7 @@ def test_concretized_specs_and_include_concrete(mutable_config, ctx: SpackContex
 
 
 def test_view_can_select_group_of_specs(
-    installed_environment, tmp_path: pathlib.Path, ctx: spack.context.SpackContext
+    installed_environment, tmp_path: pathlib.Path, ctx: SpackContext
 ):
     """Tests that we can select groups of specs in a view and exclude other groups"""
     view_dir = tmp_path / "view"
@@ -4915,7 +4914,7 @@ spack:
 
 
 def test_view_can_select_group_of_specs_using_string(
-    installed_environment, tmp_path: pathlib.Path, ctx: spack.context.SpackContext
+    installed_environment, tmp_path: pathlib.Path, ctx: SpackContext
 ):
     """Tests that we can select groups of specs in a view and exclude other groups"""
     view_dir = tmp_path / "view"

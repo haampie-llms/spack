@@ -4629,7 +4629,7 @@ def test_commit_variant_enters_the_hash(
 
     first_call = True
 
-    def _mock_resolve(spec) -> None:
+    def _mock_resolve(spec, ctx) -> None:
         if first_call:
             spec.variants["commit"] = vt.SingleValuedVariant("commit", f"{'b' * 40}")
             return

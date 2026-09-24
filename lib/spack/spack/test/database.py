@@ -871,7 +871,9 @@ def test_uninstall_by_spec(mutable_database):
     with mutable_database.write_transaction():
         for spec in mutable_database.query():
             if mutable_database.installed(spec):
-                spack.package_base.PackageBase.uninstall_by_spec(spec, force=True)
+                spack.package_base.PackageBase.uninstall_by_spec(
+                    spec, spack.store.STORE, force=True
+                )
             else:
                 mutable_database.remove(spec)
     assert len(mutable_database.query()) == 0

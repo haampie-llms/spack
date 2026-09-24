@@ -218,7 +218,7 @@ def post_install(spec, explicit=None):
         tty.debug("SKIP: shebang filtering [external package]")
         return
 
-    store = spack.store.STORE
+    store = spec.package.context.store
     for directory, _, filenames in os.walk(spec.prefix):
         filter_shebangs_in_directory(directory, store, filenames)
 
