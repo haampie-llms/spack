@@ -172,9 +172,9 @@ def mock_s3_client(monkeypatch):
     ],
 )
 def test_spider(depth, expected_found, expected_not_found, expected_text, config):
-    with spack.util.parallel.make_concurrent_executor() as executor:
-        client = spack.util.web.NetworkClient.from_config(config)
-        pages, links = spack.util.web.spider(root, depth=depth, executor=executor, client=client)
+    client = spack.util.web.NetworkClient.from_config(config)
+    with spack.util.parallel.make_concurrent_executor(shared=client) as executor:
+        pages, links = spack.util.web.spider(root, depth=depth, executor=executor)
 
     for page in expected_found["pages"]:
         assert page in pages
@@ -198,10 +198,7 @@ def test_spider_no_response(monkeypatch, config):
         spack.util.web, "read_from_url", lambda x, y, *, client: (None, None, None)
     )
     pages, links, _, _ = spack.util.web._spider(
-        root,
-        collect_nested=False,
-        _visited=set(),
-        client=spack.util.web.NetworkClient.from_config(config),
+        spack.util.web.NetworkClient.from_config(config), root, False, set()
     )
     assert not pages and not links
 
@@ -669,7 +666,6 @@ def test_get_s3_session_normalizes_method_and_returns_parsed_url(
 ):
     """Verify that "GET" and "HEAD" are treated as "fetch", and everything else
     is treated as "push"."""
-    monkeypatch.setattr(spack.util.s3, "s3_client_cache", {})
     monkeypatch.setenv("_SPACK_TEST_FETCH_SECRET", "fetch-secret")
     monkeypatch.setenv("_SPACK_TEST_PUSH_SECRET", "push-secret")
     mutable_config.set(
@@ -778,9 +774,7 @@ def test_ssl_urllib(
 
         assert mock_cert == mutable_config.get("config:ssl_certs", None)
 
-        ssl_context = spack.util.web.default_ssl_context(
-            spack.util.web.NetworkClient.from_config(mutable_config)
-        )
+        ssl_context = spack.util.web.NetworkClient.from_config(mutable_config).ssl_context
         assert ssl_context.verify_mode == ssl.CERT_REQUIRED
 
 
@@ -1057,11 +1051,9 @@ def test_url_exists_no_raise(monkeypatch, exception, config):
     assert not spack.util.web.url_exists("https://not.real.io", client=client)
 
 
-def test_base_curl_fetch_args_uses_given_config(mutable_config: Configuration, inactive_config):
-    """Tests that curl arguments come from the configuration passed as an argument, and not
-    from the global one."""
-    mutable_config.set("config:verify_ssl", True)
-    mutable_config.set("config:connect_timeout", 10)
+def test_base_curl_fetch_args_uses_given_config(inactive_config):
+    """Tests that curl arguments come from the configuration of the client."""
+    verified = inactive_config({"config": {"verify_ssl": True, "connect_timeout": 10}})
     unverified = inactive_config({"config": {"verify_ssl": False, "connect_timeout": 42}})
 
     client = spack.util.web.NetworkClient.from_config(unverified)
@@ -1069,17 +1061,15 @@ def test_base_curl_fetch_args_uses_given_config(mutable_config: Configuration, i
     assert "-k" in args
     assert args[args.index("--connect-timeout") + 1] == "42"
 
-    client = spack.util.web.NetworkClient.from_config(mutable_config)
+    client = spack.util.web.NetworkClient.from_config(verified)
     args = spack.util.web.base_curl_fetch_args("https://example.com", client=client)
     assert "-k" not in args
     assert args[args.index("--connect-timeout") + 1] == "10"
 
 
-def test_network_client_uses_given_config(mutable_config: Configuration, inactive_config):
+def test_network_client_uses_given_config(inactive_config):
     """Tests that a client takes its settings and mirrors from the configuration passed as an
-    argument, and not from the global one."""
-    mutable_config.set("config:verify_ssl", True)
-    mutable_config.set("config:url_fetch_method", "urllib")
+    argument."""
     other = inactive_config(
         {
             "config": {"verify_ssl": False, "url_fetch_method": "curl -v"},
@@ -1098,11 +1088,8 @@ def test_network_client_uses_given_config(mutable_config: Configuration, inactiv
     assert client_args["use_ssl"] is False
 
 
-def test_require_curl_uses_given_config(
-    tmp_path: pathlib.Path, ssl_scrubbed_env, mutable_config: Configuration, inactive_config
-):
-    """Tests that curl gets the custom certificates of the configuration passed as an argument,
-    and not those of the global one."""
+def test_require_curl_uses_given_config(tmp_path: pathlib.Path, ssl_scrubbed_env, inactive_config):
+    """Tests that curl gets the custom certificates of the configuration of the client."""
     mock_cert = tmp_path / "mock_cert.crt"
     mock_cert.write_text("")
     with_certs = inactive_config({"config": {"ssl_certs": str(mock_cert)}})
@@ -1112,10 +1099,10 @@ def test_require_curl_uses_given_config(
     spack.util.web.require_curl(client=client)("--help", output=str, _dump_env=certs_env)
     assert certs_env["CURL_CA_BUNDLE"] == str(mock_cert)
 
-    global_env: Dict[str, str] = {}
-    client = spack.util.web.NetworkClient.from_config(mutable_config)
-    spack.util.web.require_curl(client=client)("--help", output=str, _dump_env=global_env)
-    assert "CURL_CA_BUNDLE" not in global_env
+    default_env: Dict[str, str] = {}
+    client = spack.util.web.NetworkClient.from_config(inactive_config({}))
+    spack.util.web.require_curl(client=client)("--help", output=str, _dump_env=default_env)
+    assert "CURL_CA_BUNDLE" not in default_env
 
 
 def test_network_client_pickle_roundtrip(tmp_path: pathlib.Path, inactive_config):
@@ -1139,3 +1126,19 @@ def test_network_client_pickle_roundtrip(tmp_path: pathlib.Path, inactive_config
     assert restored.connect_timeout == 3
     assert [m.fetch_url for m in restored.mirrors] == ["s3://other-bucket/prefix"]
     assert spack.util.web.read_text(page.as_uri(), client=restored) == "hello"
+
+
+def test_network_client_rebuilds_connections_in_forked_children(monkeypatch, mutable_config):
+    """Tests that a client reuses its connections within a process, and rebuilds them in forked
+    children, since SSL and S3 connections are not fork-safe."""
+    client = spack.util.web.NetworkClient.from_config(mutable_config)
+    ssl_context, urlopen, s3_clients = client.ssl_context, client.urlopen, client.s3_clients
+    assert client.ssl_context is ssl_context
+    assert client.urlopen is urlopen
+    assert client.s3_clients is s3_clients
+
+    pid = os.getpid()
+    monkeypatch.setattr(os, "getpid", lambda: pid + 1)
+    assert client.ssl_context is not ssl_context
+    assert client.urlopen is not urlopen
+    assert client.s3_clients is not s3_clients

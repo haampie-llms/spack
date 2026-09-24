@@ -442,8 +442,7 @@ def no_path_access(monkeypatch):
 @pytest.fixture(scope="session", autouse=True)
 def clean_user_environment():
     spack_env_value = os.environ.pop(ev.spack_env_var, None)
-    with ev.no_active_environment(spack.test.harness.current()):
-        yield
+    yield
     if spack_env_value:
         os.environ[ev.spack_env_var] = spack_env_value
 
@@ -702,12 +701,12 @@ def mock_binary_index(monkeypatch, tmp_path_factory: pytest.TempPathFactory):
     """
     tmpdir = tmp_path_factory.mktemp("mock_binary_index")
     index_path = tmpdir / "binary_index"
+    ctx = spack.test.harness.current()
     mock_index = spack.binary_distribution.BinaryIndexCache(
-        str(index_path),
-        config=spack.test.harness.current().config,
-        client=spack.util.web.NetworkClient.from_config(spack.test.harness.current().config),
+        str(index_path), config=ctx.config, client=ctx.network
     )
-    monkeypatch.setattr(spack.test.harness.current(), "binary_index", mock_index)
+    # Set the built member directly: getattr would first build the real index
+    monkeypatch.setitem(ctx.__dict__, "binary_index", mock_index)
     yield
 
 
@@ -744,7 +743,7 @@ def _use_test_platform(test_platform):
 
 @pytest.fixture(autouse=True, scope="session")
 def _load_clingo():
-    """Bootstrap clingo before tests monkeypatch the host target."""
+    """Import clingo before tests monkeypatch the host target."""
     try:
         spack.solver.compat.clingo()
     except ImportError:
@@ -1149,9 +1148,7 @@ def mutable_empty_config(tmp_path_factory: pytest.TempPathFactory, configuration
 
 @pytest.fixture
 def inactive_config():
-    """Returns a factory of Configuration objects that are never the configuration of the test
-    context, to test that code uses the configuration it is given.
-    """
+    """Returns a factory of Configuration objects made of a single scope with the given data."""
 
     def _factory(data: Dict[str, Any]) -> spack.config.Configuration:
         config = spack.config.Configuration()

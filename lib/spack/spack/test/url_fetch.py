@@ -446,12 +446,8 @@ def test_url_fetch_text_urllib_web_error(mutable_config, monkeypatch):
         web_util.fetch_url_text("https://example.com/", client=client)
 
 
-def test_url_exists_uses_given_fetch_method(
-    mutable_config: Configuration, inactive_config, missing_curl
-):
-    """Tests that the fetch method is read from the configuration passed as an argument, and not
-    from the global one."""
-    mutable_config.set("config:url_fetch_method", "urllib")
+def test_url_exists_uses_given_fetch_method(inactive_config, missing_curl):
+    """Tests that the fetch method is read from the configuration of the client."""
     with_curl = inactive_config({"config": {"url_fetch_method": "curl"}})
 
     with pytest.raises(spack.error.FetchError, match="curl is required but not found"):

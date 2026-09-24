@@ -78,7 +78,7 @@ def all_libcs(context: "spack.context.SpackContext") -> Set[spack.spec.Spec]:
     """Return a set of all libc specs targeted by any configured compiler. If none, fall back to
     libc determined from the current Python process if dynamically linked.
     """
-    cache = spack.compilers.libraries.FileCompilerCache(context.misc_cache)
+    cache = context.compiler_cache
     libcs = set()
     for c in spack.compilers.config.all_compilers_from(context.config, repo=context.repo):
         candidate = spack.compilers.libraries.CompilerPropertyDetector(

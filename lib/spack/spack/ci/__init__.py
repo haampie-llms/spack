@@ -276,7 +276,7 @@ def create_already_built_pruner(
     """Return a filter that prunes specs already present on any configured
     mirrors"""
     try:
-        binary_index.update(config=config)
+        binary_index.update()
     except spack.binary_distribution.FetchCacheError as e:
         tty.warn(e)
 

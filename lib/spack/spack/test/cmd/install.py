@@ -21,6 +21,8 @@ import spack.environment as ev
 import spack.error
 import spack.hooks.sbom_generate
 import spack.installer
+import spack.installer.build
+import spack.installer.core
 import spack.package_base
 import spack.reporters.cdash
 import spack.test.harness
@@ -68,34 +70,44 @@ def test_install_package_and_dependency(
     assert 'errors="0"' in content
 
 
-def _check_runtests_none(pkg):
-    assert not pkg.run_tests
+class _BuildRequestRecorder:
+    """Records the run_tests of each build request. A module level class, so that build
+    processes can unpickle the patch."""
+
+    def __init__(self):
+        self.run_tests = {}
+
+    def __call__(self, *args, **kwargs):
+        request = spack.installer.build.BuildRequest(*args, **kwargs)
+        self.run_tests[request.spec.name] = request.run_tests
+        return request
 
 
-def _check_runtests_root(pkg):
-    assert pkg.run_tests == (pkg.name == "dependent-install")
-
-
-def _check_runtests_all(pkg):
-    assert pkg.run_tests
+def _record_run_tests(monkeypatch):
+    recorder = _BuildRequestRecorder()
+    monkeypatch.setattr(spack.installer.core, "BuildRequest", recorder)
+    return recorder.run_tests
 
 
 @pytest.mark.disable_clean_stage_check
 def test_install_runtests_notests(monkeypatch, mock_packages, mock_fetch, install_mockery):
-    monkeypatch.setattr(spack.package_base.PackageBase, "_unit_test_check", _check_runtests_none)
+    run_tests = _record_run_tests(monkeypatch)
     install("-v", "dependent-install")
+    assert run_tests and not any(run_tests.values())
 
 
 @pytest.mark.disable_clean_stage_check
 def test_install_runtests_root(monkeypatch, mock_packages, mock_fetch, install_mockery):
-    monkeypatch.setattr(spack.package_base.PackageBase, "_unit_test_check", _check_runtests_root)
+    run_tests = _record_run_tests(monkeypatch)
     install("--test=root", "dependent-install")
+    assert run_tests and all(v == (name == "dependent-install") for name, v in run_tests.items())
 
 
 @pytest.mark.disable_clean_stage_check
 def test_install_runtests_all(monkeypatch, mock_packages, mock_fetch, install_mockery):
-    monkeypatch.setattr(spack.package_base.PackageBase, "_unit_test_check", _check_runtests_all)
+    run_tests = _record_run_tests(monkeypatch)
     install("--test=all", "dependent-install")
+    assert run_tests and all(run_tests.values())
 
 
 def test_install_package_already_installed(

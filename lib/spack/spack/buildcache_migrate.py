@@ -77,6 +77,12 @@ class MigrationException(spack.error.SpackError):
         super().__init__(msg)
 
 
+def _migrate_spec_task(shared, *args) -> "MigrateSpecResult":
+    """Calls ``_migrate_spec`` with the configuration, client and GnuPG a worker shares."""
+    config, client, gpg = shared
+    return _migrate_spec(*args, config=config, client=client, gpg=gpg)
+
+
 def _migrate_spec(
     s: spack.spec.Spec,
     mirror_url: str,
@@ -328,18 +334,10 @@ def migrate(
         ]
 
         # Run the tasks in parallel if possible
-        executor = spack.util.parallel.make_concurrent_executor()
+        executor = spack.util.parallel.make_concurrent_executor(shared=(config, client, gpg))
         migrate_futures = [
-            executor.submit(
-                _migrate_spec,
-                spec,
-                mirror_url,
-                tmpdir,
-                unsigned,
-                signing_key,
-                config=config,
-                client=client,
-                gpg=gpg,
+            executor.submit_shared(
+                _migrate_spec_task, spec, mirror_url, tmpdir, unsigned, signing_key
             )
             for spec in specs_to_migrate
         ]

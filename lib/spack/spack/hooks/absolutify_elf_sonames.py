@@ -4,7 +4,6 @@
 
 import os
 
-import spack.relocate
 from spack.util import tty
 from spack.util.elf import ElfParsingError, parse_elf
 from spack.util.filesystem import BaseDirectoryVisitor, visit_directory_tree
@@ -145,7 +144,7 @@ def post_install(spec, explicit=None):
         return
 
     # Should failing to locate patchelf be a hard error?
-    patchelf = spack.relocate.patchelf_finder(ctx)()
+    patchelf = ctx.patchelf()
     if not patchelf:
         return
 

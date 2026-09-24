@@ -11,7 +11,6 @@ import os
 import re
 import sys
 import traceback
-import types
 import typing
 import warnings
 from datetime import datetime, timedelta
@@ -673,88 +672,6 @@ class ObjectWrapper:
             self.__class__ = type(wrapped_name, (wrapped_cls,), {})
 
         self.__dict__ = wrapped_object.__dict__
-
-
-class Singleton:
-    """Wrapper for lazily initialized singleton objects."""
-
-    def __init__(self, factory: Callable[[], object]):
-        """Create a new singleton to be inited with the factory function.
-
-        Most factories will simply create the object to be initialized and
-        return it.
-
-        In some cases, e.g. when bootstrapping some global state, the singleton
-        may need to be initialized incrementally. If the factory returns a generator
-        instead of a regular object, the singleton will assign each result yielded by
-        the generator to the singleton instance. This allows methods called by
-        the factory in later stages to refer back to the singleton.
-
-        Args:
-            factory (function): function taking no arguments that creates the
-                singleton instance.
-
-        """
-        self.factory = factory
-        self._instance = None
-
-    @property
-    def instance(self):
-        if self._instance is None:
-            try:
-                instance = self.factory()
-
-                if isinstance(instance, types.GeneratorType):
-                    # if it's a generator, assign every value
-                    for value in instance:
-                        self._instance = value
-                else:
-                    # if not, just assign the result like a normal singleton
-                    self._instance = instance
-            except AttributeError as e:
-                # getattr will "absorb" an AttributeError that occurs
-                # during the execution of the factory method: we'd like
-                # to show that so wrap it in something that isn't absorbed
-                raise SingletonInstantiationError(
-                    "AttrbuteError during creation of Singleton instance"
-                ) from e
-        return self._instance
-
-    def __getattr__(self, name):
-        # When unpickling Singleton objects, the 'instance' attribute may be
-        # requested but not yet set. The final 'getattr' line here requires
-        # 'instance'/'_instance' to be defined or it will enter an infinite
-        # loop, so protect against that here.
-        if name in ["_instance", "instance"]:
-            raise AttributeError(f"cannot create {name}")
-        return getattr(self.instance, name)
-
-    def __getitem__(self, name):
-        return self.instance[name]
-
-    def __contains__(self, element):
-        return element in self.instance
-
-    def __call__(self, *args, **kwargs):
-        return self.instance(*args, **kwargs)
-
-    def __iter__(self):
-        return iter(self.instance)
-
-    def __str__(self):
-        return str(self.instance)
-
-    def __repr__(self):
-        return repr(self.instance)
-
-
-class SingletonInstantiationError(Exception):
-    """Error that indicates a singleton that cannot instantiate."""
-
-
-def ensure_unwrapped(obj):
-    """Returns the real object behind a Singleton"""
-    return obj.instance if isinstance(obj, Singleton) else obj
 
 
 def get_entry_points(*, group: str):

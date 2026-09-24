@@ -20,7 +20,6 @@ import spack.error
 import spack.mirrors.mirror
 import spack.oci.image
 import spack.oci.oci
-import spack.relocate
 import spack.repo
 import spack.spec
 import spack.stage
@@ -628,7 +627,7 @@ def install_fn(args, ctx):
         args.subparser.error("a spec argument is required to install from a buildcache")
 
     query = spack.binary_distribution.BinaryCacheQuery(
-        all_architectures=args.otherarch, index=ctx.binary_index, config=ctx.config
+        all_architectures=args.otherarch, index=ctx.binary_index
     )
     matches = spack.store.find(args.specs, multiple=args.multiple, query_fn=query)
     spack.repo.attach_packages(matches, ctx)
@@ -643,7 +642,7 @@ def install_fn(args, ctx):
             config=ctx.config,
             client=ctx.network,
             store=ctx.store,
-            patchelf=spack.relocate.patchelf_finder(ctx),
+            patchelf=ctx.patchelf,
             gpg=ctx.gpg,
         )
 
@@ -651,9 +650,7 @@ def install_fn(args, ctx):
 def list_fn(args, ctx):
     """list binary packages available from mirrors"""
     try:
-        specs = spack.binary_distribution.update_cache_and_get_specs(
-            ctx.binary_index, config=ctx.config
-        )
+        specs = spack.binary_distribution.update_cache_and_get_specs(ctx.binary_index)
     except spack.binary_distribution.FetchCacheError as e:
         tty.die(e)
 
@@ -944,12 +941,11 @@ def manifest_copy(
 
 def update_index(
     mirror: spack.mirrors.mirror.Mirror,
-    config: spack.config.Configuration,
-    client: web_util.NetworkClient,
+    ctx: "spack.context.SpackContext",
     update_keys=False,
     timer=timer_mod.NULL_TIMER,
-    repo_provider: Optional[spack.repo.RepoProvider] = None,
 ):
+    config, client, repo_provider = ctx.config, ctx.network, ctx.repo_provider
     timer.start()
     # Special case OCI images for now.
     try:
@@ -960,15 +956,9 @@ def update_index(
     if image_ref:
         with tempfile.TemporaryDirectory(
             dir=spack.stage.stage_root(config)
-        ) as tmpdir, spack.util.parallel.make_concurrent_executor() as executor:
+        ) as tmpdir, spack.util.parallel.make_concurrent_executor(shared=ctx) as executor:
             spack.binary_distribution._oci_update_index(
-                image_ref,
-                tmpdir,
-                executor,
-                timer=timer,
-                config=config,
-                client=client,
-                repo_provider=repo_provider,
+                image_ref, tmpdir, executor, timer=timer, ctx=ctx
             )
         return
 
@@ -1050,7 +1040,7 @@ def update_view(
     # local cache.
     index_exists = True
     try:
-        ctx.binary_index._fetch_and_cache_index(mirror_metadata, client=ctx.network)
+        ctx.binary_index._fetch_and_cache_index(mirror_metadata)
     except spack.binary_distribution.BuildcacheIndexNotExists:
         index_exists = False
 
@@ -1128,7 +1118,7 @@ def check_index_fn(args, ctx):
     index_exists = True
     missing_index_blob = False
     try:
-        ctx.binary_index._fetch_and_cache_index(mirror_metadata, client=ctx.network)
+        ctx.binary_index._fetch_and_cache_index(mirror_metadata)
     except spack.binary_distribution.BuildcacheIndexNotExists:
         index_exists = False
     except spack.binary_distribution.FetchIndexError:
@@ -1261,14 +1251,7 @@ def update_index_fn(args, ctx):
             ctx=ctx,
         )
     else:
-        update_index(
-            args.mirror,
-            ctx.config,
-            ctx.network,
-            update_keys=args.keys,
-            timer=t,
-            repo_provider=ctx.repo_provider,
-        )
+        update_index(args.mirror, ctx, update_keys=args.keys, timer=t)
 
     if tty.is_verbose():
         tty.msg("Timing summary:")

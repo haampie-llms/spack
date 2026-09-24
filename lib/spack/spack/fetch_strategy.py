@@ -672,7 +672,7 @@ class OCIRegistryFetchStrategy(URLFetchStrategy):
             os.remove(file)
 
         try:
-            urlopen = self._urlopen or spack.oci.opener.opener_for(self.stage.client)
+            urlopen = self._urlopen or self.stage.client.oci_urlopen
             response = urlopen(self.url)
             tty.verbose(f"Fetching {self.url}")
             with open(file, "wb") as f:

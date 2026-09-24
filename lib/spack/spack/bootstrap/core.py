@@ -48,7 +48,6 @@ import spack.detection
 import spack.error
 import spack.installer_dispatch
 import spack.mirrors.mirror
-import spack.relocate
 import spack.repo
 import spack.spec
 import spack.store
@@ -219,7 +218,7 @@ class BuildcacheBootstrapper(Bootstrapper):
     def _install_by_hash(self, pkg_hash: str, pkg_sha256: str) -> None:
         ctx = self.ctx
         query = spack.binary_distribution.BinaryCacheQuery(
-            all_architectures=True, index=ctx.binary_index, config=ctx.config
+            all_architectures=True, index=ctx.binary_index
         )
         for match in spack.store.find([f"/{pkg_hash}"], multiple=False, query_fn=query):
             spack.repo.attach_packages([match], ctx)
@@ -236,7 +235,7 @@ class BuildcacheBootstrapper(Bootstrapper):
                 config=ctx.config,
                 client=ctx.network,
                 store=ctx.store,
-                patchelf=spack.relocate.patchelf_finder(ctx),
+                patchelf=ctx.patchelf,
                 gpg=None,
             )
 
@@ -249,9 +248,7 @@ class BuildcacheBootstrapper(Bootstrapper):
             # specs that we know by dag hash.
             binary_index = self.ctx.binary_index
             binary_index.regenerate_spec_cache()
-            index = spack.binary_distribution.update_cache_and_get_specs(
-                binary_index, config=self.ctx.config
-            )
+            index = spack.binary_distribution.update_cache_and_get_specs(binary_index)
 
             if not index:
                 raise RuntimeError("The binary index is empty")

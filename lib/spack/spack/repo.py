@@ -57,7 +57,6 @@ import spack.util.path
 import spack.util.spack_yaml as syaml
 from spack.util import tty
 from spack.util.filesystem import working_dir
-from spack.util.lang import Singleton
 
 if TYPE_CHECKING:
     import spack.context
@@ -1621,10 +1620,7 @@ class Repo:
         return Repo(root, cache=cache, overrides=overrides)
 
     def marshal(self):
-        cache = self._cache
-        if isinstance(cache, Singleton):
-            cache = cache.instance
-        return self.root, cache, self.overrides
+        return self.root, self._cache, self.overrides
 
     def __reduce__(self):
         return Repo.unmarshal, self.marshal()

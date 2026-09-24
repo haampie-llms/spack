@@ -134,7 +134,6 @@ def _concretize_together(
         count += 1
         ui.on_spec_concretized(abstract, concrete=concrete, count=count, duration=duration)
 
-    spack.repo.attach_packages((concrete for _, concrete in result), ctx, skip_unknown=True)
     return result
 
 

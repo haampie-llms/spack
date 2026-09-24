@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 import spack.binary_distribution
 import spack.error
 import spack.hooks
-import spack.relocate
 
 if TYPE_CHECKING:
     import spack.context
@@ -44,9 +43,7 @@ def rewire_node(spec, explicit, ctx: "spack.context.SpackContext"):
 
     spack.hooks.pre_install(spec)
     spack.binary_distribution.extract_buildcache_tarball(tarball, destination=spec.prefix)
-    spack.binary_distribution.relocate_package(
-        spec, store=store, patchelf=spack.relocate.patchelf_finder(ctx)
-    )
+    spack.binary_distribution.relocate_package(spec, store=store, patchelf=ctx.patchelf)
 
     # run post install hooks and add to db
     spack.hooks.post_install(spec, explicit)

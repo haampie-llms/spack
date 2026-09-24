@@ -420,17 +420,6 @@ class PackageTest:
             total = sum(nums)
         return total
 
-    def print_log_path(self):
-        """Print the test log file path."""
-        log = self.archived_install_test_log
-        if not os.path.isfile(log):
-            log = self.test_log_file
-            if not (log and os.path.isfile(log)):
-                tty.debug("There is no test log file (staged or installed)")
-                return
-
-        print(f"\nSee test results at:\n  {log}")
-
     def ran_tests(self) -> bool:
         """``True`` if ran tests, ``False`` otherwise."""
         return self.parts() > self.counts[TestStatus.NO_TESTS]

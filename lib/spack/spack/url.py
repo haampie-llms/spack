@@ -660,10 +660,8 @@ def find_versions_of_archive(
     list_urls |= additional_list_urls
 
     # Grab some web pages to scrape.
-    with spack.util.parallel.make_concurrent_executor(concurrency) as executor:
-        _, links = spack.util.web.spider(
-            list_urls, depth=list_depth, executor=executor, client=client
-        )
+    with spack.util.parallel.make_concurrent_executor(concurrency, shared=client) as executor:
+        _, links = spack.util.web.spider(list_urls, depth=list_depth, executor=executor)
 
     # Scrape them for archive URLs
     regexes = []

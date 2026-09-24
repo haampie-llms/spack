@@ -7,7 +7,6 @@ import concurrent.futures
 import contextlib
 import copy
 import datetime
-import functools
 import hashlib
 import io
 import itertools
@@ -354,7 +353,7 @@ class BinaryIndexCache:
             for new_entry in found_list:
                 current_list.add(new_entry.strip_view())
 
-    def update(self, with_cooldown: bool = False, *, config: spack.config.Configuration) -> None:
+    def update(self, with_cooldown: bool = False) -> None:
         """Make sure local cache of buildcache index files is up to date.
         If the same mirrors are configured as the last time this was called
         and none of the remote buildcache indices have changed, calling this
@@ -365,15 +364,14 @@ class BinaryIndexCache:
         on disk under ``_index_cache_root``).
 
         Args:
-            with_cooldown: skip mirrors whose index was fetched recently (within the TTL).
-            config: configuration to read the mirror list and TTL from."""
+            with_cooldown: skip mirrors whose index was fetched recently (within the TTL)."""
         self._init_local_index_cache()
         self.mirrors_without_index = set()
 
         supported_mirror_versions = {
             (m.fetch_url, m.fetch_view): m.supported_layout_versions
             for m in spack.mirrors.mirror.MirrorCollection.from_config(
-                config, binary=True
+                self._config, binary=True
             ).values()
         }
 
@@ -383,9 +381,7 @@ class BinaryIndexCache:
         # Fetch or update the other indexes
         errors, all_failed = [], True
         for (url, view), versions in supported_mirror_versions.items():
-            result = self._fetch_mirror_index(
-                url, view, versions=versions, cooldown=with_cooldown, config=config
-            )
+            result = self._fetch_mirror_index(url, view, versions=versions, cooldown=with_cooldown)
             if result.error:
                 errors.append(result.error)
 
@@ -413,19 +409,13 @@ class BinaryIndexCache:
             self.regenerate_spec_cache(clear_existing=clear_cache)
 
     def _fetch_mirror_index(
-        self,
-        url: str,
-        view: Optional[str],
-        *,
-        versions: List[int],
-        cooldown: bool,
-        config: spack.config.Configuration,
+        self, url: str, view: Optional[str], *, versions: List[int], cooldown: bool
     ) -> _MirrorIndexResult:
         """Fetches the index of a mirror, using a highest-version first approach, and returning
         after the first success.
         """
         now = time.time()
-        ttl = config.get_config("config").get("binary_index_ttl", 600)
+        ttl = self._config.get_config("config").get("binary_index_ttl", 600)
         for version in versions:
             meta = MirrorMetadata(url, version, view)
             cache_entry = self._local_index_cache.get(str(meta))
@@ -445,9 +435,7 @@ class BinaryIndexCache:
                 )
 
             try:
-                regenerate = self._fetch_and_cache_index(
-                    meta, cache_entry=cache_entry or {}, client=self._client
-                )
+                regenerate = self._fetch_and_cache_index(meta, cache_entry=cache_entry or {})
                 self._last_fetch_times[meta] = _LastFetch(time=now, succeeded=True)
                 return _MirrorIndexResult(
                     succeeded=True,
@@ -493,9 +481,7 @@ class BinaryIndexCache:
 
         return clear, regenerate
 
-    def _fetch_and_cache_index(
-        self, mirror_metadata: MirrorMetadata, cache_entry={}, *, client: web_util.NetworkClient
-    ):
+    def _fetch_and_cache_index(self, mirror_metadata: MirrorMetadata, cache_entry={}):
         """Fetch a buildcache index file from a remote mirror and cache it.
 
         If we already have a cached index from this mirror, then we first
@@ -505,7 +491,6 @@ class BinaryIndexCache:
             mirror_metadata: Contains mirror base url and target binary cache layout version
             cache_entry (dict): Old cache metadata with keys ``index_hash``, ``index_path``,
                 ``etag``
-            client: client to fetch the index with
 
         Returns:
             True if the local index.json was updated.
@@ -524,11 +509,11 @@ class BinaryIndexCache:
         if scheme != "oci":
             cache_class = get_url_buildcache_class(layout_version=layout_version)
             index_url = cache_class.get_index_url(mirror_url, mirror_view)
-            if not web_util.url_exists(index_url, client=client):
+            if not web_util.url_exists(index_url, client=self._client):
                 raise BuildcacheIndexNotExists(f"Index not found in cache {index_url}")
 
         fetcher: IndexHandler = _get_index_fetcher(
-            scheme, mirror_metadata, cache_entry, config=self._config, client=client
+            scheme, mirror_metadata, cache_entry, config=self._config, client=self._client
         )
         result = fetcher.conditional_fetch()
 
@@ -1032,18 +1017,17 @@ def _do_create_tarball(
 
 
 def _exists_in_buildcache(
-    spec: spack.spec.Spec,
-    out_url: str,
-    allow_unsigned: bool = False,
-    *,
-    config: spack.config.Configuration,
-    client: web_util.NetworkClient,
-    gpg: Optional[spack.util.gpg.Gpg] = None,
+    ctx: "spack.context.SpackContext", spec: spack.spec.Spec, out_url: str, allow_unsigned: bool
 ) -> URLBuildcacheEntry:
     """creates and returns (after checking existence) a URLBuildcacheEntry"""
     cache_type = get_url_buildcache_class(CURRENT_BUILD_CACHE_LAYOUT_VERSION)
     cache_entry = cache_type(
-        out_url, spec, allow_unsigned=allow_unsigned, config=config, client=client, gpg=gpg
+        out_url,
+        spec,
+        allow_unsigned=allow_unsigned,
+        config=ctx.config,
+        client=ctx.network,
+        gpg=None if allow_unsigned else ctx.gpg,
     )
     return cache_entry
 
@@ -1056,15 +1040,14 @@ def prefixes_to_relocate(spec, *, store: spack.store.Store):
 
 
 def _url_upload_tarball_and_specfile(
+    ctx: "spack.context.SpackContext",
     spec: spack.spec.Spec,
     tmpdir: str,
     cache_entry: URLBuildcacheEntry,
     signing_key: Optional[str],
-    *,
-    store: spack.store.Store,
 ):
     tarball = os.path.join(tmpdir, f"{spec.dag_hash()}.tar.gz")
-    checksum, _ = create_tarball(spec, tarball, store=store)
+    checksum, _ = create_tarball(spec, tarball, store=ctx.store)
 
     cache_entry.push_binary_package(spec, tarball, "sha256", checksum, tmpdir, signing_key)
 
@@ -1082,9 +1065,6 @@ class Uploader:
         self.force = force
         self.update_index = update_index
         self.ctx = ctx
-        self.config = ctx.config
-        self.client = ctx.network
-        self.store = ctx.store
 
         self.tmpdir: str
         self.executor: concurrent.futures.Executor
@@ -1093,7 +1073,7 @@ class Uploader:
         self.mirror.ensure_mirror_usable("push")
 
     def __enter__(self):
-        self._tmpdir = tempfile.TemporaryDirectory(dir=spack.stage.stage_root(self.config))
+        self._tmpdir = tempfile.TemporaryDirectory(dir=spack.stage.stage_root(self.ctx.config))
         self._executor = spack.util.parallel.make_concurrent_executor(shared=self.ctx)
 
         self.tmpdir = self._tmpdir.__enter__()
@@ -1150,9 +1130,7 @@ class OCIUploader(Uploader):
             force=self.force,
             tmpdir=self.tmpdir,
             executor=self.executor,
-            config=self.config,
-            client=self.client,
-            store=self.store,
+            ctx=self.ctx,
         )
 
         self._base_images = base_images
@@ -1160,14 +1138,7 @@ class OCIUploader(Uploader):
 
         # only update index if any binaries were uploaded
         if self.update_index and len(skipped) + len(upload_errors) < len(specs):
-            _oci_update_index(
-                self.target_image,
-                self.tmpdir,
-                self.executor,
-                config=self.config,
-                client=self.client,
-                repo_provider=self.ctx.repo_provider,
-            )
+            _oci_update_index(self.target_image, self.tmpdir, self.executor, ctx=self.ctx)
 
         return skipped, upload_errors
 
@@ -1181,8 +1152,8 @@ class OCIUploader(Uploader):
                 target_image=self.target_image,
                 spec=spec,
                 base_image_cache=self._base_images,
-                config=self.config,
-                client=self.client,
+                config=self.ctx.config,
+                client=self.ctx.network,
             )
         _oci_put_manifest(
             self._base_images,
@@ -1223,11 +1194,7 @@ class URLUploader(Uploader):
             signing_key=self.signing_key,
             tmpdir=self.tmpdir,
             executor=self.executor,
-            config=self.config,
-            client=self.client,
-            store=self.store,
-            repo_provider=self.ctx.repo_provider,
-            gpg=self.ctx.gpg if self.signing_key else None,
+            ctx=self.ctx,
         )
 
 
@@ -1301,26 +1268,18 @@ def _url_push(
     tmpdir: str,
     executor: concurrent.futures.Executor,
     *,
-    config: spack.config.Configuration,
-    client: web_util.NetworkClient,
-    store: spack.store.Store,
-    repo_provider: Optional["spack.repo.RepoProvider"] = None,
-    gpg: Optional[spack.util.gpg.Gpg] = None,
+    ctx: "spack.context.SpackContext",
 ) -> Tuple[List[spack.spec.Spec], List[Tuple[spack.spec.Spec, BaseException]]]:
     """Pushes to the provided build cache, and returns a list of skipped specs that were already
-    present (when force=False), and a list of errors. Does not raise on error."""
+    present (when force=False), and a list of errors. Does not raise on error. The workers of
+    ``executor`` share ``ctx``."""
+    config, client = ctx.config, ctx.network
     skipped: List[spack.spec.Spec] = []
     errors: List[Tuple[spack.spec.Spec, BaseException]] = []
 
     exists_futures = [
-        executor.submit(
-            _exists_in_buildcache,
-            spec,
-            out_url,
-            allow_unsigned=False if signing_key else True,
-            config=config,
-            client=client,
-            gpg=gpg,
+        executor.submit_shared(  # type: ignore[attr-defined]
+            _exists_in_buildcache, spec, out_url, not signing_key
         )
         for spec in specs
     ]
@@ -1352,13 +1311,12 @@ def _url_push(
         tty.info(f"{total} specs need to be pushed to {out_url}")
 
     upload_futures = [
-        executor.submit(
+        executor.submit_shared(  # type: ignore[attr-defined]
             _url_upload_tarball_and_specfile,
             spec,
             tmpdir,
             cache_entries[spec.dag_hash()],
             signing_key,
-            store=store,
         )
         for spec in specs_to_upload
     ]
@@ -1387,7 +1345,6 @@ def _url_push(
     if signing_key:
         keys_tmpdir = os.path.join(tmpdir, "keys")
         os.mkdir(keys_tmpdir)
-        assert gpg is not None, "signing requires GnuPG"
         _url_push_keys(
             out_url,
             keys=[signing_key],
@@ -1395,14 +1352,14 @@ def _url_push(
             tmpdir=keys_tmpdir,
             config=config,
             client=client,
-            gpg=gpg,
+            gpg=ctx.gpg,
         )
 
     if update_index:
         index_tmpdir = os.path.join(tmpdir, "index")
         os.mkdir(index_tmpdir)
         _url_generate_package_index(
-            out_url, index_tmpdir, config=config, client=client, repo_provider=repo_provider
+            out_url, index_tmpdir, config=config, client=client, repo_provider=ctx.repo_provider
         )
 
     return skipped, errors
@@ -1417,15 +1374,13 @@ def _oci_upload_success_msg(spec: spack.spec.Spec, digest: Digest, size: int, el
 
 
 def _oci_get_blob_info(
-    image_ref: ImageReference,
-    *,
-    config: spack.config.Configuration,
-    client: web_util.NetworkClient,
+    ctx: "spack.context.SpackContext", image_ref: ImageReference
 ) -> Optional[spack.oci.oci.Blob]:
     """Get the spack tarball layer digests and size if it exists"""
+    client = ctx.network
     try:
         manifest, image_config = get_manifest_and_config_with_retry(
-            image_ref, urlopen=spack.oci.opener.opener_for(client), config=config, client=client
+            image_ref, urlopen=client.oci_urlopen, config=ctx.config, client=client
         )
 
         return spack.oci.oci.Blob(
@@ -1438,18 +1393,16 @@ def _oci_get_blob_info(
 
 
 def _oci_push_pkg_blob(
+    ctx: "spack.context.SpackContext",
     image_ref: ImageReference,
     spec: spack.spec.Spec,
     tmpdir: str,
-    *,
-    client: web_util.NetworkClient,
-    store: spack.store.Store,
 ) -> Tuple[spack.oci.oci.Blob, float]:
     """Push a package blob to the registry and return the blob info and the time taken"""
     filename = os.path.join(tmpdir, f"{spec.dag_hash()}.tar.gz")
 
     # Create an oci.image.layer aka tarball of the package
-    tar_gz_checksum, tar_checksum = create_tarball(spec, filename, store=store)
+    tar_gz_checksum, tar_checksum = create_tarball(spec, filename, store=ctx.store)
 
     blob = spack.oci.oci.Blob(
         Digest.from_sha256(tar_gz_checksum),
@@ -1460,10 +1413,7 @@ def _oci_push_pkg_blob(
     # Upload the blob
     start = time.time()
     upload_blob_with_retry(
-        image_ref,
-        file=filename,
-        digest=blob.compressed_digest,
-        urlopen=spack.oci.opener.opener_for(client),
+        image_ref, file=filename, digest=blob.compressed_digest, urlopen=ctx.network.oci_urlopen
     )
     elapsed = time.time() - start
 
@@ -1568,7 +1518,7 @@ def _oci_put_manifest(
     )
 
     # Upload the config file
-    urlopen = spack.oci.opener.opener_for(client)
+    urlopen = client.oci_urlopen
     upload_blob_with_retry(
         image_ref, file=config_file, digest=config_file_checksum, urlopen=urlopen
     )
@@ -1634,7 +1584,7 @@ def _oci_update_base_images(
             base_image,
             target_image,
             architecture,
-            urlopen=spack.oci.opener.opener_for(client),
+            urlopen=client.oci_urlopen,
             config=config,
             client=client,
         )
@@ -1662,9 +1612,7 @@ def _oci_push(
     tmpdir: str,
     executor: concurrent.futures.Executor,
     force: bool = False,
-    config: spack.config.Configuration,
-    client: web_util.NetworkClient,
-    store: spack.store.Store,
+    ctx: "spack.context.SpackContext",
 ) -> Tuple[
     List[spack.spec.Spec],
     Dict[str, Tuple[dict, dict]],
@@ -1687,11 +1635,14 @@ def _oci_push(
         tags_to_check = (
             target_image.with_tag(_oci_default_tag(s)) for s in installed_specs_with_deps
         )
-        available_blobs = executor.map(
-            functools.partial(_oci_get_blob_info, config=config, client=client), tags_to_check
-        )
+        available_blobs = [
+            executor.submit_shared(_oci_get_blob_info, tag)  # type: ignore[attr-defined]
+            for tag in tags_to_check
+        ]
 
-        for spec, maybe_blob in zip(installed_specs_with_deps, available_blobs):
+        for spec, maybe_blob in zip(
+            installed_specs_with_deps, (f.result() for f in available_blobs)
+        ):
             if maybe_blob is not None:
                 checksums[spec.dag_hash()] = maybe_blob
                 skipped.append(spec)
@@ -1713,7 +1664,9 @@ def _oci_push(
 
     # Upload blobs
     blob_futures = [
-        executor.submit(_oci_push_pkg_blob, target_image, spec, tmpdir, client=client, store=store)
+        executor.submit_shared(  # type: ignore[attr-defined]
+            _oci_push_pkg_blob, target_image, spec, tmpdir
+        )
         for spec in blobs_to_upload
     ]
 
@@ -1742,8 +1695,8 @@ def _oci_push(
             target_image=target_image,
             spec=spec,
             base_image_cache=base_images,
-            config=config,
-            client=client,
+            config=ctx.config,
+            client=ctx.network,
         )
 
     def extra_config(spec: spack.spec.Spec):
@@ -1792,20 +1745,17 @@ def _oci_push(
 
 
 def _oci_config_from_tag(
-    image_ref_and_tag: Tuple[ImageReference, str],
-    *,
-    config: spack.config.Configuration,
-    client: web_util.NetworkClient,
+    ctx: "spack.context.SpackContext", image_ref: ImageReference, tag: str
 ) -> Optional[dict]:
-    image_ref, tag = image_ref_and_tag
+    client = ctx.network
     # Don't allow recursion here, since Spack itself always uploads
     # vnd.oci.image.manifest.v1+json, not vnd.oci.image.index.v1+json
     _, image_config = get_manifest_and_config_with_retry(
         image_ref.with_tag(tag),
         tag,
         recurse=0,
-        urlopen=spack.oci.opener.opener_for(client),
-        config=config,
+        urlopen=client.oci_urlopen,
+        config=ctx.config,
         client=client,
     )
 
@@ -1820,20 +1770,23 @@ def _oci_update_index(
     pool: concurrent.futures.Executor,
     *,
     timer=timer.NULL_TIMER,
-    config: spack.config.Configuration,
-    client: web_util.NetworkClient,
-    repo_provider: Optional["spack.repo.RepoProvider"] = None,
+    ctx: "spack.context.SpackContext",
 ) -> None:
-    urlopen = spack.oci.opener.opener_for(client)
+    """Pushes an index of the specs tagged in ``image_ref``. The workers of ``pool`` share
+    ``ctx``."""
+    repo_provider = ctx.repo_provider
+    urlopen = ctx.network.oci_urlopen
     with timer.measure("list"):
         tags = list_tags(image_ref, urlopen=urlopen)
 
     with timer.measure("read"):
         # Fetch all image config files in parallel
-        spec_dicts = pool.map(
-            functools.partial(_oci_config_from_tag, config=config, client=client),
-            ((image_ref, tag) for tag in tags if tag_is_spec(tag)),
-        )
+        spec_dict_futures = [
+            pool.submit_shared(_oci_config_from_tag, image_ref, tag)  # type: ignore[attr-defined]
+            for tag in tags
+            if tag_is_spec(tag)
+        ]
+        spec_dicts = (f.result() for f in spec_dict_futures)
 
         # Populate the database
         db_root_dir = os.path.join(tmpdir, "db_root")
@@ -1977,7 +1930,7 @@ def download_tarball(
         if spack.oci.image.is_oci_url(fetch_url):
             ref = ImageReference.from_url(fetch_url).with_tag(_oci_default_tag(spec))
 
-            urlopen = spack.oci.opener.opener_for(client)
+            urlopen = client.oci_urlopen
 
             # Fetch the manifest
             try:
@@ -2547,7 +2500,7 @@ def get_mirrors_for_spec(
     return results
 
 
-def update_cache_and_get_specs(index: BinaryIndexCache, *, config: spack.config.Configuration):
+def update_cache_and_get_specs(index: BinaryIndexCache):
     """
     Get all concrete specs for build caches available on configured mirrors.
     Initialization of internal cache data structures is done as lazily as
@@ -2557,12 +2510,11 @@ def update_cache_and_get_specs(index: BinaryIndexCache, *, config: spack.config.
 
     Args:
         index: buildcache index to query.
-        config: configuration listing the mirrors to update from.
 
     Raises:
         FetchCacheError
     """
-    index.update(config=config)
+    index.update()
     return index.get_all_built_specs()
 
 
@@ -2912,19 +2864,16 @@ def download_single_spec(
 class BinaryCacheQuery:
     """Callable object to query if a spec is in a binary cache"""
 
-    def __init__(
-        self, all_architectures, index: BinaryIndexCache, *, config: spack.config.Configuration
-    ) -> None:
+    def __init__(self, all_architectures, index: BinaryIndexCache) -> None:
         """
         Args:
             all_architectures (bool): if True consider all the spec for querying,
                 otherwise restrict to the current default architecture
             index: buildcache index to query.
-            config: configuration listing the mirrors to query.
         """
         self.all_architectures = all_architectures
 
-        specs = update_cache_and_get_specs(index, config=config)
+        specs = update_cache_and_get_specs(index)
 
         if not self.all_architectures:
             arch = spack.spec.Spec.default_arch()
@@ -3314,9 +3263,7 @@ def _get_index_fetcher(
     if scheme == "oci":
         # TODO: Actually etag and OCI are not mutually exclusive...
         return OCIIndexHandler(
-            mirror_metadata,
-            cache_entry.get("index_hash", None),
-            urlopen=spack.oci.opener.opener_for(client),
+            mirror_metadata, cache_entry.get("index_hash", None), urlopen=client.oci_urlopen
         )
 
     if mirror_metadata.version < 3:

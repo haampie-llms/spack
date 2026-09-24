@@ -498,7 +498,7 @@ def _config_mutator(method):
 
     @functools.wraps(method)
     def _method(self, *args, **kwargs):
-        self._get_config_memoized.cache_clear()
+        self._merged_sections.clear()
         return method(self, *args, **kwargs)
 
     return _method
@@ -522,21 +522,26 @@ class Configuration:
         # substitutions do not need to import spack.environment (avoiding a circular
         # import).
         self.env_path: Optional[str] = None
+        #: Memo of ``_get_config_memoized``, cleared by ``@_config_mutator`` methods
+        self._merged_sections: Dict[tuple, Tuple[YamlConfigDict, Any]] = {}
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["_merged_sections"] = {}
+        return state
 
     def highest(self) -> ConfigScope:
         """Scope with the highest precedence"""
         return next(self.scopes.reversed_values())  # type: ignore
 
     @_config_mutator
-    def push_scope_incremental(
+    def push_scope(
         self, scope: ConfigScope, priority: Optional[int] = None, _depth: int = 0
-    ) -> Generator["Configuration", None, None]:
-        """Adds a scope to the Configuration, at a given priority.
+    ) -> None:
+        """Add a scope to the Configuration, at a given priority.
 
-        ``push_scope_incremental`` yields included scopes incrementally, so that their
-        data can be used by higher priority scopes during config initialization. If you
-        push a scope that includes other, low-priority scopes, they will be pushed on
-        first, before the scope that included them.
+        If the scope includes other, low-priority scopes, they are pushed first, before the
+        scope that included them.
 
         If a priority is not given, it is assumed to be the current highest priority.
 
@@ -561,31 +566,9 @@ class Configuration:
 
             # record this inclusion so that remove_scope() can use it
             self.push_scope(included_scope, priority=priority, _depth=_depth + 1)
-            yield self
 
         tty.debug(f"[CONFIGURATION: PUSH SCOPE]: {str(scope)}, priority={priority}", level=2)
         self.scopes.add(scope.name, value=scope, priority=priority)
-        yield self
-
-    @_config_mutator
-    def push_scope(
-        self, scope: ConfigScope, priority: Optional[int] = None, _depth: int = 0
-    ) -> None:
-        """Add a scope to the Configuration, at a given priority.
-
-        If a priority is not given, it is assumed to be the current highest priority.
-
-        Args:
-            scope: scope to be added
-            priority: priority of the scope
-
-        """
-        # Use push_scope_incremental to do the real work. It returns a generator, which needs
-        # to be consumed to get each of the yielded scopes added to the scope stack.
-        # It will usually yield one scope, but if there are includes it will yield those first,
-        # before the scope we're actually pushing.
-        for _ in self.push_scope_incremental(scope=scope, priority=priority, _depth=_depth):
-            pass
 
     @_config_mutator
     def remove_scope(self, scope_name: str) -> Optional[ConfigScope]:
@@ -819,7 +802,6 @@ class Configuration:
         """Return a list of scopes that have not been overridden by include::."""
         return self._filter_overridden([s for s in self.scopes.values()])
 
-    @lang.memoized
     def _get_config_memoized(
         self, section: str, scope: Optional[str], _merged_scope: Optional[str] = None
     ) -> Tuple[YamlConfigDict, Any]:
@@ -828,6 +810,18 @@ class Configuration:
         Note that the memoization cache for this function is cleared whenever
         any function decorated with ``@_config_mutator`` is called.
         """
+        key = (section, scope, _merged_scope)
+        try:
+            return self._merged_sections[key]
+        except KeyError:
+            pass
+        result = self._merge_section(section, scope, _merged_scope)
+        self._merged_sections[key] = result
+        return result
+
+    def _merge_section(
+        self, section: str, scope: Optional[str], _merged_scope: Optional[str]
+    ) -> Tuple[YamlConfigDict, Any]:
         _validate_section_name(section)
 
         if scope is not None and _merged_scope is not None:
@@ -1680,20 +1674,14 @@ def config_paths_from_entry_points() -> List[Tuple[str, str]]:
     return config_paths
 
 
-def create_incremental() -> Generator[Configuration, None, None]:
-    """Singleton Configuration instance.
-
-    This constructs one instance associated with this module and returns
-    it. It is bundled inside a function so that configuration can be
-    initialized lazily.
-    """
+def create() -> Configuration:
+    """Create the configuration from Spack's default and configuration file scopes."""
     # Default scopes are builtins and the default scope within the Spack instance.
     # These are versioned with Spack and can be overridden by systems, sites or user scopes.
     cfg = create_from(
         (ConfigScopePriority.DEFAULTS, InternalConfigScope("_builtin", CONFIG_DEFAULTS)),
         (ConfigScopePriority.DEFAULTS, DirectoryConfigScope(*CONFIGURATION_DEFAULTS_PATH)),
     )
-    yield cfg
 
     # Initial topmost scope is spack (the config scope in the spack instance).
     # It includes the user, site, and system scopes. Environments and command
@@ -1703,25 +1691,16 @@ def create_incremental() -> Generator[Configuration, None, None]:
     # Python packages can register configuration scopes via entry_points
     configuration_paths.extend(config_paths_from_entry_points())
 
-    # add each scope
+    # Each scope's includes are resolved with the scopes pushed before it.
+    #
+    # TODO: think about whether we want to restrict what types of config can be used
+    #     at each level. e.g., we may want to just more forcibly disallow remote
+    #     config (which uses ssl and other config options) for some of the scopes,
+    #     to make the bootstrap issues more explicit, even if allowing config scope
+    #     init to reference lower scopes is more flexible.
     for name, path in configuration_paths:
-        # yield the config incrementally so that each config level's init code can get
-        # data from the one below. This can be tricky, but it enables us to have a
-        # single unified config system.
-        #
-        # TODO: think about whether we want to restrict what types of config can be used
-        #     at each level. e.g., we may want to just more forcibly disallow remote
-        #     config (which uses ssl and other config options) for some of the scopes,
-        #     to make the bootstrap issues more explicit, even if allowing config scope
-        #     init to reference lower scopes is more flexible.
-        yield from cfg.push_scope_incremental(
-            DirectoryConfigScope(name, path), priority=ConfigScopePriority.CONFIG_FILES
-        )
-
-
-def create() -> Configuration:
-    """Create a configuration using create_incremental(), return the last yielded result."""
-    return list(create_incremental())[-1]
+        cfg.push_scope(DirectoryConfigScope(name, path), priority=ConfigScopePriority.CONFIG_FILES)
+    return cfg
 
 
 def flattened_configuration(
@@ -2136,7 +2115,6 @@ def _normalize_input(entry: Union[ScopeWithOptionalPriority, str]) -> ScopeWithP
     return default_priority, DirectoryConfigScope(name, path)
 
 
-@lang.memoized
 def create_from(*scopes_or_paths: Union[ScopeWithOptionalPriority, str]) -> Configuration:
     """Creates a configuration object from the scopes passed in input.
 
