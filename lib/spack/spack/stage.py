@@ -1414,18 +1414,13 @@ def get_checksums_for_versions(
         else:
             version_hashes[version] = result
 
-    with spack.util.parallel.make_concurrent_executor(concurrency) as executor:
+    with spack.util.parallel.make_concurrent_executor(
+        concurrency, shared=(config, client)
+    ) as executor:
         results = [
             (
                 version,
-                executor.submit(
-                    _fetch_and_checksum,
-                    url,
-                    fetch_options,
-                    keep_stage,
-                    config=config,
-                    client=client,
-                ),
+                executor.submit_shared(_fetch_and_checksum_task, url, fetch_options, keep_stage),
             )
             for url, version in search_arguments
         ]
@@ -1447,6 +1442,12 @@ def get_checksums_for_versions(
     tty.debug(f"Checksummed {num_hash} version{'' if num_hash == 1 else 's'} of {package_name}:")
 
     return version_hashes
+
+
+def _fetch_and_checksum_task(shared, url: str, options: Optional[dict], keep_stage: bool):
+    """Calls ``_fetch_and_checksum`` with the configuration and client a worker shares."""
+    config, client = shared
+    return _fetch_and_checksum(url, options, keep_stage, config=config, client=client)
 
 
 def _fetch_and_checksum(

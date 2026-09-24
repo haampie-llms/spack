@@ -40,10 +40,10 @@ install = SpackCommand("install")
 @contextmanager
 def oci_servers(*servers: DummyServer):
     urlopen = create_opener(*servers).open
-    old_opener_for = spack.oci.opener.opener_for
-    spack.oci.opener.opener_for = lambda client: urlopen
+    old_oci_urlopen = spack.oci.opener.oci_urlopen
+    spack.oci.opener.oci_urlopen = lambda client: urlopen  # type: ignore
     yield urlopen
-    spack.oci.opener.opener_for = old_opener_for
+    spack.oci.opener.oci_urlopen = old_oci_urlopen  # type: ignore
 
 
 def test_buildcache_push_command(mutable_database: Database):

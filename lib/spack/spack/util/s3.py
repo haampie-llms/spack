@@ -23,9 +23,6 @@ if TYPE_CHECKING:
 #: Session and client arguments an s3 client is created with, each sorted by name.
 S3ClientKey = Tuple[Tuple[Tuple[str, Any], ...], Tuple[Tuple[str, Any], ...]]
 
-#: Map the arguments an s3 client is created with to the client.
-s3_client_cache: Dict[S3ClientKey, Any] = {}
-
 #: Allowed HTTP request methods
 S3OpenMethod = Literal["get", "head", "GET", "HEAD"]
 
@@ -73,8 +70,8 @@ def _get_s3_session(
     key = (tuple(sorted(s3_connection.items())), tuple(sorted(s3_client_args.items())))
 
     # Did we already create a client for this? Then return it.
-    if key in s3_client_cache:
-        return s3_client_cache[key], url
+    if key in client.s3_clients:
+        return client.s3_clients[key], url
 
     session = Session(**s3_connection)
     # if no access credentials provided above, then access anonymously
@@ -85,7 +82,7 @@ def _get_s3_session(
     s3_client.ClientError = ClientError
 
     # Cache the client.
-    s3_client_cache[key] = s3_client
+    client.s3_clients[key] = s3_client
     return s3_client, url
 
 
