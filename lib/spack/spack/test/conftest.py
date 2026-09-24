@@ -24,7 +24,7 @@ import tempfile
 import textwrap
 import xml.etree.ElementTree
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Generator, List, Optional, Tuple, Union
 
 import pytest
 
@@ -1639,23 +1639,27 @@ def module_configuration(request, mutable_config):
 
 
 @pytest.fixture()
-def mock_gnupghome(monkeypatch):
+def mock_gnupghome(
+    ctx: SpackContext, monkeypatch: pytest.MonkeyPatch
+) -> Generator[str, None, None]:
     # GNU PGP can't handle paths longer than 108 characters (wtf!@#$) so we
     # have to make our own tmp_path with a shorter name than pytest's.
     # This comes up because tmp paths on macOS are already long-ish, and
     # pytest makes them longer.
     short_name_tmpdir = tempfile.mkdtemp()
+    # We must manually set gnupghome here, else tests run in parallel
+    # will all fall back to the system default location and cause
+    # failures when multiple try to init the same location concurrently.
+    # Child processes inherit the variable.
+    monkeypatch.setenv("SPACK_GNUPGHOME", short_name_tmpdir)
+    # GnuPG reads SPACK_GNUPGHOME when it is built
+    monkeypatch.delitem(ctx.__dict__, "gpg", raising=False)
     try:
-        # We must manually set gnupghome here, else tests run in parallel
-        # will all fall back to the system default location and cause
-        # failures when multiple try to init the same location concurrently
-        spack.util.gpg.init(gnupghome=short_name_tmpdir)
+        _ = ctx.gpg.gpg
     except spack.util.gpg.SpackGPGError:
-        if not spack.util.gpg.GPG:
-            pytest.skip("This test requires gpg")
+        pytest.skip("This test requires gpg")
 
-    with spack.util.gpg.gnupghome_override(short_name_tmpdir):
-        yield short_name_tmpdir
+    yield short_name_tmpdir
 
     # clean up, since we are doing this manually
     # Ignore errors cause we seem to be hitting a bug similar to

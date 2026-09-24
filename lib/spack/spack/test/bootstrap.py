@@ -320,7 +320,7 @@ def test_gpg_status_check(
         mock_executable("gpg2", "echo GPG 2.3.4")
     monkeypatch.setenv("PATH", str(tmp_path / "bin"))
 
-    def _only_gnupg_in_store(exes, query_spec, context):
+    def _only_gnupg_in_store(exes, query_spec, ctx):
         if not gpg_in_store or "gpg2" not in exes:
             return None
         return spack.bootstrap._common.ExecutableInfo(

@@ -147,7 +147,7 @@ def test_buildcache_cmd_smoke_test(tmp_path: pathlib.Path, install_mockery, muta
     buildcache_cmd("list", "-l", "-v")
 
 
-def test_push_and_fetch_keys(mock_gnupghome, tmp_path: pathlib.Path):
+def test_push_and_fetch_keys(mock_gnupghome, tmp_path: pathlib.Path, ctx: SpackContext):
     testpath = str(mock_gnupghome)
 
     mirror = os.path.join(testpath, "mirror")
@@ -160,29 +160,29 @@ def test_push_and_fetch_keys(mock_gnupghome, tmp_path: pathlib.Path):
 
     # dir 1: create a new key, record its fingerprint, and push it to a new
     #        mirror
-    with spack.util.gpg.gnupghome_override(gpg_dir1):
-        spack.util.gpg.create(name="test-key", email="fake@test.key", expires="0", comment=None)
+    gpg1 = spack.util.gpg.Gpg(gpg_dir1, ctx)
+    spack.util.gpg.create(gpg1, name="test-key", email="fake@test.key", expires="0", comment=None)
 
-        keys = spack.util.gpg.public_keys()
-        assert len(keys) == 1
-        fpr = str(keys[0])
+    keys = spack.util.gpg.public_keys(gpg1)
+    assert len(keys) == 1
+    fpr = str(keys[0])
 
-        spack.binary_distribution._url_push_keys(
-            mirror, keys=[fpr], tmpdir=str(tmp_path), update_index=True, **_net()
-        )
+    spack.binary_distribution._url_push_keys(
+        mirror, keys=[fpr], tmpdir=str(tmp_path), update_index=True, gpg=gpg1, **_net()
+    )
 
     # dir 2: import the key from the mirror, and confirm that its fingerprint
     #        matches the one created above
-    with spack.util.gpg.gnupghome_override(gpg_dir2):
-        assert len(spack.util.gpg.public_keys()) == 0
+    gpg2 = spack.util.gpg.Gpg(gpg_dir2, ctx)
+    assert len(spack.util.gpg.public_keys(gpg2)) == 0
 
-        spack.binary_distribution.trust_keys(
-            mirrors=mirrors, yes_to_all=True, install=True, trust=True, force=True, **_net()
-        )
+    spack.binary_distribution.trust_keys(
+        mirrors=mirrors, yes_to_all=True, install=True, trust=True, force=True, gpg=gpg2, **_net()
+    )
 
-        new_keys = spack.util.gpg.public_keys()
-        assert len(new_keys) == 1
-        assert str(new_keys[0]) == fpr
+    new_keys = spack.util.gpg.public_keys(gpg2)
+    assert len(new_keys) == 1
+    assert str(new_keys[0]) == fpr
 
 
 @pytest.mark.maybeslow
@@ -202,7 +202,7 @@ def test_built_spec_cache(install_mockery, tmp_path: pathlib.Path, ctx: SpackCon
 
     for s in [gspec, cspec]:
         results = spack.binary_distribution.get_mirrors_for_spec(
-            s, binary_index=ctx.binary_index, **_net()
+            s, binary_index=ctx.binary_index, gpg=None, **_net()
         )
         assert len(results) == 1
         assert results[0].url == url_util.path_to_file_url(str(tmp_path))
@@ -246,7 +246,9 @@ def test_download_tarball_reports_signature_verification_failure(
         lambda layout_version: MockCacheEntry,
     )
 
-    assert spack.binary_distribution.download_tarball(spec, unsigned=None, **_net()) is None
+    assert (
+        spack.binary_distribution.download_tarball(spec, unsigned=None, gpg=None, **_net()) is None
+    )
 
     output = capfd.readouterr().err
     assert "Failed to verify signature for binary package corge/" in output
@@ -1924,7 +1926,7 @@ def test_select_signing_key_shows_fingerprints(monkeypatch):
     keys = [Key("AAAA"), Key("BBBB")]
     monkeypatch.setattr(spack.util.gpg, "signing_keys", lambda *a: keys)
     with pytest.raises(spack.binary_distribution.PickKeyException, match="AAAA\n  BBBB"):
-        spack.binary_distribution.select_signing_key()
+        spack.binary_distribution.select_signing_key(None)
 
 
 @pytest.mark.parametrize(

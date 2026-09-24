@@ -78,9 +78,9 @@ class MigrationException(spack.error.SpackError):
 
 
 def _migrate_spec_task(shared, *args) -> "MigrateSpecResult":
-    """Calls ``_migrate_spec`` with the configuration and client a worker shares."""
-    config, client = shared
-    return _migrate_spec(*args, config=config, client=client)
+    """Calls ``_migrate_spec`` with the configuration, client and GnuPG a worker shares."""
+    config, client, gpg = shared
+    return _migrate_spec(*args, config=config, client=client, gpg=gpg)
 
 
 def _migrate_spec(
@@ -92,6 +92,7 @@ def _migrate_spec(
     *,
     config: spack.config.Configuration,
     client: web_util.NetworkClient,
+    gpg: Optional[spack.util.gpg.Gpg],
 ) -> MigrateSpecResult:
     """Parallelizable function to migrate a single spec"""
     print_spec = f"{s.name}/{s.dag_hash()[:7]}"
@@ -100,7 +101,7 @@ def _migrate_spec(
 
     v3_cache_class = get_url_buildcache_class(layout_version=3)
     v3_cache_entry = v3_cache_class(
-        mirror_url, s, allow_unsigned=unsigned, config=config, client=client
+        mirror_url, s, allow_unsigned=unsigned, config=config, client=client, gpg=gpg
     )
     exists = v3_cache_entry.exists([BuildcacheComponent.SPEC, BuildcacheComponent.TARBALL])
     v3_cache_entry.destroy()
@@ -148,7 +149,7 @@ def _migrate_spec(
         )
         with open(local_signed_pre_verify, "w", encoding="utf-8") as fd:
             fd.write(spec_contents)
-        if not try_verify(local_signed_pre_verify, config=config):
+        if not try_verify(local_signed_pre_verify, config=config, gpg=gpg):
             return MigrateSpecResult(False, f"Failed to verify signature of {print_spec}")
         with open(local_signed_pre_verify, encoding="utf-8") as fd:
             spec_dict = spack.util.gpg.extract_json_from_clearsig(fd.read())
@@ -256,7 +257,7 @@ def _migrate_spec(
 
     # Possibly sign the manifest
     if not unsigned:
-        manifest_path = sign_file(signing_key, manifest_path)
+        manifest_path = sign_file(signing_key, manifest_path, gpg)
 
     v3_manifest_url = v3_cache_class.get_manifest_url(s, mirror_url)
 
@@ -277,6 +278,7 @@ def migrate(
     config: spack.config.Configuration,
     client: web_util.NetworkClient,
     repo_provider: Optional["spack.repo.RepoProvider"] = None,
+    gpg: Optional[spack.util.gpg.Gpg] = None,
 ) -> None:
     """Perform migration of the given mirror
 
@@ -284,11 +286,13 @@ def migrate(
     will not be re-signed before pushing to the new location.  Otherwise, spack
     will attempt to verify signatures and re-sign specs, and will fail if not
     able to do so.  If delete_existing is True, spack will delete the original
-    contents of the mirror once the migration is complete."""
+    contents of the mirror once the migration is complete. ``gpg`` is required unless
+    ``unsigned``."""
     signing_key = ""
     if not unsigned:
+        assert gpg is not None, "signed migration requires GnuPG"
         try:
-            signing_key = spack.binary_distribution.select_signing_key()
+            signing_key = spack.binary_distribution.select_signing_key(gpg)
         except (
             spack.binary_distribution.NoKeyException,
             spack.binary_distribution.PickKeyException,
@@ -330,7 +334,7 @@ def migrate(
         ]
 
         # Run the tasks in parallel if possible
-        executor = spack.util.parallel.make_concurrent_executor(shared=(config, client))
+        executor = spack.util.parallel.make_concurrent_executor(shared=(config, client, gpg))
         migrate_futures = [
             executor.submit_shared(
                 _migrate_spec_task, spec, mirror_url, tmpdir, unsigned, signing_key
@@ -373,6 +377,7 @@ def migrate(
             if not unsigned:
                 keys_tmpdir = os.path.join(tmpdir, "keys")
                 os.mkdir(keys_tmpdir)
+                assert gpg is not None
                 spack.binary_distribution._url_push_keys(
                     mirror_url,
                     keys=[signing_key],
@@ -380,6 +385,7 @@ def migrate(
                     tmpdir=keys_tmpdir,
                     config=config,
                     client=client,
+                    gpg=gpg,
                 )
         else:
             tty.warn("No specs migrated, did you mean to perform an unsigned migration instead?")

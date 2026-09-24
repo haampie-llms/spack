@@ -323,7 +323,12 @@ def install_from_buildcache(
     try:
         with timer.measure("fetch"):
             tarball_stage = spack.binary_distribution.download_tarball(
-                spec.build_spec, unsigned, mirrors, config=ctx.config, client=ctx.network
+                spec.build_spec,
+                unsigned,
+                mirrors,
+                config=ctx.config,
+                client=ctx.network,
+                gpg=ctx.gpg,
             )
     except spack.binary_distribution.NoConfiguredBinaryMirrors:
         return False

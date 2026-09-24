@@ -73,6 +73,7 @@ def test_buildcache(tmp_path: pathlib.Path, mutable_config: Configuration, ctx: 
         create_args = ["create", "-f", "--rebuild-index", mirror_path, pkghash]
         # Create a private key to sign package with if gpg2 available
         spack.util.gpg.create(
+            ctx.gpg,
             name="test key 1",
             expires="0",
             email="spack@googlegroups.com",

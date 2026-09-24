@@ -9,12 +9,12 @@ import time
 import pytest
 
 import spack.util.gpg
+from spack.context import SpackContext
 
 
 @pytest.fixture()
-def has_socket_dir():
-    spack.util.gpg.init()
-    return bool(spack.util.gpg.SOCKET_DIR)
+def has_socket_dir(ctx: SpackContext):
+    return bool(spack.util.gpg.Gpg(None, ctx).socket_dir)
 
 
 def test_parse_gpg_output_case_one():
@@ -77,7 +77,7 @@ fpr:::::::::ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ:"""
     assert keys[1].fpr == "YYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY"
 
 
-def test_really_long_gnupghome_dir(tmp_path: pathlib.Path, has_socket_dir):
+def test_really_long_gnupghome_dir(tmp_path: pathlib.Path, has_socket_dir, ctx: SpackContext):
     if not has_socket_dir:
         pytest.skip("This test requires /var/run/user/$(id -u)")
 
@@ -89,11 +89,15 @@ def test_really_long_gnupghome_dir(tmp_path: pathlib.Path, has_socket_dir):
     tdir = tdir[:N].rstrip(os.sep)
     tdir += "0" * (N - len(tdir))
 
-    with spack.util.gpg.gnupghome_override(tdir):
-        spack.util.gpg.create(
-            name="Spack testing 1", email="test@spack.io", comment="Spack testing key", expires="0"
-        )
-        spack.util.gpg.glist(True, True)
+    gpg = spack.util.gpg.Gpg(tdir, ctx)
+    spack.util.gpg.create(
+        gpg,
+        name="Spack testing 1",
+        email="test@spack.io",
+        comment="Spack testing key",
+        expires="0",
+    )
+    spack.util.gpg.glist(gpg, True, True)
 
 
 def test_gpg_capabilities_case_insensitvie():
@@ -162,27 +166,28 @@ def test_gpg_key_algorithm():
 
 @pytest.mark.maybeslow
 @pytest.mark.not_on_windows("does not run on windows")
-def test_trust_secret_key_file(tmp_path: pathlib.Path, mock_gnupghome):
+def test_trust_secret_key_file(tmp_path: pathlib.Path, mock_gnupghome, ctx: SpackContext):
     """Verify that `spack gpg trust` can import secret keys from a keyfile."""
     # Create a signing key.
+    gpg = ctx.gpg
     spack.util.gpg.create(
-        name="Spack CI test", email="ci@spack.io", comment="regression test key", expires="0"
+        gpg, name="Spack CI test", email="ci@spack.io", comment="regression test key", expires="0"
     )
-    signing = spack.util.gpg.signing_keys()
+    signing = spack.util.gpg.signing_keys(gpg)
     assert len(signing) == 1, "expected exactly one signing key after create"
     original_fpr = signing[0].fpr
 
     # Export it to file.
     secret_keyfile = str(tmp_path / "secret.gpg")
-    spack.util.gpg.export_keys(secret_keyfile, signing, secret=True)
+    spack.util.gpg.export_keys(gpg, secret_keyfile, signing, secret=True)
 
     # Use gpg.untrust() to remove the key from the keyring.
-    spack.util.gpg.untrust(True, original_fpr)
-    assert spack.util.gpg.signing_keys() == [], "keyring should be empty after untrust"
+    spack.util.gpg.untrust(gpg, True, original_fpr)
+    assert spack.util.gpg.signing_keys(gpg) == [], "keyring should be empty after untrust"
 
     # Use gpg.trust() to re-import the key.
-    spack.util.gpg.trust(secret_keyfile, yes_to_all=True)
-    restored = spack.util.gpg.signing_keys()
+    spack.util.gpg.trust(gpg, secret_keyfile, yes_to_all=True)
+    restored = spack.util.gpg.signing_keys(gpg)
     assert len(restored) == 1, "signing key should be restored after trusting secret key file"
     assert restored[0].fpr == original_fpr, "restored key fingerprint should match original"
 
