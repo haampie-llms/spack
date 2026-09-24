@@ -31,11 +31,9 @@ def patchelf_finder(ctx: "spack.context.SpackContext") -> PatchelfFinder:
 
     @functools.lru_cache(maxsize=None)
     def find() -> Optional[executable.Executable]:
-        import spack.bootstrap
-
         if sys.platform == "darwin":
             return None
-        return spack.bootstrap.ensure_patchelf_in_path_or_raise(ctx)
+        return ctx.ensure_patchelf()
 
     return find
 

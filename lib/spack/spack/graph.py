@@ -40,16 +40,18 @@ kind of like the graph git shows with ``git log --graph``, e.g.
 
 import enum
 import sys
-from typing import List, Optional, Set, TextIO, Tuple
+from typing import TYPE_CHECKING, List, Optional, Set, TextIO, Tuple
 
 import spack.config
-import spack.context
 import spack.deptypes as dt
 import spack.spec
 import spack.tengine
 import spack.traverse
 import spack.util.tty.color
 from spack.solver.input_analysis import create_graph_analyzer
+
+if TYPE_CHECKING:
+    import spack.context
 
 
 def find(seq, predicate):
@@ -539,7 +541,7 @@ class DAGWithDependencyTypes(DotGraphBuilder):
         )
 
 
-def _static_edges(specs, depflag, ctx: spack.context.SpackContext):
+def _static_edges(specs, depflag, ctx: "spack.context.SpackContext"):
     for spec in specs:
         *_, edges = create_graph_analyzer(ctx).possible_dependencies(
             spec.name, expand_virtuals=True, allowed_deps=depflag
@@ -560,7 +562,7 @@ def static_graph_dot(
     depflag: dt.DepFlag = dt.ALL,
     out: Optional[TextIO] = None,
     *,
-    ctx: spack.context.SpackContext,
+    ctx: "spack.context.SpackContext",
 ):
     """Static DOT graph with edges to all possible dependencies.
 

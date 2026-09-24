@@ -4,14 +4,17 @@
 
 import os
 import tempfile
+from typing import TYPE_CHECKING
 
 import spack.binary_distribution
-import spack.context
 import spack.error
 import spack.hooks
 
+if TYPE_CHECKING:
+    import spack.context
 
-def rewire(spliced_spec, ctx: spack.context.SpackContext):
+
+def rewire(spliced_spec, ctx: "spack.context.SpackContext"):
     """Given a spliced spec, this function conducts all the rewiring on all
     nodes in the DAG of that spec, in the store of ``ctx``."""
     store = ctx.store
@@ -27,7 +30,7 @@ def rewire(spliced_spec, ctx: spack.context.SpackContext):
             rewire_node(spec, explicit, ctx)
 
 
-def rewire_node(spec, explicit, ctx: spack.context.SpackContext):
+def rewire_node(spec, explicit, ctx: "spack.context.SpackContext"):
     """This function rewires a single node, worrying only about references to
     its subgraph. Binaries, text, and links are all changed in accordance with
     the splice. The resulting package is then 'installed.'"""

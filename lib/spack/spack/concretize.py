@@ -23,7 +23,6 @@ from typing import (
 import spack.compilers
 import spack.compilers.config
 import spack.config
-import spack.context
 import spack.error
 import spack.hash_lookup
 import spack.repo
@@ -47,6 +46,7 @@ SpecPair = Tuple[Spec, Spec]
 TestsType = Union[bool, Iterable[str]]
 
 if TYPE_CHECKING:
+    import spack.context
     from spack.solver.asp import Solver
     from spack.solver.reuse import SpecFiltersFactory
 
@@ -58,7 +58,7 @@ def _needs_solving(abstract: Spec, concrete: Optional[Spec]) -> bool:
     return concrete is None and not abstract.concrete
 
 
-def ensure_compilers_in_configuration(ctx: spack.context.SpackContext) -> None:
+def ensure_compilers_in_configuration(ctx: "spack.context.SpackContext") -> None:
     """Write the compilers found on the system to packages.yaml, if none are configured.
 
     A solve sees compilers as externals declared in the configuration, so detection has to run
@@ -69,7 +69,7 @@ def ensure_compilers_in_configuration(ctx: spack.context.SpackContext) -> None:
 
 
 def _solver(
-    ctx: spack.context.SpackContext, *, factory: Optional["SpecFiltersFactory"] = None
+    ctx: "spack.context.SpackContext", *, factory: Optional["SpecFiltersFactory"] = None
 ) -> "Solver":
     """Return a solver to concretize with, with the compilers already in the configuration."""
     from spack.solver.asp import Solver
@@ -80,7 +80,7 @@ def _solver(
 
 def _concretize_specs_together(
     abstract_specs: Sequence[Spec],
-    ctx: spack.context.SpackContext,
+    ctx: "spack.context.SpackContext",
     *,
     tests: TestsType = False,
     factory: Optional["SpecFiltersFactory"] = None,
@@ -102,7 +102,7 @@ def _concretize_specs_together(
 
 def _concretize_together(
     spec_list: Sequence[SpecPairInput],
-    ctx: spack.context.SpackContext,
+    ctx: "spack.context.SpackContext",
     *,
     tests: TestsType = False,
     factory: Optional["SpecFiltersFactory"] = None,
@@ -139,7 +139,7 @@ def _concretize_together(
 
 def _concretize_together_when_possible(
     spec_list: Sequence[SpecPairInput],
-    ctx: spack.context.SpackContext,
+    ctx: "spack.context.SpackContext",
     *,
     tests: TestsType = False,
     factory: Optional["SpecFiltersFactory"] = None,
@@ -193,7 +193,7 @@ def _concretize_together_when_possible(
 
 def _concretize_separately(
     spec_list: Sequence[SpecPairInput],
-    ctx: spack.context.SpackContext,
+    ctx: "spack.context.SpackContext",
     *,
     tests: TestsType = False,
     factory: Optional["SpecFiltersFactory"] = None,
@@ -211,8 +211,6 @@ def _concretize_separately(
         ui: frontend to report progress to.
         processes: size of the process pool
     """
-    from spack.bootstrap import ensure_winsdk_external_or_raise
-
     to_concretize = [abstract for abstract, concrete in spec_list if not concrete]
     args = [
         (i, str(abstract), tests, factory)
@@ -225,7 +223,7 @@ def _concretize_separately(
 
     # ensure we don't try to detect winsdk in parallel
     if sys.platform == "win32":
-        ensure_winsdk_external_or_raise(ctx)
+        ctx.ensure_windows_sdk()
 
     # Ensure all the indexes have been built or updated, since
     # otherwise the processes in the pool may timeout on waiting
@@ -267,7 +265,7 @@ def _concretize_separately(
 
 
 def _concretize_task(
-    ctx: spack.context.SpackContext,
+    ctx: "spack.context.SpackContext",
     packed_arguments: Tuple[int, str, TestsType, Optional["SpecFiltersFactory"]],
 ) -> Tuple[int, Spec, float]:
     index, spec_str, tests, factory = packed_arguments
@@ -279,7 +277,7 @@ def _concretize_task(
 
 def concretize_one(
     spec: Union[str, Spec],
-    ctx: spack.context.SpackContext,
+    ctx: "spack.context.SpackContext",
     *,
     tests: TestsType = False,
     factory: Optional["SpecFiltersFactory"] = None,
@@ -301,7 +299,7 @@ def concretize_one(
 
 def _concretize_one(
     spec: Union[str, Spec],
-    ctx: spack.context.SpackContext,
+    ctx: "spack.context.SpackContext",
     *,
     tests: TestsType = False,
     factory: Optional["SpecFiltersFactory"] = None,
@@ -334,7 +332,7 @@ def _concretize_one(
 
 def _solve_one(
     spec: Spec,
-    ctx: spack.context.SpackContext,
+    ctx: "spack.context.SpackContext",
     *,
     tests: TestsType,
     factory: Optional["SpecFiltersFactory"],
@@ -419,7 +417,7 @@ def solve_group(
 
 def concretize_spec_pairs(
     to_concretize: List[SpecPairInput],
-    ctx: spack.context.SpackContext,
+    ctx: "spack.context.SpackContext",
     *,
     tests: TestsType = False,
     ui: Optional[ConcretizerUI] = None,
@@ -447,7 +445,7 @@ def concretize_spec_pairs(
 
 def _dispatch_concretization(
     to_concretize: List[SpecPairInput],
-    ctx: spack.context.SpackContext,
+    ctx: "spack.context.SpackContext",
     *,
     tests: TestsType,
     ui: ConcretizerUI,

@@ -8,12 +8,11 @@ import os
 import pathlib
 import shutil
 import sys
-from typing import Iterable, List
+from typing import TYPE_CHECKING, Iterable, List
 
 import spack.vendor.archspec.cpu
 
 import spack.config
-import spack.context
 import spack.environment
 import spack.error
 import spack.paths
@@ -27,11 +26,14 @@ from spack.util import tty
 from .config import root_path, spec_for_current_python, store_path
 from .core import _add_externals_if_missing
 
+if TYPE_CHECKING:
+    import spack.context
+
 
 class BootstrapEnvironment(spack.environment.Environment):
     """Environment to install dependencies of Spack for a given interpreter and architecture"""
 
-    def __init__(self, ctx: spack.context.SpackContext) -> None:
+    def __init__(self, ctx: "spack.context.SpackContext") -> None:
         """
         Args:
             ctx: bootstrap context the environment is read and installed in
@@ -172,7 +174,7 @@ def dev_bootstrap_mirror_names() -> List[str]:
     ]
 
 
-def download_and_trust_key(ctx: spack.context.SpackContext):
+def download_and_trust_key(ctx: "spack.context.SpackContext"):
     """Fetches and verifies the validity of Spack's public key"""
     fingerprint_file = (
         pathlib.Path(spack.paths.share_path) / "bootstrap" / "fingerprints" / "public.txt"
@@ -190,7 +192,7 @@ def download_and_trust_key(ctx: spack.context.SpackContext):
         spack.util.gpg.trust(stage.save_filename, fprs=[fingerprint])
 
 
-def ensure_environment_dependencies(ctx: spack.context.SpackContext) -> None:
+def ensure_environment_dependencies(ctx: "spack.context.SpackContext") -> None:
     """Ensure Spack dependencies from the bootstrap environment are installed and ready to use"""
     bootstrap = ctx.bootstrap
     _add_externals_if_missing(bootstrap)

@@ -10,6 +10,7 @@ import spack.binary_distribution
 import spack.cmd
 import spack.compilers.config
 import spack.context
+import spack.detection
 import spack.spec
 from spack.cmd.common import arguments
 from spack.spec import Spec
@@ -82,7 +83,7 @@ def compiler_find(args, ctx):
     add them to Spack's configuration.
     """
     paths = args.add_paths or None
-    new_compilers = spack.compilers.config.find_compilers(
+    new_compilers = spack.detection.find_compilers(
         path_hints=paths, config=ctx.config, repo=ctx.repo, scope=args.scope, max_workers=args.jobs
     )
     if new_compilers:

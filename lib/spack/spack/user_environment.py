@@ -6,12 +6,8 @@ import re
 import sys
 from typing import TYPE_CHECKING
 
-import spack.build_environment
 import spack.config
-import spack.repo
 import spack.spec
-from spack import traverse
-from spack.enums import Context
 from spack.util import environment
 
 if TYPE_CHECKING:
@@ -86,66 +82,3 @@ def project_env_mods(
     for mod in env.env_modifications:
         if isinstance(mod, environment.NameValueModifier):
             mod.value = prefix_regex.sub(lambda m: prefix_to_prefix[m.group(0)], mod.value)
-
-
-def modifications_for_specs(
-    *specs: spack.spec.Spec,
-    ctx: "spack.context.SpackContext",
-    view=None,
-    set_package_py_globals: bool = True,
-):
-    """List of environment (shell) modifications to be processed for spec.
-
-    This list is specific to the location of the spec or its projection in
-    the view.
-
-    Args:
-        specs: spec(s) for which to list the environment modifications
-        ctx: context the packages of the specs are attached from
-        view: view associated with the spec passed as first argument
-        set_package_py_globals: whether or not to set the global variables in the
-            package.py files (this may be problematic when using buildcaches that have
-            been built on a different but compatible OS)
-    """
-    config = ctx.config
-    spack.repo.attach_packages(specs, ctx)
-    env = environment.EnvironmentModifications()
-    topo_ordered = list(
-        traverse.traverse_nodes(specs, root=True, deptype=("run", "link"), order="topo")
-    )
-
-    # Static environment changes (prefix inspections)
-    for s in reversed(topo_ordered):
-        static = environment.inspect_path(
-            s.prefix, prefix_inspections(s.platform, config), exclude=environment.is_system_path
-        )
-        env.extend(static)
-
-    # Dynamic environment changes (setup_run_environment etc)
-    setup_context = spack.build_environment.SetupContext(*specs, context=Context.RUN)
-    if set_package_py_globals:
-        setup_context.set_all_package_py_globals()
-    env.extend(setup_context.get_env_modifications())
-
-    # Apply view projections if any.
-    if view:
-        project_env_mods(*topo_ordered, view=view, env=env, config=config)
-
-    return env
-
-
-def environment_modifications_for_specs(
-    *specs: spack.spec.Spec, view=None, set_package_py_globals: bool = True
-):
-    """Same as :func:`modifications_for_specs`, in the context of the package of the first spec.
-
-    This is part of the package API; library code calls :func:`modifications_for_specs`.
-    """
-    if not specs:
-        return environment.EnvironmentModifications()
-    return modifications_for_specs(
-        *specs,
-        ctx=specs[0].package.context,
-        view=view,
-        set_package_py_globals=set_package_py_globals,
-    )

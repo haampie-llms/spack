@@ -8,18 +8,20 @@ searching the active environment, the installed store, the binary cache, and
 configured externals (via spack.externals_config).
 """
 
-from typing import List
+from typing import TYPE_CHECKING, List
 
 import spack.binary_distribution
-import spack.context
 import spack.error
 import spack.externals_config
 import spack.spec
 from spack.enums import InstallRecordStatus
 
+if TYPE_CHECKING:
+    import spack.context
+
 
 def _matching_external_specs(
-    spec: "spack.spec.Spec", *, context: spack.context.SpackContext
+    spec: "spack.spec.Spec", *, context: "spack.context.SpackContext"
 ) -> List["spack.spec.Spec"]:
     """Return configured externals from packages.yaml that match spec by abstract hash."""
     try:
@@ -35,7 +37,7 @@ def _matching_external_specs(
 
 
 def _lookup_one(
-    spec: "spack.spec.Spec", *, context: spack.context.SpackContext
+    spec: "spack.spec.Spec", *, context: "spack.context.SpackContext"
 ) -> "spack.spec.Spec":
     """Return the single concrete spec matching an abstract-hash spec.
 
@@ -65,7 +67,7 @@ def _lookup_one(
 
 
 def lookup_hash(
-    spec: "spack.spec.Spec", *, context: spack.context.SpackContext
+    spec: "spack.spec.Spec", *, context: "spack.context.SpackContext"
 ) -> "spack.spec.Spec":
     """Return a copy of spec with all abstract-hash nodes replaced by their concrete counterparts.
 
@@ -97,7 +99,7 @@ def lookup_hash(
     return result
 
 
-def replace_hash(spec: "spack.spec.Spec", *, context: spack.context.SpackContext) -> None:
+def replace_hash(spec: "spack.spec.Spec", *, context: "spack.context.SpackContext") -> None:
     """Populate spec in-place by resolving all abstract-hash nodes.
 
     Destructive counterpart to lookup_hash. No-op if spec has no abstract-hash nodes.
