@@ -196,7 +196,7 @@ def test_run(args, ctx):
     tty.msg(f"Spack test {test_suite.name}")
 
     # Set up reporter
-    reporter = args.reporter() if args.log_format else None
+    reporter = args.reporter(ctx) if args.log_format else None
     try:
         test_suite(
             remove_directory=not args.keep_stage,

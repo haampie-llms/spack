@@ -337,7 +337,7 @@ def ci_rebuild(args, ctx):
     cdash_config = ctx.config.get("cdash")
     cdash_handler = None
     if "build-group" in cdash_config:
-        client = web_util.NetworkClient.from_config(ctx.config)
+        client = ctx.network
         cdash_handler = spack_ci.CDashHandler(cdash_config, urlopen=client.urlopen)
         tty.debug("cdash url = {0}".format(cdash_handler.url))
         tty.debug("cdash project = {0}".format(cdash_handler.project))
@@ -613,7 +613,7 @@ def ci_rebuild(args, ctx):
             broken_specs_url = ci_config["broken-specs-url"]
             just_built_hash = job_spec.dag_hash()
             broken_spec_path = url_util.join(broken_specs_url, just_built_hash)
-            client = web_util.NetworkClient.from_config(ctx.config)
+            client = ctx.network
             if web_util.url_exists(broken_spec_path, client=client):
                 tty.msg("Removing {0} from the list of broken specs".format(broken_spec_path))
                 try:
