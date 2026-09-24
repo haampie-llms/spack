@@ -37,11 +37,7 @@ done
     mock_packages.packages_with_tags("compiler")
 
     with monkeypatch.context() as m:
-        for module, attribute in [
-            (spack.config, "CONFIG"),
-            (spack.caches, "MISC_CACHE"),
-            (spack.compilers.libraries, "COMPILER_CACHE"),
-        ]:
+        for module, attribute in [(spack.config, "CONFIG"), (spack.caches, "MISC_CACHE")]:
             m.setattr(module, attribute, UnusableGlobal(f"{module.__name__}.{attribute}"))
 
         # spack.repo.PATH is broken only for detection: CompilerRemover reads it in satisfies

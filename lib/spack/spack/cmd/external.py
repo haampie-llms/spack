@@ -98,7 +98,7 @@ def external_find(args, ctx):
         # this system has a description of installed packages, then we should
         # consume it automatically.
         try:
-            _collect_and_consume_cray_manifest_files()
+            _collect_and_consume_cray_manifest_files(ctx)
         except NoManifestFileError:
             # It's fine to not find any manifest file if we are doing the
             # search implicitly (i.e. as part of 'spack external find')
@@ -130,7 +130,11 @@ def external_find(args, ctx):
         ctx.repo, names=args.packages, tags=args.tags, exclude=args.exclude
     )
     detected_packages = spack.detection.by_path(
-        candidate_packages, repo=ctx.repo, path_hints=args.path, max_workers=args.jobs
+        candidate_packages,
+        repo=ctx.repo,
+        config=ctx.config,
+        path_hints=args.path,
+        max_workers=args.jobs,
     )
 
     new_specs = spack.detection.update_configuration(
@@ -146,7 +150,9 @@ def external_find(args, ctx):
             for virtual_specs in ctx.repo.get_pkg_class(new_spec.name).provided.values()
             for virtual in virtual_specs
         }
-        new_virtuals = spack.detection.set_virtuals_nonbuildable(virtuals, scope=args.scope)
+        new_virtuals = spack.detection.set_virtuals_nonbuildable(
+            virtuals, scope=args.scope, config=ctx.config
+        )
         new_specs.extend(spack.spec.Spec(name) for name in new_virtuals)
 
     if new_specs:
@@ -183,6 +189,7 @@ def packages_to_search_for(
 
 def external_read_cray_manifest(args, ctx):
     _collect_and_consume_cray_manifest_files(
+        ctx,
         manifest_file=args.file,
         manifest_directory=args.directory,
         dry_run=args.dry_run,
@@ -192,6 +199,7 @@ def external_read_cray_manifest(args, ctx):
 
 
 def _collect_and_consume_cray_manifest_files(
+    ctx,
     manifest_file=None,
     manifest_directory=None,
     dry_run=False,
@@ -237,7 +245,7 @@ def _collect_and_consume_cray_manifest_files(
     for path in manifest_files:
         tty.debug("Reading manifest file: " + path)
         try:
-            cray_manifest.read(path, not dry_run)
+            cray_manifest.read(path, not dry_run, ctx=ctx)
         except spack.error.SpackError as e:
             if fail_on_error:
                 raise

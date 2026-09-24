@@ -1452,10 +1452,14 @@ def _return_none(*args):
     return None
 
 
+def _compiler_cache_in_memory() -> spack.compilers.libraries.CompilerCache:
+    return spack.compilers.libraries.CompilerCache()
+
+
 @pytest.fixture(autouse=True)
 def disable_compiler_output_cache(monkeypatch):
     monkeypatch.setattr(
-        spack.compilers.libraries, "COMPILER_CACHE", spack.compilers.libraries.CompilerCache()
+        spack.compilers.libraries, "process_compiler_cache", _compiler_cache_in_memory
     )
 
 
