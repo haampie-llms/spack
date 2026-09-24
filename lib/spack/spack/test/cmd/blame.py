@@ -9,10 +9,10 @@ from pathlib import Path
 import pytest
 
 import spack.cmd.blame
-import spack.config
 import spack.paths
 import spack.util.spack_json as sjson
 from spack.cmd.blame import ensure_full_history, git_prefix, package_repo_root
+from spack.context import SpackContext
 from spack.main import SpackCommand, SpackCommandError
 from spack.repo import RepoDescriptors
 from spack.util.executable import ProcessError
@@ -117,7 +117,7 @@ def test_blame_by_git(mock_packages):
     assert '    homepage = "http://www.mpich.org"' in out
 
 
-def test_repo_root_local_descriptor(mock_git_version_info, monkeypatch):
+def test_repo_root_local_descriptor(mock_git_version_info, monkeypatch, ctx: SpackContext):
     """Sanity check blame's package repository root using a local repo descriptor."""
 
     # create a mock descriptor for the mock local repository
@@ -136,19 +136,19 @@ def test_repo_root_local_descriptor(mock_git_version_info, monkeypatch):
 
     # The parent of the git repository is outside the package repo root
     path = (git_repo_path / "..").resolve()
-    prefix = package_repo_root((path / "..").resolve(), spack.config.CONFIG)
+    prefix = package_repo_root((path / "..").resolve(), ctx.config)
     assert prefix is None
 
     # The base repository directory is the git root of the package repo
-    prefix = package_repo_root(git_repo_path, spack.config.CONFIG)
+    prefix = package_repo_root(git_repo_path, ctx.config)
     assert prefix == git_repo_path
 
     # The file under the base repository directory also has the package git root
-    prefix = package_repo_root(git_repo_path / filename, spack.config.CONFIG)
+    prefix = package_repo_root(git_repo_path / filename, ctx.config)
     assert prefix == git_repo_path
 
 
-def test_repo_root_remote_descriptor(mock_git_version_info, monkeypatch):
+def test_repo_root_remote_descriptor(mock_git_version_info, monkeypatch, ctx: SpackContext):
     """Sanity check blame's package repository root using a remote repo descriptor."""
 
     # create a mock descriptor for the mock local repository
@@ -165,11 +165,11 @@ def test_repo_root_remote_descriptor(mock_git_version_info, monkeypatch):
 
     # The parent of the git repository is outside the package repo root
     path = (git_repo_path / "..").resolve()
-    prefix = package_repo_root((path / "..").resolve(), spack.config.CONFIG)
+    prefix = package_repo_root((path / "..").resolve(), ctx.config)
     assert prefix is None
 
     # The base repository directory is the git root of the package repo
-    prefix = package_repo_root(git_repo_path, spack.config.CONFIG)
+    prefix = package_repo_root(git_repo_path, ctx.config)
     assert prefix == git_repo_path
 
 

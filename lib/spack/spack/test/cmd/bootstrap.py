@@ -10,7 +10,6 @@ import spack.bootstrap
 import spack.bootstrap.core
 import spack.cmd.mirror
 import spack.concretize
-import spack.config
 import spack.environment as ev
 import spack.main
 import spack.spec
@@ -159,26 +158,26 @@ def test_remove_failure_for_non_existing_names(mutable_config):
         _bootstrap("remove", "mock-mirror")
 
 
-def test_remove_and_add_a_source(mutable_config):
+def test_remove_and_add_a_source(mutable_config, ctx: SpackContext):
     # Check we start with a single bootstrapping source
-    sources = spack.bootstrap.core.bootstrapping_sources(spack.config.CONFIG)
+    sources = spack.bootstrap.core.bootstrapping_sources(ctx.config)
     assert len(sources) == 1
 
     # Remove it and check the result
     _bootstrap("remove", "github-actions")
-    sources = spack.bootstrap.core.bootstrapping_sources(spack.config.CONFIG)
+    sources = spack.bootstrap.core.bootstrapping_sources(ctx.config)
     assert not sources
 
     # Add it back and check we restored the initial state
     _bootstrap("add", "github-actions", "$spack/share/spack/bootstrap/github-actions-v2")
-    sources = spack.bootstrap.core.bootstrapping_sources(spack.config.CONFIG)
+    sources = spack.bootstrap.core.bootstrapping_sources(ctx.config)
     assert len(sources) == 1
 
 
 @pytest.mark.maybeslow
 @pytest.mark.not_on_windows("Not supported on Windows (yet)")
 def test_bootstrap_mirror_metadata(
-    mutable_config: Configuration, monkeypatch, tmp_path: pathlib.Path
+    mutable_config: Configuration, monkeypatch, tmp_path: pathlib.Path, ctx: SpackContext
 ):
     """Test that `spack bootstrap mirror` creates a folder that can be ingested by
     `spack bootstrap add`. Here we don't download data, since that would be an
@@ -197,6 +196,5 @@ def test_bootstrap_mirror_metadata(
 
     assert _bootstrap.returncode == 0
     assert any(
-        m["name"] == "test-mirror"
-        for m in spack.bootstrap.core.bootstrapping_sources(spack.config.CONFIG)
+        m["name"] == "test-mirror" for m in spack.bootstrap.core.bootstrapping_sources(ctx.config)
     )

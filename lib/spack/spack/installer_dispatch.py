@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, List, Optional, Set, Union
 
 from spack.vendor.typing_extensions import Literal
 
-import spack.config
 import spack.sandbox
 
 if TYPE_CHECKING:
@@ -43,8 +42,9 @@ def create_installer(
     dependencies_policy: Literal["auto", "cache_only", "source_only"] = "auto",
     create_reports: bool = False,
 ) -> Union["spack.old_installer.PackageInstaller", "spack.installer.PackageInstaller"]:
-    """Create an installer based on the current configuration and feature support."""
-    use_old_installer = spack.config.CONFIG.get("config:installer", "new") == "old"
+    """Create an installer based on the configuration of the packages and feature support."""
+    config = packages[0].context.config
+    use_old_installer = config.get("config:installer", "new") == "old"
 
     if use_old_installer:
         # Python's default filter shows this once per process
@@ -53,7 +53,7 @@ def create_installer(
             "Remove the setting or use config:installer:new instead."
         )
 
-    if spack.config.CONFIG.get("config:sandbox:enable", False):
+    if config.get("config:sandbox:enable", False):
         if use_old_installer:
             raise spack.sandbox.SandboxError(
                 "config:sandbox:enable is only supported with config:installer:new"

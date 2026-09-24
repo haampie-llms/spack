@@ -8,7 +8,6 @@ import stat
 import pytest
 
 import spack.concretize
-import spack.config
 import spack.context
 import spack.package_prefs
 import spack.paths
@@ -23,7 +22,7 @@ from spack.version import Version
 
 
 @pytest.fixture()
-def configure_permissions():
+def configure_permissions(ctx: SpackContext):
     conf = syaml.load_config(
         """\
 all:
@@ -44,7 +43,7 @@ callpath:
     write: world
 """
     )
-    spack.config.CONFIG.set("packages", conf, scope="concretize")
+    ctx.config.set("packages", conf, scope="concretize")
 
     yield
 
@@ -56,7 +55,7 @@ def concretize(abstract_spec, *, ctx: SpackContext):
 def update_packages(pkgname, section, value):
     """Update config and reread package list"""
     conf = {pkgname: {section: value}}
-    spack.config.CONFIG.set("packages", conf, scope="concretize")
+    spack.context.default().config.set("packages", conf, scope="concretize")
 
 
 def assert_variant_values(spec, **variants):

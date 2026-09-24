@@ -1377,7 +1377,9 @@ class BaseModuleFileWriter:
 
         # Set the file permissions of the module to match that of the package
         if os.path.exists(self.layout.filename):
-            fp.set_permissions_by_spec(self.layout.filename, self.spec, config=spack.config.CONFIG)
+            fp.set_permissions_by_spec(
+                self.layout.filename, self.spec, config=self.conf.ctx.config
+            )
 
         # Symlink defaults if needed
         self.update_module_defaults()

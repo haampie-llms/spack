@@ -31,8 +31,7 @@ def spec_for_current_python() -> str:
 def root_path(config: spack.config.Configuration) -> str:
     """Root of all the bootstrap related folders"""
     return spack.config.canonicalize_path(
-        spack.config.CONFIG.get("bootstrap:root", spack.paths.default_user_bootstrap_path),
-        config=spack.config.CONFIG,
+        config.get("bootstrap:root", spack.paths.default_user_bootstrap_path), config=config
     )
 
 

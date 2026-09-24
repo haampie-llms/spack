@@ -1,10 +1,9 @@
 # Copyright Spack Project Developers. See COPYRIGHT file for details.
 #
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
-import pickle
-
 import spack.config
 import spack.context
+import spack.test.utilities
 
 
 def test_process_context_is_one_instance(config):
@@ -13,13 +12,19 @@ def test_process_context_is_one_instance(config):
     assert ctx.network is spack.context.default().network
 
 
-def test_process_context_members_follow_the_process_config(config):
-    network = spack.context.default().network
-    with spack.config.use_configuration():
-        assert spack.context.default().network is not network
-    assert spack.context.default().network is not network
+def test_set_default_replaces_the_process_context(config):
+    previous = spack.context.default()
+    ctx = spack.context.SpackContext(spack.config.create_from())
+    assert spack.context.set_default(ctx) is previous
+    try:
+        assert spack.context.default() is ctx
+    finally:
+        spack.context.set_default(previous)
+    assert spack.context.default() is previous
 
 
-def test_process_context_unpickles_to_the_process_context(config):
-    ctx = spack.context.default()
-    assert pickle.loads(pickle.dumps(ctx)) is ctx
+def test_use_configuration_swaps_the_process_context(config):
+    previous = spack.context.default()
+    with spack.test.utilities.use_configuration() as cfg:
+        assert spack.context.default().config is cfg
+    assert spack.context.default() is previous

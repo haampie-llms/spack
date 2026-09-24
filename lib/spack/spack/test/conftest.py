@@ -83,6 +83,7 @@ from spack.installer import PackageInstaller
 from spack.main import SpackCommand
 from spack.repo import RepoPath
 from spack.store import Store
+from spack.test.utilities import UnusableGlobal
 from spack.util import tty
 from spack.util.filesystem import copy, join_path, mkdirp, remove_linked_tree, working_dir
 from spack.util.pattern import Bunch
@@ -558,7 +559,7 @@ class MockStageRoot:
 def mock_stage(tmp_path_factory: pytest.TempPathFactory, monkeypatch, request):
     """Establish the temporary build_stage for the mock archive."""
     # The approach with this autouse fixture is to replace the stage root
-    # instead of using spack.config.CONFIG.override() to avoid configuration
+    # instead of using spack.context.default().config.override() to avoid configuration
     # conflicts with dozens of tests that rely on other configuration
     # fixtures, such as config.
 
@@ -750,7 +751,7 @@ def _use_test_platform(test_platform, _load_clingo):
     # This is the only context manager used at session scope (see note
     # below for more insight) since we want to use the test platform as
     # a default during tests.
-    with spack.platforms.use_platform(test_platform):
+    with spack.test.utilities.use_platform(test_platform):
         yield
 
 
@@ -783,7 +784,8 @@ def _use_test_platform(test_platform, _load_clingo):
 @pytest.fixture(scope="session")
 def mock_packages_repo():
     yield spack.repo.from_path(
-        spack.paths.mock_packages_path, cache=spack.caches.misc_cache(config=spack.config.CONFIG)
+        spack.paths.mock_packages_path,
+        cache=spack.caches.misc_cache(config=spack.context.default().config),
     )
 
 
@@ -971,7 +973,7 @@ def default_config():
     defaults_path = os.path.join(spack.paths.etc_path, "defaults")
     if sys.platform == "win32":
         defaults_path = os.path.join(defaults_path, "windows")
-    with spack.config.use_configuration(defaults_path) as defaults_config:
+    with spack.test.utilities.use_configuration(defaults_path) as defaults_config:
         yield defaults_config
 
 
@@ -1124,8 +1126,7 @@ def mock_configuration_scopes(configuration_dir):
 @contextlib.contextmanager
 def _use_configuration_and_store(*scopes):
     """Activate config scopes and reset the store so it re-derives from them."""
-    # The process context rebuilds its store when the configuration is replaced
-    with spack.config.use_configuration(*scopes) as cfg:
+    with spack.test.utilities.use_configuration(*scopes) as cfg:
         yield cfg
 
 
@@ -1136,9 +1137,33 @@ def config(mock_configuration_scopes):
         yield config
 
 
+@pytest.fixture(autouse=True)
+def _restore_process_context():
+    """Tests that run ``spack.main`` replace the context of the process: restore it after them."""
+    previous = spack.context._DEFAULT
+    yield
+    spack.context.set_default(previous)
+
+
+#: Fixtures that replace the context of the process with one of another configuration
+_CONFIGURATION_FIXTURES = (
+    "config",
+    "mutable_config",
+    "mutable_empty_config",
+    "default_config",
+    "mock_low_high_config",
+    "mock_missing_dir_include_scopes",
+    "mock_missing_file_include_scopes",
+)
+
+
 @pytest.fixture
-def ctx() -> SpackContext:
-    """The context of the test: a view of the process globals, which fixtures set up."""
+def ctx(request) -> SpackContext:
+    """The context of the test: the context of the process, once the configuration fixtures of
+    the test have set it up."""
+    for name in _CONFIGURATION_FIXTURES:
+        if name in request.fixturenames:
+            request.getfixturevalue(name)
     return spack.context.default()
 
 
@@ -1169,7 +1194,7 @@ def mutable_empty_config(tmp_path_factory: pytest.TempPathFactory, configuration
 @pytest.fixture
 def inactive_config():
     """Returns a factory of Configuration objects that are never activated as the global
-    ``spack.config.CONFIG``, to test that code uses the configuration it is given.
+    ``spack.context.default().config``, to test that code uses the configuration it is given.
     """
 
     def _factory(data: Dict[str, Any]) -> spack.config.Configuration:
@@ -1229,7 +1254,7 @@ def mock_low_high_config(tmp_path: Path):
         spack.config.DirectoryConfigScope(name, str(tmp_path / name)) for name in ["low", "high"]
     ]
 
-    with spack.config.use_configuration(*scopes) as config:
+    with spack.test.utilities.use_configuration(*scopes) as config:
         yield config
 
 
@@ -1262,7 +1287,7 @@ def mock_missing_dir_include_scopes(tmp_path: Path):
     includes that do not have representation on the filesystem"""
     scope = create_config_scope(tmp_path, "sub")
 
-    with spack.config.use_configuration(scope) as config:
+    with spack.test.utilities.use_configuration(scope) as config:
         yield config
 
 
@@ -1272,7 +1297,7 @@ def mock_missing_file_include_scopes(tmp_path: Path):
     includes that do not have representation on the filesystem"""
     scope = create_config_scope(tmp_path, "sub.yaml")
 
-    with spack.config.use_configuration(scope) as config:
+    with spack.test.utilities.use_configuration(scope) as config:
         yield config
 
 
@@ -1334,7 +1359,7 @@ def mock_store(
     store_path = _store_dir
     _mock_wsdk_externals = spack.bootstrap.ensure_winsdk_external_or_raise
 
-    with spack.config.use_configuration(*mock_configuration_scopes):
+    with spack.test.utilities.use_configuration(*mock_configuration_scopes):
         with spack.test.utilities.use_store(str(store_path)) as store:
             with spack.test.utilities.use_repositories(mock_packages_repo):
                 try:
@@ -1467,7 +1492,7 @@ def disable_compiler_output_cache(monkeypatch):
 def install_mockery(temporary_store: spack.store.Store, mutable_config, mock_packages):
     """Hooks a fake install directory, DB, and stage directory into Spack."""
     # We use a fake package, so temporarily disable checksumming
-    with spack.config.CONFIG.override("config:checksum", False):
+    with spack.context.default().config.override("config:checksum", False):
         yield
 
     # Wipe out any cached prefix failure locks (associated with the session-scoped mock archive)
@@ -1616,7 +1641,7 @@ class ConfigUpdate:
         file = os.path.join(self.root_for_conf, filename + ".yaml")
         with open(file, encoding="utf-8") as f:
             config_settings = syaml.load_config(f)
-        spack.config.CONFIG.set("modules:default", config_settings)
+        spack.context.default().config.set("modules:default", config_settings)
 
 
 @pytest.fixture()
@@ -2504,7 +2529,7 @@ def shell_as(shell):
 @pytest.fixture()
 def nullify_globals(request, monkeypatch):
     ensure_configuration_fixture_run_before(request)
-    monkeypatch.setattr(spack.config, "CONFIG", None)
+    monkeypatch.setattr(spack.context, "_DEFAULT", UnusableGlobal("spack.context.default()"))
 
 
 def pytest_runtest_setup(item):

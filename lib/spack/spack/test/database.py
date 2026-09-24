@@ -284,7 +284,7 @@ def test_recursive_upstream_dbs(
         db_a.add(spec["x"])
 
         upstream_dbs_from_scratch = spack.store._construct_upstream_dbs_from_install_roots(
-            [roots[1], roots[2]], config=spack.config.CONFIG
+            [roots[1], roots[2]], config=ctx.config
         )
         db_a_from_scratch = Database(roots[0], upstream_dbs=upstream_dbs_from_scratch)
 
@@ -641,7 +641,7 @@ class ReadModify:
     """
 
     def __call__(self):
-        # Runs in a child process where the global store is legitimately re-established.
+        # Runs in a child process, which receives the context of the test
         db = spack.context.default().store.db
         # check that other process can read DB
         _check_db_sanity(db)
@@ -650,7 +650,9 @@ class ReadModify:
 
 
 def test_030_db_sanity_from_another_process(mutable_database):
-    spack_process = spack.subprocess_context.SpackTestProcess(ReadModify())
+    spack_process = spack.subprocess_context.SpackTestProcess(
+        ReadModify(), context=spack.context.default()
+    )
     p = spack_process.create()
     p.start()
     p.join()

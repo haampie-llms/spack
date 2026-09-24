@@ -178,7 +178,7 @@ def spec(request):
         "cannonlake-preference",
     ]
 )
-def current_host(request, monkeypatch):
+def current_host(request, monkeypatch, ctx: SpackContext):
     # is_preference is not empty if we want to supply the
     # preferred target via packages.yaml
     cpu, _, is_preference = request.param.partition("-")
@@ -194,7 +194,7 @@ def current_host(request, monkeypatch):
     else:
         target = spack.vendor.archspec.cpu.TARGETS["sapphirerapids"]
         monkeypatch.setattr(spack.vendor.archspec.cpu, "host", lambda: target)
-        with spack.config.CONFIG.override("packages:all", {"target": [cpu]}):
+        with ctx.config.override("packages:all", {"target": [cpu]}):
             yield target
 
 
@@ -5603,7 +5603,7 @@ packages:
 def test_specs_from_mirror_warns_when_index_missing(monkeypatch, ctx: SpackContext):
     """Tests that we get a warning when a binary mirror has no index."""
     binary_index = spack.binary_distribution.BinaryIndexCache(
-        config=spack.config.CONFIG, client=ctx.network
+        config=ctx.config, client=ctx.network
     )
 
     def fake_update():
@@ -6122,11 +6122,11 @@ def test_concretize_one_reports_an_already_concrete_spec_as_no_work(
 
 
 #: The process globals a SpackContext replaces, as (module, attribute) pairs.
-_CONTEXT_GLOBALS = [(spack.config, "CONFIG")]
+_CONTEXT_GLOBALS = [(spack.context, "_DEFAULT")]
 
 
 @pytest.fixture()
-def break_globals(monkeypatch):
+def break_globals(monkeypatch, ctx: SpackContext):
     """Returns a context manager making every process global in ``_CONTEXT_GLOBALS`` raise.
 
     It is a context manager rather than a plain fixture so a test can break the globals after
@@ -6258,7 +6258,7 @@ def test_concretization_cache_reads_no_global(
             "concretizer:concretization_cache",
             {"enable": True, "url": "$env/concretization", "entry_limit": 10},
         )
-        context = SpackContext(spack.config.CONFIG)
+        context = SpackContext(ctx.config)
 
         with break_globals():
             solver = spack.solver.asp.Solver(context=context)
@@ -6318,7 +6318,7 @@ def test_develop_specs_read_no_global(
         mutable_config.set(
             "develop", {"develop-test": {"spec": "develop-test@develop", "path": str(develop_dir)}}
         )
-        context = SpackContext(spack.config.CONFIG, environment=env)
+        context = SpackContext(ctx.config, environment=env)
 
         with break_globals():
             result = spack.solver.asp.Solver(context=context).solve([Spec("develop-test@develop")])

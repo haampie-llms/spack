@@ -36,7 +36,7 @@ import pathlib
 import pytest
 
 import spack.concretize
-import spack.config
+import spack.context
 import spack.environment as ev
 import spack.paths
 import spack.spec
@@ -55,7 +55,7 @@ def test_repo(mutable_config, monkeypatch, mock_stage):
 
 def update_concretize_scope(conf_str, section):
     conf = syaml.load_config(conf_str)
-    spack.config.CONFIG.set(section, conf[section], scope="concretize")
+    spack.context.default().config.set(section, conf[section], scope="concretize")
 
 
 def test_mix_spec_and_requirements(concretize_scope, test_repo, ctx: SpackContext):

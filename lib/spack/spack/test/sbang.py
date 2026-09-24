@@ -16,7 +16,6 @@ import tempfile
 
 import pytest
 
-import spack.config
 import spack.context
 import spack.store
 import spack.test.utilities
@@ -288,7 +287,7 @@ def test_shebang_handles_non_writable_files(script_dir, sbang_line, ctx: SpackCo
 
 
 @pytest.fixture(scope="function")
-def configure_group_perms():
+def configure_group_perms(ctx: SpackContext):
     # On systems with remote groups, the primary user group may be remote
     # and grp does not act on remote groups.
     # To ensure we find a group we can operate on, we get take the first group
@@ -305,13 +304,13 @@ all:
     group: {0}
 """.format(group_name)
     )
-    spack.config.CONFIG.set("packages", conf, scope="user")
+    ctx.config.set("packages", conf, scope="user")
 
     yield
 
 
 @pytest.fixture(scope="function")
-def configure_user_perms():
+def configure_user_perms(ctx: SpackContext):
     conf = syaml.load_config(
         """\
 all:
@@ -320,7 +319,7 @@ all:
     write: user
 """
     )
-    spack.config.CONFIG.set("packages", conf, scope="user")
+    ctx.config.set("packages", conf, scope="user")
 
     yield
 

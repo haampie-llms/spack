@@ -11,6 +11,7 @@ from typing import Any, Dict, Generator, List, Optional, Tuple, Union
 
 import spack.config
 import spack.context
+import spack.platforms
 import spack.repo
 import spack.store
 from spack.concretize_ui import ConcretizerUI, SolveKind
@@ -177,3 +178,34 @@ def use_repositories(
         new_repo.disable()
         ctx.__dict__["repo"] = old_repo
         old_repo.enable()
+
+
+@contextlib.contextmanager
+def use_configuration(
+    *scopes_or_paths: Union["spack.config.ScopeWithOptionalPriority", str],
+) -> Generator[spack.config.Configuration, None, None]:
+    """Make a context with the configuration of the scopes passed as arguments the context of the
+    process within the context manager."""
+    config = spack.config.create_from(*scopes_or_paths)
+    previous = spack.context.set_default(spack.context.SpackContext(config))
+    try:
+        yield config
+    finally:
+        spack.context.set_default(previous)
+
+
+@contextlib.contextmanager
+def use_platform(
+    new_platform: spack.platforms.Platform,
+) -> Generator[spack.platforms.Platform, None, None]:
+    """Use ``new_platform`` as the host platform within the context manager."""
+    assert isinstance(new_platform, spack.platforms.Platform), f'"{new_platform}" is no Platform'
+    original = spack.platforms.host
+    spack.platforms.host = spack.platforms._PickleableCallable(new_platform)
+    # Configuration scopes and caches depend on the platform
+    spack.context.default().config.clear_caches()
+    try:
+        yield new_platform
+    finally:
+        spack.platforms.host = original
+        spack.context.default().config.clear_caches()

@@ -4,33 +4,23 @@
 """Used to test correct application of config line scopes in various cases.
 
 The option `config:cache` is supposed to be False, and overridden to True
-from the command line.
+from the command line. Run with `spack python`, which provides the context as `ctx`.
 """
 
 import multiprocessing as mp
 
-import spack.config
-import spack.subprocess_context
 
-
-def show_config(serialized_state):
-    serialized_state.restore()
-    result = spack.config.CONFIG.get("config:ccache")
+def show_config(ctx):
+    result = ctx.config.get("config:ccache")
     if result is not True:
         raise RuntimeError(f"Expected config:ccache:true, but got {result}")
 
 
 if __name__ == "__main__":
-    print("Testing spawn")
-    ctx = mp.get_context("spawn")
-    serialized_state = spack.subprocess_context.GlobalStateMarshaler(ctx=ctx)
-    p = ctx.Process(target=show_config, args=(serialized_state,))
-    p.start()
-    p.join()
-
-    print("Testing fork")
-    ctx = mp.get_context("fork")
-    serialized_state = spack.subprocess_context.GlobalStateMarshaler(ctx=ctx)
-    p = ctx.Process(target=show_config, args=(serialized_state,))
-    p.start()
-    p.join()
+    for method in ("spawn", "fork"):
+        print(f"Testing {method}")
+        p = mp.get_context(method).Process(target=show_config, args=(ctx,))  # noqa: F821
+        p.start()
+        p.join()
+        if p.exitcode != 0:
+            raise SystemExit(p.exitcode)

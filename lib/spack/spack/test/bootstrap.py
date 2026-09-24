@@ -17,6 +17,7 @@ import spack.bootstrap.status
 import spack.compilers.config
 import spack.concretize
 import spack.config
+import spack.context
 import spack.database
 import spack.environment
 import spack.error
@@ -563,7 +564,7 @@ class _RecordingInstaller:
         return self
 
     def install(self) -> None:
-        self.mirrors_when_installing = spack.config.CONFIG.get("mirrors")
+        self.mirrors_when_installing = spack.context.default().config.get("mirrors")
 
 
 class _FakeConcreteSpec:

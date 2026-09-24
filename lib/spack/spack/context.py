@@ -191,6 +191,10 @@ class SpackContext:
 
         spack.bootstrap.ensure_winsdk_external_or_raise(self)
 
+    def make_default(self) -> None:
+        """Make this the context of the process (transitional)."""
+        set_default(self)
+
     def share(self, other: "SpackContext", *members: str) -> None:
         """Use the given members of ``other`` instead of building them from ``config``."""
         for member in members:
@@ -271,67 +275,23 @@ class SpackContext:
         self.__dict__.update(state)
 
 
-class _ProcessContext(SpackContext):
-    """The context of the process. Its configuration is the process global ``CONFIG``, read at
-    each access; its other members are built once per process configuration.
-
-    This is transitional: it goes away together with ``CONFIG``.
-    """
-
-    def __init__(self) -> None:
-        self.is_bootstrap = False
-        self.gpg_home = None
-        self.environment_error = None
-        self._environment = None
-        self._before_activation = {}
-        #: Configuration the members in ``__dict__`` were built from
-        self._built_from: Optional[object] = None
-
-    def _drop_members_of_other_config(self, config: Optional[object]) -> None:
-        if config is not self._built_from:
-            for name in _OWN_MEMBERS:
-                self.__dict__.pop(name, None)
-            self._built_from = config
-
-    @property
-    def config(self) -> "spack.config.Configuration":
-        import spack.config
-        from spack.util.lang import ensure_unwrapped
-
-        config = ensure_unwrapped(spack.config.CONFIG)
-        self._drop_members_of_other_config(config)
-        return spack.config.CONFIG
-
-    def _set_environment(self, env: Optional["spack.environment.Environment"]) -> None:
-        import spack.config
-        from spack.util.lang import ensure_unwrapped
-
-        self._environment = env
-        # Write through the singleton, so code holding an unwrapped reference sees it
-        ensure_unwrapped(spack.config.CONFIG).env_path = env.path if env is not None else None
-
-    def __reduce__(self):
-        return default, ()
-
-
-#: Members the process context builds itself, instead of reading them from the globals
-_OWN_MEMBERS = tuple(
-    name
-    for name, value in vars(SpackContext).items()
-    if isinstance(value, _member) and name not in vars(_ProcessContext)
-)
-
-_PROCESS_CONTEXT = _ProcessContext()
+#: The context of the process (transitional)
+_DEFAULT: Optional[SpackContext] = None
 
 
 def default() -> SpackContext:
-    """Return the context of the process (transitional)."""
-    import spack.config
-    from spack.util.lang import Singleton
+    """Return the context of the process (transitional): the one ``spack.main`` runs the command
+    in, or else one with the configuration of ``spack.config.create()``."""
+    global _DEFAULT
+    if _DEFAULT is None:
+        import spack.config
 
-    # Do not create the process configuration just to find out whether it changed
-    config = spack.config.CONFIG
-    _PROCESS_CONTEXT._drop_members_of_other_config(
-        config._instance if isinstance(config, Singleton) else config
-    )
-    return _PROCESS_CONTEXT
+        _DEFAULT = SpackContext(spack.config.create())
+    return _DEFAULT
+
+
+def set_default(ctx: Optional[SpackContext]) -> Optional[SpackContext]:
+    """Make ``ctx`` the context of the process, and return the previous one (transitional)."""
+    global _DEFAULT
+    previous, _DEFAULT = _DEFAULT, ctx
+    return previous

@@ -14,7 +14,6 @@ import re
 import pytest
 
 import spack.concretize
-import spack.config
 import spack.context
 import spack.package_base
 import spack.spec
@@ -42,7 +41,7 @@ def assign_versions(spec_str: str) -> spack.spec.Spec:
         spack.spec.Spec(spec_str),
         repo=spack.context.default().repo,
         misc_cache=spack.context.default().misc_cache,
-        config=spack.config.CONFIG,
+        config=spack.context.default().config,
     )
 
 

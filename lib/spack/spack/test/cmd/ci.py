@@ -16,7 +16,6 @@ import spack.binary_distribution
 import spack.cmd
 import spack.cmd.ci
 import spack.concretize
-import spack.config
 import spack.environment as ev
 import spack.main
 import spack.paths
@@ -949,7 +948,7 @@ spack:
             # Validate resulting buildcache (database) index
             layout_version = spack.binary_distribution.CURRENT_BUILD_CACHE_LAYOUT_VERSION
             mirror_metadata = spack.binary_distribution.MirrorMetadata(mirror_url, layout_version)
-            client = spack.util.web.NetworkClient.from_config(spack.config.CONFIG)
+            client = spack.util.web.NetworkClient.from_config(ctx.config)
             index_fetcher = spack.binary_distribution.DefaultIndexHandler(
                 mirror_metadata, None, urlopen=client.urlopen, config=ctx.config, client=client
             )
@@ -2143,7 +2142,7 @@ def test_ci_validate_standard_versions_valid(
     version_list = [spack.version.StandardVersion.from_string(v) for v in versions]
 
     assert spack.cmd.ci.validate_standard_versions(
-        pkg, version_list, spack.config.CONFIG, client=ctx.network
+        pkg, version_list, ctx.config, client=ctx.network
     )
 
     out, err = capfd.readouterr()
@@ -2160,9 +2159,7 @@ def test_ci_validate_standard_versions_invalid(
     version_list = [spack.version.StandardVersion.from_string(v) for v in versions]
 
     assert (
-        spack.cmd.ci.validate_standard_versions(
-            pkg, version_list, spack.config.CONFIG, client=ctx.network
-        )
+        spack.cmd.ci.validate_standard_versions(pkg, version_list, ctx.config, client=ctx.network)
         is False
     )
 
@@ -2180,9 +2177,7 @@ def test_ci_validate_standard_versions_invalid_url(
     version_list = [spack.version.StandardVersion.from_string(v) for v in versions]
 
     assert (
-        spack.cmd.ci.validate_standard_versions(
-            pkg, version_list, spack.config.CONFIG, client=ctx.network
-        )
+        spack.cmd.ci.validate_standard_versions(pkg, version_list, ctx.config, client=ctx.network)
         is False
     )
 
@@ -2202,9 +2197,7 @@ def test_ci_validate_standard_versions_invalid_both(
     version_list = [spack.version.StandardVersion.from_string(v) for v in versions]
 
     assert (
-        spack.cmd.ci.validate_standard_versions(
-            pkg, version_list, spack.config.CONFIG, client=ctx.network
-        )
+        spack.cmd.ci.validate_standard_versions(pkg, version_list, ctx.config, client=ctx.network)
         is False
     )
 
@@ -2230,9 +2223,7 @@ def test_ci_validate_git_versions_valid(
     monkeypatch.setattr(pkg_class, "git", repo_path)
     monkeypatch.setattr(pkg_class, "versions", version_commit_dict)
 
-    assert spack.cmd.ci.validate_git_versions(
-        pkg, version_list, spack.config.CONFIG, client=ctx.network
-    )
+    assert spack.cmd.ci.validate_git_versions(pkg, version_list, ctx.config, client=ctx.network)
 
     out, err = capfd.readouterr()
     for version in version_list:
@@ -2257,9 +2248,7 @@ def test_ci_validate_git_versions_bad_tag(
     monkeypatch.setattr(pkg_class, "versions", version_commit_dict)
 
     assert (
-        spack.cmd.ci.validate_git_versions(
-            pkg, version_list, spack.config.CONFIG, client=ctx.network
-        )
+        spack.cmd.ci.validate_git_versions(pkg, version_list, ctx.config, client=ctx.network)
         is False
     )
 
@@ -2290,9 +2279,7 @@ def test_ci_validate_git_versions_invalid(
     monkeypatch.setattr(pkg_class, "versions", version_commit_dict)
 
     assert (
-        spack.cmd.ci.validate_git_versions(
-            pkg, version_list, spack.config.CONFIG, client=ctx.network
-        )
+        spack.cmd.ci.validate_git_versions(pkg, version_list, ctx.config, client=ctx.network)
         is False
     )
 

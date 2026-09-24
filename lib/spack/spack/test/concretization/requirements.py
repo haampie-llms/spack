@@ -7,6 +7,7 @@ import pytest
 
 import spack.concretize
 import spack.config
+import spack.context
 import spack.error
 import spack.installer
 import spack.package_base
@@ -29,7 +30,7 @@ from spack.util.url import path_to_file_url
 
 def update_packages_config(conf_str):
     conf = syaml.load_config(conf_str)
-    spack.config.CONFIG.set("packages", conf["packages"], scope="concretize")
+    spack.context.default().config.set("packages", conf["packages"], scope="concretize")
 
 
 @pytest.fixture
