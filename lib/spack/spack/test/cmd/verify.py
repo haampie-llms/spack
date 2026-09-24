@@ -18,6 +18,7 @@ import spack.util.executable
 import spack.util.filesystem as fs
 import spack.util.spack_json as sjson
 import spack.verify
+from spack.context import SpackContext
 from spack.main import SpackCommand, SpackCommandError
 from spack.spec import Spec
 
@@ -75,10 +76,12 @@ def test_single_file_verify_cmd(tmp_path: pathlib.Path):
     assert sorted(errors) == sorted(expected)
 
 
-def test_single_spec_verify_cmd(mock_packages, mock_archive, mock_fetch, install_mockery):
+def test_single_spec_verify_cmd(
+    mock_packages, mock_archive, mock_fetch, install_mockery, ctx: SpackContext
+):
     # Test the verify command interface to verify a single spec
     install("--fake", "libelf")
-    s = spack.concretize.concretize_one("libelf")
+    s = spack.concretize.concretize_one("libelf", ctx)
     prefix = s.prefix
     hash = s.dag_hash()
 
@@ -101,9 +104,9 @@ def test_single_spec_verify_cmd(mock_packages, mock_archive, mock_fetch, install
 
 @pytest.mark.requires_executables("gcc")
 @skip_unless_linux
-def test_libraries(tmp_path: pathlib.Path, install_mockery, mock_fetch):
+def test_libraries(tmp_path: pathlib.Path, install_mockery, mock_fetch, ctx: SpackContext):
     gcc = spack.util.executable.which("gcc", required=True)
-    s = spack.concretize.concretize_one("libelf")
+    s = spack.concretize.concretize_one("libelf", ctx)
     spack.installer.PackageInstaller([s.package], fake=True).install()
 
     # There are no ELF files so the verification should pass

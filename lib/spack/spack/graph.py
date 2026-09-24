@@ -538,9 +538,9 @@ class DAGWithDependencyTypes(DotGraphBuilder):
         )
 
 
-def _static_edges(specs, depflag):
+def _static_edges(specs, depflag, ctx: spack.context.SpackContext):
     for spec in specs:
-        *_, edges = create_graph_analyzer(spack.context.default()).possible_dependencies(
+        *_, edges = create_graph_analyzer(ctx).possible_dependencies(
             spec.name, expand_virtuals=True, allowed_deps=depflag
         )
 
@@ -555,7 +555,11 @@ def _static_edges(specs, depflag):
 
 
 def static_graph_dot(
-    specs: List[spack.spec.Spec], depflag: dt.DepFlag = dt.ALL, out: Optional[TextIO] = None
+    specs: List[spack.spec.Spec],
+    depflag: dt.DepFlag = dt.ALL,
+    out: Optional[TextIO] = None,
+    *,
+    ctx: spack.context.SpackContext,
 ):
     """Static DOT graph with edges to all possible dependencies.
 
@@ -563,10 +567,11 @@ def static_graph_dot(
         specs: abstract specs to be represented
         depflag: dependency types to consider
         out: optional output stream. If None sys.stdout is used
+        ctx: configuration and repositories the possible dependencies are computed from
     """
     out = out or sys.stdout
     builder = StaticDag()
-    for edge in _static_edges(specs, depflag):
+    for edge in _static_edges(specs, depflag, ctx):
         builder.visit(edge)
     out.write(builder.render())
 

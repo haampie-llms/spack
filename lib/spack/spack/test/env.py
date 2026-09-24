@@ -20,6 +20,7 @@ import spack.solver.asp
 import spack.spec
 import spack.util.filesystem as fs
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.enums import ConfigScopePriority
 from spack.environment import SpackEnvironmentConfigError
 from spack.environment.environment import CURRENT_LOCKFILE_VERSION, EnvironmentManifestFile
@@ -361,7 +362,9 @@ def test_environment_pickle(tmp_path: pathlib.Path):
     assert isinstance(env2, ev.Environment)
 
 
-def test_view_projections_expand_env(tmp_path: pathlib.Path, mutable_config, mock_packages):
+def test_view_projections_expand_env(
+    tmp_path: pathlib.Path, mutable_config, mock_packages, ctx: SpackContext
+):
     """``$env`` in view projections is the directory of the environment."""
     (tmp_path / "spack.yaml").write_text(
         """\
@@ -375,7 +378,7 @@ spack:
     )
     (tmp_path / "view").mkdir()
     env = ev.Environment(str(tmp_path))
-    spec = spack.concretize.concretize_one("libelf")
+    spec = spack.concretize.concretize_one("libelf", ctx)
     view = env.default_view.view()
     assert view.get_projection_for_spec(spec) == str(tmp_path / "projected" / "libelf")
 

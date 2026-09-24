@@ -9,7 +9,6 @@ import pytest
 
 import spack.concretize
 import spack.config
-import spack.context
 import spack.main
 import spack.modules
 import spack.modules.lmod
@@ -35,13 +34,10 @@ def ensure_module_files_are_there(mock_packages_repo, mock_store, mock_configura
                 module("tcl", "refresh", "-y")
 
 
-def _module_files(module_type, *specs):
-    specs = [spack.concretize.concretize_one(x) for x in specs]
+def _module_files(module_type, *specs, ctx: SpackContext):
+    specs = [spack.concretize.concretize_one(x, ctx) for x in specs]
     writer_cls = spack.modules.module_types[module_type]
-    return [
-        writer_cls.from_spec(spec, "default", ctx=spack.context.default()).layout.filename
-        for spec in specs
-    ]
+    return [writer_cls.from_spec(spec, "default", ctx=ctx).layout.filename for spec in specs]
 
 
 @pytest.fixture(
@@ -74,7 +70,7 @@ def test_exit_with_failure(database, module_type, failure_args):
 
 
 @pytest.mark.db
-def test_remove_and_add(database, module_type):
+def test_remove_and_add(database, module_type, ctx: SpackContext):
     """Tests adding and removing a tcl module file."""
 
     if module_type == "lmod":
@@ -83,7 +79,7 @@ def test_remove_and_add(database, module_type):
         return
 
     rm_cli_args = ["rm", "-y", "mpileaks"]
-    module_files = _module_files(module_type, "mpileaks")
+    module_files = _module_files(module_type, "mpileaks", ctx=ctx)
     for item in module_files:
         assert os.path.exists(item)
 
@@ -191,8 +187,8 @@ def test_setdefault_command(mutable_database, mutable_config: Configuration, ctx
     other_spec, preferred = "pkg-a@1.0", "pkg-a@2.0"
 
     specs = [
-        spack.concretize.concretize_one(other_spec),
-        spack.concretize.concretize_one(preferred),
+        spack.concretize.concretize_one(other_spec, ctx),
+        spack.concretize.concretize_one(preferred, ctx),
     ]
     PackageInstaller([s.package for s in specs], explicit=True, fake=True).install()
 

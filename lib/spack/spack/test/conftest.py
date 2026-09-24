@@ -1300,7 +1300,7 @@ def _populate(mock_db):
     """
 
     def _install(spec):
-        s = spack.concretize.concretize_one(spec)
+        s = spack.concretize.concretize_one(spec, spack.context.default())
         PackageInstaller([s.package], fake=True, explicit=True).install()
 
     _install("mpileaks ^mpich")
@@ -2658,9 +2658,9 @@ def write_config_file(tmp_path: Path):
 
 
 @pytest.fixture()
-def wrapper_dir(install_mockery):
+def wrapper_dir(install_mockery, ctx: SpackContext):
     """Installs the compiler wrapper and returns the prefix where the script is installed."""
-    wrapper = spack.concretize.concretize_one("compiler-wrapper")
+    wrapper = spack.concretize.concretize_one("compiler-wrapper", ctx)
     wrapper_pkg = wrapper.package
     PackageInstaller([wrapper_pkg], explicit=True).install()
     return wrapper_pkg.bin_dir()

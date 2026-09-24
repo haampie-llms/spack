@@ -85,7 +85,7 @@ class TestPackage:
         del sys.modules["spack.pkg.testing_repo"]
         del sys.modules["spack.pkg.testing_repo.mpich"]
 
-    def test_inheritance_of_directives(self, mock_packages: RepoPath):
+    def test_inheritance_of_directives(self, mock_packages: RepoPath, ctx: SpackContext):
         pkg_cls = mock_packages.get_pkg_class("simple-inheritance")
 
         # Check dictionaries that should have been filled by directives
@@ -97,29 +97,29 @@ class TestPackage:
         assert len(pkg_cls.provided) == 2
 
         # Check that Spec instantiation behaves as we expect
-        s = spack.concretize.concretize_one("simple-inheritance")
+        s = spack.concretize.concretize_one("simple-inheritance", ctx)
         assert "^cmake" in s
         assert "^openblas" in s
         assert "+openblas" in s
         assert "mpi" in s
 
-        s = spack.concretize.concretize_one("simple-inheritance~openblas")
+        s = spack.concretize.concretize_one("simple-inheritance~openblas", ctx)
         assert "^cmake" in s
         assert "^openblas" not in s
         assert "~openblas" in s
         assert "mpi" in s
 
     @pytest.mark.regression("11844")
-    def test_inheritance_of_patches(self):
+    def test_inheritance_of_patches(self, ctx: SpackContext):
         # Will error if inheritor package cannot find inherited patch files
-        _ = spack.concretize.concretize_one("patch-inheritance")
+        _ = spack.concretize.concretize_one("patch-inheritance", ctx)
 
 
 @pytest.mark.regression("2737")
-def test_urls_for_versions(mock_packages, config):
+def test_urls_for_versions(mock_packages, config, ctx: SpackContext):
     """Version directive without a 'url' argument should use default url."""
     for spec_str in ("url-override@0.9.0", "url-override@1.0.0"):
-        s = spack.concretize.concretize_one(spec_str)
+        s = spack.concretize.concretize_one(spec_str, ctx)
         url = s.package.url_for_version("0.9.0")
         assert url == "http://www.anothersite.org/uo-0.9.0.tgz"
 
@@ -149,8 +149,8 @@ def test_custom_cmake_prefix_path(mock_packages, config):
     # ]
 
 
-def test_url_for_version_with_only_overrides(mock_packages, config):
-    s = spack.concretize.concretize_one("url-only-override")
+def test_url_for_version_with_only_overrides(mock_packages, config, ctx: SpackContext):
+    s = spack.concretize.concretize_one("url-only-override", ctx)
 
     # these exist and should just take the URL provided in the package
     assert s.package.url_for_version("1.0.0") == "http://a.example.com/url_override-1.0.0.tar.gz"
@@ -164,8 +164,8 @@ def test_url_for_version_with_only_overrides(mock_packages, config):
     assert s.package.url_for_version("0.7.0") == "http://c.example.com/url_override-0.7.0.tar.gz"
 
 
-def test_url_for_version_with_only_overrides_with_gaps(mock_packages, config):
-    s = spack.concretize.concretize_one("url-only-override-with-gaps")
+def test_url_for_version_with_only_overrides_with_gaps(mock_packages, config, ctx: SpackContext):
+    s = spack.concretize.concretize_one("url-only-override-with-gaps", ctx)
 
     # same as for url-only-override -- these are specific
     assert s.package.url_for_version("1.0.0") == "http://a.example.com/url_override-1.0.0.tar.gz"
@@ -380,27 +380,31 @@ def test_package_version_can_have_sparse_checkout_properties(
     assert fetcher.git_sparse_paths is None
 
 
-def test_package_can_depend_on_commit_of_dependency(mock_packages, config):
-    spec = spack.concretize.concretize_one(Spec("git-ref-commit-dep@1.0.0"))
+def test_package_can_depend_on_commit_of_dependency(mock_packages, config, ctx: SpackContext):
+    spec = spack.concretize.concretize_one(Spec("git-ref-commit-dep@1.0.0"), ctx)
     assert spec.satisfies(f"^git-ref-package commit={'a' * 40}")
     assert "surgical" not in spec["git-ref-package"].variants
 
 
-def test_package_condtional_variants_may_depend_on_commit(mock_packages, config):
-    spec = spack.concretize.concretize_one(Spec("git-ref-commit-dep@develop"))
+def test_package_condtional_variants_may_depend_on_commit(
+    mock_packages, config, ctx: SpackContext
+):
+    spec = spack.concretize.concretize_one(Spec("git-ref-commit-dep@develop"), ctx)
     assert spec.satisfies(f"^git-ref-package commit={'b' * 40}")
     conditional_variant = spec["git-ref-package"].variants.get("surgical", None)
     assert conditional_variant
     assert conditional_variant.value
 
 
-def test_commit_variant_finds_matches_for_commit_versions(mock_packages, config):
+def test_commit_variant_finds_matches_for_commit_versions(
+    mock_packages, config, ctx: SpackContext
+):
     """
     test conditional dependence on `when='commit=<sha>'`
     git-ref-commit-dep variant commit-selector depends on a specific commit of git-ref-package
     that commit is associated with the stable version of git-ref-package
     """
-    spec = spack.concretize.concretize_one(Spec("git-ref-commit-dep+commit-selector"))
+    spec = spack.concretize.concretize_one(Spec("git-ref-commit-dep+commit-selector"), ctx)
     assert spec.satisfies(f"^git-ref-package commit={'c' * 40}")
 
 

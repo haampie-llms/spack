@@ -1868,7 +1868,7 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
         if self.spec._patches_assigned():
             hash_content.extend(
                 ":".join((p.sha256, str(p.level))).encode("utf-8")
-                for p in self.spec._patches_from(repo)
+                for p in self.spec.patches_from(repo)
             )
 
         # package.py contents

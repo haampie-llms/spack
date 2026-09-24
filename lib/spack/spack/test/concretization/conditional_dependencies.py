@@ -5,6 +5,7 @@ import pytest
 
 import spack.concretize
 import spack.spec
+from spack.context import SpackContext
 
 
 @pytest.mark.parametrize(
@@ -58,9 +59,11 @@ import spack.spec
         ("hdf5~mpi %[when='+mpi' virtuals=mpi] zmpi", [], ["%[virtuals=mpi] zmpi", "^mpi"]),
     ],
 )
-def test_conditional_mpi_dependency(abstract_spec, expected, not_expected, config, mock_packages):
+def test_conditional_mpi_dependency(
+    abstract_spec, expected, not_expected, config, mock_packages, ctx: SpackContext
+):
     """Test concretizing conditional mpi dependencies."""
-    concrete = spack.concretize.concretize_one(abstract_spec)
+    concrete = spack.concretize.concretize_one(abstract_spec, ctx)
 
     for x in expected:
         assert concrete.satisfies(x), x
@@ -74,20 +77,22 @@ def test_conditional_mpi_dependency(abstract_spec, expected, not_expected, confi
 @pytest.mark.parametrize("c", [True, False])
 @pytest.mark.parametrize("cxx", [True, False])
 @pytest.mark.parametrize("fortran", [True, False])
-def test_conditional_compilers(c, cxx, fortran, mutable_config, mock_packages, config_two_gccs):
+def test_conditional_compilers(
+    c, cxx, fortran, mutable_config, mock_packages, config_two_gccs, ctx: SpackContext
+):
     """Test concretizing with conditional compilers, using every combination of +~c, +~cxx,
     and +~fortran.
     """
     # Abstract spec parametrized to depend/not on c/cxx/fortran
     # and with conditional dependencies for each on the less preferred gcc
     abstract = spack.spec.Spec(f"conditional-languages c={c} cxx={cxx} fortran={fortran}")
-    concrete_unconstrained = spack.concretize.concretize_one(abstract)
+    concrete_unconstrained = spack.concretize.concretize_one(abstract, ctx)
     abstract.constrain(
         "^[when='%c' virtuals=c]gcc@10.3.1 "
         "^[when='%cxx' virtuals=cxx]gcc@10.3.1 "
         "^[when='%fortran' virtuals=fortran]gcc@10.3.1"
     )
-    concrete = spack.concretize.concretize_one(abstract)
+    concrete = spack.concretize.concretize_one(abstract, ctx)
 
     # We should get the dependency we specified for each language we enabled
     assert concrete.satisfies("%[virtuals=c]gcc@10.3.1") == c

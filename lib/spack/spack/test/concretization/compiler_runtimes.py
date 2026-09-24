@@ -23,7 +23,7 @@ from spack.version import Version
 
 
 def _concretize_with_reuse(*, root_str, reused_str, ctx: SpackContext):
-    reused_spec = spack.concretize.concretize_one(reused_str)
+    reused_spec = spack.concretize.concretize_one(reused_str, ctx)
     external_specs = reusable_external_specs(ctx)
     setup = spack.solver.asp.SpackSolverSetup(tests=False, context=ctx)
     driver = spack.solver.asp.PyclingoDriver()
@@ -41,8 +41,8 @@ def runtime_repo(mutable_config):
         yield mock_repo
 
 
-def test_correct_gcc_runtime_is_injected_as_dependency(runtime_repo):
-    s = spack.concretize.concretize_one("pkg-a%gcc@10.2.1 ^pkg-b%gcc@9.4.0")
+def test_correct_gcc_runtime_is_injected_as_dependency(runtime_repo, ctx: SpackContext):
+    s = spack.concretize.concretize_one("pkg-a%gcc@10.2.1 ^pkg-b%gcc@9.4.0", ctx)
     a, b = s["pkg-a"], s["pkg-b"]
 
     # Both a and b should depend on the same gcc-runtime directly
@@ -54,14 +54,14 @@ def test_correct_gcc_runtime_is_injected_as_dependency(runtime_repo):
 
 @pytest.mark.regression("41972")
 def test_external_nodes_do_not_have_runtimes(
-    runtime_repo, mutable_config: Configuration, tmp_path: pathlib.Path
+    runtime_repo, mutable_config: Configuration, tmp_path: pathlib.Path, ctx: SpackContext
 ):
     """Tests that external nodes don't have runtime dependencies."""
 
     packages_yaml = {"pkg-b": {"externals": [{"spec": "pkg-b@1.0", "prefix": f"{str(tmp_path)}"}]}}
     mutable_config.set("packages", packages_yaml)
 
-    s = spack.concretize.concretize_one("pkg-a%gcc@10.2.1")
+    s = spack.concretize.concretize_one("pkg-a%gcc@10.2.1", ctx)
 
     a, b = s["pkg-a"], s["pkg-b"]
 
@@ -172,9 +172,9 @@ def test_views_can_handle_duplicate_runtime_nodes(
         assert all(not node.satisfies(x) for node in candidate_specs)
 
 
-def test_runtimes_can_be_concretized_as_standalone(runtime_repo):
+def test_runtimes_can_be_concretized_as_standalone(runtime_repo, ctx: SpackContext):
     """Tests that we can concretize a runtime as a standalone"""
-    gcc_runtime = spack.concretize.concretize_one("gcc-runtime")
+    gcc_runtime = spack.concretize.concretize_one("gcc-runtime", ctx)
 
     deps = gcc_runtime.dependencies()
     assert len(deps) == 1
@@ -201,7 +201,7 @@ def test_runtimes_are_not_reused_if_compiler_not_used(
 
 
 @pytest.mark.regression("52375")
-def test_multiple_intel_oneapi_compilers_versions(mutable_config, runtime_repo):
+def test_multiple_intel_oneapi_compilers_versions(mutable_config, runtime_repo, ctx: SpackContext):
     """Tests that multiple installed versions of intel-oneapi-compilers don't interfere with each
     other during concretization.
     """
@@ -228,10 +228,10 @@ def test_multiple_intel_oneapi_compilers_versions(mutable_config, runtime_repo):
         },
     )
 
-    pkga_v1 = spack.concretize.concretize_one("pkg-a %c,cxx=intel-oneapi-compilers@1.0")
+    pkga_v1 = spack.concretize.concretize_one("pkg-a %c,cxx=intel-oneapi-compilers@1.0", ctx)
     assert pkga_v1.satisfies("%intel-oneapi-runtime@1.0"), pkga_v1.tree()
     assert pkga_v1["intel-oneapi-runtime"].satisfies("%gcc-runtime@9.4.0"), pkga_v1.tree()
 
-    pkga_v2 = spack.concretize.concretize_one("pkg-a %c,cxx=intel-oneapi-compilers@2.0")
+    pkga_v2 = spack.concretize.concretize_one("pkg-a %c,cxx=intel-oneapi-compilers@2.0", ctx)
     assert pkga_v2.satisfies("%intel-oneapi-runtime@2.0")
     assert pkga_v2["intel-oneapi-runtime"].satisfies("%gcc-runtime@10.2.1"), pkga_v2.tree()

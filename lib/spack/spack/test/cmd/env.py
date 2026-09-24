@@ -968,11 +968,11 @@ spack:
     assert not any(x.name == "hypre" for x in read.all_specs_generator())
 
 
-def test_lockfile_spliced_specs(environment_from_manifest, install_mockery):
+def test_lockfile_spliced_specs(environment_from_manifest, install_mockery, ctx: SpackContext):
     """Test that an environment can round-trip a spliced spec."""
     # Create a local install for zmpi to splice in
     # Default concretization is not using zmpi
-    zmpi = spack.concretize.concretize_one("zmpi")
+    zmpi = spack.concretize.concretize_one("zmpi", ctx)
     PackageInstaller([zmpi.package], fake=True).install()
 
     e1 = environment_from_manifest(
@@ -1400,7 +1400,7 @@ spack:
 
 
 def test_config_change_existing(
-    mutable_mock_env_path, tmp_path: pathlib.Path, mock_packages, mutable_config
+    mutable_mock_env_path, tmp_path: pathlib.Path, mock_packages, mutable_config, ctx: SpackContext
 ):
     """Test ``config change`` with config in the ``spack.yaml`` as well as an
     included file scope.
@@ -1444,47 +1444,47 @@ spack:
     with e:
         # List of requirements, flip a variant
         config("change", "packages:mpich:require:~debug")
-        test_spec = spack.concretize.concretize_one("mpich")
+        test_spec = spack.concretize.concretize_one("mpich", ctx)
         assert test_spec.satisfies("@3.0.2~debug")
 
         # List of requirements, change the version (in a different scope)
         config("change", "packages:mpich:require:@3.0.3")
-        test_spec = spack.concretize.concretize_one("mpich")
+        test_spec = spack.concretize.concretize_one("mpich", ctx)
         assert test_spec.satisfies("@3.0.3")
 
         # "require:" as a single string, also try specifying
         # a spec string that requires enclosing in quotes as
         # part of the config path
         config("change", 'packages:libelf:require:"@0.8.12:"')
-        spack.concretize.concretize_one("libelf@0.8.12")
+        spack.concretize.concretize_one("libelf@0.8.12", ctx)
         # No need for assert, if there wasn't a failure, we
         # changed the requirement successfully.
 
         # Use change to add a requirement for a package that
         # has no requirements defined
         config("change", "packages:fftw:require:+mpi")
-        test_spec = spack.concretize.concretize_one("fftw")
+        test_spec = spack.concretize.concretize_one("fftw", ctx)
         assert test_spec.satisfies("+mpi")
         config("change", "packages:fftw:require:~mpi")
-        test_spec = spack.concretize.concretize_one("fftw")
+        test_spec = spack.concretize.concretize_one("fftw", ctx)
         assert test_spec.satisfies("~mpi")
         config("change", "packages:fftw:require:@1.0")
-        test_spec = spack.concretize.concretize_one("fftw")
+        test_spec = spack.concretize.concretize_one("fftw", ctx)
         assert test_spec.satisfies("@1.0~mpi")
 
         # Use "--match-spec" to change one spec in a "one_of"
         # list
         config("change", "packages:bowtie:require:@1.2.2", "--match-spec", "@1.2.0")
         # confirm that we can concretize to either value
-        spack.concretize.concretize_one("bowtie@1.3.0")
-        spack.concretize.concretize_one("bowtie@1.2.2")
+        spack.concretize.concretize_one("bowtie@1.3.0", ctx)
+        spack.concretize.concretize_one("bowtie@1.2.2", ctx)
         # confirm that we cannot concretize to the old value
         with pytest.raises(spack.solver.asp.UnsatisfiableSpecError):
-            spack.concretize.concretize_one("bowtie@1.2.0")
+            spack.concretize.concretize_one("bowtie@1.2.0", ctx)
 
 
 def test_config_change_new(
-    mutable_mock_env_path, tmp_path: pathlib.Path, mock_packages, mutable_config
+    mutable_mock_env_path, tmp_path: pathlib.Path, mock_packages, mutable_config, ctx: SpackContext
 ):
     spack_yaml = tmp_path / ev.manifest_name
     spack_yaml.write_text(
@@ -1497,8 +1497,8 @@ spack:
     with ev.Environment(tmp_path):
         config("change", "packages:mpich:require:~debug")
         with pytest.raises(spack.solver.asp.UnsatisfiableSpecError):
-            spack.concretize.concretize_one("mpich+debug")
-        spack.concretize.concretize_one("mpich~debug")
+            spack.concretize.concretize_one("mpich+debug", ctx)
+        spack.concretize.concretize_one("mpich~debug", ctx)
 
     # Now check that we raise an error if we need to add a require: constraint
     # when preexisting config manually specified it as a singular spec
@@ -1512,7 +1512,7 @@ spack:
 """
     )
     with ev.Environment(tmp_path):
-        assert spack.concretize.concretize_one("mpich").satisfies("@3.0.3")
+        assert spack.concretize.concretize_one("mpich", ctx).satisfies("@3.0.3")
         with pytest.raises(spack.error.ConfigError, match="not a list"):
             config("change", "packages:mpich:require:~debug")
 
@@ -1810,7 +1810,7 @@ def test_env_loads(install_mockery, mock_fetch, mock_modules_root):
 
 
 @pytest.mark.disable_clean_stage_check
-def test_stage(mock_stage, mock_fetch, install_mockery):
+def test_stage(mock_stage, mock_fetch, install_mockery, ctx: SpackContext):
     env("create", "test")
     with ev.read("test"):
         add("mpileaks")
@@ -1821,7 +1821,7 @@ def test_stage(mock_stage, mock_fetch, install_mockery):
     root = str(mock_stage)
 
     def check_stage(spec):
-        spec = spack.concretize.concretize_one(spec)
+        spec = spack.concretize.concretize_one(spec, ctx)
         for dep in spec.traverse():
             stage_name = f"{stage_prefix}{dep.name}-{dep.version}-{dep.dag_hash()}"
             if dep.external:
@@ -1913,7 +1913,7 @@ def test_uninstall_removes_from_env(mock_stage, mock_fetch, install_mockery):
     assert not test.user_specs
 
 
-def test_indirect_build_dep(repo_builder: RepoBuilder):
+def test_indirect_build_dep(repo_builder: RepoBuilder, ctx: SpackContext):
     """Simple case of X->Y->Z where Y is a build/link dep and Z is a
     build-only dep. Make sure this concrete DAG is preserved when writing the
     environment out and reading it back.
@@ -1924,7 +1924,7 @@ def test_indirect_build_dep(repo_builder: RepoBuilder):
 
     with spack.repo.use_repositories(repo_builder.root):
         x_spec = Spec("x")
-        x_concretized = spack.concretize.concretize_one(x_spec)
+        x_concretized = spack.concretize.concretize_one(x_spec, ctx)
 
         _env_create("test", with_view=False)
         e = ev.read("test")
@@ -1939,7 +1939,7 @@ def test_indirect_build_dep(repo_builder: RepoBuilder):
         assert x_env_spec == x_concretized
 
 
-def test_store_different_build_deps(repo_builder: RepoBuilder):
+def test_store_different_build_deps(repo_builder: RepoBuilder, ctx: SpackContext):
     r"""Ensure that an environment can store two instances of a build-only
     dependency::
 
@@ -1956,10 +1956,10 @@ def test_store_different_build_deps(repo_builder: RepoBuilder):
 
     with spack.repo.use_repositories(repo_builder.root):
         y_spec = Spec("y ^z@3")
-        y_concretized = spack.concretize.concretize_one(y_spec)
+        y_concretized = spack.concretize.concretize_one(y_spec, ctx)
 
         x_spec = Spec("x ^z@2")
-        x_concretized = spack.concretize.concretize_one(x_spec)
+        x_concretized = spack.concretize.concretize_one(x_spec, ctx)
 
         # Even though x chose a different 'z', the y it chooses should be identical
         # *aside* from the dependency on 'z'.  The dag_hash() will show the difference

@@ -1121,6 +1121,7 @@ def test_ci_rebuild_index(
     install_mockery,
     mock_fetch,
     mock_binary_index,
+    ctx: SpackContext,
 ):
     scratch = tmp_path / "working_dir"
     mirror_dir = scratch / "mirror"
@@ -1149,7 +1150,7 @@ spack:
     with working_dir(tmp_path):
         env_cmd("create", "test", "./spack.yaml")
         with ev.read("test"):
-            concrete_spec = spack.concretize.concretize_one("callpath")
+            concrete_spec = spack.concretize.concretize_one("callpath", ctx)
             with open(tmp_path / "spec.json", "w", encoding="utf-8") as f:
                 f.write(concrete_spec.to_json())
 
@@ -1288,12 +1289,13 @@ def test_ci_generate_read_broken_specs_url(
     mock_packages,
     monkeypatch,
     ci_base_environment,
+    ctx: SpackContext,
 ):
     """Verify that `broken-specs-url` works as intended"""
-    spec_a = spack.concretize.concretize_one("pkg-a")
+    spec_a = spack.concretize.concretize_one("pkg-a", ctx)
     a_dag_hash = spec_a.dag_hash()
 
-    spec_flattendeps = spack.concretize.concretize_one("dependent-install")
+    spec_flattendeps = spack.concretize.concretize_one("dependent-install", ctx)
     flattendeps_dag_hash = spec_flattendeps.dag_hash()
 
     broken_specs_url = tmp_path.as_uri()
@@ -1743,7 +1745,7 @@ spack:
         assert "buildcache-destination" in pipeline_doc["rebuild-index"]["script"][1]
 
 
-def dynamic_mapping_setup(tmp_path: pathlib.Path):
+def dynamic_mapping_setup(tmp_path: pathlib.Path, *, ctx: SpackContext):
     filename = str(tmp_path / "spack.yaml")
     with open(filename, "w", encoding="utf-8") as f:
         f.write(
@@ -1763,7 +1765,7 @@ spack:
 """
         )
 
-    spec_a = spack.concretize.concretize_one("pkg-a")
+    spec_a = spack.concretize.concretize_one("pkg-a", ctx)
 
     return gitlab_generator.get_job_name(spec_a)
 
@@ -1776,6 +1778,7 @@ def test_ci_dynamic_mapping_empty(
     mock_packages,
     ci_base_environment,
     mock_server,
+    ctx: SpackContext,
 ):
     # The test will always return an empty dictionary
     def _urlopen(*args, **kwargs):
@@ -1783,7 +1786,7 @@ def test_ci_dynamic_mapping_empty(
 
     mock_server("https://fake.spack.io/mapper", _urlopen)
 
-    _ = dynamic_mapping_setup(tmp_path)
+    _ = dynamic_mapping_setup(tmp_path, ctx=ctx)
     with working_dir(str(tmp_path)):
         env_cmd("create", "test", "./spack.yaml")
         outputfile = str(tmp_path / ".gitlab-ci.yml")
@@ -1801,6 +1804,7 @@ def test_ci_dynamic_mapping_full(
     mock_packages,
     ci_base_environment,
     mock_server,
+    ctx: SpackContext,
 ):
     def _urlopen(*args, **kwargs):
         return MockHTTPResponse.with_json(
@@ -1812,7 +1816,7 @@ def test_ci_dynamic_mapping_full(
 
     mock_server("https://fake.spack.io/mapper", _urlopen)
 
-    label = dynamic_mapping_setup(tmp_path)
+    label = dynamic_mapping_setup(tmp_path, ctx=ctx)
     with working_dir(str(tmp_path)):
         env_cmd("create", "test", "./spack.yaml")
         outputfile = str(tmp_path / ".gitlab-ci.yml")

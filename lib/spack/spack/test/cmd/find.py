@@ -187,9 +187,9 @@ def test_find_json_deps(database):
 
 
 @pytest.mark.db
-def test_display_json(database, capfd):
+def test_display_json(database, capfd, ctx: SpackContext):
     specs = [
-        spack.concretize.concretize_one(s)
+        spack.concretize.concretize_one(s, ctx)
         for s in ["mpileaks ^zmpi", "mpileaks ^mpich", "mpileaks ^mpich2"]
     ]
 
@@ -203,9 +203,9 @@ def test_display_json(database, capfd):
 
 
 @pytest.mark.db
-def test_display_json_deps(database, capfd):
+def test_display_json_deps(database, capfd, ctx: SpackContext):
     specs = [
-        spack.concretize.concretize_one(s)
+        spack.concretize.concretize_one(s, ctx)
         for s in ["mpileaks ^zmpi", "mpileaks ^mpich", "mpileaks ^mpich2"]
     ]
 
@@ -276,9 +276,9 @@ mpileaks-2.3
 
 
 @pytest.mark.db
-def test_find_format_deps_paths(database, config):
+def test_find_format_deps_paths(database, config, ctx: SpackContext):
     output = find("-dp", "--format", "{name}-{version}", "mpileaks", "^zmpi")
-    mpileaks = spack.concretize.concretize_one("mpileaks ^zmpi")
+    mpileaks = spack.concretize.concretize_one("mpileaks ^zmpi", ctx)
     assert (
         output
         == f"""\
@@ -298,11 +298,11 @@ mpileaks-2.3                   {mpileaks.prefix}
 
 
 @pytest.mark.db
-def test_find_very_long(database, config):
+def test_find_very_long(database, config, ctx: SpackContext):
     output = find("-L", "--no-groups", "mpileaks")
 
     specs = [
-        spack.concretize.concretize_one(s)
+        spack.concretize.concretize_one(s, ctx)
         for s in ["mpileaks ^zmpi", "mpileaks ^mpich", "mpileaks ^mpich2"]
     ]
 

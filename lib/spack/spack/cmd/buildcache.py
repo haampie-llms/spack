@@ -705,7 +705,7 @@ def check_fn(args: argparse.Namespace, ctx):
         tty.msg("No specs provided, exiting.")
         return
 
-    specs = [spack.concretize.concretize_one(s) for s in specs]
+    specs = [spack.concretize.concretize_one(s, ctx) for s in specs]
 
     # Next see if there are any configured binary mirrors
     configured_mirrors = ctx.config.get("mirrors", scope=args.scope)

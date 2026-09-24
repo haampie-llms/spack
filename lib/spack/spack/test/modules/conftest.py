@@ -19,7 +19,7 @@ def modulefile_content(request, ctx: SpackContext):
     def _impl(spec_like, module_set_name="default", explicit=True):
         if isinstance(spec_like, str):
             spec_like = spack.spec.Spec(spec_like)
-        spec = spack.concretize.concretize_one(spec_like)
+        spec = spack.concretize.concretize_one(spec_like, ctx)
         generator = writer_cls.from_spec(spec, module_set_name, explicit, ctx=ctx)
         generator.write(overwrite=True)
         written_module = pathlib.Path(generator.layout.filename)
@@ -36,7 +36,7 @@ def factory(request, mock_modules_root, ctx: SpackContext):
     writer_cls = getattr(request.module, "writer_cls")
 
     def _mock(spec_string, module_set_name="default", explicit=True):
-        spec = spack.concretize.concretize_one(spec_string)
+        spec = spack.concretize.concretize_one(spec_string, ctx)
         return writer_cls.from_spec(spec, module_set_name, explicit, ctx=ctx), spec
 
     return _mock

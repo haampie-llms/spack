@@ -4,6 +4,8 @@
 import itertools
 from typing import Any, Dict, List, NamedTuple, Optional, Union
 
+import spack.context
+import spack.repo
 import spack.spec
 import spack.util.spack_yaml
 import spack.variant
@@ -151,12 +153,15 @@ def _expand_matrix_constraints(matrix_config):
         # Catch exceptions because we want to be able to operate on
         # abstract specs without needing package information
         try:
-            spack.spec.substitute_abstract_variants(test_spec)
+            spack.spec.substitute_abstract_variants(test_spec, repo=spack.repo.PATH)
         except spack.variant.UnknownVariantError:
             pass
 
         # Resolve abstract hashes for exclusion criteria
-        if any(spack.hash_lookup.lookup_hash(test_spec).satisfies(x) for x in excludes):
+        if any(
+            spack.hash_lookup.lookup_hash(test_spec, context=spack.context.default()).satisfies(x)
+            for x in excludes
+        ):
             continue
 
         if sigil:

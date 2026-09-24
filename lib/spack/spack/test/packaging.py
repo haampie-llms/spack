@@ -40,7 +40,7 @@ pytestmark = pytest.mark.not_on_windows("does not run on windows")
 @pytest.mark.usefixtures("install_mockery", "mock_gnupghome", "mock_fetch")
 def test_buildcache(tmp_path: pathlib.Path, mutable_config: Configuration, ctx: SpackContext):
     # Install a test package
-    spec = spack.concretize.concretize_one("trivial-install-test-package")
+    spec = spack.concretize.concretize_one("trivial-install-test-package", ctx)
     PackageInstaller([spec.package], explicit=True).install()
     pkghash = "/" + str(spec.dag_hash(7))
 
@@ -402,19 +402,20 @@ def mock_download(monkeypatch):
     "manual,instr", [(False, False), (False, True), (True, False), (True, True)]
 )
 @pytest.mark.disable_clean_stage_check
-def test_manual_download(mock_download, config, mock_packages, monkeypatch, manual, instr):
+def test_manual_download(
+    mock_download, config, mock_packages, monkeypatch, manual, instr, ctx: SpackContext
+):
     """
     Ensure expected fetcher fail message based on manual download and instr.
     """
 
-    @property
     def _instr(pkg):
         return f"Download instructions for {pkg.spec.name}"
 
-    spec = spack.concretize.concretize_one("pkg-a")
+    spec = spack.concretize.concretize_one("pkg-a", ctx)
     spec.package.manual_download = manual
     if instr:
-        monkeypatch.setattr(spack.package_base.PackageBase, "download_instr", _instr)
+        monkeypatch.setattr(spack.package_base.PackageBase, "download_instr", property(_instr))
 
     expected = spec.package.download_instr if manual else "All fetchers failed"
     with pytest.raises(spack.error.FetchError, match=expected):
@@ -433,16 +434,20 @@ def fetching_not_allowed(monkeypatch):
     monkeypatch.setattr(spack.package_base.PackageBase, "fetcher", FetchingNotAllowed())
 
 
-def test_fetch_without_code_is_noop(config, mock_packages, fetching_not_allowed):
+def test_fetch_without_code_is_noop(
+    config, mock_packages, fetching_not_allowed, ctx: SpackContext
+):
     """do_fetch for packages without code should be a no-op"""
-    pkg = spack.concretize.concretize_one("pkg-a").package
+    pkg = spack.concretize.concretize_one("pkg-a", ctx).package
     pkg.has_code = False
     pkg.do_fetch()
 
 
-def test_fetch_external_package_is_noop(config, mock_packages, fetching_not_allowed):
+def test_fetch_external_package_is_noop(
+    config, mock_packages, fetching_not_allowed, ctx: SpackContext
+):
     """do_fetch for packages without code should be a no-op"""
-    spec = spack.concretize.concretize_one("pkg-a")
+    spec = spack.concretize.concretize_one("pkg-a", ctx)
     spec.external_path = "/some/where"
     assert spec.external
     spec.package.do_fetch()

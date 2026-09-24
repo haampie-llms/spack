@@ -12,6 +12,7 @@ import spack.directives_meta
 import spack.paths
 import spack.repo
 import spack.util.package_hash as ph
+from spack.context import SpackContext
 from spack.repo import RepoPath
 from spack.spec import Spec
 from spack.util.unparse import unparse
@@ -97,9 +98,11 @@ def test_all_same_but_install(mock_packages: RepoPath, config):
     compare_sans_name(mock_packages, False, spec1, spec2)
 
 
-def test_content_hash_all_same_but_patch_contents(mock_packages: RepoPath, config):
-    spec1 = spack.concretize.concretize_one("hash-test1@1.1")
-    spec2 = spack.concretize.concretize_one("hash-test2@1.1")
+def test_content_hash_all_same_but_patch_contents(
+    mock_packages: RepoPath, config, ctx: SpackContext
+):
+    spec1 = spack.concretize.concretize_one("hash-test1@1.1", ctx)
+    spec2 = spack.concretize.concretize_one("hash-test2@1.1", ctx)
     compare_hash_sans_name(mock_packages, False, spec1, spec2)
 
 
@@ -136,13 +139,15 @@ def test_package_hash_of_shadowed_package(mock_packages: RepoPath, config, repo_
         )
 
 
-def test_content_hash_different_variants(mock_packages: RepoPath, config):
-    spec1 = spack.concretize.concretize_one("hash-test1@1.2 +variantx")
-    spec2 = spack.concretize.concretize_one("hash-test2@1.2 ~variantx")
+def test_content_hash_different_variants(mock_packages: RepoPath, config, ctx: SpackContext):
+    spec1 = spack.concretize.concretize_one("hash-test1@1.2 +variantx", ctx)
+    spec2 = spack.concretize.concretize_one("hash-test2@1.2 ~variantx", ctx)
     compare_hash_sans_name(mock_packages, True, spec1, spec2)
 
 
-def test_content_hash_cannot_get_details_from_ast(mock_packages: RepoPath, config):
+def test_content_hash_cannot_get_details_from_ast(
+    mock_packages: RepoPath, config, ctx: SpackContext
+):
     """Packages hash-test1 and hash-test3 would be considered the same
     except that hash-test3 conditionally executes a phase based on
     a "when" directive that Spack cannot evaluate by examining the
@@ -152,19 +157,21 @@ def test_content_hash_cannot_get_details_from_ast(mock_packages: RepoPath, confi
     differ where Spack includes a phase on account of AST-examination
     failure.
     """
-    spec3 = spack.concretize.concretize_one("hash-test1@1.7")
-    spec4 = spack.concretize.concretize_one("hash-test3@1.7")
+    spec3 = spack.concretize.concretize_one("hash-test1@1.7", ctx)
+    spec4 = spack.concretize.concretize_one("hash-test3@1.7", ctx)
     compare_hash_sans_name(mock_packages, False, spec3, spec4)
 
 
-def test_content_hash_all_same_but_archive_hash(mock_packages: RepoPath, config):
-    spec1 = spack.concretize.concretize_one("hash-test1@1.3")
-    spec2 = spack.concretize.concretize_one("hash-test2@1.3")
+def test_content_hash_all_same_but_archive_hash(
+    mock_packages: RepoPath, config, ctx: SpackContext
+):
+    spec1 = spack.concretize.concretize_one("hash-test1@1.3", ctx)
+    spec2 = spack.concretize.concretize_one("hash-test2@1.3", ctx)
     compare_hash_sans_name(mock_packages, False, spec1, spec2)
 
 
-def test_content_hash_parse_dynamic_function_call(mock_packages, config):
-    spec = spack.concretize.concretize_one("hash-test4")
+def test_content_hash_parse_dynamic_function_call(mock_packages, config, ctx: SpackContext):
+    spec = spack.concretize.concretize_one("hash-test4", ctx)
     spec.package.content_hash(repo=spack.repo.PATH)
 
 

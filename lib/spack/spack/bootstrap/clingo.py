@@ -171,7 +171,7 @@ class ClingoBootstrapConcretizer:
         # Tweak it to conform to the host architecture + update the version of a few dependencies
         for node in s.traverse():
             # Clear patches, we'll compute them correctly later
-            node._patches_from(self.repo).clear()
+            node.patches_from(self.repo).clear()
             if "patches" in node.variants:
                 del node.variants["patches"]
 

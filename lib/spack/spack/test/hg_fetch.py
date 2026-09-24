@@ -27,7 +27,13 @@ pytestmark = [
 @pytest.mark.parametrize("type_of_test", ["default", "rev0"])
 @pytest.mark.parametrize("secure", [True, False])
 def test_fetch(
-    type_of_test, secure, mock_hg_repository, config: Configuration, mutable_mock_repo, monkeypatch
+    type_of_test,
+    secure,
+    mock_hg_repository,
+    config: Configuration,
+    mutable_mock_repo,
+    monkeypatch,
+    ctx: SpackContext,
 ):
     """Tries to:
 
@@ -43,7 +49,7 @@ def test_fetch(
     h = mock_hg_repository.hash
 
     # Construct the package under test
-    s = spack.concretize.concretize_one("hg-test")
+    s = spack.concretize.concretize_one("hg-test", ctx)
     monkeypatch.setitem(s.package.versions, Version("hg"), t.args)
 
     # Enter the stage directory and check some properties

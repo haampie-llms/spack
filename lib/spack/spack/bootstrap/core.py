@@ -33,6 +33,7 @@ import spack.binary_distribution
 import spack.compilers.libraries
 import spack.concretize
 import spack.config
+import spack.context
 import spack.detection
 import spack.error
 import spack.installer_dispatch
@@ -69,6 +70,10 @@ ConfigDictionary = Dict[str, Any]
 
 #: Whatever a bootstrapper's store probe returns on success
 ResultT = TypeVar("ResultT")
+
+
+def _concretize(spec: "spack.spec.Spec") -> "spack.spec.Spec":
+    return spack.concretize.concretize_one(spec, spack.context.default())
 
 
 class BootstrapRequest(Generic[ResultT]):
@@ -123,7 +128,7 @@ class BootstrapRequest(Generic[ResultT]):
                 "root_policy": "source_only",
                 "dependencies_policy": "source_only",
             },
-            concretize=concretize or spack.concretize.concretize_one,
+            concretize=concretize or _concretize,
         )
 
     @classmethod
@@ -137,7 +142,7 @@ class BootstrapRequest(Generic[ResultT]):
             metadata_name=abstract_spec.name,
             probe=functools.partial(_executables_in_store, executables),
             installer_args={},
-            concretize=spack.concretize.concretize_one,
+            concretize=_concretize,
         )
 
 

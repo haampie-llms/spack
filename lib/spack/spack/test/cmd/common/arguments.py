@@ -225,17 +225,21 @@ def test_deprecated_flag_is_honored_by_the_install_time_check(
     including those on a package with an 'allow' list of its own.
     """
     with mutable_config.override("packages:all:deprecation:allow", [{"severity": "critical"}]):
-        concrete = spack.concretize.concretize_one("deprecated-with-labels@3.0")
+        concrete = spack.concretize.concretize_one("deprecated-with-labels@3.0", ctx)
 
     mutable_config.set(
         "packages:deprecated-with-labels:deprecation:allow", [{"labels": ["CVE-2026-0002"]}]
     )
     with pytest.raises(spack.error.InstallError, match="deprecated"):
-        spack.deprecation.check_deprecations([concrete])
+        spack.deprecation.check_deprecations(
+            [concrete], policy=spack.deprecation.Policy.from_config(ctx.config, repo=ctx.repo)
+        )
 
     parser = argparse.ArgumentParser()
     arguments.add_concretizer_args(parser)
     namespace = parser.parse_args(["--deprecated"])
     arguments.apply_deferred_config(namespace, ctx)
 
-    spack.deprecation.check_deprecations([concrete])  # must not raise
+    spack.deprecation.check_deprecations(
+        [concrete], policy=spack.deprecation.Policy.from_config(ctx.config, repo=ctx.repo)
+    )  # must not raise

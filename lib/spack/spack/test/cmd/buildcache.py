@@ -99,7 +99,7 @@ def test_buildcache_list_allarch(database, mock_get_specs_multiarch):
 
 
 def tests_buildcache_create_env(
-    install_mockery, mock_fetch, tmp_path: pathlib.Path, mutable_mock_env_path
+    install_mockery, mock_fetch, tmp_path: pathlib.Path, mutable_mock_env_path, ctx: SpackContext
 ):
     """ "Ensure that buildcache create creates output files from env"""
     pkg = "trivial-install-test-package"
@@ -111,7 +111,7 @@ def tests_buildcache_create_env(
 
         buildcache("push", "--unsigned", str(tmp_path))
 
-    spec = spack.concretize.concretize_one(pkg)
+    spec = spack.concretize.concretize_one(pkg, ctx)
 
     mirror_url = tmp_path.as_uri()
 
@@ -152,6 +152,7 @@ def test_update_key_index(
     mock_fetch,
     mock_stage,
     mock_gnupghome,
+    ctx: SpackContext,
 ):
     """Test the update-index command with the --keys option"""
     working_dir = tmp_path / "working_dir"
@@ -164,7 +165,7 @@ def test_update_key_index(
 
     gpg("create", "Test Signing Key", "nobody@nowhere.com")
 
-    s = spack.concretize.concretize_one("libdwarf")
+    s = spack.concretize.concretize_one("libdwarf", ctx)
 
     # Install a package
     install("--fake", "--include-build-deps", s.name)
@@ -188,7 +189,9 @@ def test_update_key_index(
     assert "keys.manifest.json" in key_dir_list
 
 
-def test_buildcache_autopush(tmp_path: pathlib.Path, install_mockery, mock_fetch):
+def test_buildcache_autopush(
+    tmp_path: pathlib.Path, install_mockery, mock_fetch, ctx: SpackContext
+):
     """Test buildcache with autopush"""
     mirror_dir = tmp_path / "mirror"
     mirror_autopush_dir = tmp_path / "mirror_autopush"
@@ -196,7 +199,7 @@ def test_buildcache_autopush(tmp_path: pathlib.Path, install_mockery, mock_fetch
     mirror("add", "--unsigned", "mirror", mirror_dir.as_uri())
     mirror("add", "--autopush", "--unsigned", "mirror-autopush", mirror_autopush_dir.as_uri())
 
-    s = spack.concretize.concretize_one("libdwarf")
+    s = spack.concretize.concretize_one("libdwarf", ctx)
 
     # Install and generate build cache index
     PackageInstaller([s.package], fake=True, explicit=True).install()
@@ -217,6 +220,7 @@ def test_buildcache_sync(
     mock_fetch,
     mock_stage,
     tmp_path: pathlib.Path,
+    ctx: SpackContext,
 ):
     """
     Make sure buildcache sync works in an environment-aware manner, ignoring
@@ -251,7 +255,7 @@ def test_buildcache_sync(
         assert found_pkg, f"Expected to find {in_env_pkg} in {dest_mirror_dir}"
 
     # Install a package and put it in the buildcache
-    s = spack.concretize.concretize_one(out_env_pkg)
+    s = spack.concretize.concretize_one(out_env_pkg, ctx)
     install("--fake", s.name)
     buildcache("push", "-u", "-f", src_mirror_url, s.name)
 
@@ -334,6 +338,7 @@ def test_buildcache_create_install(
     mock_fetch,
     mock_stage,
     tmp_path: pathlib.Path,
+    ctx: SpackContext,
 ):
     """ "Ensure that buildcache create creates output files"""
     pkg = "trivial-install-test-package"
@@ -343,7 +348,7 @@ def test_buildcache_create_install(
 
     mirror_url = tmp_path.as_uri()
 
-    spec = spack.concretize.concretize_one(pkg)
+    spec = spack.concretize.concretize_one(pkg, ctx)
     cache_class = get_url_buildcache_class(
         layout_version=spack.binary_distribution.CURRENT_BUILD_CACHE_LAYOUT_VERSION
     )
@@ -441,8 +446,9 @@ def test_correct_specs_are_pushed(
     config,
     mock_packages,
     temporary_store,
+    ctx: SpackContext,
 ):
-    spec = spack.concretize.concretize_one("dttop")
+    spec = spack.concretize.concretize_one("dttop", ctx)
     PackageInstaller([spec.package], explicit=True, fake=True).install()
     slash_hash = f"/{spec.dag_hash()}"
 
@@ -500,18 +506,18 @@ def test_push_and_install_with_mirror_marked_unsigned_does_not_require_extra_fla
     ).install()
 
 
-def test_skip_no_redistribute(mock_packages, config):
-    specs = list(spack.concretize.concretize_one("no-redistribute-dependent").traverse())
+def test_skip_no_redistribute(mock_packages, config, ctx: SpackContext):
+    specs = list(spack.concretize.concretize_one("no-redistribute-dependent", ctx).traverse())
     filtered = spack.cmd.buildcache._skip_no_redistribute_for_public(specs)
     assert not any(s.name == "no-redistribute" for s in filtered)
     assert any(s.name == "no-redistribute-dependent" for s in filtered)
 
 
-def test_filter_specs_for_push_with_exclude(mock_packages, mutable_config):
+def test_filter_specs_for_push_with_exclude(mock_packages, mutable_config, ctx: SpackContext):
     """Test that _filter_specs_for_push excludes specs matching the mirror's exclude patterns."""
     specs = [
-        spack.concretize.concretize_one("brillig"),
-        spack.concretize.concretize_one("canfail"),
+        spack.concretize.concretize_one("brillig", ctx),
+        spack.concretize.concretize_one("canfail", ctx),
     ]
     mirror = spack.mirrors.mirror.Mirror(
         {"url": "https://example.com", "exclude_binary": ["brillig"]}
@@ -521,12 +527,12 @@ def test_filter_specs_for_push_with_exclude(mock_packages, mutable_config):
     assert any(s.name == "canfail" for s in filtered)
 
 
-def test_filter_specs_for_push_with_include(mock_packages, mutable_config):
+def test_filter_specs_for_push_with_include(mock_packages, mutable_config, ctx: SpackContext):
     """Test that _filter_specs_for_push only includes specs matching the mirror's include
     patterns."""
     specs = [
-        spack.concretize.concretize_one("brillig"),
-        spack.concretize.concretize_one("canfail"),
+        spack.concretize.concretize_one("brillig", ctx),
+        spack.concretize.concretize_one("canfail", ctx),
     ]
     mirror = spack.mirrors.mirror.Mirror(
         {"url": "https://example.com", "include_binary": ["canfail"]}
@@ -602,7 +608,7 @@ def test_push_without_build_deps(
 
     mirror("add", "--unsigned", "my-mirror", str(tmp_path))
 
-    s = spack.concretize.concretize_one("dtrun3")
+    s = spack.concretize.concretize_one("dtrun3", ctx)
     PackageInstaller([s.package], explicit=True, fake=True, include_build_deps=True).install()
     s["dtbuild3"].package.do_uninstall()
 
@@ -644,7 +650,11 @@ def test_check_mirror_for_layout(v2_buildcache_layout, mutable_config, capfd, ct
 
 
 def test_url_buildcache_entry_v2_exists(
-    v2_buildcache_layout, mock_packages, mutable_config, do_not_check_runtimes_on_reuse
+    v2_buildcache_layout,
+    mock_packages,
+    mutable_config,
+    do_not_check_runtimes_on_reuse,
+    ctx: SpackContext,
 ):
     """Test existence check for v2 buildcache entries"""
     test_mirror_path = v2_buildcache_layout("unsigned")
@@ -662,7 +672,7 @@ def test_url_buildcache_entry_v2_exists(
     build_cache = v2_cache_class(mirror_url, **_entry_resources())
     assert not build_cache.exists([BuildcacheComponent.SPEC, BuildcacheComponent.TARBALL])
 
-    spec = spack.concretize.concretize_one("libdwarf")
+    spec = spack.concretize.concretize_one("libdwarf", ctx)
 
     # In v2 we have to ask for both, because we need to have the spec to have the tarball
     build_cache = v2_cache_class(mirror_url, spec, allow_unsigned=True, **_entry_resources())

@@ -19,6 +19,7 @@ import spack.schema.config
 import spack.util.filesystem as fs
 import spack.util.spack_yaml as syaml
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.store import Store
 
 config = spack.main.SpackCommand("config")
@@ -651,6 +652,7 @@ def test_config_prefer_upstream(
     mutable_config: Configuration,
     gen_mock_layout,
     monkeypatch,
+    ctx: SpackContext,
 ):
     """Check that when a dependency package is recorded as installed in
     an upstream database that it is not reinstalled.
@@ -660,7 +662,7 @@ def test_config_prefer_upstream(
     prepared_db = spack.database.Database(mock_db_root, layout=gen_mock_layout("a"))
 
     for spec in ["hdf5 +mpi", "hdf5 ~mpi", "boost+debug~icu+graph", "dependency-install", "patch"]:
-        dep = spack.concretize.concretize_one(spec)
+        dep = spack.concretize.concretize_one(spec, ctx)
         prepared_db.add(dep)
 
     downstream_db_root = str(tmp_path_factory.mktemp("mock_downstream_db_root"))

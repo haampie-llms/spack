@@ -21,6 +21,7 @@ import spack.config
 import spack.deprecation
 import spack.error
 import spack.mirrors.mirror
+import spack.repo
 import spack.report
 import spack.spec
 import spack.stage
@@ -305,7 +306,10 @@ class PackageInstaller:
     def install(self) -> None:
         # Refuse disallowed deprecations before updating any index, so an install that cannot
         # succeed does no work first
-        spack.deprecation.check_deprecations(self.roots)
+        spack.deprecation.check_deprecations(
+            self.roots,
+            policy=spack.deprecation.Policy.from_config(spack.config.CONFIG, repo=spack.repo.PATH),
+        )
 
         # check what specs we could fetch from binaries (checks against cache, not remotely)
         try:

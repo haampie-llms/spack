@@ -419,7 +419,7 @@ class TestTcl:
         assert "debug=True" in writer.layout.use_name
         assert "mpi=mpich-v3.0.4" in writer.layout.use_name
 
-    def test_setup_environment(self, modulefile_content, module_configuration):
+    def test_setup_environment(self, modulefile_content, module_configuration, ctx: SpackContext):
         """Tests the internal set-up of run-time environment."""
 
         module_configuration("suffix")
@@ -428,7 +428,7 @@ class TestTcl:
         assert len([x for x in content if "setenv FOOBAR" in x]) == 1
         assert len([x for x in content if "setenv FOOBAR {mpileaks}" in x]) == 1
 
-        spec = spack.concretize.concretize_one("mpileaks")
+        spec = spack.concretize.concretize_one("mpileaks", ctx)
         content = modulefile_content(spec["callpath"])
 
         assert len([x for x in content if "setenv FOOBAR" in x]) == 1
@@ -504,12 +504,12 @@ class TestTcl:
         module_configuration("exclude_implicits")
 
         # mpileaks is defined as explicit with explicit argument set on writer
-        mpileaks_spec = spack.concretize.concretize_one("mpileaks")
+        mpileaks_spec = spack.concretize.concretize_one("mpileaks", ctx)
         writer = writer_cls.from_spec(mpileaks_spec, "default", True, ctx=ctx)
         assert not writer.conf.excluded
 
         # callpath is defined as implicit with explicit argument set on writer
-        callpath_spec = spack.concretize.concretize_one("callpath")
+        callpath_spec = spack.concretize.concretize_one("callpath", ctx)
         writer = writer_cls.from_spec(callpath_spec, "default", False, ctx=ctx)
         assert writer.conf.excluded
 
@@ -544,7 +544,7 @@ class TestTcl:
         """Tests the addition and removal of hide command in modulerc."""
         module_configuration("hide_implicits")
 
-        spec = spack.concretize.concretize_one("mpileaks@2.3")
+        spec = spack.concretize.concretize_one("mpileaks@2.3", ctx)
 
         # mpileaks is defined as implicit, thus hide command should appear in modulerc
         writer = writer_cls.from_spec(spec, "default", False, ctx=ctx)
@@ -591,8 +591,8 @@ class TestTcl:
         # three versions of mpileaks are implicit
         writer = writer_cls.from_spec(spec, "default", False, ctx=ctx)
         writer.write(overwrite=True)
-        spec_alt1 = spack.concretize.concretize_one("mpileaks@2.2")
-        spec_alt2 = spack.concretize.concretize_one("mpileaks@2.1")
+        spec_alt1 = spack.concretize.concretize_one("mpileaks@2.2", ctx)
+        spec_alt2 = spack.concretize.concretize_one("mpileaks@2.1", ctx)
         writer_alt1 = writer_cls.from_spec(spec_alt1, "default", False, ctx=ctx)
         writer_alt1.write(overwrite=True)
         writer_alt2 = writer_cls.from_spec(spec_alt2, "default", False, ctx=ctx)

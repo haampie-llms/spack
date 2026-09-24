@@ -95,7 +95,7 @@ def deprecate(parser, args, ctx):
     )
 
     if args.install:
-        deprecator = spack.concretize.concretize_one(specs[1])
+        deprecator = spack.concretize.concretize_one(specs[1], ctx)
     else:
         deprecator = spack.cmd.disambiguate_spec(specs[1], env, store=ctx.store, local=True)
 

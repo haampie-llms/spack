@@ -347,7 +347,9 @@ def test_read_cray_manifest(temporary_store, manifest_file, ctx: SpackContext):
     query_specs = temporary_store.db.query("openmpi")
     assert any(x.dag_hash() == "openmpifakehasha" for x in query_specs)
 
-    concretized_spec = spack.concretize.concretize_one("depends-on-openmpi ^/openmpifakehasha")
+    concretized_spec = spack.concretize.concretize_one(
+        "depends-on-openmpi ^/openmpifakehasha", ctx
+    )
     assert concretized_spec["hwloc"].dag_hash() == "hwlocfakehashaaa"
 
 

@@ -14,7 +14,6 @@ import spack.repo
 import spack.spec
 import spack.traverse
 import spack.util.path
-from spack.active_environment import active_environment
 from spack.enums import InstallRecordStatus
 from spack.externals import ExternalSpecsParser
 from spack.externals_config import (
@@ -249,7 +248,7 @@ class ReusableSpecsSelector:
                 exclude = source.get("exclude", default_exclude)
                 if source["type"] == "environment" and "path" in source:
                     env_dir = spack.environment.as_env_dir(source["path"])
-                    active_env = active_environment()
+                    active_env = context.environment
                     if not active_env or env_dir not in active_env.included_concrete_env_root_dirs:
                         # If the environment is not included as a concrete environment, use the
                         # current specs from its lockfile.
@@ -299,7 +298,7 @@ class ReusableSpecsSelector:
                 )
 
     def reusable_specs(
-        self, specs: List[spack.spec.Spec], *, policy: Optional[spack.deprecation.Policy] = None
+        self, specs: List[spack.spec.Spec], *, policy: spack.deprecation.Policy
     ) -> List[spack.spec.Spec]:
         result = []
         for reuse_source in self.reuse_sources:

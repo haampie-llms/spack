@@ -6,9 +6,11 @@ import numbers
 import pytest
 
 import spack.concretize
+import spack.context
 import spack.error
 import spack.spec
 import spack.variant
+from spack.context import SpackContext
 from spack.repo import RepoPath
 from spack.spec import Spec, VariantMap
 from spack.variant import (
@@ -675,12 +677,12 @@ def test_strict_invalid_variant_values(mock_packages: RepoPath, pkg_name, value,
     ],
 )
 def test_concretize_variant_default_with_multiple_defs(
-    mock_packages: RepoPath, config, pkg_name, spec, satisfies, def_id
+    mock_packages: RepoPath, config, pkg_name, spec, satisfies, def_id, ctx: SpackContext
 ):
     pkg = mock_packages.get_pkg_class(pkg_name)
     pkg_defs = [vdef for _, vdef in pkg.variant_definitions("v")]
 
-    spec = spack.concretize.concretize_one(f"{pkg_name}{spec}")
+    spec = spack.concretize.concretize_one(f"{pkg_name}{spec}", ctx)
     assert spec.satisfies(satisfies)
     assert spec.package.get_variant("v") is pkg_defs[def_id]
 
@@ -702,14 +704,16 @@ def test_concretize_variant_default_with_multiple_defs(
 )
 def test_substitute_abstract_variants_narrowing(mock_packages, spec, variant_name, narrowed_type):
     spec = Spec(spec)
-    spack.spec.substitute_abstract_variants(spec)
+    spack.spec.substitute_abstract_variants(spec, repo=spack.context.default().repo)
     assert spec.variants[variant_name].type == narrowed_type
 
 
 def test_substitute_abstract_variants_failure(mock_packages):
     with pytest.raises(spack.spec.InvalidVariantForSpecError):
         # variant doesn't exist at version
-        spack.spec.substitute_abstract_variants(Spec("variant-values@4.0 v=bar"))
+        spack.spec.substitute_abstract_variants(
+            Spec("variant-values@4.0 v=bar"), repo=spack.context.default().repo
+        )
 
 
 def test_abstract_variant_satisfies_abstract_abstract():

@@ -9,6 +9,7 @@ import pytest
 
 import spack.concretize
 import spack.user_environment as uenv
+from spack.context import SpackContext
 from spack.main import SpackCommand
 
 load = SpackCommand("load")
@@ -44,12 +45,14 @@ def test_manpath_trailing_colon(
     )
 
 
-def test_load_recursive(install_mockery, mock_fetch, mock_archive, mock_packages, working_env):
+def test_load_recursive(
+    install_mockery, mock_fetch, mock_archive, mock_packages, working_env, ctx: SpackContext
+):
     def test_load_shell(shell, set_command):
         """Test that `spack load` applies prefix inspections of its required runtime deps in
         topo-order"""
         install("--fake", "mpileaks")
-        mpileaks_spec = spack.concretize.concretize_one("mpileaks")
+        mpileaks_spec = spack.concretize.concretize_one("mpileaks", ctx)
 
         # Ensure our reference variable is clean.
         os.environ["CMAKE_PREFIX_PATH"] = "/hello" + os.pathsep + "/world"
@@ -164,11 +167,12 @@ def test_unload(
     mock_archive,
     mock_packages,
     working_env,
+    ctx: SpackContext,
 ):
     """Tests that any variables set in the user environment are undone by the
     unload command"""
     install("--fake", "mpileaks")
-    mpileaks_spec = spack.concretize.concretize_one("mpileaks")
+    mpileaks_spec = spack.concretize.concretize_one("mpileaks", ctx)
 
     # Set so unload has something to do
     os.environ["FOOBAR"] = "mpileaks"
@@ -185,11 +189,11 @@ def test_unload(
 
 
 def test_unload_fails_no_shell(
-    install_mockery, mock_fetch, mock_archive, mock_packages, working_env
+    install_mockery, mock_fetch, mock_archive, mock_packages, working_env, ctx: SpackContext
 ):
     """Test that spack unload prints an error message without a shell."""
     install("--fake", "mpileaks")
-    mpileaks_spec = spack.concretize.concretize_one("mpileaks")
+    mpileaks_spec = spack.concretize.concretize_one("mpileaks", ctx)
     os.environ[uenv.spack_loaded_hashes_var] = mpileaks_spec.dag_hash()
 
     out = unload("mpileaks", fail_on_error=False)

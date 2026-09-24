@@ -33,6 +33,7 @@ def test_fetch(
     config: Configuration,
     mutable_mock_repo,
     monkeypatch,
+    ctx: SpackContext,
 ):
     """Tries to:
 
@@ -48,7 +49,7 @@ def test_fetch(
     h = mock_svn_repository.hash
 
     # Construct the package under test
-    s = spack.concretize.concretize_one("svn-test")
+    s = spack.concretize.concretize_one("svn-test", ctx)
     monkeypatch.setitem(s.package.versions, Version("svn"), t.args)
 
     # Enter the stage directory and check some properties

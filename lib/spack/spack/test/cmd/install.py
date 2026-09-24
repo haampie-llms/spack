@@ -135,14 +135,14 @@ def test_install_dirty_flag(arguments, expected):
     assert args.dirty == expected
 
 
-def test_package_output(install_mockery, mock_fetch):
+def test_package_output(install_mockery, mock_fetch, ctx: SpackContext):
     """
     Ensure output printed from pkgs is captured by output redirection.
     """
     # we can't use output capture here because it interferes with Spack's
     # logging. TODO: see whether we can get multiple log_outputs to work
     # when nested AND in pytest
-    spec = spack.concretize.concretize_one("printing-package")
+    spec = spack.concretize.concretize_one("printing-package", ctx)
     pkg = spec.package
     PackageInstaller([pkg], explicit=True, verbose=True, tests=sys.platform != "win32").install()
 
@@ -186,18 +186,22 @@ def test_install_output_on_python_error(mock_packages, mock_archive, mock_fetch,
 
 
 @pytest.mark.disable_clean_stage_check
-def test_install_with_source(mock_packages, mock_archive, mock_fetch, install_mockery):
+def test_install_with_source(
+    mock_packages, mock_archive, mock_fetch, install_mockery, ctx: SpackContext
+):
     """Verify that source has been copied into place."""
     install("--source", "--keep-stage", "trivial-install-test-package")
-    spec = spack.concretize.concretize_one("trivial-install-test-package")
+    spec = spack.concretize.concretize_one("trivial-install-test-package", ctx)
     src = os.path.join(spec.prefix.share, "trivial-install-test-package", "src")
     assert filecmp.cmp(
         os.path.join(mock_archive.path, "configure"), os.path.join(src, "configure")
     )
 
 
-def test_install_env_variables(mock_packages, mock_archive, mock_fetch, install_mockery):
-    spec = spack.concretize.concretize_one("pkg-c")
+def test_install_env_variables(
+    mock_packages, mock_archive, mock_fetch, install_mockery, ctx: SpackContext
+):
+    spec = spack.concretize.concretize_one("pkg-c", ctx)
     install("pkg-c")
     assert os.path.isfile(spec.package.install_env_path)
 
@@ -219,10 +223,15 @@ def test_show_log_on_error(
 
 
 def test_install_overwrite(
-    mock_packages, mock_archive, mock_fetch, temporary_store: Store, install_mockery
+    mock_packages,
+    mock_archive,
+    mock_fetch,
+    temporary_store: Store,
+    install_mockery,
+    ctx: SpackContext,
 ):
     """Tests installing a spec, and then re-installing it in the same prefix."""
-    spec = spack.concretize.concretize_one("pkg-c")
+    spec = spack.concretize.concretize_one("pkg-c", ctx)
     install("pkg-c")
 
     # Ignore manifest, install times, and sbom
@@ -254,15 +263,19 @@ def test_install_overwrite(
     assert fs.hash_directory(spec.prefix, ignore=ignores) != bad_md5
 
 
-def test_install_overwrite_not_installed(mock_packages, mock_archive, mock_fetch, install_mockery):
+def test_install_overwrite_not_installed(
+    mock_packages, mock_archive, mock_fetch, install_mockery, ctx: SpackContext
+):
     """Tests that overwrite doesn't fail if the package is not installed"""
-    spec = spack.concretize.concretize_one("pkg-c")
+    spec = spack.concretize.concretize_one("pkg-c", ctx)
     assert not os.path.exists(spec.prefix)
     install("--overwrite", "-y", "pkg-c")
     assert os.path.exists(spec.prefix)
 
 
-def test_install_commit(mock_git_version_info, install_mockery, mock_packages, monkeypatch):
+def test_install_commit(
+    mock_git_version_info, install_mockery, mock_packages, monkeypatch, ctx: SpackContext
+):
     """Test installing a git package from a commit.
 
     This ensures Spack associates commit versions with their packages in time to do
@@ -275,7 +288,7 @@ def test_install_commit(mock_git_version_info, install_mockery, mock_packages, m
     monkeypatch.setattr(spack.package_base.PackageBase, "git", file_url, raising=False)
 
     # Use the earliest commit in the repository
-    spec = spack.concretize.concretize_one(f"git-test-commit@{commits[-1]}")
+    spec = spack.concretize.concretize_one(f"git-test-commit@{commits[-1]}", ctx)
     PackageInstaller([spec.package], explicit=True).install()
 
     # Ensure first commit file contents were written
@@ -287,11 +300,16 @@ def test_install_commit(mock_git_version_info, install_mockery, mock_packages, m
 
 
 def test_install_overwrite_multiple(
-    mock_packages, mock_archive, mock_fetch, temporary_store: Store, install_mockery
+    mock_packages,
+    mock_archive,
+    mock_fetch,
+    temporary_store: Store,
+    install_mockery,
+    ctx: SpackContext,
 ):
     # Try to install a spec and then to reinstall it.
-    libdwarf = spack.concretize.concretize_one("libdwarf")
-    cmake = spack.concretize.concretize_one("cmake")
+    libdwarf = spack.concretize.concretize_one("libdwarf", ctx)
+    cmake = spack.concretize.concretize_one("cmake", ctx)
 
     install("--fake", "libdwarf")
     install("--fake", "cmake")
@@ -489,13 +507,15 @@ def spec_format(request):
         [["cmake", "libelf"], ["mpi", "boost"]],
     ],
 )
-def test_install_mix_cli_and_files(spec_format, clispecs, filespecs, tmp_path: pathlib.Path):
+def test_install_mix_cli_and_files(
+    spec_format, clispecs, filespecs, tmp_path: pathlib.Path, ctx: SpackContext
+):
     args = clispecs
 
     for spec in filespecs:
         filepath = tmp_path / (spec + f".{spec_format}")
         args = [str(filepath)] + args
-        s = spack.concretize.concretize_one(spec)
+        s = spack.concretize.concretize_one(spec, ctx)
         with filepath.open("w") as f:
             s.to_yaml(f) if spec_format == "yaml" else s.to_json(f)
 
@@ -504,9 +524,14 @@ def test_install_mix_cli_and_files(spec_format, clispecs, filespecs, tmp_path: p
 
 
 def test_extra_files_are_archived(
-    mock_packages, mock_archive, mock_fetch, temporary_store: Store, install_mockery
+    mock_packages,
+    mock_archive,
+    mock_fetch,
+    temporary_store: Store,
+    install_mockery,
+    ctx: SpackContext,
 ):
-    s = spack.concretize.concretize_one("archive-files")
+    s = spack.concretize.concretize_one("archive-files", ctx)
 
     install("archive-files")
 
@@ -621,12 +646,17 @@ def test_cdash_buildstamp_param(tmp_path: pathlib.Path, mock_fetch, install_mock
 
 @pytest.mark.disable_clean_stage_check
 def test_cdash_install_from_spec_json(
-    tmp_path: pathlib.Path, mock_fetch, install_mockery, mock_packages, mock_archive
+    tmp_path: pathlib.Path,
+    mock_fetch,
+    install_mockery,
+    mock_packages,
+    mock_archive,
+    ctx: SpackContext,
 ):
     with fs.working_dir(str(tmp_path)):
         spec_json_path = str(tmp_path / "spec.json")
 
-        pkg_spec = spack.concretize.concretize_one("pkg-c")
+        pkg_spec = spack.concretize.concretize_one("pkg-c", ctx)
         with open(spec_json_path, "w", encoding="utf-8") as fd:
             fd.write(pkg_spec.to_json())
 
@@ -679,9 +709,9 @@ def test_cache_only_fails(mock_fetch, temporary_store: Store, install_mockery):
     assert not temporary_store.db.query_local("libelf")
 
 
-def test_install_only_dependencies(mock_fetch, install_mockery):
-    dep = spack.concretize.concretize_one("dependency-install")
-    root = spack.concretize.concretize_one("dependent-install")
+def test_install_only_dependencies(mock_fetch, install_mockery, ctx: SpackContext):
+    dep = spack.concretize.concretize_one("dependency-install", ctx)
+    root = spack.concretize.concretize_one("dependent-install", ctx)
 
     install("--only", "dependencies", "dependent-install")
 
@@ -700,9 +730,9 @@ def test_install_only_package(mock_fetch, install_mockery):
     assert "dependency-install" in msg
 
 
-def test_install_deps_then_package(mock_fetch, install_mockery):
-    dep = spack.concretize.concretize_one("dependency-install")
-    root = spack.concretize.concretize_one("dependent-install")
+def test_install_deps_then_package(mock_fetch, install_mockery, ctx: SpackContext):
+    dep = spack.concretize.concretize_one("dependency-install", ctx)
+    root = spack.concretize.concretize_one("dependent-install", ctx)
 
     install("--only", "dependencies", "dependent-install")
     assert os.path.exists(dep.prefix)
@@ -715,12 +745,14 @@ def test_install_deps_then_package(mock_fetch, install_mockery):
 # Unit tests should not be affected by the user's managed environments
 @pytest.mark.not_on_windows("Environment views not supported on windows. Revisit after #34701")
 @pytest.mark.regression("12002")
-def test_install_only_dependencies_in_env(mutable_mock_env_path, mock_fetch, install_mockery):
+def test_install_only_dependencies_in_env(
+    mutable_mock_env_path, mock_fetch, install_mockery, ctx: SpackContext
+):
     env("create", "test")
 
     with ev.read("test"):
-        dep = spack.concretize.concretize_one("dependency-install")
-        root = spack.concretize.concretize_one("dependent-install")
+        dep = spack.concretize.concretize_one("dependency-install", ctx)
+        root = spack.concretize.concretize_one("dependent-install", ctx)
 
         install("-v", "--only", "dependencies", "--add", "dependent-install")
 
@@ -731,14 +763,14 @@ def test_install_only_dependencies_in_env(mutable_mock_env_path, mock_fetch, ins
 # Unit tests should not be affected by the user's managed environments
 @pytest.mark.regression("12002")
 def test_install_only_dependencies_of_all_in_env(
-    mutable_mock_env_path, mock_fetch, install_mockery
+    mutable_mock_env_path, mock_fetch, install_mockery, ctx: SpackContext
 ):
     env("create", "--without-view", "test")
 
     with ev.read("test"):
         roots = [
-            spack.concretize.concretize_one("dependent-install@1.0"),
-            spack.concretize.concretize_one("dependent-install@2.0"),
+            spack.concretize.concretize_one("dependent-install@1.0", ctx),
+            spack.concretize.concretize_one("dependent-install@2.0", ctx),
         ]
 
         add("dependent-install@1.0")
@@ -890,13 +922,15 @@ def test_cdash_auth_token(tmp_path: pathlib.Path, mock_fetch, install_mockery, m
 
 @pytest.mark.not_on_windows("Windows log_output logs phase header out of order")
 @pytest.mark.disable_clean_stage_check
-def test_cdash_configure_warning(tmp_path: pathlib.Path, mock_fetch, install_mockery):
+def test_cdash_configure_warning(
+    tmp_path: pathlib.Path, mock_fetch, install_mockery, ctx: SpackContext
+):
     with fs.working_dir(str(tmp_path)):
         # Test would fail if install raised an error.
 
         # Ensure that even on non-x86_64 architectures, there are no
         # dependencies installed
-        spec = spack.concretize.concretize_one("configure-warning")
+        spec = spack.concretize.concretize_one("configure-warning", ctx)
         spec.clear_dependencies()
         specfile = "./spec.json"
         with open(specfile, "w", encoding="utf-8") as f:
@@ -940,11 +974,11 @@ def test_install_fails_no_args_suggests_env_activation(tmp_path: pathlib.Path):
 # Unit tests should not be affected by the user's managed environments
 @pytest.mark.not_on_windows("Environment views not supported on windows. Revisit after #34701")
 def test_install_env_with_tests_all(
-    mutable_mock_env_path, mock_packages, mock_fetch, install_mockery
+    mutable_mock_env_path, mock_packages, mock_fetch, install_mockery, ctx: SpackContext
 ):
     env("create", "test")
     with ev.read("test"):
-        test_dep = spack.concretize.concretize_one("test-dependency")
+        test_dep = spack.concretize.concretize_one("test-dependency", ctx)
         add("depb")
         install("--fake", "--test", "all")
         assert os.path.exists(test_dep.prefix)
@@ -953,11 +987,11 @@ def test_install_env_with_tests_all(
 # Unit tests should not be affected by the user's managed environments
 @pytest.mark.not_on_windows("Environment views not supported on windows. Revisit after #34701")
 def test_install_env_with_tests_root(
-    mutable_mock_env_path, mock_packages, mock_fetch, install_mockery
+    mutable_mock_env_path, mock_packages, mock_fetch, install_mockery, ctx: SpackContext
 ):
     env("create", "test")
     with ev.read("test"):
-        test_dep = spack.concretize.concretize_one("test-dependency")
+        test_dep = spack.concretize.concretize_one("test-dependency", ctx)
         add("depb")
         install("--fake", "--test", "root")
         assert not os.path.exists(test_dep.prefix)
@@ -1117,9 +1151,11 @@ def test_invalid_concurrent_packages_flag(mutable_config):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Feature disabled on windows due to locking")
-def test_concurrent_packages_set_in_config(mutable_config: Configuration, mock_packages):
+def test_concurrent_packages_set_in_config(
+    mutable_config: Configuration, mock_packages, ctx: SpackContext
+):
     """Ensure that the number of concurrent packages is properly set from adding to config"""
     mutable_config.set("config:concurrent_packages", 3)
-    spec = spack.concretize.concretize_one("pkg-a")
+    spec = spack.concretize.concretize_one("pkg-a", ctx)
     installer = spack.installer.PackageInstaller([spec.package])
     assert installer.capacity == 3
