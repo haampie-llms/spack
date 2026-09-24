@@ -20,6 +20,7 @@ import spack.store
 import spack.test.harness
 import spack.util.filesystem as fs
 import spack.util.spack_yaml as syaml
+from spack.context import SpackContext
 from spack.hooks import sbang
 from spack.store import Store
 from spack.util.executable import which
@@ -214,8 +215,8 @@ def test_shebang_interpreter_regex(shebang, interpreter):
     assert sbang.get_interpreter(shebang) == interpreter
 
 
-def test_shebang_handling(script_dir, sbang_line):
-    sbang.filter_shebangs_in_directory(script_dir.tempdir, spack.test.harness.current().store)
+def test_shebang_handling(script_dir, sbang_line, ctx: SpackContext):
+    sbang.filter_shebangs_in_directory(script_dir.tempdir, ctx.store)
 
     # Make sure this is untouched
     with open(script_dir.short_shebang, "r", encoding="utf-8") as f:
@@ -272,20 +273,20 @@ def test_shebang_handling(script_dir, sbang_line):
         assert f.readline() == last_line
 
 
-def test_shebang_handles_non_writable_files(script_dir, sbang_line):
+def test_shebang_handles_non_writable_files(script_dir, sbang_line, ctx: SpackContext):
     # make a file non-writable
     st = os.stat(script_dir.long_shebang)
     not_writable_mode = st.st_mode & ~stat.S_IWRITE
     os.chmod(script_dir.long_shebang, not_writable_mode)
 
-    test_shebang_handling(script_dir, sbang_line)
+    test_shebang_handling(script_dir, sbang_line, ctx)
 
     st = os.stat(script_dir.long_shebang)
     assert oct(not_writable_mode) == oct(st.st_mode)
 
 
 @pytest.fixture(scope="function")
-def configure_group_perms():
+def configure_group_perms(ctx: SpackContext):
     # On systems with remote groups, the primary user group may be remote
     # and grp does not act on remote groups.
     # To ensure we find a group we can operate on, we get take the first group
@@ -302,13 +303,13 @@ all:
     group: {0}
 """.format(group_name)
     )
-    spack.test.harness.current().config.set("packages", conf, scope="user")
+    ctx.config.set("packages", conf, scope="user")
 
     yield
 
 
 @pytest.fixture(scope="function")
-def configure_user_perms():
+def configure_user_perms(ctx: SpackContext):
     conf = syaml.load_config(
         """\
 all:
@@ -317,7 +318,7 @@ all:
     write: user
 """
     )
-    spack.test.harness.current().config.set("packages", conf, scope="user")
+    ctx.config.set("packages", conf, scope="user")
 
     yield
 
@@ -345,14 +346,14 @@ def check_sbang_installation(store: spack.store.Store, group=False):
         assert mode == 0o755, "Unexpected {0}".format(oct(mode))
 
 
-def run_test_install_sbang(store: spack.store.Store, group):
-    sbang_path = sbang.sbang_install_path_for(spack.test.harness.current().store)
+def run_test_install_sbang(store: spack.store.Store, group, *, ctx: SpackContext):
+    sbang_path = sbang.sbang_install_path_for(ctx.store)
     sbang_bin_dir = os.path.dirname(sbang_path)
 
     assert sbang_path.startswith(store.unpadded_root)
     assert not os.path.exists(sbang_bin_dir)
 
-    store.install_sbang(spack.test.harness.current().config)
+    store.install_sbang(ctx.config)
     check_sbang_installation(store, group)
 
     # put an invalid file in for sbang
@@ -360,23 +361,27 @@ def run_test_install_sbang(store: spack.store.Store, group):
     with open(sbang_path, "w", encoding="utf-8") as f:
         f.write("foo")
 
-    store.install_sbang(spack.test.harness.current().config)
+    store.install_sbang(ctx.config)
     check_sbang_installation(store, group)
 
     # install again and make sure sbang is still fine
-    store.install_sbang(spack.test.harness.current().config)
+    store.install_sbang(ctx.config)
     check_sbang_installation(store, group)
 
 
-def test_install_group_sbang(temporary_store: Store, install_mockery, configure_group_perms):
-    run_test_install_sbang(temporary_store, True)
+def test_install_group_sbang(
+    temporary_store: Store, install_mockery, configure_group_perms, ctx: SpackContext
+):
+    run_test_install_sbang(temporary_store, True, ctx=ctx)
 
 
-def test_install_user_sbang(temporary_store: Store, install_mockery, configure_user_perms):
-    run_test_install_sbang(temporary_store, False)
+def test_install_user_sbang(
+    temporary_store: Store, install_mockery, configure_user_perms, ctx: SpackContext
+):
+    run_test_install_sbang(temporary_store, False, ctx=ctx)
 
 
-def test_install_sbang_too_long(tmp_path: pathlib.Path):
+def test_install_sbang_too_long(tmp_path: pathlib.Path, ctx: SpackContext):
     root = str(tmp_path)
     num_extend = sbang.system_shebang_limit - len(root) - len("/bin/sbang")
     long_path = root
@@ -384,7 +389,7 @@ def test_install_sbang_too_long(tmp_path: pathlib.Path):
         add = min(num_extend, 255)
         long_path = os.path.join(long_path, "e" * add)
         num_extend -= add
-    with spack.test.harness.use_store(long_path) as store:
+    with spack.test.harness.use_store(ctx, long_path) as store:
         with pytest.raises(sbang.SbangPathError) as exc_info:
             sbang.sbang_install_path_for(store)
 
@@ -394,7 +399,7 @@ def test_install_sbang_too_long(tmp_path: pathlib.Path):
     assert "cannot patch" in err
 
 
-def test_sbang_hook_skips_nonexecutable_blobs(tmp_path: pathlib.Path):
+def test_sbang_hook_skips_nonexecutable_blobs(tmp_path: pathlib.Path, ctx: SpackContext):
     # Write a binary blob to non-executable.sh, with a long interpreter "path"
     # consisting of invalid UTF-8. The latter is technically not really necessary for
     # the test, but binary blobs accidentally starting with b'#!' usually do not contain
@@ -404,14 +409,14 @@ def test_sbang_hook_skips_nonexecutable_blobs(tmp_path: pathlib.Path):
     with open(file, "wb") as f:
         f.write(contents)
 
-    sbang.filter_shebangs_in_directory(str(tmp_path), spack.test.harness.current().store)
+    sbang.filter_shebangs_in_directory(str(tmp_path), ctx.store)
 
     # Make sure there is no sbang shebang.
     with open(file, "rb") as f:
         assert b"sbang" not in f.readline()
 
 
-def test_sbang_handles_non_utf8_files(tmp_path: pathlib.Path):
+def test_sbang_handles_non_utf8_files(tmp_path: pathlib.Path, ctx: SpackContext):
     # We have an executable with a copyright sign as filename
     contents = b"#!" + b"\xa9" * sbang.system_shebang_limit + b"\nand another symbol: \xa9"
 
@@ -426,7 +431,7 @@ def test_sbang_handles_non_utf8_files(tmp_path: pathlib.Path):
         f.write(contents)
 
     # Run sbang
-    assert sbang.filter_shebang_for(file, spack.test.harness.current().store)
+    assert sbang.filter_shebang_for(file, ctx.store)
 
     with open(file, "rb") as f:
         new_contents = f.read()
@@ -445,7 +450,7 @@ def shebang_limits_system_8_spack_16():
 
 
 def test_shebang_exceeds_spack_shebang_limit(
-    shebang_limits_system_8_spack_16, tmp_path: pathlib.Path
+    shebang_limits_system_8_spack_16, tmp_path: pathlib.Path, ctx: SpackContext
 ):
     """Tests whether shebangs longer than Spack's limit are skipped"""
     file = str(tmp_path / "longer_than_spack_limit.sh")
@@ -453,18 +458,20 @@ def test_shebang_exceeds_spack_shebang_limit(
         f.write(b"#!" + b"x" * sbang.spack_shebang_limit)
 
     # Then Spack shouldn't try to add a shebang
-    assert not sbang.filter_shebang_for(file, spack.test.harness.current().store)
+    assert not sbang.filter_shebang_for(file, ctx.store)
 
     with open(file, "rb") as f:
         assert b"sbang" not in f.read()
 
 
-def test_sbang_hook_handles_non_writable_files_preserving_permissions(tmp_path: pathlib.Path):
+def test_sbang_hook_handles_non_writable_files_preserving_permissions(
+    tmp_path: pathlib.Path, ctx: SpackContext
+):
     path = str(tmp_path / "file.sh")
     with open(path, "w", encoding="utf-8") as f:
         f.write(long_line)
     os.chmod(path, 0o555)
-    sbang.filter_shebang_for(path, spack.test.harness.current().store)
+    sbang.filter_shebang_for(path, ctx.store)
     with open(path, "r", encoding="utf-8") as f:
         assert "sbang" in f.readline()
     assert os.stat(path).st_mode & 0o777 == 0o555

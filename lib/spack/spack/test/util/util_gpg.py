@@ -8,13 +8,13 @@ import time
 
 import pytest
 
-import spack.test.harness
 import spack.util.gpg
+from spack.context import SpackContext
 
 
 @pytest.fixture()
-def has_socket_dir():
-    return bool(spack.util.gpg.Gpg(None, spack.test.harness.current()).socket_dir)
+def has_socket_dir(ctx: SpackContext):
+    return bool(spack.util.gpg.Gpg(None, ctx).socket_dir)
 
 
 def test_parse_gpg_output_case_one():
@@ -77,7 +77,7 @@ fpr:::::::::ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ:"""
     assert keys[1].fpr == "YYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY"
 
 
-def test_really_long_gnupghome_dir(tmp_path: pathlib.Path, has_socket_dir):
+def test_really_long_gnupghome_dir(tmp_path: pathlib.Path, has_socket_dir, ctx: SpackContext):
     if not has_socket_dir:
         pytest.skip("This test requires /var/run/user/$(id -u)")
 
@@ -89,7 +89,7 @@ def test_really_long_gnupghome_dir(tmp_path: pathlib.Path, has_socket_dir):
     tdir = tdir[:N].rstrip(os.sep)
     tdir += "0" * (N - len(tdir))
 
-    gpg = spack.util.gpg.Gpg(tdir, spack.test.harness.current())
+    gpg = spack.util.gpg.Gpg(tdir, ctx)
     spack.util.gpg.create(
         gpg,
         name="Spack testing 1",
@@ -166,10 +166,10 @@ def test_gpg_key_algorithm():
 
 @pytest.mark.maybeslow
 @pytest.mark.not_on_windows("does not run on windows")
-def test_trust_secret_key_file(tmp_path: pathlib.Path, mock_gnupghome):
+def test_trust_secret_key_file(tmp_path: pathlib.Path, mock_gnupghome, ctx: SpackContext):
     """Verify that `spack gpg trust` can import secret keys from a keyfile."""
     # Create a signing key.
-    gpg = spack.test.harness.current().gpg
+    gpg = ctx.gpg
     spack.util.gpg.create(
         gpg, name="Spack CI test", email="ci@spack.io", comment="regression test key", expires="0"
     )

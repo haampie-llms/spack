@@ -10,8 +10,8 @@ import pytest
 
 import spack.config
 import spack.extensions
-import spack.test.harness
 import spack.util.lang
+from spack.context import SpackContext
 
 
 class MockConfigEntryPoint:
@@ -84,10 +84,12 @@ def test_spack_entry_point_config(tmp_path: pathlib.Path, mock_get_entry_points)
     assert config.get("config:install_tree:root", scope="plugin-mypackage_config") == "/spam/opt"
 
 
-def test_spack_entry_point_extension(tmp_path: pathlib.Path, mock_get_entry_points):
+def test_spack_entry_point_extension(
+    tmp_path: pathlib.Path, mock_get_entry_points, ctx: SpackContext
+):
     """Test config scope entry point"""
     my_ext = tmp_path / "spack/spack-myext"
-    config = spack.test.harness.current().config
+    config = ctx.config
     extensions = spack.extensions.get_extension_paths(config)
     found = bool([ext for ext in extensions if os.path.samefile(ext, my_ext)])
     if not found:

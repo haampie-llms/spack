@@ -4,18 +4,21 @@
 
 import platform
 
+import pytest
+
 import spack
 import spack.cmd.debug
 import spack.platforms
 import spack.repo
 import spack.spec
-import spack.test.harness
+from spack.context import SpackContext
 from spack.test.conftest import _return_none
 from spack.test.harness import SpackCommand
 
 debug = SpackCommand("debug")
 
 
+@pytest.mark.usefixtures("config")
 def test_report():
     out = debug("report")
     host_platform = spack.platforms.host()
@@ -29,7 +32,7 @@ def test_report():
     assert str(architecture) in out
 
 
-def test_get_builtin_repo_info_local_repo(mock_git_version_info, monkeypatch):
+def test_get_builtin_repo_info_local_repo(mock_git_version_info, monkeypatch, ctx: SpackContext):
     """Confirm local git repo descriptor returns expected path."""
     path = mock_git_version_info[0]
 
@@ -37,10 +40,14 @@ def test_get_builtin_repo_info_local_repo(mock_git_version_info, monkeypatch):
         return {"builtin": spack.repo.LocalRepoDescriptor("builtin", path)}
 
     monkeypatch.setattr(spack.repo.RepoDescriptors, "from_config", _from_config)
-    assert path in spack.cmd.debug._get_builtin_repo_info(spack.test.harness.current().config)
+    repo_info = spack.cmd.debug._get_builtin_repo_info(ctx.config)
+    assert repo_info is not None
+    assert path in repo_info
 
 
-def test_get_builtin_repo_info_unsupported_type(mock_git_version_info, monkeypatch):
+def test_get_builtin_repo_info_unsupported_type(
+    mock_git_version_info, monkeypatch, ctx: SpackContext
+):
     """Confirm None is return if the 'builtin' repo descriptor's type is unsupported."""
 
     def _from_config(*args, **kwargs):
@@ -48,20 +55,22 @@ def test_get_builtin_repo_info_unsupported_type(mock_git_version_info, monkeypat
         return {"builtin": path}
 
     monkeypatch.setattr(spack.repo.RepoDescriptors, "from_config", _from_config)
-    assert spack.cmd.debug._get_builtin_repo_info(spack.test.harness.current().config) is None
+    assert spack.cmd.debug._get_builtin_repo_info(ctx.config) is None
 
 
-def test_get_builtin_repo_info_no_builtin(monkeypatch):
+def test_get_builtin_repo_info_no_builtin(monkeypatch, ctx: SpackContext):
     """Confirm None is return if there is no 'builtin' repo descriptor."""
 
     def _from_config(*args, **kwargs):
         return {"local": "/assumes/no/descriptor/needed"}
 
     monkeypatch.setattr(spack.repo.RepoDescriptors, "from_config", _from_config)
-    assert spack.cmd.debug._get_builtin_repo_info(spack.test.harness.current().config) is None
+    assert spack.cmd.debug._get_builtin_repo_info(ctx.config) is None
 
 
-def test_get_builtin_repo_info_bad_destination(mock_git_version_info, monkeypatch):
+def test_get_builtin_repo_info_bad_destination(
+    mock_git_version_info, monkeypatch, ctx: SpackContext
+):
     """Confirm git failure of a repository returns None."""
 
     def _from_config(*args, **kwargs):
@@ -69,7 +78,7 @@ def test_get_builtin_repo_info_bad_destination(mock_git_version_info, monkeypatc
         return {"builtin": spack.repo.LocalRepoDescriptor("builtin", f"{path}/missing")}
 
     monkeypatch.setattr(spack.repo.RepoDescriptors, "from_config", _from_config)
-    assert spack.cmd.debug._get_builtin_repo_info(spack.test.harness.current().config) is None
+    assert spack.cmd.debug._get_builtin_repo_info(ctx.config) is None
 
 
 def test_get_spack_repo_info_no_commit(monkeypatch):

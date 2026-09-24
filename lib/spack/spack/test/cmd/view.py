@@ -10,8 +10,8 @@ import pytest
 
 import spack.concretize
 import spack.main
-import spack.test.harness
 import spack.util.spack_yaml as s_yaml
+from spack.context import SpackContext
 from spack.installer import PackageInstaller
 from spack.test.harness import SpackCommand
 from spack.util.filesystem import _windows_can_symlink
@@ -198,6 +198,7 @@ def test_view_extension_conflict_ignored(
         assert fin.read() == "1.0"
 
 
+@pytest.mark.usefixtures("config")
 def test_view_fails_with_missing_projections_file(tmp_path: pathlib.Path):
     viewpath = str(tmp_path / "view")
     (tmp_path / "view").mkdir()
@@ -216,8 +217,9 @@ def test_view_files_not_ignored(
     install_mockery,
     cmd,
     with_projection,
+    ctx: SpackContext,
 ):
-    spec = spack.concretize.concretize_one("view-not-ignored", spack.test.harness.current())
+    spec = spack.concretize.concretize_one("view-not-ignored", ctx)
     pkg = spec.package
     PackageInstaller([pkg], explicit=True).install()
     pkg.assert_installed(spec.prefix)

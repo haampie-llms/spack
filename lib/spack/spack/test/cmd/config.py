@@ -20,6 +20,7 @@ import spack.test.harness
 import spack.util.filesystem as fs
 import spack.util.spack_yaml as syaml
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.store import Store
 
 config = spack.test.harness.SpackCommand("config")
@@ -40,8 +41,8 @@ scope_path_re = r"\(([^\)]+)\)"
         (False, ["internal", "include"]),
     ],
 )
-def test_config_scopes(path, types, mutable_mock_env_path):
-    ev.create("test", ctx=spack.test.harness.current())
+def test_config_scopes(path, types, mutable_mock_env_path, ctx: SpackContext):
+    ev.create("test", ctx=ctx)
     scopes_cmd = ["scopes"]
     if path:
         scopes_cmd.append("-p")
@@ -148,7 +149,7 @@ def test_config_scopes_path(mutable_config):
 
 
 def test_get_config_scope(mock_low_high_config):
-    assert config("get", "repos").strip() == "repos: {}"
+    assert config("get", "mirrors").strip() == "mirrors: {}"
 
 
 def test_get_config_roundtrip(mutable_config):
@@ -174,29 +175,29 @@ def test_get_config_scope_merged(mock_low_high_config):
     fs.mkdirp(low_path)
     fs.mkdirp(high_path)
 
-    with open(os.path.join(low_path, "repos.yaml"), "w", encoding="utf-8") as f:
+    with open(os.path.join(low_path, "mirrors.yaml"), "w", encoding="utf-8") as f:
         f.write(
             """\
-repos:
-  repo3: repo3
+mirrors:
+  mirror3: file:///mirror3
 """
         )
 
-    with open(os.path.join(high_path, "repos.yaml"), "w", encoding="utf-8") as f:
+    with open(os.path.join(high_path, "mirrors.yaml"), "w", encoding="utf-8") as f:
         f.write(
             """\
-repos:
-  repo1: repo1
-  repo2: repo2
+mirrors:
+  mirror1: file:///mirror1
+  mirror2: file:///mirror2
 """
         )
 
     assert (
-        config("get", "repos").strip()
-        == """repos:
-  repo1: repo1
-  repo2: repo2
-  repo3: repo3"""
+        config("get", "mirrors").strip()
+        == """mirrors:
+  mirror1: file:///mirror1
+  mirror2: file:///mirror2
+  mirror3: file:///mirror3"""
     )
 
 
@@ -214,23 +215,25 @@ def test_config_edit(mutable_config, working_env):
     assert config("edit", "--print-file", "repos").strip() == repos_path
 
 
-def test_config_get_gets_spack_yaml(mutable_mock_env_path):
-    with ev.create("test", ctx=spack.test.harness.current()) as env:
+def test_config_get_gets_spack_yaml(mutable_mock_env_path, ctx: SpackContext):
+    with ev.create("test", ctx=ctx) as env:
         assert "mpileaks" not in config("get")
         env.add("mpileaks")
         env.write()
         assert "mpileaks" in config("get")
 
 
-def test_config_edit_edits_spack_yaml(mutable_mock_env_path):
-    env = ev.create("test", ctx=spack.test.harness.current())
+def test_config_edit_edits_spack_yaml(mutable_mock_env_path, ctx: SpackContext):
+    env = ev.create("test", ctx=ctx)
     with env:
         assert config("edit", "--print-file").strip() == env.manifest_path
 
 
-def test_config_add_with_scope_adds_to_scope(mutable_config: Configuration, mutable_mock_env_path):
+def test_config_add_with_scope_adds_to_scope(
+    mutable_config: Configuration, mutable_mock_env_path, ctx: SpackContext
+):
     """Test adding to non-env config scope with an active environment"""
-    env = ev.create("test", ctx=spack.test.harness.current())
+    env = ev.create("test", ctx=ctx)
     with env:
         config("--scope=user", "add", "config:install_tree:root:/usr")
     assert mutable_config.get("config:install_tree:root", scope="user") == "/usr"
@@ -576,9 +579,9 @@ def test_remove_list(mutable_empty_config):
     )
 
 
-def test_config_add_to_env(mutable_empty_config, mutable_mock_env_path):
+def test_config_add_to_env(mutable_empty_config, mutable_mock_env_path, ctx: SpackContext):
     env("create", "test")
-    with ev.read("test", ctx=spack.test.harness.current()):
+    with ev.read("test", ctx=ctx):
         config("add", "config:dirty:true")
         output = config("get")
 
@@ -589,7 +592,7 @@ def test_config_add_to_env(mutable_empty_config, mutable_mock_env_path):
 
 
 def test_config_add_to_env_preserve_comments(
-    mutable_empty_config, mutable_mock_env_path, tmp_path: pathlib.Path
+    mutable_empty_config, mutable_mock_env_path, tmp_path: pathlib.Path, ctx: SpackContext
 ):
     filepath = str(tmp_path / "spack.yaml")
     manifest = """# comment
@@ -607,7 +610,7 @@ spack:  # comment
 """
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(manifest)
-    env = ev.Environment(str(tmp_path), ctx=spack.test.harness.current())
+    env = ev.Environment(str(tmp_path), ctx=ctx)
     with env:
         config("add", "config:dirty:true")
         output = config("get")
@@ -616,14 +619,14 @@ spack:  # comment
     assert "dirty: true" in output
 
 
-def test_config_remove_from_env(mutable_empty_config, mutable_mock_env_path):
+def test_config_remove_from_env(mutable_empty_config, mutable_mock_env_path, ctx: SpackContext):
     env("create", "test")
-    with ev.read("test", ctx=spack.test.harness.current()):
+    with ev.read("test", ctx=ctx):
         config("add", "config:dirty:true")
         output = config("get")
     assert "dirty: true" in output
 
-    with ev.read("test", ctx=spack.test.harness.current()):
+    with ev.read("test", ctx=ctx):
         config("rm", "config:dirty")
         output = config("get")
     assert "dirty: true" not in output
@@ -652,6 +655,7 @@ def test_config_prefer_upstream(
     mutable_config: Configuration,
     gen_mock_layout,
     monkeypatch,
+    ctx: SpackContext,
 ):
     """Check that when a dependency package is recorded as installed in
     an upstream database that it is not reinstalled.
@@ -661,7 +665,7 @@ def test_config_prefer_upstream(
     prepared_db = spack.database.Database(mock_db_root, layout=gen_mock_layout("a"))
 
     for spec in ["hdf5 +mpi", "hdf5 ~mpi", "boost+debug~icu+graph", "dependency-install", "patch"]:
-        dep = spack.concretize.concretize_one(spec, spack.test.harness.current())
+        dep = spack.concretize.concretize_one(spec, ctx)
         prepared_db.add(dep)
 
     downstream_db_root = str(tmp_path_factory.mktemp("mock_downstream_db_root"))
@@ -683,7 +687,9 @@ def test_config_prefer_upstream(
     assert "- hdf5" in output
 
 
-def test_environment_config_update(tmp_path: pathlib.Path, mutable_config, monkeypatch):
+def test_environment_config_update(
+    tmp_path: pathlib.Path, mutable_config, monkeypatch, ctx: SpackContext
+):
     with open(tmp_path / "spack.yaml", "w", encoding="utf-8") as f:
         f.write(
             """\
@@ -699,10 +705,10 @@ spack:
 
     monkeypatch.setattr(spack.schema.config, "update", update_config)
 
-    with ev.Environment(str(tmp_path), ctx=spack.test.harness.current()):
+    with ev.Environment(str(tmp_path), ctx=ctx):
         config("update", "-y", "config")
 
-    with ev.Environment(str(tmp_path), ctx=spack.test.harness.current()) as e:
+    with ev.Environment(str(tmp_path), ctx=ctx) as e:
         assert not e.manifest.yaml_content["spack"]["config"]["ccache"]
 
 
@@ -720,13 +726,15 @@ spack:
 
 
 @pytest.mark.parametrize("cmd_str", ["get", "blame"])
-def test_config_with_group_shows_override_packages(cmd_str, tmp_path, mutable_config):
+def test_config_with_group_shows_override_packages(
+    cmd_str, tmp_path, mutable_config, ctx: SpackContext
+):
     """Tests that packages should show that group's override packages config,
     when the option is given.
     """
     (tmp_path / "spack.yaml").write_text(_GROUP_OVERRIDE_SPACK_YAML)
 
-    with ev.Environment(str(tmp_path), ctx=spack.test.harness.current()):
+    with ev.Environment(str(tmp_path), ctx=ctx):
         output = config(cmd_str, "packages")
         assert "1.2.13" not in output
         if cmd_str == "blame":
@@ -746,10 +754,12 @@ def test_config_with_group_requires_active_environment(cmd_str, mutable_config):
 
 
 @pytest.mark.parametrize("cmd_str", ["get", "blame"])
-def test_config_with_unknown_group_gives_clear_error(cmd_str, tmp_path, mutable_config):
+def test_config_with_unknown_group_gives_clear_error(
+    cmd_str, tmp_path, mutable_config, ctx: SpackContext
+):
     """Tests that using a non-existing group gives a clear error."""
     (tmp_path / "spack.yaml").write_text("spack:\n  specs:\n  - zlib\n")
-    with ev.Environment(str(tmp_path), ctx=spack.test.harness.current()):
+    with ev.Environment(str(tmp_path), ctx=ctx):
         output = config(cmd_str, "--group=nonexistent", "packages", fail_on_error=False)
     assert config.returncode == 1
     assert "'nonexistent' not found in" in output

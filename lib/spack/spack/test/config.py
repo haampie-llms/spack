@@ -15,7 +15,6 @@ import pytest
 
 import spack
 import spack.config
-import spack.context
 import spack.directory_layout
 import spack.environment as ev
 import spack.error
@@ -30,13 +29,13 @@ import spack.schema.mirrors
 import spack.schema.repos
 import spack.spec
 import spack.store
-import spack.test.harness
 import spack.util.executable
 import spack.util.filesystem as fs
 import spack.util.git
 import spack.util.path as spack_path
 import spack.util.spack_yaml as syaml
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.enums import ConfigScopePriority
 from spack.repo import RepoPath
 from spack.util.filesystem import getuid, join_path, touch
@@ -277,14 +276,16 @@ def test_write_list_in_memory(mock_low_high_config):
     assert config == {**repos_high["repos"], **repos_low["repos"]}
 
 
-def test_substitute_config_variables(mock_low_high_config, monkeypatch, tmp_path: pathlib.Path):
+def test_substitute_config_variables(
+    mock_low_high_config, monkeypatch, tmp_path: pathlib.Path, ctx: SpackContext
+):
     # Test $spack substitution at the start (valid on all platforms)
     assert os.path.join(spack.paths.prefix, "foo", "bar", "baz") == spack.config.canonicalize_path(
-        "$spack/foo/bar/baz/", config=spack.test.harness.current().config
+        "$spack/foo/bar/baz/", config=ctx.config
     )
 
     assert os.path.join(spack.paths.prefix, "foo", "bar", "baz") == spack.config.canonicalize_path(
-        "${spack}/foo/bar/baz/", config=spack.test.harness.current().config
+        "${spack}/foo/bar/baz/", config=ctx.config
     )
 
     # Test $spack substitution in the middle. This only makes sense when using posix paths.
@@ -293,52 +294,49 @@ def test_substitute_config_variables(mock_low_high_config, monkeypatch, tmp_path
         base = str(tmp_path)
 
         assert os.path.join(base, "foo", "bar", "baz", prefix) == spack.config.canonicalize_path(
-            os.path.join(base, "foo", "bar", "baz", "$spack"),
-            config=spack.test.harness.current().config,
+            os.path.join(base, "foo", "bar", "baz", "$spack"), config=ctx.config
         )
 
         assert os.path.join(
             base, "foo", "bar", "baz", prefix, "foo", "bar", "baz"
         ) == spack.config.canonicalize_path(
             os.path.join(base, "foo", "bar", "baz", "$spack", "foo", "bar", "baz"),
-            config=spack.test.harness.current().config,
+            config=ctx.config,
         )
 
         assert os.path.join(base, "foo", "bar", "baz", prefix) == spack.config.canonicalize_path(
-            os.path.join(base, "foo", "bar", "baz", "${spack}"),
-            config=spack.test.harness.current().config,
+            os.path.join(base, "foo", "bar", "baz", "${spack}"), config=ctx.config
         )
 
         assert os.path.join(
             base, "foo", "bar", "baz", prefix, "foo", "bar", "baz"
         ) == spack.config.canonicalize_path(
             os.path.join(base, "foo", "bar", "baz", "${spack}", "foo", "bar", "baz"),
-            config=spack.test.harness.current().config,
+            config=ctx.config,
         )
 
         assert os.path.join(
             base, "foo", "bar", "baz", prefix, "foo", "bar", "baz"
         ) != spack.config.canonicalize_path(
             os.path.join(base, "foo", "bar", "baz", "${spack", "foo", "bar", "baz"),
-            config=spack.test.harness.current().config,
+            config=ctx.config,
         )
 
     # $env replacement is a no-op when no environment is active
     assert spack.config.canonicalize_path(
-        os.path.join(str(tmp_path), "foo", "bar", "baz", "$env"),
-        config=spack.test.harness.current().config,
+        os.path.join(str(tmp_path), "foo", "bar", "baz", "$env"), config=ctx.config
     ) == os.path.join(str(tmp_path), "foo", "bar", "baz", "$env")
 
     # Fake an active environment and $env is replaced properly
     fake_env_path = str(tmp_path / "quux" / "quuux")
     monkeypatch.setattr(mock_low_high_config, "env_path", fake_env_path)
-    assert spack.config.canonicalize_path(
-        "$env/foo/bar/baz", config=spack.test.harness.current().config
-    ) == os.path.join(fake_env_path, os.path.join("foo", "bar", "baz"))
+    assert spack.config.canonicalize_path("$env/foo/bar/baz", config=ctx.config) == os.path.join(
+        fake_env_path, os.path.join("foo", "bar", "baz")
+    )
 
     # relative paths without source information are relative to cwd
     assert spack.config.canonicalize_path(
-        os.path.join("foo", "bar", "baz"), config=spack.test.harness.current().config
+        os.path.join("foo", "bar", "baz"), config=ctx.config
     ) == os.path.abspath(os.path.join("foo", "bar", "baz"))
 
     # relative paths with source information are relative to the file
@@ -347,21 +345,19 @@ def test_substitute_config_variables(mock_low_high_config, monkeypatch, tmp_path
     )
     mock_low_high_config.clear_caches()
     path = mock_low_high_config.get("modules:default:roots:lmod")
-    assert spack.config.canonicalize_path(
-        path, config=spack.test.harness.current().config
-    ) == os.path.normpath(
+    assert spack.config.canonicalize_path(path, config=ctx.config) == os.path.normpath(
         os.path.join(mock_low_high_config.scopes["low"].path, os.path.join("foo", "bar", "baz"))
     )
 
     # test architecture information is in replacements
     assert spack.config.canonicalize_path(
-        os.path.join("foo", "$platform", "bar"), config=spack.test.harness.current().config
+        os.path.join("foo", "$platform", "bar"), config=ctx.config
     ) == os.path.abspath(os.path.join("foo", "test", "bar"))
 
     host_target = spack.platforms.host().default_target()
     host_target_family = str(host_target.family)
     assert spack.config.canonicalize_path(
-        os.path.join("foo", "$target_family", "bar"), config=spack.test.harness.current().config
+        os.path.join("foo", "$target_family", "bar"), config=ctx.config
     ) == os.path.abspath(os.path.join("foo", host_target_family, "bar"))
 
 
@@ -411,48 +407,62 @@ def test_merge_with_defaults(mock_low_high_config, write_config_file):
     assert cfg["baz"]["version"] == ["c"]
 
 
-def test_substitute_user(mock_low_high_config, tmp_path: pathlib.Path):
+def test_substitute_user(mock_low_high_config, tmp_path: pathlib.Path, ctx: SpackContext):
     user = spack.config.get_user()
     base = str(tmp_path)
     assert os.path.join(base, "foo", "bar", user, "baz") == spack.config.canonicalize_path(
-        os.path.join(base, "foo", "bar", "$user", "baz"),
-        config=spack.test.harness.current().config,
+        os.path.join(base, "foo", "bar", "$user", "baz"), config=ctx.config
     )
 
 
-def test_substitute_user_cache(mock_low_high_config):
+def test_substitute_user_cache(mock_low_high_config, ctx: SpackContext):
     user_cache_path = spack.paths.user_cache_path
     assert os.path.join(user_cache_path, "baz") == spack.config.canonicalize_path(
-        os.path.join("$user_cache_path", "baz"), config=spack.test.harness.current().config
+        os.path.join("$user_cache_path", "baz"), config=ctx.config
     )
 
 
-def test_substitute_tempdir(mock_low_high_config):
+def test_substitute_tempdir(mock_low_high_config, ctx: SpackContext):
     tempdir = tempfile.gettempdir()
-    assert tempdir == spack.config.canonicalize_path(
-        "$tempdir", config=spack.test.harness.current().config
-    )
+    assert tempdir == spack.config.canonicalize_path("$tempdir", config=ctx.config)
     assert os.path.join(tempdir, "foo", "bar", "baz") == spack.config.canonicalize_path(
-        os.path.join("$tempdir", "foo", "bar", "baz"), config=spack.test.harness.current().config
+        os.path.join("$tempdir", "foo", "bar", "baz"), config=ctx.config
     )
 
 
-def test_substitute_date(mock_low_high_config):
+def test_tests_ignore_user_configuration_and_caches(ctx: SpackContext):
+    """Neither the mock configuration nor the one of ``spack.config.create()`` reads the user and
+    system configuration, and the mock configuration keeps its caches out of the user's."""
+    user_and_system = [
+        pathlib.Path(os.path.expanduser(f"~{os.sep}.spack")),
+        pathlib.Path(os.sep, "etc", "spack"),
+    ]
+    for config in (ctx.config, spack.config.create()):
+        for scope in config.scopes.values():
+            path = getattr(scope, "path", None)
+            if path is None:
+                continue
+            path = pathlib.Path(path)
+            assert not any(path == p or p in path.parents for p in user_and_system), scope.name
+
+    user_cache = pathlib.Path(spack.paths.user_cache_path)
+    for key in ("config:misc_cache", "config:source_cache", "config:test_stage"):
+        path = pathlib.Path(spack.config.canonicalize_path(ctx.config.get(key), config=ctx.config))
+        assert user_cache not in path.parents, key
+
+
+def test_substitute_date(mock_low_high_config, ctx: SpackContext):
     test_path = os.path.join("hello", "world", "on", "$date")
-    new_path = spack.config.canonicalize_path(
-        test_path, config=spack.test.harness.current().config
-    )
+    new_path = spack.config.canonicalize_path(test_path, config=ctx.config)
     assert "$date" in test_path
     assert date.today().strftime("%Y-%m-%d") in new_path
 
 
-def test_substitute_spack_version():
+def test_substitute_spack_version(ctx: SpackContext):
     version = spack.spack_version_info
     assert spack.config.canonicalize_path(
-        "spack$spack_short_version/test", config=spack.test.harness.current().config
-    ) == spack.config.canonicalize_path(
-        f"spack{version[0]}.{version[1]}/test", config=spack.test.harness.current().config
-    )
+        "spack$spack_short_version/test", config=ctx.config
+    ) == spack.config.canonicalize_path(f"spack{version[0]}.{version[1]}/test", config=ctx.config)
 
 
 PAD_STRING = spack_path.SPACK_PATH_PADDING_CHARS
@@ -1103,7 +1113,7 @@ def test_license_dir_config(mutable_config: Configuration, mock_packages: RepoPa
     assert mutable_config.get("config:license_dir") == expected_dir
     assert spack.package_base.global_license_dir(mutable_config) == expected_dir
     pkg = mock_packages.get_pkg_class("pkg-a")(spack.spec.Spec("pkg-a"))
-    pkg.context = spack.context.SpackContext(mutable_config)
+    pkg.context = SpackContext(mutable_config)
     assert pkg.global_license_dir == expected_dir
 
     abs_path = str(tmp_path / "foo" / "bar" / "baz")
@@ -1504,7 +1514,7 @@ def test_config_path_dsl(path, it_should_work, expected_parsed):
 
 @pytest.mark.regression("48254")
 def test_env_activation_preserves_command_line_scope(
-    mutable_mock_env_path, mutable_config: Configuration
+    mutable_mock_env_path, mutable_config: Configuration, ctx: SpackContext
 ):
     """Check that the "command_line" scope remains the highest priority scope, when we activate,
     or deactivate, environments.
@@ -1513,18 +1523,18 @@ def test_env_activation_preserves_command_line_scope(
     assert expected_cl_scope.name == "command_line"
 
     # Creating an environment pushes a new scope
-    ev.create("test", ctx=spack.test.harness.current())
-    with ev.read("test", ctx=spack.test.harness.current()):
+    ev.create("test", ctx=ctx)
+    with ev.read("test", ctx=ctx):
         assert mutable_config.highest() == expected_cl_scope
 
         # No active environment pops the scope
-        with ev.no_active_environment(spack.test.harness.current()):
+        with ev.no_active_environment(ctx):
             assert mutable_config.highest() == expected_cl_scope
         assert mutable_config.highest() == expected_cl_scope
 
         # Switch the environment to another one
-        ev.create("test-2", ctx=spack.test.harness.current())
-        with ev.read("test-2", ctx=spack.test.harness.current()):
+        ev.create("test-2", ctx=ctx)
+        with ev.read("test-2", ctx=ctx):
             assert mutable_config.highest() == expected_cl_scope
         assert mutable_config.highest() == expected_cl_scope
 
@@ -1534,7 +1544,7 @@ def test_env_activation_preserves_command_line_scope(
 @pytest.mark.regression("48414")
 @pytest.mark.regression("49188")
 def test_env_activation_preserves_config_scopes(
-    mutable_mock_env_path, mutable_config: Configuration
+    mutable_mock_env_path, mutable_config: Configuration, ctx: SpackContext
 ):
     """Check that the priority of scopes is respected when merging configuration files."""
     custom_scope = spack.config.InternalConfigScope("custom_scope")
@@ -1548,20 +1558,20 @@ def test_env_activation_preserves_config_scopes(
 
     assert highest_priority_scopes(mutable_config, nscopes=2) == expected_scopes_without_env
     # Creating an environment pushes a new scope
-    ev.create("test", ctx=spack.test.harness.current())
-    with ev.read("test", ctx=spack.test.harness.current()):
+    ev.create("test", ctx=ctx)
+    with ev.read("test", ctx=ctx):
         assert highest_priority_scopes(mutable_config, nscopes=3) == expected_scopes_with_first_env
 
         # No active environment pops the scope
-        with ev.no_active_environment(spack.test.harness.current()):
+        with ev.no_active_environment(ctx):
             assert (
                 highest_priority_scopes(mutable_config, nscopes=2) == expected_scopes_without_env
             )
         assert highest_priority_scopes(mutable_config, nscopes=3) == expected_scopes_with_first_env
 
         # Switch the environment to another one
-        ev.create("test-2", ctx=spack.test.harness.current())
-        with ev.read("test-2", ctx=spack.test.harness.current()):
+        ev.create("test-2", ctx=ctx)
+        with ev.read("test-2", ctx=ctx):
             assert (
                 highest_priority_scopes(mutable_config, nscopes=3)
                 == expected_scopes_with_second_env
@@ -1615,19 +1625,22 @@ def test_deepcopy_as_builtin(env_yaml):
     assert line_info["all"].line_info == f"{env_yaml}:7"
 
 
-def test_included_optional_include_scopes():
+def test_included_optional_include_scopes(ctx: SpackContext):
     with pytest.raises(NotImplementedError):
-        spack.config.OptionalInclude({}, spack.test.harness.current().config).scopes(
-            spack.config.ConfigScope("fail")
-        )
+        spack.config.OptionalInclude({}, ctx.config).scopes(spack.config.ConfigScope("fail"))
 
 
 def test_included_path_string(
-    tmp_path: pathlib.Path, mock_low_high_config, ensure_debug, monkeypatch, capfd
+    tmp_path: pathlib.Path,
+    mock_low_high_config,
+    ensure_debug,
+    monkeypatch,
+    capfd,
+    ctx: SpackContext,
 ):
     path = tmp_path / "local" / "config.yaml"
     path.parent.mkdir()
-    include = spack.config.included_path(path, spack.test.harness.current().config)
+    include = spack.config.included_path(path, ctx.config)
     assert isinstance(include, spack.config.IncludePath)
     assert include.path == str(path)
     assert not include.optional
@@ -1653,12 +1666,12 @@ def test_included_path_string(
 
 
 def test_included_path_string_no_parent_path(
-    tmp_path: pathlib.Path, config, ensure_debug, monkeypatch
+    tmp_path: pathlib.Path, config, ensure_debug, monkeypatch, ctx: SpackContext
 ):
     """Use a relative include path and no parent scope path so destination
     will be rooted in the current working directory (usually SPACK_ROOT)."""
     entry = {"path": "config.yaml", "optional": True}
-    include = spack.config.included_path(entry, spack.test.harness.current().config)
+    include = spack.config.included_path(entry, ctx.config)
     parent_scope = spack.config.InternalConfigScope("parent-scope")
     included_scopes = include.scopes(parent_scope)
     # ensure scope is returned even if there is no parent path
@@ -1670,27 +1683,29 @@ def test_included_path_string_no_parent_path(
     assert curr_dir == os.path.commonprefix([curr_dir, destination])  # type: ignore[list-item]
 
 
-def test_included_path_substitution():
+def test_included_path_substitution(ctx: SpackContext):
     # check a straight path substitution
     entry = {"path": "$user_cache_path/path/to/config.yaml"}
-    include = spack.config.included_path(entry, spack.test.harness.current().config)
+    include = spack.config.included_path(entry, ctx.config)
+    assert isinstance(include, spack.config.IncludePath)
     assert spack.paths.user_cache_path in include.path
 
     # check path through an environment variable
     path = "/path/to/project/packages.yaml"
     os.environ["SPACK_TEST_PATH_SUB"] = path
     entry = {"name": "vartest", "path": "$SPACK_TEST_PATH_SUB"}
-    include = spack.config.included_path(entry, spack.test.harness.current().config)
+    include = spack.config.included_path(entry, ctx.config)
+    assert isinstance(include, spack.config.IncludePath)
     assert path in include.path
 
 
 def test_included_path_conditional_bad_when(
-    tmp_path: pathlib.Path, mock_low_high_config, ensure_debug, capfd
+    tmp_path: pathlib.Path, mock_low_high_config, ensure_debug, capfd, ctx: SpackContext
 ):
     path = tmp_path / "local"
     path.mkdir()
     entry = {"path": str(path), "when": 'platform == "nosuchplatform"', "optional": True}
-    include = spack.config.included_path(entry, spack.test.harness.current().config)
+    include = spack.config.included_path(entry, ctx.config)
     assert isinstance(include, spack.config.IncludePath)
     assert include.path == entry["path"]
     assert include.when == entry["when"]
@@ -1703,11 +1718,13 @@ def test_included_path_conditional_bad_when(
     assert not scopes
 
 
-def test_included_path_conditional_success(tmp_path: pathlib.Path, mock_low_high_config):
+def test_included_path_conditional_success(
+    tmp_path: pathlib.Path, mock_low_high_config, ctx: SpackContext
+):
     path = tmp_path / "local"
     path.mkdir()
     entry = {"path": str(path), "when": 'platform == "test"', "optional": True}
-    include = spack.config.included_path(entry, spack.test.harness.current().config)
+    include = spack.config.included_path(entry, ctx.config)
     assert isinstance(include, spack.config.IncludePath)
     assert include.path == entry["path"]
     assert include.when == entry["when"]
@@ -1719,21 +1736,26 @@ def test_included_path_conditional_success(tmp_path: pathlib.Path, mock_low_high
     assert isinstance(scopes[0], spack.config.DirectoryConfigScope)
 
 
-def test_included_path_git_missing_args():
+def test_included_path_git_missing_args(ctx: SpackContext):
     # must have one or more of: branch, tag and commit so fail if missing any
     entry = {"git": "https://example.com/windows/configs.git", "paths": ["config.yaml"]}
     with pytest.raises(spack.error.ConfigError, match="specify one or more"):
-        spack.config.included_path(entry, spack.test.harness.current().config)
+        spack.config.included_path(entry, ctx.config)
 
     # must have one or more paths
     entry["tag"] = "v1.0"
     entry["paths"] = []
     with pytest.raises(spack.error.ConfigError, match="must include one or more"):
-        spack.config.included_path(entry, spack.test.harness.current().config)
+        spack.config.included_path(entry, ctx.config)
 
 
 def test_included_path_git_unsat(
-    tmp_path: pathlib.Path, mock_low_high_config, ensure_debug, monkeypatch, capfd
+    tmp_path: pathlib.Path,
+    mock_low_high_config,
+    ensure_debug,
+    monkeypatch,
+    capfd,
+    ctx: SpackContext,
 ):
     paths = ["config.yaml", "packages.yaml"]
     entry = {
@@ -1742,7 +1764,7 @@ def test_included_path_git_unsat(
         "paths": paths,
         "when": 'platform == "nosuchplatform"',
     }
-    include = spack.config.included_path(entry, spack.test.harness.current().config)
+    include = spack.config.included_path(entry, ctx.config)
     assert isinstance(include, spack.config.GitIncludePaths)
     assert include.git == entry["git"]
     assert include.tag == entry["tag"]
@@ -1756,7 +1778,7 @@ def test_included_path_git_unsat(
     assert not scopes
 
 
-def test_included_path_git_substitutions():
+def test_included_path_git_substitutions(ctx: SpackContext):
     # check path substitutions for the git url *and* paths
     paths = ["./$platform/config.yaml", "$platform/packages.yaml"]
     entry = {
@@ -1766,7 +1788,7 @@ def test_included_path_git_substitutions():
         "paths": paths,
         "when": 'platform == "test"',
     }
-    include = spack.config.included_path(entry, spack.test.harness.current().config)
+    include = spack.config.included_path(entry, ctx.config)
     assert isinstance(include, spack.config.GitIncludePaths)
     assert not include.optional and include.evaluate_condition()
     assert "test" in include.git, "Expected the git url to contain the platform"
@@ -1777,7 +1799,8 @@ def test_included_path_git_substitutions():
     url = "https://example.com/path/to/configs.git"
     os.environ["SPACK_TEST_URL_SUB"] = url
     entry["git"] = "$SPACK_TEST_URL_SUB"
-    include = spack.config.included_path(entry, spack.test.harness.current().config)
+    include = spack.config.included_path(entry, ctx.config)
+    assert isinstance(include, spack.config.GitIncludePaths)
     assert include.git == url, "Expected git url environment var substitution"
 
 
@@ -1785,7 +1808,14 @@ def test_included_path_git_substitutions():
     "key,value", [("branch", "main"), ("commit", "abcdef123456"), ("tag", "v1.0")]
 )
 def test_included_path_git(
-    tmp_path: pathlib.Path, mock_low_high_config, ensure_debug, monkeypatch, key, value, capfd
+    tmp_path: pathlib.Path,
+    mock_low_high_config,
+    ensure_debug,
+    monkeypatch,
+    key,
+    value,
+    capfd,
+    ctx: SpackContext,
 ):
     """Check git includes for branch, commit, and tag using relative paths.
 
@@ -1802,7 +1832,7 @@ def test_included_path_git(
         "paths": paths,
         "when": 'platform == "test"',
     }
-    include = spack.config.included_path(entry, spack.test.harness.current().config)
+    include = spack.config.included_path(entry, ctx.config)
     assert isinstance(include, spack.config.GitIncludePaths)
     assert not include.optional and include.evaluate_condition()
 
@@ -1864,22 +1894,22 @@ def test_included_path_git(
 
 
 @pytest.mark.parametrize("path", ["./config.yaml", "/path/to/my/special/package.yaml"])
-def test_included_path_local_no_dest(path):
+def test_included_path_local_no_dest(path, ctx: SpackContext):
     """Confirm that local paths have no cache destination."""
     entry = {"path": path}
-    include = spack.config.included_path(entry, spack.test.harness.current().config)
+    include = spack.config.included_path(entry, ctx.config)
     destination = include.base_directory(entry["path"])
     assert not destination, f"Expected local include ({include}) to NOT have a cache destination"
 
 
-def test_included_path_url_temp_dest(mock_low_high_config):
+def test_included_path_url_temp_dest(mock_low_high_config, ctx: SpackContext):
     """Check that remote (raw) path under different scopes end up with temporary
     cache destinations."""
     entry = {
         "path": "https://github.com/path/to/raw/config/config.yaml",
         "sha256": "26e871804a92cd07bb3d611b31b4156ae93d35b6a6d6e0ef3a67871fcb1d258b",
     }
-    include = spack.config.included_path(entry, spack.test.harness.current().config)
+    include = spack.config.included_path(entry, ctx.config)
 
     parent_scope = mock_low_high_config.scopes["low"]
     parent_scope.path = ""
@@ -1888,33 +1918,34 @@ def test_included_path_url_temp_dest(mock_low_high_config):
     for scope in [None, parent_scope]:
         rest = "parent scope with no path" if scope else "no parent scope"
         destination = include.base_directory(entry["path"], parent_scope=scope)
+        assert destination is not None
         dest_dir = str(pathlib.Path(destination).parent)
         temp_dir = tempfile.gettempdir()
         assert dest_dir == temp_dir, pre + rest
 
 
-def test_included_path_git_temp_dest(mock_low_high_config):
+def test_included_path_git_temp_dest(mock_low_high_config, ctx: SpackContext):
     """Check a remote (relative) path with different parent scope options that
     result in a temporary cache destination."""
-    entry = {
-        "git": "https://example.com/linux/configs.git",
-        "branch": "develop",
-        "paths": ["config.yaml"],
-    }
-    include = spack.config.included_path(entry, spack.test.harness.current().config)
+    git_url = "https://example.com/linux/configs.git"
+    entry = {"git": git_url, "branch": "develop", "paths": ["config.yaml"]}
+    include = spack.config.included_path(entry, ctx.config)
     parent_scope = mock_low_high_config.scopes["low"]
     parent_scope.path = ""
     pre = f"Expected temporary cache destination for git include path ({include}) for "
 
     for scope in [None, parent_scope]:
         rest = "parent scope with no path" if scope else "no parent scope"
-        destination = include.base_directory(entry["git"], parent_scope=scope)
+        destination = include.base_directory(git_url, parent_scope=scope)
+        assert destination is not None
         dest_dir = str(pathlib.Path(destination).parent)
         temp_dir = tempfile.gettempdir()
         assert dest_dir == temp_dir, pre + rest
 
 
-def test_included_path_git_errs(tmp_path: pathlib.Path, mock_low_high_config, monkeypatch):
+def test_included_path_git_errs(
+    tmp_path: pathlib.Path, mock_low_high_config, monkeypatch, ctx: SpackContext
+):
     monkeypatch.setattr(spack.paths, "user_cache_path", str(tmp_path))
 
     paths = ["concretizer.yaml"]
@@ -1924,7 +1955,7 @@ def test_included_path_git_errs(tmp_path: pathlib.Path, mock_low_high_config, mo
         "paths": paths,
         "when": 'platform == "test"',
     }
-    include = spack.config.included_path(entry, spack.test.harness.current().config)
+    include = spack.config.included_path(entry, ctx.config)
     parent_scope = mock_low_high_config.scopes["low"]
 
     # fail to initialize the repository
@@ -1961,7 +1992,7 @@ def test_included_path_git_errs(tmp_path: pathlib.Path, mock_low_high_config, mo
 
 def test_missing_include_scope_list(mock_missing_dir_include_scopes):
     """Tests that an included scope with a non existent file/directory
-    is still listed as a scope under spack.test.harness.current().config.scopes"""
+    is still listed as a scope under ctx.config.scopes"""
     assert "sub_base" in list(mock_missing_dir_include_scopes.scopes), (
         "Missing Optional Scope Missing from Config Scopes"
     )
@@ -2059,12 +2090,12 @@ def test_config_scope_empty_write(tmp_path: pathlib.Path):
     assert config_scope.get_section("include") is None
 
 
-def test_include_bad_parent_scope(tmp_path: pathlib.Path):
+def test_include_bad_parent_scope(tmp_path: pathlib.Path, ctx: SpackContext):
     """Test parent scope validation."""
     path = tmp_path / "config.yaml"
     path.touch()
     entry = {"path": str(path)}
-    include = spack.config.included_path(entry, spack.test.harness.current().config)
+    include = spack.config.included_path(entry, ctx.config)
 
     # Confirm require a ConfigScope parent
     with pytest.raises(AssertionError, match="configuration scope"):
@@ -2084,76 +2115,63 @@ def test_config_invalid_scope(mock_low_high_config):
 
 
 @pytest.mark.not_on_windows("Unix path")
-def test_canonicalize_file_unix():
+def test_canonicalize_file_unix(ctx: SpackContext):
     assert (
-        spack.config.canonicalize_path(
-            "/home/spack/path/to/file.txt", config=spack.test.harness.current().config
-        )
+        spack.config.canonicalize_path("/home/spack/path/to/file.txt", config=ctx.config)
         == "/home/spack/path/to/file.txt"
     )
     assert (
-        spack.config.canonicalize_path(
-            "file:///home/another/config.yaml", config=spack.test.harness.current().config
-        )
+        spack.config.canonicalize_path("file:///home/another/config.yaml", config=ctx.config)
         == "/home/another/config.yaml"
     )
 
 
 @pytest.mark.only_windows("Windows path")
-def test_canonicalize_file_windows():
+def test_canonicalize_file_windows(ctx: SpackContext):
     assert (
-        spack.config.canonicalize_path(
-            r"C:\Files (x86)\Windows\10", config=spack.test.harness.current().config
-        )
+        spack.config.canonicalize_path(r"C:\Files (x86)\Windows\10", config=ctx.config)
         == r"C:\Files (x86)\Windows\10"
     )
     assert (
-        spack.config.canonicalize_path(
-            r"E:/spack stage", config=spack.test.harness.current().config
-        )
-        == r"E:\spack stage"
+        spack.config.canonicalize_path(r"E:/spack stage", config=ctx.config) == r"E:\spack stage"
     )
 
 
-def test_canonicalize_file_relative():
-    assert spack.config.canonicalize_path(
-        "path/to.txt", config=spack.test.harness.current().config
-    ) == os.path.join(os.getcwd(), "path", "to.txt")
+def test_canonicalize_file_relative(ctx: SpackContext):
+    assert spack.config.canonicalize_path("path/to.txt", config=ctx.config) == os.path.join(
+        os.getcwd(), "path", "to.txt"
+    )
 
 
-def test_env_substitution_follows_activation(mutable_mock_env_path, mutable_config: Configuration):
+def test_env_substitution_follows_activation(
+    mutable_mock_env_path, mutable_config: Configuration, ctx: SpackContext
+):
     """Tests that the "$env" substitution resolves to the active environment's path only while an
     environment is active, and is a no-op before and after activation.
     """
     # Before activation "$env" is a no-op
     assert mutable_config.env_path is None
-    assert (
-        spack.config.substitute_path_variables("$env/foo/bar", spack.test.harness.current().config)
-        == "$env/foo/bar"
-    )
+    assert spack.config.substitute_path_variables("$env/foo/bar", ctx.config) == "$env/foo/bar"
 
-    env = ev.create("test", ctx=spack.test.harness.current())
+    env = ev.create("test", ctx=ctx)
     with env:
         # During activation "$env" resolves to the environment's path
         assert mutable_config.env_path == env.path
         assert (
-            spack.config.substitute_path_variables(
-                "$env/foo/bar", spack.test.harness.current().config
-            )
+            spack.config.substitute_path_variables("$env/foo/bar", ctx.config)
             == f"{env.path}/foo/bar"
         )
 
     # After deactivation "$env" is a no-op again
     assert mutable_config.env_path is None
-    assert (
-        spack.config.substitute_path_variables("$env/foo/bar", spack.test.harness.current().config)
-        == "$env/foo/bar"
-    )
+    assert spack.config.substitute_path_variables("$env/foo/bar", ctx.config) == "$env/foo/bar"
 
 
-def test_flattened_configuration_has_every_section(mutable_config: Configuration):
+def test_flattened_configuration_has_every_section(
+    mutable_config: Configuration, ctx: SpackContext
+):
     """Tests that flattening the configuration gives the merged content of every section."""
-    flattened = spack.config.flattened_configuration(spack.test.harness.current().config)
+    flattened = spack.config.flattened_configuration(ctx.config)
 
     assert list(flattened) == [spack.schema.env.TOP_LEVEL_KEY]
     sections = flattened[spack.schema.env.TOP_LEVEL_KEY]
@@ -2162,7 +2180,9 @@ def test_flattened_configuration_has_every_section(mutable_config: Configuration
         assert sections[name] == mutable_config.get(name)
 
 
-def test_flattened_configuration_leaves_the_manifest_alone(mutable_config: Configuration):
+def test_flattened_configuration_leaves_the_manifest_alone(
+    mutable_config: Configuration, ctx: SpackContext
+):
     """Tests that a manifest keeps the keys that are not config sections."""
     manifest = syaml.load(
         """\
@@ -2172,7 +2192,7 @@ spack:
   view: true
 """
     )
-    flattened = spack.config.flattened_configuration(spack.test.harness.current().config, manifest)
+    flattened = spack.config.flattened_configuration(ctx.config, manifest)
     flattened = flattened[spack.schema.env.TOP_LEVEL_KEY]
 
     assert flattened["specs"] == ["mpileaks"]

@@ -19,6 +19,7 @@ import spack.util.filesystem as fs
 import spack.util.git
 import spack.util.web
 from spack import ci
+from spack.context import SpackContext
 from spack.spec import Spec
 from spack.test.conftest import MockHTTPResponse, RepoBuilder
 from spack.version import Version
@@ -118,7 +119,7 @@ def test_filter_added_checksums_new_commit(mock_git_package_changes):
         ) == ["74253725f884e2424a0dd8ae3f69896d5377f325"]
 
 
-def test_pipeline_dag(config, repo_builder: RepoBuilder):
+def test_pipeline_dag(config, repo_builder: RepoBuilder, ctx: SpackContext):
     r"""Test creation, pruning, and traversal of PipelineDAG using the
     following package dependency graph:
 
@@ -142,8 +143,8 @@ def test_pipeline_dag(config, repo_builder: RepoBuilder):
     repo_builder.add_package("pkg-b", dependencies=[("pkg-d", None, None), ("pkg-e", None, None)])
     repo_builder.add_package("pkg-a", dependencies=[("pkg-b", None, None), ("pkg-c", None, None)])
 
-    with spack.test.harness.use_repositories(repo_builder.root):
-        spec_a = spack.concretize.concretize_one("pkg-a", spack.test.harness.current())
+    with spack.test.harness.use_repositories(ctx, repo_builder.root):
+        spec_a = spack.concretize.concretize_one("pkg-a", ctx)
 
         key_a = ci.common.PipelineDag.key(spec_a)
         key_b = ci.common.PipelineDag.key(spec_a["pkg-b"])
@@ -242,14 +243,14 @@ def test_pipeline_dag(config, repo_builder: RepoBuilder):
 
 
 @pytest.mark.not_on_windows("Not supported on Windows (yet)")
-def test_import_signing_key(mock_gnupghome):
+def test_import_signing_key(mock_gnupghome, ctx: SpackContext):
     signing_key_dir = spack.paths.mock_gpg_keys_path
     signing_key_path = os.path.join(signing_key_dir, "package-signing-key")
     with open(signing_key_path, encoding="utf-8") as fd:
         signing_key = fd.read()
 
     # Just make sure this does not raise any exceptions
-    ci.import_signing_key(signing_key, spack.test.harness.current())
+    ci.import_signing_key(signing_key, ctx)
 
 
 def test_download_and_extract_artifacts(tmp_path: pathlib.Path, monkeypatch):
@@ -282,16 +283,14 @@ def test_download_and_extract_artifacts(tmp_path: pathlib.Path, monkeypatch):
         ci.download_and_extract_artifacts(url, str(working_dir), urlopen=_urlopen_500)
 
 
-def test_ci_copy_stage_logs_to_artifacts_fail(tmp_path: pathlib.Path, config, capfd):
+def test_ci_copy_stage_logs_to_artifacts_fail(
+    tmp_path: pathlib.Path, config, capfd, ctx: SpackContext
+):
     """The copy will fail because the spec is not concrete so does not have
     a package."""
     log_dir = tmp_path / "log_dir"
-    concrete_spec = spack.concretize.concretize_one(
-        "printing-package", spack.test.harness.current()
-    )
-    ci.copy_stage_logs_to_artifacts(
-        concrete_spec, str(log_dir), store=spack.test.harness.current().store
-    )
+    concrete_spec = spack.concretize.concretize_one("printing-package", ctx)
+    ci.copy_stage_logs_to_artifacts(concrete_spec, str(log_dir), store=ctx.store)
     _, err = capfd.readouterr()
     assert "Unable to copy files" in err
     assert "No such file or directory" in err
@@ -389,7 +388,7 @@ def test_setup_spack_repro_version(
     assert "Unable to merge {0}".format(c1) in err
 
 
-def test_get_spec_filter_list(mutable_mock_env_path, mutable_mock_repo):
+def test_get_spec_filter_list(mutable_mock_env_path, mutable_mock_repo, ctx: SpackContext):
     """Tests that, given an active environment and list of touched pkgs, we get the right
     list of possibly-changed env specs.
 
@@ -408,7 +407,7 @@ def test_get_spec_filter_list(mutable_mock_env_path, mutable_mock_repo):
 
     and simulates a change in libdwarf.
     """
-    e1 = ev.create("test", ctx=spack.test.harness.current())
+    e1 = ev.create("test", ctx=ctx)
     e1.add("mpileaks")
     e1.add("hypre")
     e1.concretize()
@@ -465,8 +464,8 @@ def test_get_spec_filter_list(mutable_mock_env_path, mutable_mock_repo):
 
 
 @pytest.mark.regression("29947")
-def test_affected_specs_on_first_concretization(mutable_mock_env_path):
-    e = ev.create("first_concretization", ctx=spack.test.harness.current())
+def test_affected_specs_on_first_concretization(mutable_mock_env_path, ctx: SpackContext):
+    e = ev.create("first_concretization", ctx=ctx)
     e.add("mpileaks~shared")
     e.add("mpileaks+shared")
     e.concretize()
@@ -495,17 +494,13 @@ def test_ci_process_command_fail(repro_dir, monkeypatch):
         ci.process_command("help", [], str(repro_dir))
 
 
-def test_ci_create_buildcache(working_env, config, monkeypatch):
+def test_ci_create_buildcache(working_env, config, monkeypatch, ctx: SpackContext):
     """Test that create_buildcache returns a list of objects with the correct
     keys and types."""
     monkeypatch.setattr(ci, "push_to_build_cache", lambda a, b, c, **kwargs: True)
-    ctx = spack.test.harness.current()
-    resources = {"ctx": ctx}
 
     results = ci.create_buildcache(
-        Spec(),
-        destination_mirror_urls=["file:///fake-url-one", "file:///fake-url-two"],
-        **resources,
+        Spec(), destination_mirror_urls=["file:///fake-url-one", "file:///fake-url-two"], ctx=ctx
     )
 
     assert len(results) == 2
@@ -516,7 +511,7 @@ def test_ci_create_buildcache(working_env, config, monkeypatch):
     assert result2.url == "file:///fake-url-two"
 
     results = ci.create_buildcache(
-        Spec(), destination_mirror_urls=["file:///fake-url-one"], **resources
+        Spec(), destination_mirror_urls=["file:///fake-url-one"], ctx=ctx
     )
 
     assert len(results) == 1
@@ -524,25 +519,28 @@ def test_ci_create_buildcache(working_env, config, monkeypatch):
     assert results[0].url == "file:///fake-url-one"
 
 
-def test_ci_run_standalone_tests_missing_requirements(working_env, config, capfd):
+def test_ci_run_standalone_tests_missing_requirements(
+    working_env, config, capfd, ctx: SpackContext
+):
     """This test case checks for failing prerequisite checks."""
     ci.run_standalone_tests()
     err = capfd.readouterr()[1]
     assert "Job spec is required" in err
 
-    args = {
-        "job_spec": spack.concretize.concretize_one(
-            "printing-package", spack.test.harness.current()
-        )
-    }
-    ci.run_standalone_tests(**args)
+    ci.run_standalone_tests(job_spec=spack.concretize.concretize_one("printing-package", ctx))
     err = capfd.readouterr()[1]
     assert "Reproduction directory is required" in err
 
 
 @pytest.mark.not_on_windows("Reliance on bash script not supported on Windows")
 def test_ci_run_standalone_tests_not_installed_junit(
-    tmp_path: pathlib.Path, repro_dir, working_env, mock_test_stage, capfd, monkeypatch
+    tmp_path: pathlib.Path,
+    repro_dir,
+    working_env,
+    mock_test_stage,
+    capfd,
+    monkeypatch,
+    ctx: SpackContext,
 ):
     # the generated test script runs `spack` from PATH
     monkeypatch.setenv("PATH", f"{spack.paths.bin_path}{os.pathsep}{os.environ['PATH']}")
@@ -550,7 +548,7 @@ def test_ci_run_standalone_tests_not_installed_junit(
 
     ci.run_standalone_tests(
         log_file=str(log_file),
-        job_spec=spack.concretize.concretize_one("printing-package", spack.test.harness.current()),
+        job_spec=spack.concretize.concretize_one("printing-package", ctx),
         repro_dir=str(repro_dir),
         fail_fast=True,
     )
@@ -561,7 +559,13 @@ def test_ci_run_standalone_tests_not_installed_junit(
 
 @pytest.mark.not_on_windows("Reliance on bash script not supported on Windows")
 def test_ci_run_standalone_tests_not_installed_cdash(
-    tmp_path: pathlib.Path, repro_dir, working_env, mock_test_stage, capfd, monkeypatch
+    tmp_path: pathlib.Path,
+    repro_dir,
+    working_env,
+    mock_test_stage,
+    capfd,
+    monkeypatch,
+    ctx: SpackContext,
 ):
     """Test run_standalone_tests with cdash and related options."""
     # the generated test script runs `spack` from PATH
@@ -578,13 +582,11 @@ def test_ci_run_standalone_tests_not_installed_cdash(
     os.environ["SPACK_CDASH_BUILD_NAME"] = "ci-test-build"
     os.environ["SPACK_CDASH_BUILD_STAMP"] = "ci-test-build-stamp"
     os.environ["CI_RUNNER_DESCRIPTION"] = "test-runner"
-    client = spack.util.web.NetworkClient.from_config(spack.test.harness.current().config)
-    handler = ci.CDashHandler(
-        ci_cdash, urlopen=client.urlopen, config=spack.test.harness.current().config
-    )
+    client = spack.util.web.NetworkClient.from_config(ctx.config)
+    handler = ci.CDashHandler(ci_cdash, urlopen=client.urlopen, config=ctx.config)
     ci.run_standalone_tests(
         log_file=str(log_file),
-        job_spec=spack.concretize.concretize_one("printing-package", spack.test.harness.current()),
+        job_spec=spack.concretize.concretize_one("printing-package", ctx),
         repro_dir=str(repro_dir),
         cdash=handler,
     )
@@ -601,12 +603,12 @@ def test_ci_run_standalone_tests_not_installed_cdash(
     assert "No such file or directory" in err
 
 
-def test_ci_skipped_report(tmp_path: pathlib.Path, config, monkeypatch):
+def test_ci_skipped_report(tmp_path: pathlib.Path, config, monkeypatch, ctx: SpackContext):
     """Test explicit skipping of report as well as CI's 'package' arg."""
     # the cdash url is fake; never upload reports to it
     monkeypatch.setattr(spack.reporters.cdash.CDash, "upload", lambda self, filename: None)
     pkg = "trivial-smoke-test"
-    spec = spack.concretize.concretize_one(pkg, spack.test.harness.current())
+    spec = spack.concretize.concretize_one(pkg, ctx)
     ci_cdash = {
         "url": "file://fake",
         "build-group": "fake-group",
@@ -616,10 +618,8 @@ def test_ci_skipped_report(tmp_path: pathlib.Path, config, monkeypatch):
     os.environ["SPACK_CDASH_BUILD_NAME"] = "fake-test-build"
     os.environ["SPACK_CDASH_BUILD_STAMP"] = "ci-test-build-stamp"
     os.environ["CI_RUNNER_DESCRIPTION"] = "test-runner"
-    client = spack.util.web.NetworkClient.from_config(spack.test.harness.current().config)
-    handler = ci.CDashHandler(
-        ci_cdash, urlopen=client.urlopen, config=spack.test.harness.current().config
-    )
+    client = spack.util.web.NetworkClient.from_config(ctx.config)
+    handler = ci.CDashHandler(ci_cdash, urlopen=client.urlopen, config=ctx.config)
     reason = "Testing skip"
     handler.report_skipped(spec, str(tmp_path), reason=reason)
 

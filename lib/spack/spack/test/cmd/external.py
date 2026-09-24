@@ -11,8 +11,8 @@ import spack.cmd.external
 import spack.cray_manifest
 import spack.detection
 import spack.detection.path
-import spack.test.harness
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.spec import Spec
 from spack.test.harness import SpackCommand
 from spack.util.filesystem import getuid, touch
@@ -140,11 +140,11 @@ def test_find_external_cmd_not_buildable(
         (["hwloc"], ["detectable"], [], []),
     ],
 )
-def test_package_selection(names, tags, exclude, expected):
+def test_package_selection(names, tags, exclude, expected, ctx: SpackContext):
     """Tests various cases of selecting packages"""
     # In the mock repo we only have 'find-externals1' that is detectable
     result = spack.cmd.external.packages_to_search_for(
-        spack.test.harness.current().repo, names=names, tags=tags, exclude=exclude
+        ctx.repo, names=names, tags=tags, exclude=exclude
     )
     assert set(result) == set(expected)
 
@@ -253,23 +253,24 @@ def test_list_detectable_packages(mutable_config):
     assert external.returncode == 0
 
 
-def test_overriding_prefix(mock_executable, mutable_config, monkeypatch, mock_packages):
+def test_overriding_prefix(
+    mock_executable, mutable_config, monkeypatch, mock_packages, ctx: SpackContext
+):
     gcc_exe = mock_executable("gcc", output="echo 4.2.1")
     search_dir = gcc_exe.parent
 
-    @classmethod
     def _determine_variants(cls, exes, version_str):
         return "languages=c", {"prefix": "/opt/gcc/bin", "compilers": {"c": exes[0]}}
 
     gcc_cls = mock_packages.get_pkg_class("gcc")
-    monkeypatch.setattr(gcc_cls, "determine_variants", _determine_variants)
+    monkeypatch.setattr(gcc_cls, "determine_variants", classmethod(_determine_variants))
 
     finder = spack.detection.path.ExecutablesFinder()
     detected_specs = finder.find(
         pkg_name="gcc",
         initial_guess=[str(search_dir)],
         repository=mock_packages,
-        config=spack.test.harness.current().config,
+        config=ctx.config,
         additional_search_paths=[],
     )
 

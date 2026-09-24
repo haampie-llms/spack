@@ -7,9 +7,9 @@ import pathlib
 import pytest
 
 import spack.reporters.extract
-import spack.test.harness
 import spack.util.filesystem as fs
 import spack.util.web
+from spack.context import SpackContext
 from spack.install_test import TestStatus
 from spack.reporters import CDash, CDashConfiguration
 from spack.util import tty
@@ -159,7 +159,9 @@ fake::test_skip .. SKIPPED
     assert part["loglines"][0].startswith("SKIPPED:")
 
 
-def test_reporters_report_for_package_no_stdout(tmp_path: pathlib.Path, monkeypatch, capfd):
+def test_reporters_report_for_package_no_stdout(
+    tmp_path: pathlib.Path, monkeypatch, capfd, ctx: SpackContext
+):
     class MockCDash(CDash):
         def upload(*args, **kwargs):
             # Just return (Do NOT try to upload the report to the fake site)
@@ -175,11 +177,7 @@ def test_reporters_report_for_package_no_stdout(tmp_path: pathlib.Path, monkeypa
     )
     monkeypatch.setattr(tty, "_debug", 1)
 
-    reporter = MockCDash(
-        configuration=configuration,
-        urlopen=_client().urlopen,
-        config=spack.test.harness.current().config,
-    )
+    reporter = MockCDash(configuration=configuration, urlopen=_client().urlopen, config=ctx.config)
     pkg_data = {"name": "fake-package"}
     reporter.test_report_for_package(str(tmp_path), pkg_data, 0)
     err = capfd.readouterr()[1]
@@ -187,7 +185,7 @@ def test_reporters_report_for_package_no_stdout(tmp_path: pathlib.Path, monkeypa
     assert "No generated output" in err
 
 
-def test_cdash_reporter_truncates_build_name_if_too_long():
+def test_cdash_reporter_truncates_build_name_if_too_long(ctx: SpackContext):
     build_name = "a" * 190
     extra_long_build_name = build_name + "a"
     configuration = CDashConfiguration(
@@ -199,11 +197,7 @@ def test_cdash_reporter_truncates_build_name_if_too_long():
         track="fake-track",
     )
 
-    reporter = CDash(
-        configuration=configuration,
-        urlopen=_client().urlopen,
-        config=spack.test.harness.current().config,
-    )
+    reporter = CDash(configuration=configuration, urlopen=_client().urlopen, config=ctx.config)
     new_build_name = reporter.report_build_name("fake-package")
 
     assert new_build_name != extra_long_build_name

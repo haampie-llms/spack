@@ -15,8 +15,8 @@ from urllib.request import Request
 import pytest
 
 import spack.mirrors.mirror
-import spack.test.harness
 import spack.util.web
+from spack.context import SpackContext
 from spack.oci.image import Digest, ImageReference, default_config, default_manifest
 from spack.oci.oci import (
     copy_missing_layers,
@@ -665,7 +665,7 @@ def test_default_credentials_provider(monkeypatch):
     )
 
 
-def test_manifest_index(tmp_path: pathlib.Path):
+def test_manifest_index(tmp_path: pathlib.Path, ctx: SpackContext):
     """Test obtaining manifest + config from a registry
     that has an index"""
     urlopen = create_opener(InMemoryOCIRegistry("registry.example.com")).open
@@ -714,7 +714,6 @@ def test_manifest_index(tmp_path: pathlib.Path):
     upload_manifest(img, index, tag=True, urlopen=urlopen)
 
     # Check that we fetcht the correct manifest and config for each architecture
-    ctx = spack.test.harness.current()
     for arch in ("amd64", "arm64"):
         assert (
             get_manifest_and_config(

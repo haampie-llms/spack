@@ -15,11 +15,11 @@ import spack.repo
 import spack.solver.asp
 import spack.spec
 import spack.spec_parser
-import spack.test.harness
 import spack.traverse
 import spack.util.lang
 import spack.variant
 import spack.version as vn
+from spack.context import SpackContext
 from spack.enums import PropagationPolicy
 from spack.error import SpecError, UnsatisfiableSpecError
 from spack.spec import ArchSpec, DependencySpec, Spec, SpecFormatSigilError, SpecFormatStringError
@@ -487,11 +487,11 @@ class TestSpecSemantics:
     @pytest.mark.parametrize(
         "lhs,rhs", [("libelf", Spec()), ("libelf", "@0:1"), ("libelf", "@0:1 %gcc")]
     )
-    def test_concrete_specs_which_satisfies_abstract(self, lhs, rhs):
+    def test_concrete_specs_which_satisfies_abstract(self, lhs, rhs, ctx: SpackContext):
         """Test that constraining an abstract spec by a compatible concrete one makes the
         abstract spec concrete, and equal to the one it was constrained with.
         """
-        lhs, rhs = spack.concretize.concretize_one(lhs, spack.test.harness.current()), Spec(rhs)
+        lhs, rhs = spack.concretize.concretize_one(lhs, ctx), Spec(rhs)
 
         assert lhs.intersects(rhs)
         assert rhs.intersects(lhs)
@@ -566,8 +566,8 @@ class TestSpecSemantics:
             ("mpileaks ^mpich+debug", "mpileaks~~debug"),
         ],
     )
-    def test_concrete_specs_which_do_not_satisfy_abstract(self, lhs, rhs):
-        lhs, rhs = spack.concretize.concretize_one(lhs, spack.test.harness.current()), Spec(rhs)
+    def test_concrete_specs_which_do_not_satisfy_abstract(self, lhs, rhs, ctx: SpackContext):
+        lhs, rhs = spack.concretize.concretize_one(lhs, ctx), Spec(rhs)
 
         assert lhs.intersects(rhs) is False
         assert rhs.intersects(lhs) is False
@@ -594,8 +594,8 @@ class TestSpecSemantics:
             ("multivalue-variant foo=bar", "multivalue-variant foo==quux"),
         ],
     )
-    def test_concrete_specs_which_satisfy_abstract(self, lhs, rhs):
-        lhs, rhs = spack.concretize.concretize_one(lhs, spack.test.harness.current()), Spec(rhs)
+    def test_concrete_specs_which_satisfy_abstract(self, lhs, rhs, ctx: SpackContext):
+        lhs, rhs = spack.concretize.concretize_one(lhs, ctx), Spec(rhs)
 
         assert lhs.intersects(rhs)
         assert rhs.intersects(lhs)
@@ -772,9 +772,9 @@ class TestSpecSemantics:
         with pytest.raises(SpecError, match="propagate"):
             Spec("pkg++foo")._mark_concrete()
 
-    def test_basic_satisfies_conditional_dep(self):
+    def test_basic_satisfies_conditional_dep(self, ctx: SpackContext):
         """Tests basic semantic of satisfies with conditional dependencies, on a concrete spec"""
-        concrete = spack.concretize.concretize_one("mpileaks ^mpich", spack.test.harness.current())
+        concrete = spack.concretize.concretize_one("mpileaks ^mpich", ctx)
 
         # This branch exists, so the condition is met, and is satisfied
         assert concrete.satisfies("^[virtuals=mpi] mpich")
@@ -786,14 +786,14 @@ class TestSpecSemantics:
         assert concrete.satisfies("^[when='^notapackage'] zmpi")
         assert not concrete.satisfies("^[when='^mpi'] zmpi")
 
-    def test_concrete_satisfies_does_not_consult_repo(self, monkeypatch):
+    def test_concrete_satisfies_does_not_consult_repo(self, monkeypatch, ctx: SpackContext):
         """Tests that `satisfies()` on a concrete lhs doesn't need the provider index, when the rhs
         contains a virtual name.
         """
-        concrete = spack.concretize.concretize_one("mpileaks ^mpich", spack.test.harness.current())
+        concrete = spack.concretize.concretize_one("mpileaks ^mpich", ctx)
 
         # Reset the index, will raise if the `_provider_index` is ever removed as an attribute
-        monkeypatch.setattr(spack.test.harness.current().repo, "_provider_index", None)
+        monkeypatch.setattr(ctx.repo, "_provider_index", None)
 
         # Basic match and mismatch cases.
         assert concrete.satisfies("mpileaks")
@@ -817,22 +817,22 @@ class TestSpecSemantics:
         assert mpich.satisfies("mpi")
 
         # We should not create again the index
-        assert spack.test.harness.current().repo._provider_index is None
+        assert ctx.repo._provider_index is None
 
-    def test_concrete_contains_does_not_consult_repo(self, monkeypatch):
+    def test_concrete_contains_does_not_consult_repo(self, monkeypatch, ctx: SpackContext):
         """Tests that `foo in spec` on a concrete spec doesn't need the provider index, when the
         item contains a virtual name.
         """
-        concrete = spack.concretize.concretize_one("mpileaks ^mpich", spack.test.harness.current())
+        concrete = spack.concretize.concretize_one("mpileaks ^mpich", ctx)
 
         # Reset the index, will raise if the `_provider_index` is ever removed as an attribute
-        monkeypatch.setattr(spack.test.harness.current().repo, "_provider_index", None)
+        monkeypatch.setattr(ctx.repo, "_provider_index", None)
 
         assert "mpi" in concrete
         assert "c" in concrete
 
         # We should not create again the index
-        assert spack.test.harness.current().repo._provider_index is None
+        assert ctx.repo._provider_index is None
 
     def test_abstract_satisfies_with_lhs_provider_rhs_virtual(self):
         """If the left-hand side mentions a provider among dependencies and the right-hand side
@@ -844,12 +844,12 @@ class TestSpecSemantics:
         assert Spec("mpileaks %[virtuals=mpi] mpich").satisfies("mpileaks ^mpi")
         assert Spec("mpileaks %[virtuals=mpi] mpich").satisfies("mpileaks %mpi")
 
-    def test_concrete_checks_on_virtual_names_dont_need_repo(self, monkeypatch):
+    def test_concrete_checks_on_virtual_names_dont_need_repo(self, monkeypatch, ctx: SpackContext):
         """Tests that ``%mpi`` or similar on a concrete spec doesn't need the repo"""
-        concrete = spack.concretize.concretize_one("mpileaks ^mpich", spack.test.harness.current())
+        concrete = spack.concretize.concretize_one("mpileaks ^mpich", ctx)
 
         # We don't need the repo
-        monkeypatch.setattr(spack.test.harness.current(), "repo", None)
+        monkeypatch.setattr(ctx, "repo", None)
 
         assert concrete.satisfies("%mpi")
         assert concrete.satisfies("%c")
@@ -868,32 +868,32 @@ class TestSpecSemantics:
             node["annotations"]["original_specfile_version"] = 5
         return as_dict
 
-    def test_provided_virtuals_frozen_at_concretization(self):
+    def test_provided_virtuals_frozen_at_concretization(self, ctx: SpackContext):
         """When several ``provides`` clauses match, the frozen versions are their intersection,
         as in the solver: mpich2@1.5 matches mpi@:2.0, @1.1: mpi@:2.1 and @1.2: mpi@:2.2."""
-        provider = spack.concretize.concretize_one("mpich2@1.5", spack.test.harness.current())
+        provider = spack.concretize.concretize_one("mpich2@1.5", ctx)
         assert provider.provided_virtuals == (Spec("mpi@:2.0"),)
         assert provider.satisfies("mpi@:2.0")
         assert not provider.satisfies("mpi@2.1:")
 
-    def test_provided_virtuals_serialization_roundtrip(self):
+    def test_provided_virtuals_serialization_roundtrip(self, ctx: SpackContext):
         """Frozen provided virtuals survive a JSON round-trip and are part of the dag hash."""
-        provider = spack.concretize.concretize_one(
-            "mpileaks ^mpich", spack.test.harness.current()
-        )["mpich"]
+        provider = spack.concretize.concretize_one("mpileaks ^mpich", ctx)["mpich"]
         roundtrip = Spec.from_json(provider.to_json())
         assert provider.provided_virtuals == (Spec("mpi@:3"),)
         assert roundtrip.provided_virtuals == provider.provided_virtuals
         assert roundtrip.dag_hash() == provider.dag_hash()
         assert provider.to_node_dict()["provided_virtuals"] == ["mpi@:3"]  # the dag hash preimage
 
-    def test_provided_virtuals_reconstructed_from_old_specfile(self, monkeypatch):
+    def test_provided_virtuals_reconstructed_from_old_specfile(
+        self, monkeypatch, ctx: SpackContext
+    ):
         """An old spec file is reconstructed from the cached provider index, without loading
         package classes, and its stored dag hash is used verbatim."""
-        concrete = spack.concretize.concretize_one("mpileaks ^mpich", spack.test.harness.current())
+        concrete = spack.concretize.concretize_one("mpileaks ^mpich", ctx)
         as_dict = self._old_spec_dict(concrete)
         # build the index before class loads are forbidden
-        spack.test.harness.current().repo.provider_index
+        ctx.repo.provider_index
 
         def no_class_loads(self, name):
             raise AssertionError(
@@ -902,14 +902,14 @@ class TestSpecSemantics:
 
         monkeypatch.setattr(spack.repo.RepoPath, "get_pkg_class", no_class_loads)
 
-        old = Spec.from_dict(as_dict, repo_provider=spack.test.harness.current().repo_provider)
+        old = Spec.from_dict(as_dict, repo_provider=ctx.repo_provider)
         assert old.original_spec_format() == 5
         assert old["mpich"].provided_virtuals == (Spec("mpi@:3"),)
         assert old.dag_hash() == concrete.dag_hash()
 
-    def test_v6_specfile_omits_empty_provided_virtuals(self):
+    def test_v6_specfile_omits_empty_provided_virtuals(self, ctx: SpackContext):
         """A v6 node without the key provides nothing, and is not reconstructed."""
-        concrete = spack.concretize.concretize_one("mpileaks ^mpich", spack.test.harness.current())
+        concrete = spack.concretize.concretize_one("mpileaks ^mpich", ctx)
         assert "provided_virtuals" not in concrete.to_node_dict()
         assert "provided_virtuals" in concrete["mpich"].to_node_dict()
 
@@ -919,50 +919,48 @@ class TestSpecSemantics:
         assert reread.provided_virtuals == ()
         assert reread["mpich"].provided_virtuals == ()
 
-    def test_abstract_root_with_concrete_deps_is_reconstructed_per_node(self):
+    def test_abstract_root_with_concrete_deps_is_reconstructed_per_node(self, ctx: SpackContext):
         """An abstract root with a resolved ``^/hash`` dependency writes both kinds of node;
         reconstruction covers the concrete ones only."""
-        mpich = spack.concretize.concretize_one("mpich", spack.test.harness.current())
+        mpich = spack.concretize.concretize_one("mpich", ctx)
         root = Spec("mpileaks")
         root._add_dependency(mpich, depflag=dt.BUILD | dt.LINK, virtuals=())
 
         as_dict = self._old_spec_dict(root)
         assert as_dict["spec"]["nodes"][0]["concrete"] is False
 
-        reread = Spec.from_dict(as_dict, repo_provider=spack.test.harness.current().repo_provider)
+        reread = Spec.from_dict(as_dict, repo_provider=ctx.repo_provider)
         assert not reread.concrete
         with pytest.raises(SpecError):
             reread.provided_virtuals
         assert reread["mpich"].provided_virtuals == (Spec("mpi@:3"),)
 
-    def test_old_specfile_with_unknown_package_provides_nothing(self):
+    def test_old_specfile_with_unknown_package_provides_nothing(self, ctx: SpackContext):
         """A package absent from the configured repos provides nothing."""
-        as_dict = self._old_spec_dict(
-            spack.concretize.concretize_one("pkg-a", spack.test.harness.current())
-        )
+        as_dict = self._old_spec_dict(spack.concretize.concretize_one("pkg-a", ctx))
         as_dict["spec"]["nodes"][0]["name"] = "no-such-package"
 
-        provider = spack.test.harness.current().repo_provider
+        provider = ctx.repo_provider
         assert Spec.from_dict(as_dict, repo_provider=provider).provided_virtuals == ()
 
     @pytest.mark.regression("53012")
-    def test_disjoint_provides_clauses_provide_nothing(self, monkeypatch):
+    def test_disjoint_provides_clauses_provide_nothing(self, monkeypatch, ctx: SpackContext):
         """Matching clauses with disjoint versions provide no version of the virtual, and the
         spec file stays readable. The solver ignores a virtual nothing depends on."""
-        pkg_cls = spack.test.harness.current().repo.get_pkg_class("pkg-a")
+        pkg_cls = ctx.repo.get_pkg_class("pkg-a")
         monkeypatch.setattr(
             pkg_cls,
             "provided",
             {Spec("@1:"): {Spec("something@:1")}, Spec("@:9"): {Spec("something@2:")}},
         )
-        concrete = spack.concretize.concretize_one("pkg-a", spack.test.harness.current())
+        concrete = spack.concretize.concretize_one("pkg-a", ctx)
         assert concrete.provided_virtuals == ()
         assert Spec.from_json(concrete.to_json()).dag_hash() == concrete.dag_hash()
 
-    def test_provided_virtuals_recomputed_on_rehash(self):
+    def test_provided_virtuals_recomputed_on_rehash(self, ctx: SpackContext):
         """Un-marking dependents on rehash clears their provided virtuals; they are recomputed
         while other nodes of the DAG are still concrete."""
-        concrete = spack.concretize.concretize_one("mpileaks ^mpich", spack.test.harness.current())
+        concrete = spack.concretize.concretize_one("mpileaks ^mpich", ctx)
         provider = concrete["mpich"]
         frozen = tuple(s.copy() for s in provider.provided_virtuals)
 
@@ -972,15 +970,17 @@ class TestSpecSemantics:
         with pytest.raises(SpecError):
             provider.provided_virtuals
 
-        spack.repo.freeze_provided_virtuals([concrete], repo=spack.test.harness.current().repo)
-        spack.spec.assign_hashes([concrete], repo=spack.test.harness.current().repo)
+        spack.repo.freeze_provided_virtuals([concrete], repo=ctx.repo)
+        spack.spec.assign_hashes([concrete], repo=ctx.repo)
         assert provider.provided_virtuals == frozen
 
-    def test_versioned_virtual_queries_on_concrete_specs_are_stateless(self, monkeypatch):
+    def test_versioned_virtual_queries_on_concrete_specs_are_stateless(
+        self, monkeypatch, ctx: SpackContext
+    ):
         """Versioned virtual queries are resolved with the frozen versions, without a repo."""
-        concrete = spack.concretize.concretize_one("mpileaks ^mpich", spack.test.harness.current())
+        concrete = spack.concretize.concretize_one("mpileaks ^mpich", ctx)
         provider = concrete["mpich"]  # provides mpi@:3
-        monkeypatch.setattr(spack.test.harness.current(), "repo", None)
+        monkeypatch.setattr(ctx, "repo", None)
 
         assert provider.satisfies("mpi@:3")
         assert not provider.satisfies("mpi@4:")
@@ -988,12 +988,12 @@ class TestSpecSemantics:
         assert concrete.satisfies("^mpi@:3")
         assert not concrete.satisfies("^mpi@4:")
 
-    def test_satisfies_single_valued_variant(self):
+    def test_satisfies_single_valued_variant(self, ctx: SpackContext):
         """Tests that the case reported in
         https://github.com/spack/spack/pull/2386#issuecomment-282147639
         is handled correctly.
         """
-        a = spack.concretize.concretize_one("pkg-a foobar=bar", spack.test.harness.current())
+        a = spack.concretize.concretize_one("pkg-a foobar=bar", ctx)
 
         assert a.satisfies("foobar=bar")
         assert a.satisfies("foobar=*")
@@ -1011,21 +1011,19 @@ class TestSpecSemantics:
         # Check that conditional dependencies are treated correctly
         assert "^pkg-b" in a
 
-    def test_unsatisfied_single_valued_variant(self):
-        a = spack.concretize.concretize_one("pkg-a foobar=baz", spack.test.harness.current())
+    def test_unsatisfied_single_valued_variant(self, ctx: SpackContext):
+        a = spack.concretize.concretize_one("pkg-a foobar=baz", ctx)
         assert "^pkg-b" not in a
 
-        mv = spack.concretize.concretize_one("multivalue-variant", spack.test.harness.current())
+        mv = spack.concretize.concretize_one("multivalue-variant", ctx)
         assert "pkg-a@1.0" not in mv
 
-    def test_indirect_unsatisfied_single_valued_variant(self):
-        spec = spack.concretize.concretize_one(
-            "singlevalue-variant-dependent", spack.test.harness.current()
-        )
+    def test_indirect_unsatisfied_single_valued_variant(self, ctx: SpackContext):
+        spec = spack.concretize.concretize_one("singlevalue-variant-dependent", ctx)
         assert "pkg-a@1.0" not in spec
 
-    def test_satisfied_namespace(self):
-        spec = spack.concretize.concretize_one("zlib", spack.test.harness.current())
+    def test_satisfied_namespace(self, ctx: SpackContext):
+        spec = spack.concretize.concretize_one("zlib", ctx)
         assert spec.satisfies("namespace=builtin_mock")
         assert not spec.satisfies("namespace=builtin")
 
@@ -1049,13 +1047,11 @@ class TestSpecSemantics:
         with pytest.raises(spack.spec_parser.SpecParsingError, match="Propagation"):
             Spec(spec_string)
 
-    def test_multivalued_variant_1(self):
+    def test_multivalued_variant_1(self, ctx: SpackContext):
         # Semantics for a multi-valued variant is different
         # Depending on whether the spec is concrete or not
 
-        a = spack.concretize.concretize_one(
-            "multivalue-variant foo=bar", spack.test.harness.current()
-        )
+        a = spack.concretize.concretize_one("multivalue-variant foo=bar", ctx)
         b = Spec("multivalue-variant foo=bar,baz")
         assert not a.satisfies(b)
 
@@ -1067,14 +1063,12 @@ class TestSpecSemantics:
         # An abstract spec can instead be constrained
         assert a.constrain(b)
 
-    def test_multivalued_variant_3(self):
-        a = spack.concretize.concretize_one(
-            "multivalue-variant foo=bar,baz", spack.test.harness.current()
-        )
+    def test_multivalued_variant_3(self, ctx: SpackContext):
+        a = spack.concretize.concretize_one("multivalue-variant foo=bar,baz", ctx)
         b = Spec("multivalue-variant foo=bar,baz,quux")
         assert not a.satisfies(b)
 
-    def test_multivalued_variant_4(self):
+    def test_multivalued_variant_4(self, ctx: SpackContext):
         a = Spec("multivalue-variant foo=bar,baz")
         b = Spec("multivalue-variant foo=bar,baz,quux")
         # The specs are abstract and they **could** be constrained
@@ -1084,9 +1078,9 @@ class TestSpecSemantics:
         # ...but will fail during concretization if there are
         # values in the variant that are not allowed
         with pytest.raises(InvalidVariantValueError):
-            spack.concretize.concretize_one(a, spack.test.harness.current())
+            spack.concretize.concretize_one(a, ctx)
 
-    def test_multivalued_variant_5(self):
+    def test_multivalued_variant_5(self, ctx: SpackContext):
         # This time we'll try to set a single-valued variant
         a = Spec("multivalue-variant fee=bar")
         b = Spec("multivalue-variant fee=baz")
@@ -1100,10 +1094,10 @@ class TestSpecSemantics:
         # ...but will fail during concretization if there are
         # multiple values set
         with pytest.raises(MultipleValuesInExclusiveVariantError):
-            spack.concretize.concretize_one(a, spack.test.harness.current())
+            spack.concretize.concretize_one(a, ctx)
 
-    def test_copy_satisfies_transitive(self):
-        spec = spack.concretize.concretize_one("dttop", spack.test.harness.current())
+    def test_copy_satisfies_transitive(self, ctx: SpackContext):
+        spec = spack.concretize.concretize_one("dttop", ctx)
         copy = spec.copy()
         for s, t in zip(spec.traverse(), copy.traverse()):
             assert s.satisfies(t)
@@ -1126,9 +1120,9 @@ class TestSpecSemantics:
         assert Spec("netlib-lapack ^openblas").intersects("netlib-lapack ^netlib-blas")
         assert Spec("netlib-lapack ^netlib-blas").intersects("netlib-lapack ^netlib-blas")
 
-    def test_intersectable_concrete_specs_must_have_the_same_hash(self):
+    def test_intersectable_concrete_specs_must_have_the_same_hash(self, ctx: SpackContext):
         """Ensure that concrete specs are matched *exactly* by hash."""
-        s1 = spack.concretize.concretize_one("mpileaks", spack.test.harness.current())
+        s1 = spack.concretize.concretize_one("mpileaks", ctx)
         s2 = s1.copy()
 
         assert s1.satisfies(s2)
@@ -1150,9 +1144,9 @@ class TestSpecSemantics:
         s = Spec("callpath")
         assert s["callpath"] == s
 
-    def test_dep_index(self):
+    def test_dep_index(self, ctx: SpackContext):
         """Tests __getitem__ and __contains__ for specs."""
-        s = spack.concretize.concretize_one("callpath", spack.test.harness.current())
+        s = spack.concretize.concretize_one("callpath", ctx)
 
         assert s["callpath"] == s
 
@@ -1167,13 +1161,11 @@ class TestSpecSemantics:
         assert "mpi" in s
 
     @pytest.mark.usefixtures("config")
-    def test_virtual_index(self):
-        s = spack.concretize.concretize_one("callpath", spack.test.harness.current())
-        s_mpich = spack.concretize.concretize_one("callpath ^mpich", spack.test.harness.current())
-        s_mpich2 = spack.concretize.concretize_one(
-            "callpath ^mpich2", spack.test.harness.current()
-        )
-        s_zmpi = spack.concretize.concretize_one("callpath ^zmpi", spack.test.harness.current())
+    def test_virtual_index(self, ctx: SpackContext):
+        s = spack.concretize.concretize_one("callpath", ctx)
+        s_mpich = spack.concretize.concretize_one("callpath ^mpich", ctx)
+        s_mpich2 = spack.concretize.concretize_one("callpath ^mpich2", ctx)
+        s_zmpi = spack.concretize.concretize_one("callpath ^zmpi", ctx)
 
         assert s["mpi"].name != "mpi"
         assert s_mpich["mpi"].name == "mpich"
@@ -1257,10 +1249,8 @@ class TestSpecSemantics:
         with pytest.raises(ValueError):
             Spec("libelf foo")
 
-    def test_spec_formatting(self):
-        spec = spack.concretize.concretize_one(
-            "multivalue-variant cflags=-O2", spack.test.harness.current()
-        )
+    def test_spec_formatting(self, ctx: SpackContext):
+        spec = spack.concretize.concretize_one("multivalue-variant cflags=-O2", ctx)
 
         # Testing named strings ie {string} and whether we get
         # the correct component
@@ -1366,10 +1356,8 @@ class TestSpecSemantics:
         spec = spack.spec.Spec()
         assert spec.format(fmt_str) == ""
 
-    def test_spec_formatting_spaces_in_key(self):
-        spec = spack.concretize.concretize_one(
-            "multivalue-variant cflags=-O2", spack.test.harness.current()
-        )
+    def test_spec_formatting_spaces_in_key(self, ctx: SpackContext):
+        spec = spack.concretize.concretize_one("multivalue-variant cflags=-O2", ctx)
 
         # test that spaces are preserved, if they come after some other text, otherwise
         # they are trimmed.
@@ -1382,10 +1370,8 @@ class TestSpecSemantics:
     @pytest.mark.parametrize(
         "fmt_str", ["{@name}", "{@version.concrete}", "{%compiler.version}", "{/hashd}"]
     )
-    def test_spec_formatting_sigil_mismatches(self, fmt_str):
-        spec = spack.concretize.concretize_one(
-            "multivalue-variant cflags=-O2", spack.test.harness.current()
-        )
+    def test_spec_formatting_sigil_mismatches(self, fmt_str, ctx: SpackContext):
+        spec = spack.concretize.concretize_one("multivalue-variant cflags=-O2", ctx)
 
         with pytest.raises(SpecFormatSigilError):
             spec.format(fmt_str)
@@ -1406,10 +1392,8 @@ class TestSpecSemantics:
             r"{variants.this_variant_does_not_exist}",
         ],
     )
-    def test_spec_formatting_bad_formats(self, fmt_str):
-        spec = spack.concretize.concretize_one(
-            "multivalue-variant cflags=-O2", spack.test.harness.current()
-        )
+    def test_spec_formatting_bad_formats(self, fmt_str, ctx: SpackContext):
+        spec = spack.concretize.concretize_one("multivalue-variant cflags=-O2", ctx)
         with pytest.raises(SpecFormatStringError):
             spec.format(fmt_str)
 
@@ -1455,13 +1439,12 @@ class TestSpecSemantics:
         with pytest.raises(SpecError):
             spec.prefix
 
-    def test_forwarding_of_architecture_attributes(self):
-        spec = spack.concretize.concretize_one(
-            "libelf target=x86_64", spack.test.harness.current()
-        )
+    def test_forwarding_of_architecture_attributes(self, ctx: SpackContext):
+        spec = spack.concretize.concretize_one("libelf target=x86_64", ctx)
 
         # Check that we can still access each member through
         # the architecture attribute
+        assert spec.architecture
         assert "test" in spec.architecture
         assert "debian" in spec.architecture
         assert "x86_64" in spec.architecture
@@ -1478,11 +1461,11 @@ class TestSpecSemantics:
         assert spec.target < "broadwell"
 
     @pytest.mark.parametrize("transitive", [True, False])
-    def test_splice(self, transitive):
+    def test_splice(self, transitive, ctx: SpackContext):
         # Tests the new splice function in Spec using a somewhat simple case
         # with a variant with a conditional dependency.
-        spec = spack.concretize.concretize_one("splice-t", spack.test.harness.current())
-        dep = spack.concretize.concretize_one("splice-h+foo", spack.test.harness.current())
+        spec = spack.concretize.concretize_one("splice-t", ctx)
+        dep = spack.concretize.concretize_one("splice-h+foo", ctx)
 
         # Sanity checking that these are not the same thing.
         assert dep.dag_hash() != spec["splice-h"].dag_hash()
@@ -1663,9 +1646,9 @@ class TestSpecSemantics:
                 assert edge.depflag == depflag
 
     @pytest.mark.parametrize("transitive", [True, False])
-    def test_splice_with_cached_hashes(self, transitive):
-        spec = spack.concretize.concretize_one("splice-t", spack.test.harness.current())
-        dep = spack.concretize.concretize_one("splice-h+foo", spack.test.harness.current())
+    def test_splice_with_cached_hashes(self, transitive, ctx: SpackContext):
+        spec = spack.concretize.concretize_one("splice-t", ctx)
+        dep = spack.concretize.concretize_one("splice-h+foo", ctx)
 
         # monkeypatch hashes so we can test that they are cached
         spec._hash = "aaaaaa"
@@ -1682,9 +1665,9 @@ class TestSpecSemantics:
         assert out["splice-z"].dag_hash() == out_z_expected.dag_hash()
 
     @pytest.mark.parametrize("transitive", [True, False])
-    def test_splice_input_unchanged(self, transitive):
-        spec = spack.concretize.concretize_one("splice-t", spack.test.harness.current())
-        dep = spack.concretize.concretize_one("splice-h+foo", spack.test.harness.current())
+    def test_splice_input_unchanged(self, transitive, ctx: SpackContext):
+        spec = spack.concretize.concretize_one("splice-t", ctx)
+        dep = spack.concretize.concretize_one("splice-h+foo", ctx)
         orig_spec_hash = spec.dag_hash()
         orig_dep_hash = dep.dag_hash()
         spec.splice(dep, transitive)
@@ -1694,13 +1677,13 @@ class TestSpecSemantics:
         assert dep.dag_hash() == orig_dep_hash
 
     @pytest.mark.parametrize("transitive", [True, False])
-    def test_splice_subsequent(self, transitive):
-        spec = spack.concretize.concretize_one("splice-t", spack.test.harness.current())
-        dep = spack.concretize.concretize_one("splice-h+foo", spack.test.harness.current())
+    def test_splice_subsequent(self, transitive, ctx: SpackContext):
+        spec = spack.concretize.concretize_one("splice-t", ctx)
+        dep = spack.concretize.concretize_one("splice-h+foo", ctx)
         out = spec.splice(dep, transitive)
 
         # Now we attempt a second splice.
-        dep = spack.concretize.concretize_one("splice-z+bar", spack.test.harness.current())
+        dep = spack.concretize.concretize_one("splice-z+bar", ctx)
 
         # Transitivity shouldn't matter since Splice Z has no dependencies.
         out2 = out.splice(dep, transitive)
@@ -1711,9 +1694,9 @@ class TestSpecSemantics:
         assert out2.spliced
 
     @pytest.mark.parametrize("transitive", [True, False])
-    def test_splice_dict(self, transitive):
-        spec = spack.concretize.concretize_one("splice-t", spack.test.harness.current())
-        dep = spack.concretize.concretize_one("splice-h+foo", spack.test.harness.current())
+    def test_splice_dict(self, transitive, ctx: SpackContext):
+        spec = spack.concretize.concretize_one("splice-t", ctx)
+        dep = spack.concretize.concretize_one("splice-h+foo", ctx)
         out = spec.splice(dep, transitive)
 
         # Sanity check all hashes are unique...
@@ -1728,9 +1711,9 @@ class TestSpecSemantics:
         assert len(build_spec_nodes) == 1
 
     @pytest.mark.parametrize("transitive", [True, False])
-    def test_splice_dict_roundtrip(self, transitive):
-        spec = spack.concretize.concretize_one("splice-t", spack.test.harness.current())
-        dep = spack.concretize.concretize_one("splice-h+foo", spack.test.harness.current())
+    def test_splice_dict_roundtrip(self, transitive, ctx: SpackContext):
+        spec = spack.concretize.concretize_one("splice-t", ctx)
+        dep = spack.concretize.concretize_one("splice-h+foo", ctx)
         out = spec.splice(dep, transitive)
 
         # Sanity check all hashes are unique...
@@ -1780,10 +1763,10 @@ class TestSpecSemantics:
         assert s.intersects(constraint) is expected_result
 
     @pytest.mark.regression("13124")
-    def test_error_message_unknown_variant(self):
+    def test_error_message_unknown_variant(self, ctx: SpackContext):
         s = Spec("mpileaks +unknown")
         with pytest.raises(UnknownVariantError):
-            spack.concretize.concretize_one(s, spack.test.harness.current())
+            spack.concretize.concretize_one(s, ctx)
 
     @pytest.mark.regression("18527")
     def test_satisfies_dependencies_ordered(self):
@@ -1802,38 +1785,37 @@ class TestSpecSemantics:
         assert not Spec("mpileaks ^[deptypes=link] zmpi %gcc").satisfies("^gcc")
 
     @pytest.mark.parametrize("transitive", [True, False])
-    def test_splice_swap_names(self, transitive):
-        spec = spack.concretize.concretize_one("splice-vt", spack.test.harness.current())
-        dep = spack.concretize.concretize_one("splice-a+foo", spack.test.harness.current())
+    def test_splice_swap_names(self, transitive, ctx: SpackContext):
+        spec = spack.concretize.concretize_one("splice-vt", ctx)
+        dep = spack.concretize.concretize_one("splice-a+foo", ctx)
         out = spec.splice(dep, transitive)
         assert dep.name in out
         assert transitive == ("+foo" in out["splice-z"])
 
     @pytest.mark.parametrize("transitive", [True, False])
-    def test_splice_swap_names_mismatch_virtuals(self, transitive):
-        vt = spack.concretize.concretize_one("splice-vt", spack.test.harness.current())
-        vh = spack.concretize.concretize_one("splice-vh+foo", spack.test.harness.current())
+    def test_splice_swap_names_mismatch_virtuals(self, transitive, ctx: SpackContext):
+        vt = spack.concretize.concretize_one("splice-vt", ctx)
+        vh = spack.concretize.concretize_one("splice-vh+foo", ctx)
         with pytest.raises(spack.spec.SpliceError, match="virtual"):
             vt.splice(vh, transitive)
 
-    def test_adaptor_optflags(self):
+    def test_adaptor_optflags(self, ctx: SpackContext):
         """Tests that we can obtain the list of optflags, and debugflags,
         from the compiler adaptor, and that this list is taken from the
         appropriate compiler package.
         """
         # pkg-a depends on c, so only the gcc compiler should be chosen
-        spec = spack.concretize.concretize_one(Spec("pkg-a %gcc"), spack.test.harness.current())
+        spec = spack.concretize.concretize_one(Spec("pkg-a %gcc"), ctx)
         assert "-Otestopt" in spec.package.compiler.opt_flags
         # This is not set, make sure we get an empty list
         for x in spec.package.compiler.debug_flags:
             pass
 
-    def test_spec_override(self):
+    def test_spec_override(self, ctx: SpackContext):
         init_spec = Spec("pkg-a foo=baz foobar=baz cflags=-O3 cxxflags=-O1")
         change_spec = Spec("pkg-a foo=fee cflags=-O2")
         new_spec = spack.concretize.concretize_one(
-            Spec.override(init_spec, change_spec, repo=spack.test.harness.current().repo),
-            spack.test.harness.current(),
+            Spec.override(init_spec, change_spec, repo=ctx.repo), ctx
         )
         assert "foo=fee" in new_spec
         # This check fails without concretizing: apparently if both specs are
@@ -1844,18 +1826,17 @@ class TestSpecSemantics:
         assert new_spec.compiler_flags["cflags"] == ["-O2"]
         assert new_spec.compiler_flags["cxxflags"] == ["-O1"]
 
-    def test_spec_override_with_nonexisting_variant(self):
+    def test_spec_override_with_nonexisting_variant(self, ctx: SpackContext):
         init_spec = Spec("pkg-a foo=baz foobar=baz cflags=-O3 cxxflags=-O1")
         change_spec = Spec("pkg-a baz=fee")
         with pytest.raises(ValueError):
-            Spec.override(init_spec, change_spec, repo=spack.test.harness.current().repo)
+            Spec.override(init_spec, change_spec, repo=ctx.repo)
 
-    def test_spec_override_with_variant_not_in_init_spec(self):
+    def test_spec_override_with_variant_not_in_init_spec(self, ctx: SpackContext):
         init_spec = Spec("pkg-a foo=baz foobar=baz cflags=-O3 cxxflags=-O1")
         change_spec = Spec("pkg-a +bvv ~lorem_ipsum")
         new_spec = spack.concretize.concretize_one(
-            Spec.override(init_spec, change_spec, repo=spack.test.harness.current().repo),
-            spack.test.harness.current(),
+            Spec.override(init_spec, change_spec, repo=ctx.repo), ctx
         )
         assert "+bvv" in new_spec
         assert "~lorem_ipsum" in new_spec
@@ -1932,8 +1913,8 @@ class TestSpecSemantics:
             ),
         ],
     )
-    def test_virtual_deps_bindings(self, spec_str, specs_in_dag):
-        s = spack.concretize.concretize_one(spec_str, spack.test.harness.current())
+    def test_virtual_deps_bindings(self, spec_str, specs_in_dag, ctx: SpackContext):
+        s = spack.concretize.concretize_one(spec_str, ctx)
         for label, expected in specs_in_dag:
             assert label in s
             assert s[label].satisfies(expected), label
@@ -1947,9 +1928,9 @@ class TestSpecSemantics:
             "netlib-scalapack ^[virtuals=lapack] intel-parallel-studio ^openblas",
         ],
     )
-    def test_unsatisfiable_virtual_deps_bindings(self, spec_str):
+    def test_unsatisfiable_virtual_deps_bindings(self, spec_str, ctx: SpackContext):
         with pytest.raises(spack.solver.asp.UnsatisfiableSpecError):
-            spack.concretize.concretize_one(spec_str, spack.test.harness.current())
+            spack.concretize.concretize_one(spec_str, ctx)
 
     @pytest.mark.parametrize(
         "spec_str,abstract_tests,concrete_tests",
@@ -1974,13 +1955,15 @@ class TestSpecSemantics:
             ),
         ],
     )
-    def test_conditional_dependencies_satisfies(self, spec_str, abstract_tests, concrete_tests):
+    def test_conditional_dependencies_satisfies(
+        self, spec_str, abstract_tests, concrete_tests, ctx: SpackContext
+    ):
         """Tests satisfaction semantics for conditional specs, in different scenarios."""
         s = Spec(spec_str)
         for c, result in abstract_tests:
             assert s.satisfies(c) is result
 
-        concrete = spack.concretize.concretize_one(spec_str, spack.test.harness.current())
+        concrete = spack.concretize.concretize_one(spec_str, ctx)
         for c, result in concrete_tests:
             assert concrete.satisfies(c) is result
 
@@ -2078,12 +2061,12 @@ def test_spec_format_path_posix(spec_str, format_str, expected, mock_git_test_pa
 
 @pytest.mark.regression("3887")
 @pytest.mark.parametrize("spec_str", ["py-extension2", "extension1", "perl-extension"])
-def test_is_extension_after_round_trip_to_dict(config, mock_packages, spec_str):
+def test_is_extension_after_round_trip_to_dict(config, mock_packages, spec_str, ctx: SpackContext):
     # x is constructed directly from string, y from a
     # round-trip to dict representation
-    x = spack.concretize.concretize_one(spec_str, spack.test.harness.current())
+    x = spack.concretize.concretize_one(spec_str, ctx)
     y = Spec.from_dict(x.to_dict())
-    spack.repo.attach_packages([y], spack.test.harness.current())
+    spack.repo.attach_packages([y], ctx)
 
     # Using 'y' since the round-trip make us lose build dependencies
     for d in y.traverse():
@@ -2128,7 +2111,7 @@ def test_merge_anonymous_spec_with_named_spec(anonymous, named, expected):
     assert s == Spec(expected)
 
 
-def test_spec_installed(database):
+def test_spec_installed(database, ctx: SpackContext):
     """Test whether Database.installed works."""
     # a known installed spec should say that it's installed
     specs = database.query()
@@ -2141,14 +2124,14 @@ def test_spec_installed(database):
     assert not database.installed(spec)
 
     # pkg-a is not in the mock DB and is not installed
-    spec = spack.concretize.concretize_one("pkg-a", spack.test.harness.current())
+    spec = spack.concretize.concretize_one("pkg-a", ctx)
     assert not database.installed(spec)
 
 
 @pytest.mark.regression("30678")
-def test_call_dag_hash_on_old_dag_hash_spec(mock_packages, config):
+def test_call_dag_hash_on_old_dag_hash_spec(mock_packages, config, ctx: SpackContext):
     # create a concrete spec
-    a = spack.concretize.concretize_one("pkg-a", spack.test.harness.current())
+    a = spack.concretize.concretize_one("pkg-a", ctx)
     dag_hashes = {spec.name: spec.dag_hash() for spec in a.traverse()}
 
     # make it look like an old DAG hash spec with no package hash on the spec.
@@ -2161,8 +2144,8 @@ def test_call_dag_hash_on_old_dag_hash_spec(mock_packages, config):
         assert "package_hash" not in spec.to_node_dict()
 
 
-def test_spec_trim(mock_packages, config):
-    top = spack.concretize.concretize_one("dt-diamond", spack.test.harness.current())
+def test_spec_trim(mock_packages, config, ctx: SpackContext):
+    top = spack.concretize.concretize_one("dt-diamond", ctx)
     top.trim("dt-diamond-left")
     remaining = {x.name for x in top.traverse()}
     assert {
@@ -2180,9 +2163,9 @@ def test_spec_trim(mock_packages, config):
 
 
 @pytest.mark.regression("30861")
-def test_concretize_partial_old_dag_hash_spec(mock_packages, config):
+def test_concretize_partial_old_dag_hash_spec(mock_packages, config, ctx: SpackContext):
     # create an "old" spec with no package hash
-    bottom = spack.concretize.concretize_one("dt-diamond-bottom", spack.test.harness.current())
+    bottom = spack.concretize.concretize_one("dt-diamond-bottom", ctx)
     bottom._package_hash = None
 
     dummy_hash = "zd4m26eis2wwbvtyfiliar27wkcv3ehk"
@@ -2193,7 +2176,7 @@ def test_concretize_partial_old_dag_hash_spec(mock_packages, config):
     top.add_dependency_edge(bottom, depflag=0, virtuals=())
 
     # concretize with the already-concrete dependency
-    top = spack.concretize.concretize_one(top, spack.test.harness.current())
+    top = spack.concretize.concretize_one(top, ctx)
 
     for spec in top.traverse():
         assert spec.concrete
@@ -2206,9 +2189,9 @@ def test_concretize_partial_old_dag_hash_spec(mock_packages, config):
     assert spec["dt-diamond-bottom"]._package_hash is None
 
 
-def test_package_hash_affects_dunder_and_dag_hash(mock_packages, config):
-    a1 = spack.concretize.concretize_one("pkg-a", spack.test.harness.current())
-    a2 = spack.concretize.concretize_one("pkg-a", spack.test.harness.current())
+def test_package_hash_affects_dunder_and_dag_hash(mock_packages, config, ctx: SpackContext):
+    a1 = spack.concretize.concretize_one("pkg-a", ctx)
+    a2 = spack.concretize.concretize_one("pkg-a", ctx)
 
     assert hash(a1) == hash(a2)
     assert a1.dag_hash() == a2.dag_hash()
@@ -2226,11 +2209,11 @@ def test_package_hash_affects_dunder_and_dag_hash(mock_packages, config):
     assert a1.dag_hash() != a2.dag_hash()
 
 
-def test_intersects_and_satisfies_on_concretized_spec(config, mock_packages):
+def test_intersects_and_satisfies_on_concretized_spec(config, mock_packages, ctx: SpackContext):
     """Test that a spec obtained by concretizing an abstract spec, satisfies the abstract spec
     but not vice-versa.
     """
-    a1 = spack.concretize.concretize_one("pkg-a@1.0", spack.test.harness.current())
+    a1 = spack.concretize.concretize_one("pkg-a@1.0", ctx)
     a2 = Spec("pkg-a@1.0")
 
     assert a1.intersects(a2)
@@ -2249,8 +2232,10 @@ def test_intersects_and_satisfies_on_concretized_spec(config, mock_packages):
     ],
 )
 @pytest.mark.regression("35597")
-def test_abstract_provider_in_spec(abstract_spec, spec_str, config, mock_packages):
-    s = spack.concretize.concretize_one(spec_str, spack.test.harness.current())
+def test_abstract_provider_in_spec(
+    abstract_spec, spec_str, config, mock_packages, ctx: SpackContext
+):
+    s = spack.concretize.concretize_one(spec_str, ctx)
     assert abstract_spec in s
 
 
@@ -2583,8 +2568,8 @@ def test_constrain_dependencies_copies(mock_packages):
     assert y == Spec("^foo")
 
 
-def test_abstract_hash_intersects_and_satisfies(config, mock_packages):
-    concrete: Spec = spack.concretize.concretize_one("pkg-a", spack.test.harness.current())
+def test_abstract_hash_intersects_and_satisfies(config, mock_packages, ctx: SpackContext):
+    concrete: Spec = spack.concretize.concretize_one("pkg-a", ctx)
     hash = concrete.dag_hash()
     hash_5 = hash[:5]
     hash_6 = hash[:6]
@@ -2675,8 +2660,8 @@ def test_virtual_queries_work_for_strings_and_lists():
         assert parent.edges_to_dependencies(virtuals=[lang])  # string arg
 
 
-def test_old_format_strings_trigger_error(config, mock_packages):
-    s = spack.concretize.concretize_one("pkg-a", spack.test.harness.current())
+def test_old_format_strings_trigger_error(config, mock_packages, ctx: SpackContext):
+    s = spack.concretize.concretize_one("pkg-a", ctx)
     with pytest.raises(SpecFormatStringError):
         s.format("${PACKAGE}-${VERSION}-${HASH}")
 
@@ -2869,7 +2854,7 @@ def test_comparison_after_breaking_hash_change():
     assert len({x, y}) == 2
 
 
-def test_satisfies_and_subscript_with_compilers(config, mock_packages):
+def test_satisfies_and_subscript_with_compilers(config, mock_packages, ctx: SpackContext):
     """Tests the semantic of "satisfies" and __getitem__ for the following spec:
 
     [    ]  multivalue-variant@2.3
@@ -2884,7 +2869,7 @@ def test_satisfies_and_subscript_with_compilers(config, mock_packages):
     [b   ]          ^gmake@4.4
     [bl  ]          ^pkg-b@1.0
     """
-    s = spack.concretize.concretize_one("multivalue-variant", spack.test.harness.current())
+    s = spack.concretize.concretize_one("multivalue-variant", ctx)
 
     # Check a direct build/link dependency
     assert s.satisfies("^pkg-a")
@@ -2933,10 +2918,10 @@ def test_an_anonymous_spec_is_the_top_of_the_order_only(mock_packages):
     assert not Spec("").satisfies("pkg-b")
 
 
-def test_the_direct_flag_follows_concreteness(config, mock_packages):
+def test_the_direct_flag_follows_concreteness(config, mock_packages, ctx: SpackContext):
     """A direct dependency is a constraint written with %, so the flag is set when a spec stops
     being concrete and cleared when it becomes concrete again."""
-    mpileaks = spack.concretize.concretize_one("mpileaks", spack.test.harness.current())
+    mpileaks = spack.concretize.concretize_one("mpileaks", ctx)
     assert not any(edge.direct for edge in mpileaks.traverse_edges(root=False))
 
     mpileaks._mark_concrete(False)
@@ -2957,10 +2942,12 @@ def test_marking_an_abstract_spec_abstract_again_changes_nothing(mock_packages):
     assert spec.satisfies("mpileaks ^callpath")
 
 
-def test_a_spec_that_stopped_being_concrete_matches_a_direct_constraint(config, mock_packages):
+def test_a_spec_that_stopped_being_concrete_matches_a_direct_constraint(
+    config, mock_packages, ctx: SpackContext
+):
     """A spec that stops being concrete keeps every edge it had, so a direct dependency
     constraint is matched by the package it depends on, and not by one further down."""
-    mpileaks = spack.concretize.concretize_one("mpileaks", spack.test.harness.current())
+    mpileaks = spack.concretize.concretize_one("mpileaks", ctx)
     mpileaks._mark_concrete(False)
 
     assert mpileaks.satisfies("mpileaks %callpath")
@@ -2968,10 +2955,12 @@ def test_a_spec_that_stopped_being_concrete_matches_a_direct_constraint(config, 
     assert not mpileaks.satisfies("mpileaks %libelf")
 
 
-def test_direct_constraint_nested_below_a_concrete_dependency(config, mock_packages):
+def test_direct_constraint_nested_below_a_concrete_dependency(
+    config, mock_packages, ctx: SpackContext
+):
     """A % constraint below ^ is checked on the node it applies to, so when that node is
     concrete its edges match without the direct flag, even if the root spec is abstract."""
-    callpath = spack.concretize.concretize_one("callpath", spack.test.harness.current())
+    callpath = spack.concretize.concretize_one("callpath", ctx)
     root = Spec("mpileaks")
     root.add_dependency_edge(callpath, depflag=dt.BUILD | dt.LINK, virtuals=())
 
@@ -2989,10 +2978,12 @@ def test_a_direct_dependency_is_inside_a_transitive_one(mock_packages):
     assert not anywhere_in_dag.satisfies(direct_dependency)
 
 
-def test_every_edge_of_a_concrete_node_is_a_direct_dependency(mock_packages, config):
+def test_every_edge_of_a_concrete_node_is_a_direct_dependency(
+    mock_packages, config, ctx: SpackContext
+):
     """A concrete spec records its edges without the direct flag, but each of them is a direct
     dependency in fact, so it matches a direct constraint. A package further down does not."""
-    mpileaks = spack.concretize.concretize_one("mpileaks", spack.test.harness.current())
+    mpileaks = spack.concretize.concretize_one("mpileaks", ctx)
     assert not mpileaks.edges_to_dependencies(name="callpath")[0].direct
 
     assert mpileaks.satisfies("mpileaks %callpath")
@@ -3011,9 +3002,11 @@ def test_every_edge_of_a_concrete_node_is_a_direct_dependency(mock_packages, con
         ("pkg-c", "{name}-{compiler.name}-{compiler.version}", "pkg-c-none-none"),
     ],
 )
-def test_spec_format_with_compiler_adaptors(spec_str, spec_fmt, expected, config, mock_packages):
+def test_spec_format_with_compiler_adaptors(
+    spec_str, spec_fmt, expected, config, mock_packages, ctx: SpackContext
+):
     """Tests the output of spec format, when involving `Spec.compiler` adaptors"""
-    s = spack.concretize.concretize_one(spec_str, spack.test.harness.current())
+    s = spack.concretize.concretize_one(spec_str, ctx)
     assert s.format(spec_fmt) == expected
 
 
@@ -3218,11 +3211,13 @@ def test_satisfies_checks_all_in_edges_of_shared_node():
     assert not root.satisfies("^[deptypes=build,test] pkg-d")  # no single in-edge has both
 
 
-def test_satisfies_tries_every_parallel_edge_of_a_concrete_spec(config, mock_packages):
+def test_satisfies_tries_every_parallel_edge_of_a_concrete_spec(
+    config, mock_packages, ctx: SpackContext
+):
     """Satisfies is exhaustive when there are duplicates on concrete specs."""
     # dupe-tool-root --build--> dupe-tool@1.0 --build--> cmake
     #                --link-->  dupe-tool-user --link--> dupe-tool@2.0 --build--> gmake
-    spec = spack.concretize.concretize_one("dupe-tool-root", spack.test.harness.current())
+    spec = spack.concretize.concretize_one("dupe-tool-root", ctx)
     assert spec.satisfies("^[deptypes=build] dupe-tool@1")
     assert spec.satisfies("^[deptypes=link] dupe-tool@2")
     assert spec.satisfies("^[deptypes=build] dupe-tool@1 ^[deptypes=link] dupe-tool@2 %gmake")
@@ -3295,9 +3290,9 @@ def test_specs_semantics_on_self(spec_str, mock_packages, config):
         ("mpileaks+debug", "@_R{+debug}"),
     ],
 )
-def test_highlighting_spec_parts(spec_str, expected_fmt, config, mock_packages):
+def test_highlighting_spec_parts(spec_str, expected_fmt, config, mock_packages, ctx: SpackContext):
     """Tests correct highlighting of non-default versions and variants"""
-    s = spack.concretize.concretize_one(spec_str, spack.test.harness.current())
+    s = spack.concretize.concretize_one(spec_str, ctx)
     expected = colorize(expected_fmt, color=True)
 
     colorized_str = s.format(
@@ -3309,11 +3304,13 @@ def test_highlighting_spec_parts(spec_str, expected_fmt, config, mock_packages):
 
 
 @pytest.mark.parametrize("spec_str", ["mpileaks", "mpileaks ^zmpi"])
-def test_mark_concrete_roundtrip_preserves_hashes(spec_str, config, mock_packages):
+def test_mark_concrete_roundtrip_preserves_hashes(
+    spec_str, config, mock_packages, ctx: SpackContext
+):
     """Tests that clearing concreteness and re-hashing a spec must preserve the DAG hash of the
     root and of every transitive dependency.
     """
-    s = spack.concretize.concretize_one(spec_str, spack.test.harness.current())
+    s = spack.concretize.concretize_one(spec_str, ctx)
 
     # Record the DAG hash of every node in the DAG (root and transitive dependencies).
     original = {node.name: node.dag_hash() for node in s.traverse()}
@@ -3325,8 +3322,8 @@ def test_mark_concrete_roundtrip_preserves_hashes(spec_str, config, mock_package
     assert all(node._hash is None for node in s.traverse())
 
     # Re-hash the DAG: the cleared hashes must recompute to the original values.
-    spack.repo.freeze_provided_virtuals([s], repo=spack.test.harness.current().repo)
-    spack.spec.assign_hashes([s], repo=spack.test.harness.current().repo)
+    spack.repo.freeze_provided_virtuals([s], repo=ctx.repo)
+    spack.spec.assign_hashes([s], repo=ctx.repo)
     roundtrip = {node.name: node.dag_hash() for node in s.traverse()}
     assert roundtrip == original
 

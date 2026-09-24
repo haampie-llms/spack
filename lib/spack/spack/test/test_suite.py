@@ -12,9 +12,9 @@ import spack.concretize
 import spack.database
 import spack.install_test
 import spack.spec
-import spack.test.harness
 import spack.util.executable
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.install_test import TestStatus
 from spack.util.executable import which
 from spack.util.filesystem import touch
@@ -40,9 +40,9 @@ def ensure_results(filename, expected, present=True):
             assert not have, f"Expected '{expected}' NOT to be in the file"
 
 
-def test_test_log_name(mock_packages, config):
+def test_test_log_name(mock_packages, config, ctx: SpackContext):
     """Ensure test log path is reasonable."""
-    spec = spack.concretize.concretize_one("libdwarf", spack.test.harness.current())
+    spec = spack.concretize.concretize_one("libdwarf", ctx)
 
     test_name = "test_name"
 
@@ -54,9 +54,9 @@ def test_test_log_name(mock_packages, config):
     assert test_suite.test_log_name(spec) in logfile
 
 
-def test_test_ensure_stage(mock_test_stage, mock_packages):
+def test_test_ensure_stage(mock_test_stage, mock_packages, ctx: SpackContext):
     """Make sure test stage directory is properly set up."""
-    spec = spack.concretize.concretize_one("libdwarf", spack.test.harness.current())
+    spec = spack.concretize.concretize_one("libdwarf", ctx)
 
     test_name = "test_name"
 
@@ -67,10 +67,10 @@ def test_test_ensure_stage(mock_test_stage, mock_packages):
     assert mock_test_stage in test_suite.stage
 
 
-def test_write_test_result(mock_packages, mock_test_stage):
+def test_write_test_result(mock_packages, mock_test_stage, ctx: SpackContext):
     """Ensure test results written to a results file."""
-    spec = spack.concretize.concretize_one("libdwarf", spack.test.harness.current())
-    result = "TEST"
+    spec = spack.concretize.concretize_one("libdwarf", ctx)
+    result = spack.install_test.TestStatus.PASSED
     test_name = "write-test"
 
     test_suite = spack.install_test.TestSuite([spec], test_name, stage_root=mock_test_stage)
@@ -83,13 +83,13 @@ def test_write_test_result(mock_packages, mock_test_stage):
         assert len(lines) == 1
 
         msg = lines[0]
-        assert result in msg
+        assert str(result) in msg
         assert spec.name in msg
 
 
-def test_test_not_installed(mock_packages, install_mockery, mock_test_stage):
+def test_test_not_installed(mock_packages, install_mockery, mock_test_stage, ctx: SpackContext):
     """Attempt to perform stand-alone test for not_installed package."""
-    spec = spack.concretize.concretize_one("trivial-smoke-test", spack.test.harness.current())
+    spec = spack.concretize.concretize_one("trivial-smoke-test", ctx)
     test_suite = spack.install_test.TestSuite([spec], stage_root=mock_test_stage)
 
     test_suite()
@@ -103,10 +103,17 @@ def test_test_not_installed(mock_packages, install_mockery, mock_test_stage):
     [({}, TestStatus.SKIPPED, "Skipped"), ({"externals": True}, TestStatus.NO_TESTS, "No tests")],
 )
 def test_test_external(
-    mock_packages, install_mockery, mock_test_stage, monkeypatch, arguments, status, msg
+    mock_packages,
+    install_mockery,
+    mock_test_stage,
+    monkeypatch,
+    arguments,
+    status,
+    msg,
+    ctx: SpackContext,
 ):
     name = "trivial-smoke-test"
-    spec = spack.concretize.concretize_one(name, spack.test.harness.current())
+    spec = spack.concretize.concretize_one(name, ctx)
     spec.external_path = "/path/to/external/{0}".format(name)
 
     monkeypatch.setattr(spack.database.Database, "installed", _true)
@@ -119,7 +126,7 @@ def test_test_external(
         ensure_results(test_suite.log_file_for_spec(spec), msg)
 
 
-def test_test_stage_caches(mock_packages, install_mockery, mock_test_stage):
+def test_test_stage_caches(mock_packages, install_mockery, mock_test_stage, ctx: SpackContext):
     def ensure_current_cache_fail(test_suite):
         with pytest.raises(spack.install_test.TestSuiteSpecError):
             _ = test_suite.current_test_cache_dir
@@ -127,7 +134,7 @@ def test_test_stage_caches(mock_packages, install_mockery, mock_test_stage):
         with pytest.raises(spack.install_test.TestSuiteSpecError):
             _ = test_suite.current_test_data_dir
 
-    spec = spack.concretize.concretize_one("libelf", spack.test.harness.current())
+    spec = spack.concretize.concretize_one("libelf", ctx)
     test_suite = spack.install_test.TestSuite([spec], "test-cache", stage_root=mock_test_stage)
 
     # Check no current specs yield failure
@@ -135,17 +142,17 @@ def test_test_stage_caches(mock_packages, install_mockery, mock_test_stage):
 
     # Check no current base spec yields failure
     test_suite.current_base_spec = None
-    test_suite.current_test_spec = spec
+    test_suite.current_test_spec = spec  # type: ignore[assignment]
     ensure_current_cache_fail(test_suite)
 
     # Check no current test spec yields failure
-    test_suite.current_base_spec = spec
+    test_suite.current_base_spec = spec  # type: ignore[assignment]
     test_suite.current_test_spec = None
     ensure_current_cache_fail(test_suite)
 
 
-def test_test_spec_run_once(mock_packages, install_mockery, mock_test_stage):
-    spec = spack.concretize.concretize_one("libelf", spack.test.harness.current())
+def test_test_spec_run_once(mock_packages, install_mockery, mock_test_stage, ctx: SpackContext):
+    spec = spack.concretize.concretize_one("libelf", ctx)
     test_suite = spack.install_test.TestSuite([spec], "test-dups", stage_root=mock_test_stage)
     (test_suite.specs[0]).package.test_suite = test_suite
 
@@ -154,8 +161,10 @@ def test_test_spec_run_once(mock_packages, install_mockery, mock_test_stage):
 
 
 @pytest.mark.not_on_windows("Cannot find echo executable")
-def test_test_spec_passes(mock_packages, install_mockery, mock_test_stage, monkeypatch):
-    spec = spack.concretize.concretize_one("simple-standalone-test", spack.test.harness.current())
+def test_test_spec_passes(
+    mock_packages, install_mockery, mock_test_stage, monkeypatch, ctx: SpackContext
+):
+    spec = spack.concretize.concretize_one("simple-standalone-test", ctx)
     monkeypatch.setattr(spack.database.Database, "installed", _true)
     test_suite = spack.install_test.TestSuite([spec], stage_root=mock_test_stage)
     test_suite()
@@ -169,27 +178,28 @@ def test_get_test_suite(config):
     assert not spack.install_test.get_test_suite("nothing", config)
 
 
-def test_get_test_suite_no_name(mock_packages, mock_test_stage):
+def test_get_test_suite_no_name(mock_packages, mock_test_stage, ctx: SpackContext):
     with pytest.raises(spack.install_test.TestSuiteNameError) as exc_info:
-        spack.install_test.get_test_suite("", spack.test.harness.current().config)
+        spack.install_test.get_test_suite("", ctx.config)
 
     assert "name is required" in str(exc_info)
 
 
-def test_get_test_suite_too_many(mock_packages, mock_test_stage):
+def test_get_test_suite_too_many(mock_packages, mock_test_stage, ctx: SpackContext):
     test_suites = []
     name = "duplicate-alias"
 
     def add_suite(package):
-        spec = spack.concretize.concretize_one(package, spack.test.harness.current())
+        spec = spack.concretize.concretize_one(package, ctx)
         suite = spack.install_test.TestSuite([spec], name, stage_root=mock_test_stage)
         suite.ensure_stage()
         spack.install_test.write_test_suite_file(suite)
         test_suites.append(suite)
 
     add_suite("libdwarf")
-    config = spack.test.harness.current().config
+    config = ctx.config
     suite = spack.install_test.get_test_suite(name, config)
+    assert suite is not None
     assert suite.alias == name
 
     add_suite("libelf")
@@ -202,16 +212,20 @@ def test_get_test_suite_too_many(mock_packages, mock_test_stage):
     "virtuals,expected",
     [(False, ["Mpich.test_mpich"]), (True, ["Mpi.test_hello", "Mpich.test_mpich"])],
 )
-def test_test_function_names(mock_packages, install_mockery, virtuals, expected):
+def test_test_function_names(
+    mock_packages, install_mockery, virtuals, expected, ctx: SpackContext
+):
     """Confirm test_function_names works as expected with/without virtuals."""
-    spec = spack.concretize.concretize_one("mpich", spack.test.harness.current())
+    spec = spack.concretize.concretize_one("mpich", ctx)
     tests = spack.install_test.test_function_names(spec.package, add_virtuals=virtuals)
     assert sorted(tests) == sorted(expected)
 
 
-def test_test_functions_pkgless(mock_packages, install_mockery, ensure_debug, capfd):
+def test_test_functions_pkgless(
+    mock_packages, install_mockery, ensure_debug, capfd, ctx: SpackContext
+):
     """Confirm works for package providing a package-less virtual."""
-    spec = spack.concretize.concretize_one("simple-standalone-test", spack.test.harness.current())
+    spec = spack.concretize.concretize_one("simple-standalone-test", ctx)
     fns = spack.install_test.test_functions(spec.package, add_virtuals=True)
     out = capfd.readouterr()
     assert len(fns) == 2, "Expected two test functions"
@@ -263,14 +277,14 @@ def test_package_copy_test_files_fails(mock_packages):
     assert "test suite is missing" in str(exc_info)
 
 
-def test_package_copy_test_files_skips(mock_packages, ensure_debug, capfd):
+def test_package_copy_test_files_skips(mock_packages, ensure_debug, capfd, ctx: SpackContext):
     """Confirm copy_test_files errors as expected if no package class found."""
     # Try with a non-concrete spec and package with a test suite
-    MockSuite = collections.namedtuple("TestSuite", ["specs"])
+    MockSuite = collections.namedtuple("MockSuite", ["specs"])
     MyPackage = collections.namedtuple("MyPackage", ["name", "spec", "test_suite", "context"])
     vspec = spack.spec.Spec("something")
-    pkg = MyPackage("SomePackage", vspec, MockSuite([]), spack.test.harness.current())
-    spack.install_test.copy_test_files(pkg, vspec)
+    pkg = MyPackage("SomePackage", vspec, MockSuite([]), ctx)
+    spack.install_test.copy_test_files(pkg, vspec)  # type: ignore[arg-type]
     out = capfd.readouterr()[1]
     assert "skipping test data copy" in out
     assert "no package class found" in out
@@ -292,9 +306,11 @@ def test_process_test_parts(mock_packages):
     assert "test suite is missing" in str(exc_info)
 
 
-def test_test_part_fail(tmp_path: pathlib.Path, install_mockery, mock_fetch, mock_test_stage):
+def test_test_part_fail(
+    tmp_path: pathlib.Path, install_mockery, mock_fetch, mock_test_stage, ctx: SpackContext
+):
     """Confirm test_part with a ProcessError results in FAILED status."""
-    s = spack.concretize.concretize_one("trivial-smoke-test", spack.test.harness.current())
+    s = spack.concretize.concretize_one("trivial-smoke-test", ctx)
     pkg = s.package
     pkg.tester.test_log_file = str(tmp_path / "test-log.txt")
     touch(pkg.tester.test_log_file)
@@ -308,9 +324,9 @@ def test_test_part_fail(tmp_path: pathlib.Path, install_mockery, mock_fetch, moc
         assert status == TestStatus.FAILED
 
 
-def test_test_part_pass(install_mockery, mock_fetch, mock_test_stage):
+def test_test_part_pass(install_mockery, mock_fetch, mock_test_stage, ctx: SpackContext):
     """Confirm test_part that succeeds results in PASSED status."""
-    s = spack.concretize.concretize_one("trivial-smoke-test", spack.test.harness.current())
+    s = spack.concretize.concretize_one("trivial-smoke-test", ctx)
     pkg = s.package
 
     name = "test_echo"
@@ -327,9 +343,9 @@ def test_test_part_pass(install_mockery, mock_fetch, mock_test_stage):
         assert status == TestStatus.PASSED
 
 
-def test_test_part_skip(install_mockery, mock_fetch, mock_test_stage):
+def test_test_part_skip(install_mockery, mock_fetch, mock_test_stage, ctx: SpackContext):
     """Confirm test_part that raises SkipTest results in test status SKIPPED."""
-    s = spack.concretize.concretize_one("trivial-smoke-test", spack.test.harness.current())
+    s = spack.concretize.concretize_one("trivial-smoke-test", ctx)
     pkg = s.package
 
     name = "test_skip"
@@ -347,9 +363,10 @@ def test_test_part_missing_exe_fail_fast(
     mock_fetch,
     mock_test_stage,
     mutable_config: Configuration,
+    ctx: SpackContext,
 ):
     """Confirm test_part with fail fast enabled raises exception."""
-    s = spack.concretize.concretize_one("trivial-smoke-test", spack.test.harness.current())
+    s = spack.concretize.concretize_one("trivial-smoke-test", ctx)
     pkg = s.package
     pkg.tester.test_log_file = str(tmp_path / "test-log.txt")
     touch(pkg.tester.test_log_file)
@@ -369,10 +386,10 @@ def test_test_part_missing_exe_fail_fast(
 
 
 def test_test_part_missing_exe(
-    tmp_path: pathlib.Path, install_mockery, mock_fetch, mock_test_stage
+    tmp_path: pathlib.Path, install_mockery, mock_fetch, mock_test_stage, ctx: SpackContext
 ):
     """Confirm test_part with missing executable fails."""
-    s = spack.concretize.concretize_one("trivial-smoke-test", spack.test.harness.current())
+    s = spack.concretize.concretize_one("trivial-smoke-test", ctx)
     pkg = s.package
     pkg.tester.test_log_file = str(tmp_path / "test-log.txt")
     touch(pkg.tester.test_log_file)
@@ -404,11 +421,11 @@ def test_test_part_missing_exe(
     ],
 )
 def test_embedded_test_part_status(
-    install_mockery, mock_fetch, mock_test_stage, current, substatuses, expected
+    install_mockery, mock_fetch, mock_test_stage, current, substatuses, expected, ctx: SpackContext
 ):
     """Check to ensure the status of the enclosing test part reflects summary of embedded parts."""
 
-    s = spack.concretize.concretize_one("trivial-smoke-test", spack.test.harness.current())
+    s = spack.concretize.concretize_one("trivial-smoke-test", ctx)
     pkg = s.package
     base_name = "test_example"
     part_name = f"{pkg.__class__.__name__}::{base_name}"
@@ -432,10 +449,16 @@ def test_embedded_test_part_status(
     ],
 )
 def test_write_tested_status(
-    tmp_path: pathlib.Path, install_mockery, mock_fetch, mock_test_stage, statuses, expected
+    tmp_path: pathlib.Path,
+    install_mockery,
+    mock_fetch,
+    mock_test_stage,
+    statuses,
+    expected,
+    ctx: SpackContext,
 ):
     """Check to ensure the status of the enclosing test part reflects summary of embedded parts."""
-    s = spack.concretize.concretize_one("trivial-smoke-test", spack.test.harness.current())
+    s = spack.concretize.concretize_one("trivial-smoke-test", ctx)
     pkg = s.package
     for i, status in enumerate(statuses):
         pkg.tester.test_parts[f"test_{i}"] = status
@@ -450,10 +473,10 @@ def test_write_tested_status(
 
 @pytest.mark.regression("37840")
 def test_write_tested_status_no_repeats(
-    tmp_path: pathlib.Path, install_mockery, mock_fetch, mock_test_stage
+    tmp_path: pathlib.Path, install_mockery, mock_fetch, mock_test_stage, ctx: SpackContext
 ):
     """Emulate re-running the same stand-alone tests a second time."""
-    s = spack.concretize.concretize_one("trivial-smoke-test", spack.test.harness.current())
+    s = spack.concretize.concretize_one("trivial-smoke-test", ctx)
     pkg = s.package
     statuses = [TestStatus.PASSED, TestStatus.PASSED]
     for i, status in enumerate(statuses):

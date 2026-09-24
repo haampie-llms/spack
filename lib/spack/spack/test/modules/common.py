@@ -1,6 +1,7 @@
 # Copyright Spack Project Developers. See COPYRIGHT file for details.
 #
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
+import io
 import os
 import stat
 import types
@@ -9,7 +10,6 @@ import pytest
 
 import spack.cmd.modules
 import spack.concretize
-import spack.context
 import spack.error
 import spack.modules
 import spack.modules.common
@@ -19,6 +19,7 @@ import spack.package_prefs
 import spack.repo
 import spack.test.harness
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.installer import PackageInstaller
 from spack.modules.common import UpstreamModuleIndex
 from spack.util.filesystem import readlink
@@ -61,15 +62,13 @@ def mock_package_perms(monkeypatch):
 
 
 def test_modules_written_with_proper_permissions(
-    mock_module_filename, mock_package_perms, mock_packages, config
+    mock_module_filename, mock_package_perms, mock_packages, config, ctx: SpackContext
 ):
-    spec = spack.concretize.concretize_one("mpileaks", spack.test.harness.current())
+    spec = spack.concretize.concretize_one("mpileaks", ctx)
 
     # The code tested is common to all module types, but has to be tested from
     # one. Tcl picked at random
-    generator = spack.modules.tcl.TclModulefileWriter.from_spec(
-        spec, "default", ctx=spack.test.harness.current()
-    )
+    generator = spack.modules.tcl.TclModulefileWriter.from_spec(spec, "default", ctx=ctx)
     generator.write()
 
     assert mock_package_perms & os.stat(mock_module_filename).st_mode == mock_package_perms
@@ -77,13 +76,18 @@ def test_modules_written_with_proper_permissions(
 
 @pytest.mark.parametrize("module_type", ["tcl", "lmod"])
 def test_modules_default_symlink(
-    module_type, mock_packages, mock_module_filename, mock_module_defaults, config
+    module_type,
+    mock_packages,
+    mock_module_filename,
+    mock_module_defaults,
+    config,
+    ctx: SpackContext,
 ):
-    spec = spack.concretize.concretize_one("mpileaks@2.3", spack.test.harness.current())
+    spec = spack.concretize.concretize_one("mpileaks@2.3", ctx)
     mock_module_defaults(spec.format("{name}{@version}"), True)
 
     generator_cls = spack.modules.module_types[module_type]
-    generator = generator_cls.from_spec(spec, "default", ctx=spack.test.harness.current())
+    generator = generator_cls.from_spec(spec, "default", ctx=ctx)
     generator.write()
 
     link_path = os.path.join(os.path.dirname(mock_module_filename), "default")
@@ -153,7 +157,7 @@ module_index:
         upstream_index.upstream_module(s4, "tcl")
 
 
-def test_get_module_upstream(monkeypatch):
+def test_get_module_upstream(monkeypatch, ctx: SpackContext):
     s1 = MockSpec("spec-1")
 
     tcl_module_index = """\
@@ -163,40 +167,44 @@ module_index:
     use_name: a
 """.format(s1.dag_hash())
 
-    module_indices = [{}, {"tcl": spack.modules.common._read_module_index(tcl_module_index)}]
+    tcl_index = spack.modules.common._read_module_index(io.StringIO(tcl_module_index))
+    module_indices = [{}, {"tcl": tcl_index}]
 
     dbs = ["d0", "d1"]
 
     mock_db = MockDb(dbs, {s1.dag_hash(): "d1"})
     upstream_index = UpstreamModuleIndex(mock_db, module_indices)
 
-    ctx = spack.context.SpackContext(spack.test.harness.current().config)
-    ctx.store = types.SimpleNamespace(db=mock_db)
-    m1_path = spack.modules.get_module("tcl", s1, True, ctx=ctx, upstream_index=upstream_index)
+    module_ctx = SpackContext(ctx.config)
+    module_ctx.store = types.SimpleNamespace(db=mock_db)  # type: ignore[assignment]
+    m1_path = spack.modules.get_module(
+        "tcl",
+        s1,  # type: ignore[arg-type]
+        True,
+        ctx=module_ctx,
+        upstream_index=upstream_index,
+    )
     assert m1_path == "/path/to/a"
 
 
 @pytest.mark.regression("14347")
-def test_load_installed_package_not_in_repo(install_mockery, mock_fetch, monkeypatch):
+def test_load_installed_package_not_in_repo(
+    install_mockery, mock_fetch, monkeypatch, ctx: SpackContext
+):
     """Test that installed packages that have been removed are still loadable"""
-    spec = spack.concretize.concretize_one(
-        "trivial-install-test-package", spack.test.harness.current()
-    )
+    spec = spack.concretize.concretize_one("trivial-install-test-package", ctx)
     PackageInstaller([spec.package], explicit=True).install()
-    spack.modules.module_types["tcl"].from_spec(
-        spec, "default", True, ctx=spack.test.harness.current()
-    ).write()
+    spack.modules.module_types["tcl"].from_spec(spec, "default", True, ctx=ctx).write()
 
     def find_nothing(*args):
         raise spack.repo.UnknownPackageError("Repo package access is disabled for test")
 
     # Mock deletion of the package
     spec._package = None
-    monkeypatch.setattr(spack.test.harness.current().repo, "get", find_nothing)
+    monkeypatch.setattr(ctx.repo, "get", find_nothing)
     with pytest.raises(spack.repo.UnknownPackageError):
-        spack.repo.attach_packages([spec], spack.test.harness.current())
+        spack.repo.attach_packages([spec], ctx)
 
-    ctx = spack.test.harness.current()
     module_path = spack.modules.get_module(
         "tcl",
         spec,
@@ -206,7 +214,7 @@ def test_load_installed_package_not_in_repo(install_mockery, mock_fetch, monkeyp
     )
     assert module_path
 
-    spack.package_base.PackageBase.uninstall_by_spec(spec, spack.test.harness.current().store)
+    spack.package_base.PackageBase.uninstall_by_spec(spec, ctx.store)
 
 
 @pytest.mark.regression("37649")

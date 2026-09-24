@@ -10,6 +10,7 @@ import spack.environment as ev
 import spack.spec
 import spack.test.harness
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.test.harness import SpackCommand
 
 pytestmark = [
@@ -38,14 +39,16 @@ change = SpackCommand("change")
         ),
     ],
 )
-def test_mutate_internals(dep, orig_constraint, mutated_constraint, mutable_config: Configuration):
+def test_mutate_internals(
+    dep, orig_constraint, mutated_constraint, mutable_config: Configuration, ctx: SpackContext
+):
     """
     Check that Environment.mutate and Spec.mutate work for several different constraint types.
 
     Includes check that environment.mutate rehashing gets the same answer as spec.mutate rehashing.
     """
-    ev.create("test", ctx=spack.test.harness.current())
-    env = ev.read("test", ctx=spack.test.harness.current())
+    ev.create("test", ctx=ctx)
+    env = ev.read("test", ctx=ctx)
 
     mutable_config.set("packages:cmake", {"require": orig_constraint})
 
@@ -66,7 +69,7 @@ def test_mutate_internals(dep, orig_constraint, mutated_constraint, mutable_conf
     mutator = spack.spec.Spec(mutated_constraint)
     env.mutate(selectors=[selector], mutators=[mutator])
     cmake_spec.mutate(mutator)
-    spack.spec.rehash_mutated([cmake_spec], repo=spack.test.harness.current().repo)
+    spack.spec.rehash_mutated([cmake_spec], repo=ctx.repo)
 
     for spec in env.all_specs_generator():
         if spec.name == "cmake":
@@ -83,12 +86,12 @@ def test_mutate_internals(dep, orig_constraint, mutated_constraint, mutable_conf
     assert root_spec.dag_hash() == new_hash
 
 
-def test_mutate_internals_multiple_mutations():
+def test_mutate_internals_multiple_mutations(ctx: SpackContext):
     """
     Check that Environment.mutate correctly applies multiple mutations to different selected Specs.
     """
-    ev.create("test", ctx=spack.test.harness.current())
-    env = ev.read("test", ctx=spack.test.harness.current())
+    ev.create("test", ctx=ctx)
+    env = ev.read("test", ctx=ctx)
 
     root = "cmake-client+truthy os=debian6 %cmake@3.23.1 os=debian6"
     env.add(root)
@@ -126,14 +129,14 @@ def test_mutate_internals_multiple_mutations():
     assert new_hash != orig_hash
 
 
-def test_mutate_namespace(repo_builder):
+def test_mutate_namespace(repo_builder, ctx: SpackContext):
     """
     Check that Environment.mutate and Spec.mutate can change the namespace of a Spec.
     """
     repo_builder.add_package("cmake")
 
-    ev.create("test", ctx=spack.test.harness.current())
-    env = ev.read("test", ctx=spack.test.harness.current())
+    ev.create("test", ctx=ctx)
+    env = ev.read("test", ctx=ctx)
 
     env.add("cmake-client")
     env.concretize()
@@ -145,7 +148,7 @@ def test_mutate_namespace(repo_builder):
     selector = spack.spec.Spec("cmake")
     mutator = spack.spec.Spec(f"{repo_builder.namespace}.cmake")
 
-    with spack.test.harness.use_repositories(repo_builder.root, override=False):
+    with spack.test.harness.use_repositories(ctx, repo_builder.root, override=False):
         env.mutate(selectors=[selector], mutators=[mutator])
         cmake_spec.mutate(mutator)
 
@@ -156,17 +159,17 @@ def test_mutate_namespace(repo_builder):
 
 
 @pytest.mark.parametrize("constraint", ["foo", "foo.bar", "foo%cmake@1.0", "foo@1.1:", "foo/abc"])
-def test_mutate_spec_invalid(constraint):
-    spec = spack.concretize.concretize_one("cmake-client", spack.test.harness.current())
+def test_mutate_spec_invalid(constraint, ctx: SpackContext):
+    spec = spack.concretize.concretize_one("cmake-client", ctx)
     with pytest.raises(spack.spec.SpecMutationError):
         spec.mutate(spack.spec.Spec(constraint))
 
 
-def _test_mutate_from_cli(args, create=True):
+def _test_mutate_from_cli(args, create=True, *, ctx: SpackContext):
     if create:
-        ev.create("test", ctx=spack.test.harness.current())
+        ev.create("test", ctx=ctx)
 
-    env = ev.read("test", ctx=spack.test.harness.current())
+    env = ev.read("test", ctx=ctx)
 
     if create:
         env.add("cmake-client%cmake@3.4.3")
@@ -180,11 +183,11 @@ def _test_mutate_from_cli(args, create=True):
     return list(env.roots())
 
 
-def test_mutate_from_cli():
+def test_mutate_from_cli(ctx: SpackContext):
     match_spec = "%cmake@3.4.3"
     constraint = "@3.0"
     args = ["--concrete", f"--match-spec={match_spec}", constraint]
-    roots = _test_mutate_from_cli(args)
+    roots = _test_mutate_from_cli(args, ctx=ctx)
 
     assert any(r.satisfies(match_spec) for r in roots)
     for root in roots:
@@ -192,12 +195,12 @@ def test_mutate_from_cli():
             assert root.satisfies(constraint)
 
 
-def test_mutate_from_cli_multiple():
+def test_mutate_from_cli_multiple(ctx: SpackContext):
     match_spec = "%cmake@3.4.3"
     constraint1 = "@3.0"
     constraint2 = "build_system=foo"
     args = ["--concrete", f"--match-spec={match_spec}", constraint1, constraint2]
-    roots = _test_mutate_from_cli(args)
+    roots = _test_mutate_from_cli(args, ctx=ctx)
 
     assert any(r.satisfies(match_spec) for r in roots)
     for root in roots:
@@ -206,25 +209,25 @@ def test_mutate_from_cli_multiple():
             assert root.satisfies(constraint2)
 
 
-def test_mutate_from_cli_no_abstract():
+def test_mutate_from_cli_no_abstract(ctx: SpackContext):
     match_spec = "cmake"
     constraint = "@3.0"
     args = ["--concrete", f"--match-spec={match_spec}", constraint]
 
     with pytest.raises(ValueError, match="Cannot change abstract spec"):
-        _ = _test_mutate_from_cli(args)
+        _ = _test_mutate_from_cli(args, ctx=ctx)
 
     args = ["--concrete-only"] + args[1:]
-    roots = _test_mutate_from_cli(args, create=False)
+    roots = _test_mutate_from_cli(args, create=False, ctx=ctx)
 
     for root in roots:
         assert root[match_spec].satisfies(constraint)
 
 
-def test_mutate_from_cli_all_no_match_spec():
+def test_mutate_from_cli_all_no_match_spec(ctx: SpackContext):
     constraint = "cmake-client@3.0"
     args = ["--concrete", "--all", constraint]
-    roots = _test_mutate_from_cli(args)
+    roots = _test_mutate_from_cli(args, ctx=ctx)
 
     for root in roots:
         assert root.satisfies(constraint)

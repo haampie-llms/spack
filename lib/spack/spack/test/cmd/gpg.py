@@ -8,9 +8,9 @@ import pathlib
 import pytest
 
 import spack.binary_distribution
-import spack.test.harness
 import spack.util.filesystem as fs
 import spack.util.gpg
+from spack.context import SpackContext
 from spack.paths import mock_gpg_keys_path
 from spack.test.harness import SpackCommand
 from spack.util.executable import ProcessError
@@ -33,7 +33,9 @@ pytestmark = pytest.mark.not_on_windows("does not run on windows")
         ("gpg2", "gpg (GnuPG) 2.2.19"),  # gpg2 command
     ],
 )
-def test_find_gpg(cmd_name, version, tmp_path: pathlib.Path, mock_gnupghome, monkeypatch):
+def test_find_gpg(
+    cmd_name, version, tmp_path: pathlib.Path, mock_gnupghome, monkeypatch, ctx: SpackContext
+):
     TEMPLATE = '#!/bin/sh\necho "{version}"\n'
 
     with fs.working_dir(str(tmp_path)):
@@ -45,20 +47,22 @@ def test_find_gpg(cmd_name, version, tmp_path: pathlib.Path, mock_gnupghome, mon
     monkeypatch.setenv("PATH", str(tmp_path))
     if version == "undetectable" or version.endswith("1.3.4"):
         with pytest.raises(spack.util.gpg.SpackGPGError):
-            spack.util.gpg.Gpg(None, spack.test.harness.current()).gpg
+            spack.util.gpg.Gpg(None, ctx).gpg
     else:
-        assert spack.util.gpg.Gpg(None, spack.test.harness.current()).gpg is not None
+        assert spack.util.gpg.Gpg(None, ctx).gpg is not None
 
 
-def test_no_gpg_in_path(tmp_path: pathlib.Path, mock_gnupghome, monkeypatch, mutable_config):
+def test_no_gpg_in_path(
+    tmp_path: pathlib.Path, mock_gnupghome, monkeypatch, mutable_config, ctx: SpackContext
+):
     monkeypatch.setenv("PATH", str(tmp_path))
     bootstrap("disable")
     with pytest.raises(RuntimeError):
-        spack.util.gpg.Gpg(None, spack.test.harness.current()).gpg
+        spack.util.gpg.Gpg(None, ctx).gpg
 
 
 @pytest.mark.maybeslow
-def test_gpg(tmp_path: pathlib.Path, mutable_config, mock_gnupghome):
+def test_gpg(tmp_path: pathlib.Path, mutable_config, mock_gnupghome, ctx: SpackContext):
     MOCK_KEY = "B27095DEEF1787C3C8C85917DCA0241840A5DAE2"
 
     # Import the default key.
@@ -89,7 +93,7 @@ def test_gpg(tmp_path: pathlib.Path, mutable_config, mock_gnupghome):
         "Spack testing 1",
         "spack@googlegroups.com",
     )
-    keyfp = spack.util.gpg.signing_keys(spack.test.harness.current().gpg)[0].fpr
+    keyfp = spack.util.gpg.signing_keys(ctx.gpg)[0].fpr
 
     # List the keys.
     # TODO: Test the output here.

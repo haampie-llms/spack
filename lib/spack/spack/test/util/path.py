@@ -8,9 +8,9 @@ import sys
 import pytest
 
 import spack.store
-import spack.test.harness
 import spack.util.path as sup
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.util import tty
 
 #: Some lines with lots of placeholders
@@ -134,7 +134,7 @@ def test_pad_on_path_sep_boundary():
 
 
 @pytest.mark.parametrize("debug", [1, 2])
-def test_path_debug_padded_filter(debug, monkeypatch):
+def test_path_debug_padded_filter(debug, monkeypatch, ctx: SpackContext):
     """Ensure padded filter works as expected with different debug levels."""
     fmt = "{0}{1}{2}{1}{3}"
     prefix = "[+] {0}home{0}user{0}install".format(os.sep)
@@ -147,7 +147,5 @@ def test_path_debug_padded_filter(debug, monkeypatch):
     )
 
     monkeypatch.setattr(tty, "_debug", debug)
-    with spack.test.harness.current().config.override(
-        "config:install_tree", {"padded_length": 128}
-    ):
+    with ctx.config.override("config:install_tree", {"padded_length": 128}):
         assert expected == sup.debug_padded_filter(string)

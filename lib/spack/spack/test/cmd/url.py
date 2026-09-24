@@ -5,8 +5,8 @@ import re
 
 import pytest
 
-import spack.test.harness
 from spack.cmd.url import name_parsed_correctly, url_summary, version_parsed_correctly
+from spack.context import SpackContext
 from spack.repo import RepoPath
 from spack.test.harness import SpackCommand
 from spack.url import UndetectableVersionError
@@ -55,10 +55,12 @@ def test_version_parsed_correctly():
     assert not version_parsed_correctly(MyPackage("", ["0.18.0"]), "oce-0.18.0")
 
 
+@pytest.mark.usefixtures("config")
 def test_url_parse():
     url("parse", "http://zlib.net/fossils/zlib-1.2.10.tar.gz")
 
 
+@pytest.mark.usefixtures("config")
 def test_url_with_no_version_fails():
     # No version in URL
     with pytest.raises(UndetectableVersionError):
@@ -94,11 +96,11 @@ def test_url_list(mock_packages):
     assert 0 < correct_version_urls < total_urls
 
 
-def test_url_summary(mock_packages):
+def test_url_summary(mock_packages, ctx: SpackContext):
     """Test the URL summary command."""
     # test url_summary, the internal function that does the work
     (total_urls, correct_names, correct_versions, name_count_dict, version_count_dict) = (
-        url_summary(None, spack.test.harness.current())
+        url_summary(None, ctx)
     )
 
     assert 0 < correct_names <= sum(name_count_dict.values()) <= total_urls
@@ -106,14 +108,14 @@ def test_url_summary(mock_packages):
 
     # make sure it agrees with the actual command.
     out = url("summary")
-    out_total_urls = int(re.search(r"Total URLs found:\s*(\d+)", out).group(1))
-    assert out_total_urls == total_urls
+    out_total_urls = re.search(r"Total URLs found:\s*(\d+)", out)
+    assert out_total_urls and int(out_total_urls.group(1)) == total_urls
 
-    out_correct_names = int(re.search(r"Names correctly parsed:\s*(\d+)", out).group(1))
-    assert out_correct_names == correct_names
+    out_correct_names = re.search(r"Names correctly parsed:\s*(\d+)", out)
+    assert out_correct_names and int(out_correct_names.group(1)) == correct_names
 
-    out_correct_versions = int(re.search(r"Versions correctly parsed:\s*(\d+)", out).group(1))
-    assert out_correct_versions == correct_versions
+    out_correct_versions = re.search(r"Versions correctly parsed:\s*(\d+)", out)
+    assert out_correct_versions and int(out_correct_versions.group(1)) == correct_versions
 
 
 def test_url_stats(mock_packages: RepoPath):

@@ -15,6 +15,7 @@ import spack.repo
 import spack.test.harness
 import spack.util.executable
 import spack.util.file_cache
+from spack.context import SpackContext
 from spack.repo import RepoPath
 from spack.util.filesystem import mkdirp, working_dir
 
@@ -92,13 +93,13 @@ def _builtin_mock_copy(
 
 
 @pytest.fixture
-def builtin_mock_copy(_builtin_mock_copy: spack.repo.Repo):
+def builtin_mock_copy(_builtin_mock_copy: spack.repo.Repo, ctx: SpackContext):
     """Fixture that enables a copy of the builtin_mock repo."""
-    with spack.test.harness.use_repositories(_builtin_mock_copy):
+    with spack.test.harness.use_repositories(ctx, _builtin_mock_copy):
         yield _builtin_mock_copy
 
 
-def test_pkg_add(git, builtin_mock_copy: spack.repo.Repo):
+def test_pkg_add(git, builtin_mock_copy: spack.repo.Repo, ctx: SpackContext):
     with working_dir(builtin_mock_copy.packages_path):
         mkdirp("mockpkg_e")
         with open("mockpkg_e/package.py", "w", encoding="utf-8") as f:
@@ -112,7 +113,7 @@ def test_pkg_add(git, builtin_mock_copy: spack.repo.Repo):
         finally:
             shutil.rmtree("mockpkg_e")
             # Removing a package mid-run disrupts Spack's caching
-            checker = spack.test.harness.current().repo.repos[0]._fast_package_checker
+            checker = ctx.repo.repos[0]._fast_package_checker
             if checker:
                 checker.invalidate()
 
@@ -227,6 +228,7 @@ def test_pkg_changed(builtin_mock_copy: spack.repo.Repo):
         pkg("changed", "--type", "foo")
 
 
+@pytest.mark.usefixtures("config")
 def test_pkg_fails_when_not_git_repo(monkeypatch):
     monkeypatch.setattr(spack.cmd, "spack_is_git_repo", lambda: False)
     with pytest.raises(spack.main.SpackCommandError):

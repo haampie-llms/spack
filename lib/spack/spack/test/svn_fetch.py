@@ -8,8 +8,8 @@ import pathlib
 import pytest
 
 import spack.concretize
-import spack.test.harness
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.fetch_strategy import SvnFetchStrategy
 from spack.stage import stage_from_config
 from spack.util.executable import which
@@ -34,6 +34,7 @@ def test_fetch(
     config: Configuration,
     mutable_mock_repo,
     monkeypatch,
+    ctx: SpackContext,
 ):
     """Tries to:
 
@@ -49,7 +50,7 @@ def test_fetch(
     h = mock_svn_repository.hash
 
     # Construct the package under test
-    s = spack.concretize.concretize_one("svn-test", spack.test.harness.current())
+    s = spack.concretize.concretize_one("svn-test", ctx)
     monkeypatch.setitem(s.package.versions, Version("svn"), t.args)
 
     # Enter the stage directory and check some properties

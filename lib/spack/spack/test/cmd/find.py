@@ -19,12 +19,12 @@ import spack.paths
 import spack.spec
 import spack.test.harness
 import spack.user_environment as uenv
+from spack.context import SpackContext
 from spack.database import Database
 from spack.enums import InstallRecordStatus
 from spack.test.harness import SpackCommand
 from spack.test.utilities import SpackCommandArgs
 from spack.util.filesystem import working_dir
-from spack.util.pattern import Bunch
 from spack.version.git_ref_lookup import GitRefLookup
 
 find = SpackCommand("find")
@@ -58,11 +58,11 @@ def mock_display(monkeypatch, specs):
     monkeypatch.setattr(spack.cmd, "display_specs", display)
 
 
-def test_query_arguments():
+def test_query_arguments(ctx: SpackContext):
     query_arguments = spack.cmd.find.query_arguments
 
     # Default arguments
-    args = Bunch(
+    args = argparse.Namespace(
         only_missing=False,
         missing=False,
         only_deprecated=False,
@@ -75,7 +75,7 @@ def test_query_arguments():
         install_tree="all",
     )
 
-    q_args = query_arguments(args, spack.test.harness.current())
+    q_args = query_arguments(args, ctx)
     assert "installed" in q_args
     assert "predicate_fn" in q_args
     assert "explicit" in q_args
@@ -88,20 +88,20 @@ def test_query_arguments():
 
     # Check that explicit works correctly
     args.explicit = True
-    q_args = query_arguments(args, spack.test.harness.current())
+    q_args = query_arguments(args, ctx)
     assert q_args["explicit"] is True
 
     args.explicit = False
     args.implicit = True
-    q_args = query_arguments(args, spack.test.harness.current())
+    q_args = query_arguments(args, ctx)
     assert q_args["explicit"] is False
 
 
 @pytest.mark.db
 @pytest.mark.usefixtures("database", "mock_display")
-def test_tag1(parser, specs):
+def test_tag1(parser, specs, ctx: SpackContext):
     args = parser.parse_args(["--tag", "tag1"])
-    spack.cmd.find.find(parser, args, spack.test.harness.current())
+    spack.cmd.find.find(parser, args, ctx)
 
     assert len(specs) == 2
     assert "mpich" in [x.name for x in specs]
@@ -110,9 +110,9 @@ def test_tag1(parser, specs):
 
 @pytest.mark.db
 @pytest.mark.usefixtures("database", "mock_display")
-def test_tag2(parser, specs):
+def test_tag2(parser, specs, ctx: SpackContext):
     args = parser.parse_args(["--tag", "tag2"])
-    spack.cmd.find.find(parser, args, spack.test.harness.current())
+    spack.cmd.find.find(parser, args, ctx)
 
     assert len(specs) == 1
     assert "mpich" in [x.name for x in specs]
@@ -120,9 +120,9 @@ def test_tag2(parser, specs):
 
 @pytest.mark.db
 @pytest.mark.usefixtures("database", "mock_display")
-def test_tag2_tag3(parser, specs):
+def test_tag2_tag3(parser, specs, ctx: SpackContext):
     args = parser.parse_args(["--tag", "tag2", "--tag", "tag3"])
-    spack.cmd.find.find(parser, args, spack.test.harness.current())
+    spack.cmd.find.find(parser, args, ctx)
 
     assert len(specs) == 0
 
@@ -187,9 +187,9 @@ def test_find_json_deps(database):
 
 
 @pytest.mark.db
-def test_display_json(database, capfd):
+def test_display_json(database, capfd, ctx: SpackContext):
     specs = [
-        spack.concretize.concretize_one(s, spack.test.harness.current())
+        spack.concretize.concretize_one(s, ctx)
         for s in ["mpileaks ^zmpi", "mpileaks ^mpich", "mpileaks ^mpich2"]
     ]
 
@@ -203,9 +203,9 @@ def test_display_json(database, capfd):
 
 
 @pytest.mark.db
-def test_display_json_deps(database, capfd):
+def test_display_json_deps(database, capfd, ctx: SpackContext):
     specs = [
-        spack.concretize.concretize_one(s, spack.test.harness.current())
+        spack.concretize.concretize_one(s, ctx)
         for s in ["mpileaks ^zmpi", "mpileaks ^mpich", "mpileaks ^mpich2"]
     ]
 
@@ -276,9 +276,9 @@ mpileaks-2.3
 
 
 @pytest.mark.db
-def test_find_format_deps_paths(database, config):
+def test_find_format_deps_paths(database, config, ctx: SpackContext):
     output = find("-dp", "--format", "{name}-{version}", "mpileaks", "^zmpi")
-    mpileaks = spack.concretize.concretize_one("mpileaks ^zmpi", spack.test.harness.current())
+    mpileaks = spack.concretize.concretize_one("mpileaks ^zmpi", ctx)
     assert (
         output
         == f"""\
@@ -298,11 +298,11 @@ mpileaks-2.3                   {mpileaks.prefix}
 
 
 @pytest.mark.db
-def test_find_very_long(database, config):
+def test_find_very_long(database, config, ctx: SpackContext):
     output = find("-L", "--no-groups", "mpileaks")
 
     specs = [
-        spack.concretize.concretize_one(s, spack.test.harness.current())
+        spack.concretize.concretize_one(s, ctx)
         for s in ["mpileaks ^zmpi", "mpileaks ^mpich", "mpileaks ^mpich2"]
     ]
 
@@ -336,11 +336,16 @@ def test_find_command_basic_usage(database):
 
 @pytest.mark.regression("9875")
 def test_find_prefix_in_env(
-    mutable_mock_env_path, install_mockery, mock_fetch, mock_packages, mock_archive
+    mutable_mock_env_path,
+    install_mockery,
+    mock_fetch,
+    mock_packages,
+    mock_archive,
+    ctx: SpackContext,
 ):
     """Test `find` formats requiring concrete specs work in environments."""
     env("create", "test")
-    with ev.read("test", ctx=spack.test.harness.current()):
+    with ev.read("test", ctx=ctx):
         install("--fake", "--add", "mpileaks")
         find("-p")
         find("-l")
@@ -349,7 +354,7 @@ def test_find_prefix_in_env(
 
 
 def test_find_specs_include_concrete_env(
-    mutable_mock_env_path, mutable_mock_repo, tmp_path: pathlib.Path
+    mutable_mock_env_path, mutable_mock_repo, tmp_path: pathlib.Path, ctx: SpackContext
 ):
     path = tmp_path / "spack.yaml"
 
@@ -364,7 +369,7 @@ spack:
             )
         env("create", "test1", "spack.yaml")
 
-    test1 = ev.read("test1", ctx=spack.test.harness.current())
+    test1 = ev.read("test1", ctx=ctx)
     test1.concretize()
     test1.write()
 
@@ -379,13 +384,13 @@ spack:
             )
         env("create", "test2", "spack.yaml")
 
-    test2 = ev.read("test2", ctx=spack.test.harness.current())
+    test2 = ev.read("test2", ctx=ctx)
     test2.concretize()
     test2.write()
 
     env("create", "--include-concrete", "test1", "--include-concrete", "test2", "combined_env")
 
-    with ev.read("combined_env", ctx=spack.test.harness.current()):
+    with ev.read("combined_env", ctx=ctx):
         output = find()
 
     assert "no root specs" in output
@@ -395,7 +400,7 @@ spack:
 
 
 def test_find_specs_nested_include_concrete_env(
-    mutable_mock_env_path, mutable_mock_repo, tmp_path: pathlib.Path
+    mutable_mock_env_path, mutable_mock_repo, tmp_path: pathlib.Path, ctx: SpackContext
 ):
     path = tmp_path / "spack.yaml"
 
@@ -410,19 +415,19 @@ spack:
             )
         env("create", "test1", "spack.yaml")
 
-    test1 = ev.read("test1", ctx=spack.test.harness.current())
+    test1 = ev.read("test1", ctx=ctx)
     test1.concretize()
     test1.write()
 
     env("create", "--include-concrete", "test1", "test2")
-    test2 = ev.read("test2", ctx=spack.test.harness.current())
+    test2 = ev.read("test2", ctx=ctx)
     test2.add("libelf")
     test2.concretize()
     test2.write()
 
     env("create", "--include-concrete", "test2", "test3")
 
-    with ev.read("test3", ctx=spack.test.harness.current()):
+    with ev.read("test3", ctx=ctx):
         output = find()
 
     assert "no root specs" in output
@@ -445,13 +450,13 @@ def test_find_loaded(database: Database, working_env):
 
 @pytest.mark.regression("37712")
 def test_environment_with_version_range_in_compiler_doesnt_fail(
-    tmp_path: pathlib.Path, mock_packages
+    tmp_path: pathlib.Path, mock_packages, ctx: SpackContext
 ):
     """Tests that having an active environment with a root spec containing a compiler constrained
     by a version range (i.e. @X.Y rather the single version than @=X.Y) doesn't result in an error
     when invoking "spack find".
     """
-    test_environment = ev.create_in_dir(tmp_path, ctx=spack.test.harness.current())
+    test_environment = ev.create_in_dir(tmp_path, ctx=ctx)
     test_environment.add("zlib %gcc@12.1.0")
     test_environment.write()
 
@@ -466,15 +471,15 @@ def test_environment_with_version_range_in_compiler_doesnt_fail(
 
 
 @pytest.fixture
-def test_repo(mock_stage):
+def test_repo(mock_stage, ctx: SpackContext):
     with spack.test.harness.use_repositories(
-        os.path.join(spack.paths.test_repos_path, "spack_repo", "find")
+        ctx, os.path.join(spack.paths.test_repos_path, "spack_repo", "find")
     ) as mock_packages_repo:
         yield mock_packages_repo
 
 
 def test_find_concretized_not_installed(
-    mutable_mock_env_path, install_mockery, mock_fetch, test_repo, mock_archive
+    mutable_mock_env_path, install_mockery, mock_fetch, test_repo, mock_archive, ctx: SpackContext
 ):
     """Test queries against installs of specs against fake repo.
 
@@ -488,15 +493,13 @@ def test_find_concretized_not_installed(
     uninstall = SpackCommand("uninstall")
 
     def _query(*args):
-        return spack.cmd.find._find_query(
-            SpackCommandArgs("find")(*args), spack.test.harness.current()
-        )
+        return spack.cmd.find._find_query(SpackCommandArgs("find")(*args), ctx)
 
     def _nresults(_qresult):
         return len(_qresult[0]), len(_qresult[1])
 
     env("create", "test")
-    with ev.read("test", ctx=spack.test.harness.current()):
+    with ev.read("test", ctx=ctx):
         install("--fake", "--add", "a0")
 
         assert _nresults(_query()) == (3, 0)
@@ -602,12 +605,14 @@ spack:
         ),
     ],
 )
-def test_find_env_with_groups(spack_yaml, expected, not_expected, tmp_path: pathlib.Path):
+def test_find_env_with_groups(
+    spack_yaml, expected, not_expected, tmp_path: pathlib.Path, ctx: SpackContext
+):
     """Tests that the output of spack find contains expected matches when using an
     environment with groups.
     """
     (tmp_path / "spack.yaml").write_text(spack_yaml)
-    with ev.Environment(tmp_path, ctx=spack.test.harness.current()):
+    with ev.Environment(tmp_path, ctx=ctx):
         output = find()
 
     assert all(x in output for x in expected)

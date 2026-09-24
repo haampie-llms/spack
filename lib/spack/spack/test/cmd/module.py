@@ -13,7 +13,9 @@ import spack.modules
 import spack.modules.lmod
 import spack.test.harness
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.installer import PackageInstaller
+from spack.test.conftest import mock_configuration
 
 module = spack.test.harness.SpackCommand("module")
 
@@ -22,22 +24,18 @@ pytestmark = pytest.mark.not_on_windows("does not run on windows")
 
 #: make sure module files are generated for all the tests here
 @pytest.fixture(scope="module", autouse=True)
-def ensure_module_files_are_there(mock_packages_repo, mock_store, mock_configuration_scopes):
+def ensure_module_files_are_there(mock_packages_repo, mock_store_path, configuration_dir):
     """Generate module files for module tests."""
-    module = spack.test.harness.SpackCommand("module")
-    with spack.test.harness.use_store(str(mock_store)):
-        with spack.test.harness.use_configuration(*mock_configuration_scopes):
-            with spack.test.harness.use_repositories(mock_packages_repo):
-                module("tcl", "refresh", "-y")
+    module_ctx = SpackContext(mock_configuration(configuration_dir))
+    spack.test.harness.set_store(module_ctx, mock_store_path)
+    spack.test.harness.set_repositories(module_ctx, mock_packages_repo)
+    module("tcl", "refresh", "-y", ctx=module_ctx)
 
 
-def _module_files(module_type, *specs):
-    specs = [spack.concretize.concretize_one(x, spack.test.harness.current()) for x in specs]
+def _module_files(module_type, *specs, ctx: SpackContext):
+    specs = [spack.concretize.concretize_one(x, ctx) for x in specs]
     writer_cls = spack.modules.module_types[module_type]
-    return [
-        writer_cls.from_spec(spec, "default", ctx=spack.test.harness.current()).layout.filename
-        for spec in specs
-    ]
+    return [writer_cls.from_spec(spec, "default", ctx=ctx).layout.filename for spec in specs]
 
 
 @pytest.fixture(
@@ -70,7 +68,7 @@ def test_exit_with_failure(database, module_type, failure_args):
 
 
 @pytest.mark.db
-def test_remove_and_add(database, module_type):
+def test_remove_and_add(database, module_type, ctx: SpackContext):
     """Tests adding and removing a tcl module file."""
 
     if module_type == "lmod":
@@ -79,7 +77,7 @@ def test_remove_and_add(database, module_type):
         return
 
     rm_cli_args = ["rm", "-y", "mpileaks"]
-    module_files = _module_files(module_type, "mpileaks")
+    module_files = _module_files(module_type, "mpileaks", ctx=ctx)
     for item in module_files:
         assert os.path.exists(item)
 
@@ -175,7 +173,7 @@ writer_cls = spack.modules.lmod.LmodModulefileWriter
 
 
 @pytest.mark.db
-def test_setdefault_command(mutable_database, mutable_config: Configuration):
+def test_setdefault_command(mutable_database, mutable_config: Configuration, ctx: SpackContext):
     data = {
         "default": {
             "enable": ["lmod"],
@@ -187,14 +185,14 @@ def test_setdefault_command(mutable_database, mutable_config: Configuration):
     other_spec, preferred = "pkg-a@1.0", "pkg-a@2.0"
 
     specs = [
-        spack.concretize.concretize_one(other_spec, spack.test.harness.current()),
-        spack.concretize.concretize_one(preferred, spack.test.harness.current()),
+        spack.concretize.concretize_one(other_spec, ctx),
+        spack.concretize.concretize_one(preferred, ctx),
     ]
     PackageInstaller([s.package for s in specs], explicit=True, fake=True).install()
 
     writers = {
-        preferred: writer_cls.from_spec(specs[1], "default", ctx=spack.test.harness.current()),
-        other_spec: writer_cls.from_spec(specs[0], "default", ctx=spack.test.harness.current()),
+        preferred: writer_cls.from_spec(specs[1], "default", ctx=ctx),
+        other_spec: writer_cls.from_spec(specs[0], "default", ctx=ctx),
     }
 
     # Create two module files for the same software

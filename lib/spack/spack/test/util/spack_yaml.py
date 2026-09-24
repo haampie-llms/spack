@@ -4,6 +4,8 @@
 
 import re
 
+import pytest
+
 from spack.config import Configuration
 from spack.test.harness import SpackCommand
 
@@ -66,6 +68,7 @@ def test_config_blame_with_override(config: Configuration):
         check_blame("dirty", config_file, 15)
 
 
+@pytest.mark.usefixtures("config")
 def test_config_blame_defaults():
     """check blame for an element from an override scope"""
     files = {}

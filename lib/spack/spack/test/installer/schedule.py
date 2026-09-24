@@ -13,9 +13,9 @@ import spack.deptypes as dt
 import spack.error
 import spack.spec
 import spack.store
-import spack.test.harness
 import spack.traverse
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.database import Database
 from spack.installer.base import ExitCode, JobServerBase, NoopJobServer
 from spack.installer.schedule import BuildGraph, ScheduleResult, _node_to_roots, schedule_builds
@@ -35,12 +35,12 @@ if sys.platform != "win32":
     from spack.installer.posix import PosixJobServer
 
 
-def install_spec_in_db(spec: Spec, store: Store):
+def install_spec_in_db(spec: Spec, store: Store, *, ctx: SpackContext):
     """Helper to install a spec in the database for testing."""
     prefix = store.layout.path_for_spec(spec)
     spec.set_prefix(prefix)
     # Use the layout to create a proper installation directory structure
-    store.layout.create_install_directory(spec, spack.test.harness.current().config)
+    store.layout.create_install_directory(spec, ctx.config)
     store.db.add(spec, explicit=False)
 
 
@@ -235,11 +235,13 @@ class TestBuildGraph:
         assert diamond_dag["dep1"].dag_hash() in graph.child_to_parent[shared_hash]
         assert diamond_dag["dep2"].dag_hash() in graph.child_to_parent[shared_hash]
 
-    def test_pruning_installed_specs(self, mock_specs: Dict[str, Spec], temporary_store: Store):
+    def test_pruning_installed_specs(
+        self, mock_specs: Dict[str, Spec], temporary_store: Store, ctx: SpackContext
+    ):
         """Test that installed specs are correctly pruned from the graph."""
         # Install dep2 in the database
         dep2 = mock_specs["dep2"]
-        install_spec_in_db(dep2, temporary_store)
+        install_spec_in_db(dep2, temporary_store, ctx=ctx)
 
         graph = BuildGraph(
             specs=[mock_specs["root"]],
@@ -259,12 +261,12 @@ class TestBuildGraph:
         assert len(graph.parent_to_child[mock_specs["dep1"].dag_hash()]) == 0
 
     def test_pruning_with_shared_dependency_partially_installed(
-        self, diamond_dag: Dict[str, Spec], temporary_store: Store
+        self, diamond_dag: Dict[str, Spec], temporary_store: Store, ctx: SpackContext
     ):
         """Test that pruning a shared dependency correctly updates all parents."""
         # Install the shared dependency
         shared = diamond_dag["shared"]
-        install_spec_in_db(shared, temporary_store)
+        install_spec_in_db(shared, temporary_store, ctx=ctx)
         graph = BuildGraph(
             specs=[diamond_dag["root"]],
             root_policy="auto",
@@ -282,12 +284,12 @@ class TestBuildGraph:
         assert len(graph.parent_to_child[diamond_dag["dep2"].dag_hash()]) == 0
 
     def test_overwrite_set_prevents_pruning(
-        self, mock_specs: Dict[str, Spec], temporary_store: Store
+        self, mock_specs: Dict[str, Spec], temporary_store: Store, ctx: SpackContext
     ):
         """Test that specs in overwrite_set are not pruned even if installed."""
         # Install dep2 in the database
         dep2 = mock_specs["dep2"]
-        install_spec_in_db(dep2, temporary_store)
+        install_spec_in_db(dep2, temporary_store, ctx=ctx)
 
         # Create graph with dep2 in the overwrite set
         graph = BuildGraph(
@@ -309,12 +311,12 @@ class TestBuildGraph:
         assert mock_specs["dep1"].dag_hash() in graph.child_to_parent[dep2.dag_hash()]
 
     def test_installed_root_excludes_build_deps_even_when_requested(
-        self, specs_with_build_deps: Dict[str, Spec], temporary_store: Store
+        self, specs_with_build_deps: Dict[str, Spec], temporary_store: Store, ctx: SpackContext
     ):
         """Test that installed root specs never include build deps, even with
         include_build_deps=True."""
         root = specs_with_build_deps["root"]
-        install_spec_in_db(root, temporary_store)
+        install_spec_in_db(root, temporary_store, ctx=ctx)
 
         graph = BuildGraph(
             specs=[root],
@@ -376,12 +378,12 @@ class TestBuildGraph:
         assert specs_with_build_deps["all_dep"].dag_hash() in graph.nodes
 
     def test_install_deps_false_with_all_deps_installed(
-        self, mock_specs: Dict[str, Spec], temporary_store: Store
+        self, mock_specs: Dict[str, Spec], temporary_store: Store, ctx: SpackContext
     ):
         """Test successful package-only install when all dependencies are already installed."""
         # Install all dependencies
         for dep_name in ["dep1", "dep2", "dep3"]:
-            install_spec_in_db(mock_specs[dep_name], temporary_store)
+            install_spec_in_db(mock_specs[dep_name], temporary_store, ctx=ctx)
 
         # Should succeed since all dependencies are installed
         graph = BuildGraph(
@@ -401,7 +403,7 @@ class TestBuildGraph:
         assert len(graph.parent_to_child.get(mock_specs["root"].dag_hash(), [])) == 0
 
     def test_pruning_creates_cartesian_product_of_connections(
-        self, complex_pruning_dag: Dict[str, Spec], temporary_store: Store
+        self, complex_pruning_dag: Dict[str, Spec], temporary_store: Store, ctx: SpackContext
     ):
         """Test that pruning creates full Cartesian product of parent-child connections.
 
@@ -420,7 +422,7 @@ class TestBuildGraph:
         """
         # Install the middle node
         middle = complex_pruning_dag["middle"]
-        install_spec_in_db(middle, temporary_store)
+        install_spec_in_db(middle, temporary_store, ctx=ctx)
 
         # Use parent1 as the root to build the graph
         graph = BuildGraph(
@@ -471,12 +473,12 @@ class TestBuildGraph:
         assert middle_hash not in graph.child_to_parent
 
     def test_empty_graph_all_specs_installed(
-        self, mock_specs: Dict[str, Spec], temporary_store: Store
+        self, mock_specs: Dict[str, Spec], temporary_store: Store, ctx: SpackContext
     ):
         """Test that the graph is empty when all specs are already installed."""
         # Install all specs in the DAG
         for spec_name in ["root", "dep1", "dep2", "dep3"]:
-            install_spec_in_db(mock_specs[spec_name], temporary_store)
+            install_spec_in_db(mock_specs[spec_name], temporary_store, ctx=ctx)
 
         graph = BuildGraph(
             specs=[mock_specs["root"]],
@@ -494,12 +496,12 @@ class TestBuildGraph:
         assert len(graph.child_to_parent) == 0
 
     def test_empty_graph_install_package_false_all_deps_installed(
-        self, mock_specs: Dict[str, Spec], temporary_store: Store
+        self, mock_specs: Dict[str, Spec], temporary_store: Store, ctx: SpackContext
     ):
         """Test empty graph when install_package=False and all dependencies are installed."""
         # Install all dependencies (but not the root)
         for dep_name in ["dep1", "dep2", "dep3"]:
-            install_spec_in_db(mock_specs[dep_name], temporary_store)
+            install_spec_in_db(mock_specs[dep_name], temporary_store, ctx=ctx)
 
         graph = BuildGraph(
             specs=[mock_specs["root"]],
@@ -518,7 +520,9 @@ class TestBuildGraph:
         assert len(graph.parent_to_child) == 0
         assert len(graph.child_to_parent) == 0
 
-    def test_pruning_leaf_node(self, mock_specs: Dict[str, Spec], temporary_store: Store):
+    def test_pruning_leaf_node(
+        self, mock_specs: Dict[str, Spec], temporary_store: Store, ctx: SpackContext
+    ):
         """Test that pruning a leaf node (no children) works correctly.
 
         This ensures the pruning logic handles the boundary condition where
@@ -526,7 +530,7 @@ class TestBuildGraph:
         """
         # Install dep2, which is a leaf node (no children)
         dep2 = mock_specs["dep2"]
-        install_spec_in_db(dep2, temporary_store)
+        install_spec_in_db(dep2, temporary_store, ctx=ctx)
 
         graph = BuildGraph(
             specs=[mock_specs["root"]],
@@ -661,12 +665,12 @@ class TestBuildGraphTestDeps:
         assert specs_with_test_deps["dep_test_dep"].dag_hash() in graph.nodes
 
     def test_mark_explicit_spec_excludes_build_only_deps(
-        self, specs_with_build_deps: Dict[str, Spec], temporary_store: Store
+        self, specs_with_build_deps: Dict[str, Spec], temporary_store: Store, ctx: SpackContext
     ):
         """An installed-implicit spec in explicit_set should only traverse link/run deps,
         not build-only deps."""
         root = specs_with_build_deps["root"]
-        install_spec_in_db(root, temporary_store)
+        install_spec_in_db(root, temporary_store, ctx=ctx)
         assert temporary_store.db._data[root.dag_hash()].explicit is False
         graph = BuildGraph(
             specs=[root],
@@ -750,11 +754,13 @@ class TestExpandBuildDeps:
         # C waits on B, so not in pending
         assert specs["c"].dag_hash() not in pending
 
-    def test_expand_build_deps_skips_installed_in_db(self, temporary_store: Store):
+    def test_expand_build_deps_skips_installed_in_db(
+        self, temporary_store: Store, ctx: SpackContext
+    ):
         """A --build--> C --link--> D. D installed in DB.
         After expand: C added, D NOT added. No edge C->D. C in pending."""
         specs = create_dag(nodes=["a", "c", "d"], edges=[("a", "c", "build"), ("c", "d", "link")])
-        install_spec_in_db(specs["d"], temporary_store)
+        install_spec_in_db(specs["d"], temporary_store, ctx=ctx)
         graph = self._make_graph(specs, "a", temporary_store)
 
         pending: List[str] = []
@@ -783,12 +789,12 @@ class TestExpandBuildDeps:
         assert specs["c"].dag_hash() in pending
 
     def test_expand_build_deps_reenqueues_original_when_all_deps_installed(
-        self, temporary_store: Store
+        self, temporary_store: Store, ctx: SpackContext
     ):
         """A --build--> C. C installed in DB.
         After expand: C NOT added. A re-enqueued (no uninstalled children)."""
         specs = create_dag(nodes=["a", "c"], edges=[("a", "c", "build")])
-        install_spec_in_db(specs["c"], temporary_store)
+        install_spec_in_db(specs["c"], temporary_store, ctx=ctx)
         graph = self._make_graph(specs, "a", temporary_store)
 
         pending: List[str] = []
@@ -797,11 +803,13 @@ class TestExpandBuildDeps:
         assert len(newly_added) == 0
         assert specs["a"].dag_hash() in pending
 
-    def test_expand_build_deps_no_deadlock_on_installed_dep(self, temporary_store: Store):
+    def test_expand_build_deps_no_deadlock_on_installed_dep(
+        self, temporary_store: Store, ctx: SpackContext
+    ):
         """A --build--> C --link--> D. D installed in DB.
         No edge C->D in parent_to_child. C in pending."""
         specs = create_dag(nodes=["a", "c", "d"], edges=[("a", "c", "build"), ("c", "d", "link")])
-        install_spec_in_db(specs["d"], temporary_store)
+        install_spec_in_db(specs["d"], temporary_store, ctx=ctx)
         graph = self._make_graph(specs, "a", temporary_store)
 
         pending: List[str] = []
@@ -825,7 +833,9 @@ class TestExpandBuildDeps:
         graph = self._make_graph(specs, "a", temporary_store)
         assert not graph.has_unexpanded_build_deps(specs["a"].dag_hash())
 
-    def test_expand_build_deps_does_not_mark_in_graph_spec_as_done(self, temporary_store: Store):
+    def test_expand_build_deps_does_not_mark_in_graph_spec_as_done(
+        self, temporary_store: Store, ctx: SpackContext
+    ):
         """A --link--> B, A --link--> C, B --build--> C.
         C is in the graph (link dep of A) and installed in DB (simulating an overwrite build
         in progress). Expanding B's build deps should add edge B->C and NOT mark C as done."""
@@ -838,7 +848,7 @@ class TestExpandBuildDeps:
         assert specs["c"].dag_hash() in graph.nodes
 
         # Simulate overwrite: install C in DB after graph creation
-        install_spec_in_db(specs["c"], temporary_store)
+        install_spec_in_db(specs["c"], temporary_store, ctx=ctx)
 
         pending: List[str] = []
         self._expand(graph, specs["b"].dag_hash(), pending, temporary_store.db)
@@ -905,9 +915,9 @@ class TestScheduleBuilds:
         store.assign_prefix(spec)
         return spec
 
-    def _mark_installed(self, spec, store):
+    def _mark_installed(self, spec, store, *, ctx: SpackContext):
         """Create the install directory structure and register the spec in the DB as installed."""
-        store.layout.create_install_directory(spec, spack.test.harness.current().config)
+        store.layout.create_install_directory(spec, ctx.config)
         store.db.add(spec, explicit=True)
 
     def test_not_installed_no_running_starts_build(self, temporary_store, mock_packages):
@@ -923,10 +933,12 @@ class TestScheduleBuilds:
         for _, lock in result.to_start:
             lock.release_write()
 
-    def test_already_installed_yields_newly_installed(self, temporary_store, mock_packages):
+    def test_already_installed_yields_newly_installed(
+        self, temporary_store, mock_packages, ctx: SpackContext
+    ):
         """A spec already in the DB is returned in newly_installed, not in to_start."""
         spec = self._make_spec("trivial-install-test-package", temporary_store)
-        self._mark_installed(spec, temporary_store)
+        self._mark_installed(spec, temporary_store, ctx=ctx)
         pending = [spec.dag_hash()]
         result = _schedule(pending, _FakeBuildGraph([spec]), temporary_store)
         assert not result.blocked
@@ -973,10 +985,12 @@ class TestScheduleBuilds:
         assert not result.newly_installed
         assert len(pending) == 1
 
-    def test_overwrite_installed_spec_is_started(self, temporary_store, mock_packages):
+    def test_overwrite_installed_spec_is_started(
+        self, temporary_store, mock_packages, ctx: SpackContext
+    ):
         """A spec in the overwrite set is scheduled even when already installed."""
         spec = self._make_spec("trivial-install-test-package", temporary_store)
-        self._mark_installed(spec, temporary_store)
+        self._mark_installed(spec, temporary_store, ctx=ctx)
         pending = [spec.dag_hash()]
         result = _schedule(
             pending,
@@ -1011,7 +1025,7 @@ class TestScheduleBuilds:
             lock.release_write()
 
     def test_write_locked_read_locked_installed_yields_newly_installed(
-        self, temporary_store, mock_packages, monkeypatch
+        self, temporary_store, mock_packages, monkeypatch, ctx: SpackContext
     ):
         """Write lock fails but read lock succeeds and spec is installed: treated as done.
 
@@ -1020,7 +1034,7 @@ class TestScheduleBuilds:
         write lock was obtained, preventing the jobserver from firing unnecessarily.
         """
         spec = self._make_spec("trivial-install-test-package", temporary_store)
-        self._mark_installed(spec, temporary_store)
+        self._mark_installed(spec, temporary_store, ctx=ctx)
         pending = [spec.dag_hash()]
         lock = temporary_store.prefix_locker.lock(spec)
         monkeypatch.setattr(lock, "try_acquire_write", lambda: False)
@@ -1052,10 +1066,12 @@ class TestScheduleBuilds:
         assert not result.newly_installed
         assert pending == [spec.dag_hash()]  # spec stays in pending for retry
 
-    def test_overwrite_handled_by_concurrent_process(self, temporary_store, mock_packages):
+    def test_overwrite_handled_by_concurrent_process(
+        self, temporary_store, mock_packages, ctx: SpackContext
+    ):
         """When a spec in overwrite was installed AFTER overwrite_time, another process did it."""
         spec = self._make_spec("trivial-install-test-package", temporary_store)
-        self._mark_installed(spec, temporary_store)  # installation_time = now()
+        self._mark_installed(spec, temporary_store, ctx=ctx)  # installation_time = now()
         pending = [spec.dag_hash()]
         # the default overwrite_time=0.0 is earlier than now()
         result = _schedule(
@@ -1069,11 +1085,11 @@ class TestScheduleBuilds:
             lock.release_read()
 
     def test_installed_implicit_explicit_set_produces_db_update(
-        self, temporary_store, mock_packages
+        self, temporary_store, mock_packages, ctx: SpackContext
     ):
         """An installed-implicit spec in explicit set produces a DbUpdate."""
         spec = self._make_spec("trivial-install-test-package", temporary_store)
-        temporary_store.layout.create_install_directory(spec, spack.test.harness.current().config)
+        temporary_store.layout.create_install_directory(spec, ctx.config)
         temporary_store.db.add(spec, explicit=False)
         pending = [spec.dag_hash()]
         result = _schedule(
@@ -1122,10 +1138,12 @@ class TestScheduleBuilds:
         for _, lock in result.to_start:
             lock.release_write()
 
-    def test_overwrite_prefix_mismatch_raises(self, temporary_store, mock_packages):
+    def test_overwrite_prefix_mismatch_raises(
+        self, temporary_store, mock_packages, ctx: SpackContext
+    ):
         """An overwrite install cannot proceed when the spec prefix differs from the DB path."""
         spec = self._make_spec("trivial-install-test-package", temporary_store)
-        self._mark_installed(spec, temporary_store)
+        self._mark_installed(spec, temporary_store, ctx=ctx)
         spec.set_prefix("/some/other/prefix")
         with pytest.raises(spack.error.InstallError, match="Prefix mismatch in overwrite"):
             _schedule(
@@ -1136,10 +1154,10 @@ class TestScheduleBuilds:
                 overwrite_time=time.time() + 100,
             )
 
-    def test_prefix_collision_raises(self, temporary_store, mock_packages):
+    def test_prefix_collision_raises(self, temporary_store, mock_packages, ctx: SpackContext):
         """A spec cannot be scheduled into a prefix already occupied by another spec."""
         installed = self._make_spec("trivial-install-test-package", temporary_store)
-        self._mark_installed(installed, temporary_store)
+        self._mark_installed(installed, temporary_store, ctx=ctx)
         colliding = self._make_spec("trivial-smoke-test", temporary_store)
         colliding.set_prefix(temporary_store.layout.path_for_spec(installed))
         with pytest.raises(spack.error.InstallError, match="already exists"):
@@ -1147,15 +1165,19 @@ class TestScheduleBuilds:
 
 
 def test_cache_miss_expands_build_deps(
-    temporary_store: Store, mock_packages, mutable_config: Configuration, tmp_path
+    temporary_store: Store,
+    mock_packages,
+    mutable_config: Configuration,
+    tmp_path,
+    ctx: SpackContext,
 ):
     """A cache miss on a root with unexpanded build deps schedules those deps (growing the UI
     total) and retries the root as source_only."""
     mutable_config.set(
         "mirrors", {"local": {"url": (tmp_path / "mirror").as_uri(), "binary": True}}
     )
-    dep = _make_concrete("dependency-install")
-    root = _make_concrete("dependent-install", deps=[dep], depflag=dt.BUILD)
+    dep = _make_concrete("dependency-install", ctx=ctx)
+    root = _make_concrete("dependent-install", deps=[dep], depflag=dt.BUILD, ctx=ctx)
     launcher = ScriptedLauncher(
         {root.name: [Script(exitcode=ExitCode.BUILD_CACHE_MISS), Script()], dep.name: Script()}
     )

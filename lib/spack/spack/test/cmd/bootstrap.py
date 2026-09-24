@@ -14,6 +14,7 @@ import spack.environment as ev
 import spack.spec
 import spack.test.harness
 from spack.config import Configuration
+from spack.context import SpackContext
 
 _bootstrap = spack.test.harness.SpackCommand("bootstrap")
 
@@ -58,10 +59,12 @@ def test_reset_in_file_scopes(mutable_config, scopes):
         assert not os.path.exists(bootstrap_yaml)
 
 
-def test_reset_in_environment(mutable_mock_env_path, mutable_config: Configuration):
+def test_reset_in_environment(
+    mutable_mock_env_path, mutable_config: Configuration, ctx: SpackContext
+):
     env = spack.test.harness.SpackCommand("env")
     env("create", "bootstrap-test")
-    current_environment = ev.read("bootstrap-test", ctx=spack.test.harness.current())
+    current_environment = ev.read("bootstrap-test", ctx=ctx)
 
     with current_environment:
         _bootstrap("disable")
@@ -155,26 +158,26 @@ def test_remove_failure_for_non_existing_names(mutable_config):
         _bootstrap("remove", "mock-mirror")
 
 
-def test_remove_and_add_a_source(mutable_config):
+def test_remove_and_add_a_source(mutable_config, ctx: SpackContext):
     # Check we start with a single bootstrapping source
-    sources = spack.bootstrap.core.bootstrapping_sources(spack.test.harness.current().config)
+    sources = spack.bootstrap.core.bootstrapping_sources(ctx.config)
     assert len(sources) == 1
 
     # Remove it and check the result
     _bootstrap("remove", "github-actions")
-    sources = spack.bootstrap.core.bootstrapping_sources(spack.test.harness.current().config)
+    sources = spack.bootstrap.core.bootstrapping_sources(ctx.config)
     assert not sources
 
     # Add it back and check we restored the initial state
     _bootstrap("add", "github-actions", "$spack/share/spack/bootstrap/github-actions-v2")
-    sources = spack.bootstrap.core.bootstrapping_sources(spack.test.harness.current().config)
+    sources = spack.bootstrap.core.bootstrapping_sources(ctx.config)
     assert len(sources) == 1
 
 
 @pytest.mark.maybeslow
 @pytest.mark.not_on_windows("Not supported on Windows (yet)")
 def test_bootstrap_mirror_metadata(
-    mutable_config: Configuration, monkeypatch, tmp_path: pathlib.Path
+    mutable_config: Configuration, monkeypatch, tmp_path: pathlib.Path, ctx: SpackContext
 ):
     """Test that `spack bootstrap mirror` creates a folder that can be ingested by
     `spack bootstrap add`. Here we don't download data, since that would be an
@@ -193,6 +196,5 @@ def test_bootstrap_mirror_metadata(
 
     assert _bootstrap.returncode == 0
     assert any(
-        m["name"] == "test-mirror"
-        for m in spack.bootstrap.core.bootstrapping_sources(spack.test.harness.current().config)
+        m["name"] == "test-mirror" for m in spack.bootstrap.core.bootstrapping_sources(ctx.config)
     )

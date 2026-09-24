@@ -19,13 +19,13 @@ import pytest
 import spack.error
 import spack.mirrors.mirror
 import spack.paths
-import spack.test.harness
 import spack.url
 import spack.util.parallel
 import spack.util.s3
 import spack.util.url as url_util
 import spack.util.web
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.util import tty
 from spack.util.filesystem import working_dir
 from spack.version import Version
@@ -203,41 +203,41 @@ def test_spider_no_response(monkeypatch, config):
     assert not pages and not links
 
 
-def test_find_versions_of_archive_0():
+def test_find_versions_of_archive_0(ctx: SpackContext):
     versions = spack.url.find_versions_of_archive(
-        root_tarball, root, list_depth=0, client=spack.test.harness.current().network
+        root_tarball, root, list_depth=0, client=ctx.network
     )
     assert Version("0.0.0") in versions
 
 
-def test_find_versions_of_archive_1():
+def test_find_versions_of_archive_1(ctx: SpackContext):
     versions = spack.url.find_versions_of_archive(
-        root_tarball, root, list_depth=1, client=spack.test.harness.current().network
+        root_tarball, root, list_depth=1, client=ctx.network
     )
     assert Version("0.0.0") in versions
     assert Version("1.0.0") in versions
 
 
-def test_find_versions_of_archive_2():
+def test_find_versions_of_archive_2(ctx: SpackContext):
     versions = spack.url.find_versions_of_archive(
-        root_tarball, root, list_depth=2, client=spack.test.harness.current().network
+        root_tarball, root, list_depth=2, client=ctx.network
     )
     assert Version("0.0.0") in versions
     assert Version("1.0.0") in versions
     assert Version("2.0.0") in versions
 
 
-def test_find_exotic_versions_of_archive_2():
+def test_find_exotic_versions_of_archive_2(ctx: SpackContext):
     versions = spack.url.find_versions_of_archive(
-        root_tarball, root, list_depth=2, client=spack.test.harness.current().network
+        root_tarball, root, list_depth=2, client=ctx.network
     )
     # up for grabs to make this better.
     assert Version("2.0.0b2") in versions
 
 
-def test_find_versions_of_archive_3():
+def test_find_versions_of_archive_3(ctx: SpackContext):
     versions = spack.url.find_versions_of_archive(
-        root_tarball, root, list_depth=3, client=spack.test.harness.current().network
+        root_tarball, root, list_depth=3, client=ctx.network
     )
     assert Version("0.0.0") in versions
     assert Version("1.0.0") in versions
@@ -246,28 +246,25 @@ def test_find_versions_of_archive_3():
     assert Version("4.5") in versions
 
 
-def test_find_exotic_versions_of_archive_3():
+def test_find_exotic_versions_of_archive_3(ctx: SpackContext):
     versions = spack.url.find_versions_of_archive(
-        root_tarball, root, list_depth=3, client=spack.test.harness.current().network
+        root_tarball, root, list_depth=3, client=ctx.network
     )
     assert Version("2.0.0b2") in versions
     assert Version("3.0a1") in versions
     assert Version("4.5-rc5") in versions
 
 
-def test_find_versions_of_archive_with_fragment():
+def test_find_versions_of_archive_with_fragment(ctx: SpackContext):
     versions = spack.url.find_versions_of_archive(
-        root_tarball, root_with_fragment, list_depth=0, client=spack.test.harness.current().network
+        root_tarball, root_with_fragment, list_depth=0, client=ctx.network
     )
     assert Version("5.0.0") in versions
 
 
-def test_find_versions_of_archive_with_javascript():
+def test_find_versions_of_archive_with_javascript(ctx: SpackContext):
     versions = spack.url.find_versions_of_archive(
-        root_tarball,
-        root_with_javascript,
-        list_depth=0,
-        client=spack.test.harness.current().network,
+        root_tarball, root_with_javascript, list_depth=0, client=ctx.network
     )
     assert Version("5.0.0") in versions
 

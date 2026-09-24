@@ -26,6 +26,7 @@ import spack.util.module_cmd
 import spack.util.spack_yaml as syaml
 from spack.build_environment import UseMode, _static_to_shared_library, dso_suffix
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.enums import Context
 from spack.installer import PackageInstaller
 from spack.util.environment import EnvironmentModifications
@@ -151,7 +152,9 @@ def test_static_to_shared_library(build_environment):
 @pytest.mark.regression("8345")
 @pytest.mark.usefixtures("mock_packages")
 @pytest.mark.not_on_windows("Module files are not supported on Windows")
-def test_cc_not_changed_by_modules(monkeypatch, mutable_config, working_env, compiler_factory):
+def test_cc_not_changed_by_modules(
+    monkeypatch, mutable_config, working_env, compiler_factory, ctx: SpackContext
+):
     """Tests that external module files that are loaded cannot change the
     CC environment variable.
     """
@@ -165,7 +168,7 @@ def test_cc_not_changed_by_modules(monkeypatch, mutable_config, working_env, com
 
     monkeypatch.setattr(spack.util.module_cmd, "load_module", _set_wrong_cc)
 
-    s = spack.concretize.concretize_one("cmake %gcc@14", spack.test.harness.current())
+    s = spack.concretize.concretize_one("cmake %gcc@14", ctx)
     spack.build_environment.setup_package(s.package, dirty=False)
 
     assert os.environ["CC"] != "NOT_THIS_PLEASE"
@@ -173,10 +176,10 @@ def test_cc_not_changed_by_modules(monkeypatch, mutable_config, working_env, com
 
 
 def test_setup_dependent_package_inherited_modules(
-    working_env, mock_packages, install_mockery, mock_fetch
+    working_env, mock_packages, install_mockery, mock_fetch, ctx: SpackContext
 ):
     # This will raise on regression
-    s = spack.concretize.concretize_one("cmake-client-inheritor", spack.test.harness.current())
+    s = spack.concretize.concretize_one("cmake-client-inheritor", ctx)
     PackageInstaller([s.package], fake=True).install()
 
 
@@ -264,6 +267,7 @@ def test_compiler_config_modifications(
     compiler_factory,
     mutable_config,
     monkeypatch,
+    ctx: SpackContext,
 ):
     # Set the environment as per prerequisites
     ensure_env_variables(initial)
@@ -278,7 +282,7 @@ def test_compiler_config_modifications(
 
         return convert_to_platform_path(pathlist)
 
-    pkg = spack.concretize.concretize_one("cmake %gcc@14", spack.test.harness.current()).package
+    pkg = spack.concretize.concretize_one("cmake %gcc@14", ctx).package
     # Trigger the modifications
     spack.build_environment.setup_package(pkg, dirty=False)
 
@@ -324,7 +328,9 @@ def test_load_external_modules_error(working_env, monkeypatch):
         spack.build_environment.load_external_modules(context)
 
 
-def test_external_config_env(mock_packages, mutable_config: Configuration, working_env):
+def test_external_config_env(
+    mock_packages, mutable_config: Configuration, working_env, ctx: SpackContext
+):
     cmake_config = {
         "externals": [
             {
@@ -336,7 +342,7 @@ def test_external_config_env(mock_packages, mutable_config: Configuration, worki
     }
     mutable_config.set("packages:cmake", cmake_config)
 
-    cmake_client = spack.concretize.concretize_one("cmake-client", spack.test.harness.current())
+    cmake_client = spack.concretize.concretize_one("cmake-client", ctx)
     spack.build_environment.setup_package(cmake_client.package, False)
 
     assert os.environ["TEST_ENV_VAR_SET"] == "yes it's set"
@@ -345,7 +351,13 @@ def test_external_config_env(mock_packages, mutable_config: Configuration, worki
 @pytest.mark.regression("9107")
 @pytest.mark.not_on_windows("Windows does not support module files")
 def test_spack_paths_before_module_paths(
-    mutable_config, mock_packages, compiler_factory, monkeypatch, working_env, wrapper_dir
+    mutable_config,
+    mock_packages,
+    compiler_factory,
+    monkeypatch,
+    working_env,
+    wrapper_dir,
+    ctx: SpackContext,
 ):
     gcc_entry = compiler_factory(spec="gcc@14.0.1 languages=c,c++")
     gcc_entry["modules"] = ["some_module"]
@@ -359,7 +371,7 @@ def test_spack_paths_before_module_paths(
 
     monkeypatch.setattr(spack.util.module_cmd, "load_module", _set_wrong_cc)
 
-    s = spack.concretize.concretize_one("cmake", spack.test.harness.current())
+    s = spack.concretize.concretize_one("cmake", ctx)
 
     spack.build_environment.setup_package(s.package, dirty=False)
 
@@ -367,8 +379,8 @@ def test_spack_paths_before_module_paths(
     assert paths.index(str(wrapper_dir)) < paths.index(module_path)
 
 
-def test_package_inheritance_module_setup(config, mock_packages, working_env):
-    s = spack.concretize.concretize_one("multimodule-inheritance", spack.test.harness.current())
+def test_package_inheritance_module_setup(config, mock_packages, working_env, ctx: SpackContext):
+    s = spack.concretize.concretize_one("multimodule-inheritance", ctx)
     pkg = s.package
 
     spack.build_environment.setup_package(pkg, False)
@@ -380,7 +392,12 @@ def test_package_inheritance_module_setup(config, mock_packages, working_env):
 
 
 def test_wrapper_variables(
-    config, mock_packages, working_env, monkeypatch, installation_dir_with_headers
+    config,
+    mock_packages,
+    working_env,
+    monkeypatch,
+    installation_dir_with_headers,
+    ctx: SpackContext,
 ):
     """Check that build_environment supplies the needed library/include
     directories via the SPACK_LINK_DIRS and SPACK_INCLUDE_DIRS environment
@@ -402,7 +419,7 @@ def test_wrapper_variables(
         not in cuda_include_dirs
     )
 
-    root = spack.concretize.concretize_one("dt-diamond", spack.test.harness.current())
+    root = spack.concretize.concretize_one("dt-diamond", ctx)
 
     for s in root.traverse():
         s.set_prefix(f"/{s.name}-prefix/")
@@ -452,7 +469,7 @@ def test_wrapper_variables(
 
 
 def test_external_prefixes_last(
-    mutable_config: Configuration, mock_packages, working_env, monkeypatch
+    mutable_config: Configuration, mock_packages, working_env, monkeypatch, ctx: SpackContext
 ):
     # Sanity check: under normal circumstances paths associated with
     # dt-diamond-left would appear first. We'll mark it as external in
@@ -469,7 +486,7 @@ dt-diamond-left:
 """
     )
     mutable_config.set("packages", cfg_data)
-    top = spack.concretize.concretize_one("dt-diamond", spack.test.harness.current())
+    top = spack.concretize.concretize_one("dt-diamond", ctx)
 
     def _trust_me_its_a_dir(path):
         return True
@@ -491,19 +508,19 @@ dt-diamond-left:
     assert not ({os.path.normpath(x) for x in link_dirs[:-2]} & external_lib_paths)
 
 
-def test_parallel_false_is_not_propagating(config, mock_packages):
+def test_parallel_false_is_not_propagating(config, mock_packages, ctx: SpackContext):
     """Test that parallel=False is not propagating to dependencies"""
     # a foobar=bar (parallel = False)
     # |
     # b (parallel =True)
-    s = spack.concretize.concretize_one("pkg-a foobar=bar", spack.test.harness.current())
+    s = spack.concretize.concretize_one("pkg-a foobar=bar", ctx)
 
     spack.build_environment.set_package_py_globals(s.package, context=Context.BUILD)
     assert s["pkg-a"].package.module.make_jobs == 1
 
     spack.build_environment.set_package_py_globals(s["pkg-b"].package, context=Context.BUILD)
     assert s["pkg-b"].package.module.make_jobs == spack.config.determine_number_of_jobs(
-        parallel=s["pkg-b"].package.parallel, config=spack.test.harness.current().config
+        parallel=s["pkg-b"].package.parallel, config=ctx.config
     )
 
 
@@ -513,10 +530,15 @@ def test_parallel_false_is_not_propagating(config, mock_packages):
 )
 @pytest.mark.skipif(sys.platform != "linux", reason="dtags make sense only on linux")
 def test_setting_dtags_based_on_config(
-    config_setting, expected_flag, config: Configuration, mock_packages, working_env
+    config_setting,
+    expected_flag,
+    config: Configuration,
+    mock_packages,
+    working_env,
+    ctx: SpackContext,
 ):
     # Pick a random package to be able to set compiler's variables
-    s = spack.concretize.concretize_one("cmake", spack.test.harness.current())
+    s = spack.concretize.concretize_one("cmake", ctx)
     with config.override("config:shared_linking", {"type": config_setting, "bind": False}):
         env = spack.build_environment.setup_package(s.package, dirty=False)
         modifications = env.group_by_name()
@@ -530,7 +552,7 @@ def test_setting_dtags_based_on_config(
 
 
 def test_module_globals_available_at_setup_dependent_time(
-    monkeypatch, mutable_config, mock_packages, working_env
+    monkeypatch, mutable_config, mock_packages, working_env, ctx: SpackContext
 ):
     """Spack built package externaltest depends on an external package
     externaltool. Externaltool's setup_dependent_package needs to be able to
@@ -545,7 +567,7 @@ def test_module_globals_available_at_setup_dependent_time(
         assert dependent_module.ninja is not None
         dependent_spec.package.test_attr = True
 
-    externaltool = spack.concretize.concretize_one("externaltest", spack.test.harness.current())
+    externaltool = spack.concretize.concretize_one("externaltest", ctx)
     monkeypatch.setattr(
         externaltool["externaltool"].package, "setup_dependent_package", setup_dependent_package
     )
@@ -616,13 +638,13 @@ def test_build_jobs_defaults():
 
 
 class TestModuleMonkeyPatcher:
-    def test_getting_attributes(self, config, mock_packages):
-        s = spack.concretize.concretize_one("libelf", spack.test.harness.current())
+    def test_getting_attributes(self, config, mock_packages, ctx: SpackContext):
+        s = spack.concretize.concretize_one("libelf", ctx)
         module_wrapper = spack.build_environment.ModuleChangePropagator(s.package)
         assert module_wrapper.Libelf == s.package.module.Libelf
 
-    def test_setting_attributes(self, config, mock_packages):
-        s = spack.concretize.concretize_one("libelf", spack.test.harness.current())
+    def test_setting_attributes(self, config, mock_packages, ctx: SpackContext):
+        s = spack.concretize.concretize_one("libelf", ctx)
         module = s.package.module
         module_wrapper = spack.build_environment.ModuleChangePropagator(s.package)
 
@@ -639,8 +661,8 @@ class TestModuleMonkeyPatcher:
             assert current_module.SOME_ATTRIBUTE == 1
 
 
-def test_effective_deptype_build_environment(config, mock_packages):
-    s = spack.concretize.concretize_one("dttop", spack.test.harness.current())
+def test_effective_deptype_build_environment(config, mock_packages, ctx: SpackContext):
+    s = spack.concretize.concretize_one("dttop", ctx)
 
     #  [    ]  dttop@1.0                    #
     #  [b   ]      ^dtbuild1@1.0            # <- direct build dep
@@ -673,8 +695,8 @@ def test_effective_deptype_build_environment(config, mock_packages):
     assert not expected_flags, f"Missing {expected_flags.keys()} from effective_deptypes"
 
 
-def test_effective_deptype_run_environment(config, mock_packages):
-    s = spack.concretize.concretize_one("dttop", spack.test.harness.current())
+def test_effective_deptype_run_environment(config, mock_packages, ctx: SpackContext):
+    s = spack.concretize.concretize_one("dttop", ctx)
 
     #  [    ]  dttop@1.0                    #
     #  [b   ]      ^dtbuild1@1.0            # <- direct build-only dep is pruned
@@ -705,24 +727,26 @@ def test_effective_deptype_run_environment(config, mock_packages):
     assert not expected_flags, f"Missing {expected_flags.keys()} from effective_deptypes"
 
 
-def test_monkey_patching_works_across_virtual(config, mock_packages):
+def test_monkey_patching_works_across_virtual(config, mock_packages, ctx: SpackContext):
     """Assert that a monkeypatched attribute is found regardless we access through the
     real name or the virtual name.
     """
-    s = spack.concretize.concretize_one("mpileaks ^mpich", spack.test.harness.current())
+    s = spack.concretize.concretize_one("mpileaks ^mpich", ctx)
     s["mpich"].foo = "foo"
     assert s["mpich"].foo == "foo"
     assert s["mpi"].foo == "foo"
 
 
-def test_clear_compiler_related_runtime_variables_of_build_deps(config, mock_packages):
+def test_clear_compiler_related_runtime_variables_of_build_deps(
+    config, mock_packages, ctx: SpackContext
+):
     """Verify that Spack drops CC, CXX, FC and F77 from the dependencies related build environment
     variable changes if they are set in setup_run_environment. Spack manages those variables
     elsewhere."""
-    s = spack.concretize.concretize_one("build-env-compiler-var-a", spack.test.harness.current())
-    ctx = spack.build_environment.SetupContext(s, context=Context.BUILD)
-    result = {}
-    ctx.get_env_modifications().apply_modifications(result)
+    s = spack.concretize.concretize_one("build-env-compiler-var-a", ctx)
+    setup_ctx = spack.build_environment.SetupContext(s, context=Context.BUILD)
+    result: Dict[str, str] = {}
+    setup_ctx.get_env_modifications().apply_modifications(result)
     assert "CC" not in result
     assert "CXX" not in result
     assert "FC" not in result
@@ -777,16 +801,16 @@ def test_optimization_flags(compiler_spec, target_name, expected_flags, compiler
     reason="tests check specific x86_64 uarch flags",
 )
 @pytest.mark.not_on_windows("Windows doesn't support the compiler wrapper")
-def test_optimization_flags_are_using_node_target(config, mock_packages, monkeypatch):
+def test_optimization_flags_are_using_node_target(
+    config, mock_packages, monkeypatch, ctx: SpackContext
+):
     """Tests that we are using the target on the node to be compiled to retrieve the uarch
     specific flags, and not the target of the compiler.
     """
     compiler_wrapper_pkg = spack.concretize.concretize_one(
-        "compiler-wrapper target=core2", spack.test.harness.current()
+        "compiler-wrapper target=core2", ctx
     ).package
-    mpileaks = spack.concretize.concretize_one(
-        "mpileaks target=x86_64", spack.test.harness.current()
-    )
+    mpileaks = spack.concretize.concretize_one("mpileaks target=x86_64", ctx)
 
     env = EnvironmentModifications()
     compiler_wrapper_pkg.setup_dependent_build_environment(env, mpileaks)
@@ -835,14 +859,19 @@ gcc:
 )
 @pytest.mark.not_on_windows("Windows doesn't use the compiler-wrapper")
 def test_extra_rpaths_is_set(
-    working_env, mutable_config: Configuration, mock_packages, gcc_config, expected_rpaths
+    working_env,
+    mutable_config: Configuration,
+    mock_packages,
+    gcc_config,
+    expected_rpaths,
+    ctx: SpackContext,
 ):
     """Tests that using a compiler with an 'extra_rpaths' section will set the corresponding
     SPACK_COMPILER_EXTRA_RPATHS variable for the wrapper.
     """
     cfg_data = syaml.load_config(gcc_config)
     mutable_config.set("packages", cfg_data)
-    mpich = spack.concretize.concretize_one("mpich %gcc@14", spack.test.harness.current())
+    mpich = spack.concretize.concretize_one("mpich %gcc@14", ctx)
     spack.build_environment.setup_package(mpich.package, dirty=False)
 
     if expected_rpaths is not None:

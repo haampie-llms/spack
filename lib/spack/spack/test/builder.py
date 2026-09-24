@@ -12,13 +12,14 @@ import spack.error
 import spack.paths
 import spack.repo
 import spack.test.harness
+from spack.context import SpackContext
 from spack.util.filesystem import touch
 
 
 @pytest.fixture()
-def builder_test_repository(config):
+def builder_test_repository(config, ctx: SpackContext):
     builder_test_path = os.path.join(spack.paths.test_repos_path, "spack_repo", "builder_test")
-    with spack.test.harness.use_repositories(builder_test_path) as mock_repo:
+    with spack.test.harness.use_repositories(ctx, builder_test_path) as mock_repo:
         yield mock_repo
 
 
@@ -79,10 +80,10 @@ def builder_test_repository(config):
 @pytest.mark.usefixtures("builder_test_repository", "config")
 @pytest.mark.disable_clean_stage_check
 def test_callbacks_and_installation_procedure(
-    spec_str, expected_values, working_env, temporary_store
+    spec_str, expected_values, working_env, temporary_store, ctx: SpackContext
 ):
     """Test the correct execution of callbacks and installation procedures for packages."""
-    s = spack.concretize.concretize_one(spec_str, spack.test.harness.current())
+    s = spack.concretize.concretize_one(spec_str, ctx)
     builder = spack.builder.create(s.package)
     for phase_fn in builder:
         phase_fn.execute()
@@ -104,8 +105,8 @@ def test_callbacks_and_installation_procedure(
         ("old-style-derived", "configure_args", ["--with-bar", "--with-foo"]),
     ],
 )
-def test_old_style_compatibility_with_super(spec_str, method_name, expected):
-    s = spack.concretize.concretize_one(spec_str, spack.test.harness.current())
+def test_old_style_compatibility_with_super(spec_str, method_name, expected, ctx: SpackContext):
+    s = spack.concretize.concretize_one(spec_str, ctx)
     builder = spack.builder.create(s.package)
     value = getattr(builder, method_name)()
     assert value == expected
@@ -115,8 +116,8 @@ def test_old_style_compatibility_with_super(spec_str, method_name, expected):
 @pytest.mark.regression("33928")
 @pytest.mark.usefixtures("builder_test_repository", "config", "working_env")
 @pytest.mark.disable_clean_stage_check
-def test_build_time_tests_are_executed_from_default_builder(temporary_store):
-    s = spack.concretize.concretize_one("old-style-autotools", spack.test.harness.current())
+def test_build_time_tests_are_executed_from_default_builder(temporary_store, ctx: SpackContext):
+    s = spack.concretize.concretize_one("old-style-autotools", ctx)
     builder = spack.builder.create(s.package)
     builder.pkg.run_tests = True
     for phase_fn in builder:
@@ -128,39 +129,41 @@ def test_build_time_tests_are_executed_from_default_builder(temporary_store):
 
 @pytest.mark.regression("34518")
 @pytest.mark.usefixtures("builder_test_repository", "config", "working_env")
-def test_monkey_patching_wrapped_pkg():
+def test_monkey_patching_wrapped_pkg(ctx: SpackContext):
     """Confirm 'run_tests' is accessible through wrappers."""
-    s = spack.concretize.concretize_one("old-style-autotools", spack.test.harness.current())
+    s = spack.concretize.concretize_one("old-style-autotools", ctx)
     builder = spack.builder.create(s.package)
+    pkg_with_dispatcher = builder.pkg_with_dispatcher  # type: ignore[attr-defined]
     assert s.package.run_tests is False
     assert builder.pkg.run_tests is False
-    assert builder.pkg_with_dispatcher.run_tests is False
+    assert pkg_with_dispatcher.run_tests is False
 
     s.package.run_tests = True
     assert builder.pkg.run_tests is True
-    assert builder.pkg_with_dispatcher.run_tests is True
+    assert pkg_with_dispatcher.run_tests is True
 
 
 @pytest.mark.regression("34440")
 @pytest.mark.usefixtures("builder_test_repository", "config", "working_env")
-def test_monkey_patching_test_log_file():
+def test_monkey_patching_test_log_file(ctx: SpackContext):
     """Confirm 'test_log_file' is accessible through wrappers."""
-    s = spack.concretize.concretize_one("old-style-autotools", spack.test.harness.current())
+    s = spack.concretize.concretize_one("old-style-autotools", ctx)
     builder = spack.builder.create(s.package)
 
     s.package.tester.test_log_file = "/some/file"
     assert builder.pkg.tester.test_log_file == "/some/file"
-    assert builder.pkg_with_dispatcher.tester.test_log_file == "/some/file"
+    pkg_with_dispatcher = builder.pkg_with_dispatcher  # type: ignore[attr-defined]
+    assert pkg_with_dispatcher.tester.test_log_file == "/some/file"
 
 
 # Windows context manager's __exit__ fails with ValueError ("I/O operation
 # on closed file").
 @pytest.mark.not_on_windows("Does not run on windows")
 def test_install_time_test_callback(
-    tmp_path: pathlib.Path, config, mock_packages, mock_stage, temporary_store
+    tmp_path: pathlib.Path, config, mock_packages, mock_stage, temporary_store, ctx: SpackContext
 ):
     """Confirm able to run stand-alone test as a post-install callback."""
-    s = spack.concretize.concretize_one("py-test-callback", spack.test.harness.current())
+    s = spack.concretize.concretize_one("py-test-callback", ctx)
     builder = spack.builder.create(s.package)
     builder.pkg.run_tests = True
     s.package.tester.test_log_file = str(tmp_path / "install_test.log")
@@ -176,19 +179,21 @@ def test_install_time_test_callback(
 
 @pytest.mark.regression("43097")
 @pytest.mark.usefixtures("builder_test_repository", "config")
-def test_mixins_with_builders(working_env):
+def test_mixins_with_builders(working_env, ctx: SpackContext):
     """Tests that run_after and run_before callbacks are accumulated correctly,
     when mixins are used with builders.
     """
-    s = spack.concretize.concretize_one("builder-and-mixins", spack.test.harness.current())
+    s = spack.concretize.concretize_one("builder-and-mixins", ctx)
     builder = spack.builder.create(s.package)
+    run_before_callbacks = builder._run_before_callbacks  # type: ignore[attr-defined]
+    run_after_callbacks = builder._run_after_callbacks  # type: ignore[attr-defined]
 
     # Check that callbacks added by the mixin are in the list
-    assert any(fn.__name__ == "before_install" for _, fn in builder._run_before_callbacks)
-    assert any(fn.__name__ == "after_install" for _, fn in builder._run_after_callbacks)
+    assert any(fn.__name__ == "before_install" for _, fn in run_before_callbacks)
+    assert any(fn.__name__ == "after_install" for _, fn in run_after_callbacks)
 
     # Check that callback from the GenericBuilder are in the list too
-    assert any(fn.__name__ == "sanity_check_prefix" for _, fn in builder._run_after_callbacks)
+    assert any(fn.__name__ == "sanity_check_prefix" for _, fn in run_after_callbacks)
 
 
 def test_reading_api_v20_attributes():
@@ -225,15 +230,13 @@ def test_reading_api_v22_attributes():
 
 @pytest.mark.regression("51917")
 @pytest.mark.usefixtures("builder_test_repository", "config")
-def test_builder_when_inheriting_just_package(working_env):
+def test_builder_when_inheriting_just_package(working_env, ctx: SpackContext):
     """Tests that if we inherit a package from another package that has a builder defined,
     but we don't need to modify the builder ourselves, we'll get the builder of the base
     package class.
     """
-    base_spec = spack.concretize.concretize_one("callbacks", spack.test.harness.current())
-    derived_spec = spack.concretize.concretize_one(
-        "inheritance-only-package", spack.test.harness.current()
-    )
+    base_spec = spack.concretize.concretize_one("callbacks", ctx)
+    derived_spec = spack.concretize.concretize_one("inheritance-only-package", ctx)
 
     base_builder = spack.builder.create(base_spec.package)
     derived_builder = spack.builder.create(derived_spec.package)
@@ -244,9 +247,9 @@ def test_builder_when_inheriting_just_package(working_env):
 
 
 @pytest.mark.usefixtures("builder_test_repository", "config")
-def test_get_builder_class_accepts_objects_and_classes():
+def test_get_builder_class_accepts_objects_and_classes(ctx: SpackContext):
     """Tests that get_builder_class works on both package objects and package classes."""
-    pkg_cls = spack.test.harness.current().repo.get_pkg_class("callbacks")
+    pkg_cls = ctx.repo.get_pkg_class("callbacks")
     builder_cls = spack.builder.get_builder_class(pkg_cls, "GenericBuilder")
 
     # The builder is defined in the package module, so it is found from the class
@@ -254,11 +257,11 @@ def test_get_builder_class_accepts_objects_and_classes():
     assert spack.repo.is_package_module(builder_cls.__module__)
 
     # ... and an object of that class gives the same answer
-    pkg = spack.concretize.concretize_one("callbacks", spack.test.harness.current()).package
+    pkg = spack.concretize.concretize_one("callbacks", ctx).package
     assert spack.builder.get_builder_class(pkg, "GenericBuilder") is builder_cls
 
     # Derived packages that don't redefine a builder get it from the base package module
-    derived_cls = spack.test.harness.current().repo.get_pkg_class("inheritance-only-package")
+    derived_cls = ctx.repo.get_pkg_class("inheritance-only-package")
     assert spack.builder.get_builder_class(derived_cls, "GenericBuilder") is builder_cls
 
     # Names that are not defined in any package module are not builders

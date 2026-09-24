@@ -14,11 +14,11 @@ import spack.cmd.verify
 import spack.concretize
 import spack.installer
 import spack.repo
-import spack.test.harness
 import spack.util.executable
 import spack.util.filesystem as fs
 import spack.util.spack_json as sjson
 import spack.verify
+from spack.context import SpackContext
 from spack.main import SpackCommandError
 from spack.spec import Spec
 from spack.test.harness import SpackCommand
@@ -33,11 +33,11 @@ def skip_unless_linux(f):
     )(f)
 
 
-def test_single_file_verify_cmd(tmp_path: pathlib.Path):
+def test_single_file_verify_cmd(tmp_path: pathlib.Path, ctx: SpackContext):
     # Test the verify command interface to verifying a single file.
     filedir = tmp_path / "a" / "b" / "c" / "d"
     filepath = filedir / "file"
-    metadir = tmp_path / spack.test.harness.current().store.layout.metadata_dir
+    metadir = tmp_path / ctx.store.layout.metadata_dir
 
     fs.mkdirp(str(filedir))
     fs.mkdirp(str(metadir))
@@ -47,7 +47,7 @@ def test_single_file_verify_cmd(tmp_path: pathlib.Path):
 
     data = spack.verify.create_manifest_entry(str(filepath))
 
-    manifest_file = metadir / spack.test.harness.current().store.layout.manifest_file_name
+    manifest_file = metadir / ctx.store.layout.manifest_file_name
 
     with open(str(manifest_file), "w", encoding="utf-8") as f:
         sjson.dump({str(filepath): data}, f)
@@ -77,10 +77,12 @@ def test_single_file_verify_cmd(tmp_path: pathlib.Path):
     assert sorted(errors) == sorted(expected)
 
 
-def test_single_spec_verify_cmd(mock_packages, mock_archive, mock_fetch, install_mockery):
+def test_single_spec_verify_cmd(
+    mock_packages, mock_archive, mock_fetch, install_mockery, ctx: SpackContext
+):
     # Test the verify command interface to verify a single spec
     install("--fake", "libelf")
-    s = spack.concretize.concretize_one("libelf", spack.test.harness.current())
+    s = spack.concretize.concretize_one("libelf", ctx)
     prefix = s.prefix
     hash = s.dag_hash()
 
@@ -103,9 +105,9 @@ def test_single_spec_verify_cmd(mock_packages, mock_archive, mock_fetch, install
 
 @pytest.mark.requires_executables("gcc")
 @skip_unless_linux
-def test_libraries(tmp_path: pathlib.Path, install_mockery, mock_fetch):
+def test_libraries(tmp_path: pathlib.Path, install_mockery, mock_fetch, ctx: SpackContext):
     gcc = spack.util.executable.which("gcc", required=True)
-    s = spack.concretize.concretize_one("libelf", spack.test.harness.current())
+    s = spack.concretize.concretize_one("libelf", ctx)
     spack.installer.PackageInstaller([s.package], fake=True).install()
 
     # There are no ELF files so the verification should pass
@@ -150,7 +152,7 @@ def test_libraries(tmp_path: pathlib.Path, install_mockery, mock_fetch):
     assert spack.cmd.verify._verify_libraries(s, ["libf.so"]) is None
 
 
-def test_verify_versions(mock_packages):
+def test_verify_versions(mock_packages, ctx: SpackContext):
     missing = "thisisnotapackage"
     unknown = "deprecated-versions@=thisisnotaversion"
     deprecated = "deprecated-versions@=1.1.0"
@@ -162,7 +164,7 @@ def test_verify_versions(mock_packages):
     for spec in specs:
         spec._mark_concrete()
         spec.set_prefix(f"/opt/{spec.name}")
-        spack.repo.attach_packages([spec], spack.test.harness.current(), skip_unknown=True)
+        spack.repo.attach_packages([spec], ctx, skip_unknown=True)
 
     msg_lines = spack.cmd.verify._verify_version(specs)
     assert "3 installed packages have unknown/deprecated" in msg_lines[0]

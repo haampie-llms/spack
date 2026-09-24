@@ -5,7 +5,7 @@
 import pytest
 
 import spack.environment as ev
-import spack.test.harness
+from spack.context import SpackContext
 from spack.main import SpackCommandError
 from spack.test.harness import SpackCommand
 
@@ -16,9 +16,9 @@ pytestmark = pytest.mark.usefixtures(
 
 
 @pytest.mark.disable_clean_stage_check
-def test_fetch_in_env(mock_archive, mock_stage, mock_fetch, install_mockery):
+def test_fetch_in_env(mock_archive, mock_stage, mock_fetch, install_mockery, ctx: SpackContext):
     SpackCommand("env")("create", "test")
-    with ev.read("test", ctx=spack.test.harness.current()):
+    with ev.read("test", ctx=ctx):
         SpackCommand("add")("python")
         with pytest.raises(SpackCommandError):
             SpackCommand("fetch")()

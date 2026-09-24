@@ -8,8 +8,8 @@ import pytest
 import spack.concretize
 import spack.error
 import spack.spec
-import spack.test.harness
 import spack.variant
+from spack.context import SpackContext
 from spack.repo import RepoPath
 from spack.spec import Spec, VariantMap
 from spack.variant import (
@@ -676,12 +676,12 @@ def test_strict_invalid_variant_values(mock_packages: RepoPath, pkg_name, value,
     ],
 )
 def test_concretize_variant_default_with_multiple_defs(
-    mock_packages: RepoPath, config, pkg_name, spec, satisfies, def_id
+    mock_packages: RepoPath, config, pkg_name, spec, satisfies, def_id, ctx: SpackContext
 ):
     pkg = mock_packages.get_pkg_class(pkg_name)
     pkg_defs = [vdef for _, vdef in pkg.variant_definitions("v")]
 
-    spec = spack.concretize.concretize_one(f"{pkg_name}{spec}", spack.test.harness.current())
+    spec = spack.concretize.concretize_one(f"{pkg_name}{spec}", ctx)
     assert spec.satisfies(satisfies)
     assert spec.package.get_variant("v") is pkg_defs[def_id]
 
@@ -701,18 +701,18 @@ def test_concretize_variant_default_with_multiple_defs(
         ("variant-values@2.0 v=bar", "v", spack.variant.VariantType.MULTI),
     ],
 )
-def test_substitute_abstract_variants_narrowing(mock_packages, spec, variant_name, narrowed_type):
+def test_substitute_abstract_variants_narrowing(
+    mock_packages, spec, variant_name, narrowed_type, ctx: SpackContext
+):
     spec = Spec(spec)
-    spack.spec.substitute_abstract_variants(spec, repo=spack.test.harness.current().repo)
+    spack.spec.substitute_abstract_variants(spec, repo=ctx.repo)
     assert spec.variants[variant_name].type == narrowed_type
 
 
-def test_substitute_abstract_variants_failure(mock_packages):
+def test_substitute_abstract_variants_failure(mock_packages, ctx: SpackContext):
     with pytest.raises(spack.spec.InvalidVariantForSpecError):
         # variant doesn't exist at version
-        spack.spec.substitute_abstract_variants(
-            Spec("variant-values@4.0 v=bar"), repo=spack.test.harness.current().repo
-        )
+        spack.spec.substitute_abstract_variants(Spec("variant-values@4.0 v=bar"), repo=ctx.repo)
 
 
 def test_abstract_variant_satisfies_abstract_abstract():

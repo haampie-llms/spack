@@ -16,6 +16,7 @@ import spack.paths
 import spack.repo
 import spack.test.harness
 from spack.cmd.style import _run_import_check, changed_files
+from spack.context import SpackContext
 from spack.repo import RepoPath
 from spack.util.executable import which
 from spack.util.filesystem import FileFilter, working_dir
@@ -43,14 +44,12 @@ def has_develop_branch(git):
 
 
 @pytest.fixture(scope="function")
-def ruff_package(tmp_path: pathlib.Path):
+def ruff_package(tmp_path: pathlib.Path, ctx: SpackContext):
     """Style only checks files that have been modified. This fixture makes a small
     change to the ``ruff`` mock package, yields the filename, then undoes the
     change on cleanup.
     """
-    repo = spack.repo.from_path(
-        spack.paths.mock_packages_path, cache=spack.test.harness.current().misc_cache
-    )
+    repo = spack.repo.from_path(spack.paths.mock_packages_path, cache=ctx.misc_cache)
     filename = repo.filename_for_package_name("ruff")
     rel_path = os.path.dirname(os.path.relpath(filename, spack.paths.prefix))
     tmp = tmp_path / rel_path / "ruff-ci-package.py"
@@ -65,11 +64,9 @@ def ruff_package(tmp_path: pathlib.Path):
 
 
 @pytest.fixture
-def ruff_package_with_errors(scope="function"):
+def ruff_package_with_errors(ctx: SpackContext, scope="function"):
     """A ruff package with errors."""
-    repo = spack.repo.from_path(
-        spack.paths.mock_packages_path, cache=spack.test.harness.current().misc_cache
-    )
+    repo = spack.repo.from_path(spack.paths.mock_packages_path, cache=ctx.misc_cache)
     filename = repo.filename_for_package_name("ruff")
     tmp = filename + ".tmp"
 
@@ -124,7 +121,7 @@ def test_changed_no_base(git, tmp_path: pathlib.Path, capfd):
         assert "This repository does not have a 'foobar'" in err
 
 
-def test_changed_files_all_files(mock_packages: RepoPath):
+def test_changed_files_all_files(mock_packages: RepoPath, ctx: SpackContext):
     # it's hard to guarantee "all files", so do some sanity checks.
     files = {
         os.path.join(spack.paths.prefix, os.path.normpath(path))
@@ -145,9 +142,7 @@ def test_changed_files_all_files(mock_packages: RepoPath):
     assert os.path.join(spack.paths.module_path, "spec.py") in files
 
     # a mock package
-    repo = spack.repo.from_path(
-        spack.paths.mock_packages_path, cache=spack.test.harness.current().misc_cache
-    )
+    repo = spack.repo.from_path(spack.paths.mock_packages_path, cache=ctx.misc_cache)
     filename = repo.filename_for_package_name("ruff")
     assert filename in files
 
@@ -158,6 +153,7 @@ def test_changed_files_all_files(mock_packages: RepoPath):
     assert not any(f.startswith(spack.paths.vendor_path) for f in files)
 
 
+@pytest.mark.usefixtures("config")
 def test_bad_root(tmp_path: pathlib.Path):
     """Ensure that `spack style` doesn't run on non-spack directories."""
     output = style("--root", str(tmp_path), fail_on_error=False)
@@ -291,6 +287,7 @@ def test_style_with_ruff_format(ruff_package_with_errors):
     assert "spack style found errors" in output
 
 
+@pytest.mark.usefixtures("config")
 def test_skip_tools():
     output = style("--skip", "import,ruff-check,ruff-format,mypy")
     assert "Nothing to run" in output

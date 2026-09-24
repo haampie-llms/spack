@@ -8,26 +8,31 @@ import pytest
 
 import spack.concretize
 import spack.test.harness
+from spack.context import SpackContext
 
 
 @pytest.mark.parametrize("hash_length", [1, 2, 3, 4, 5, 9])
 @pytest.mark.usefixtures("mock_packages")
-def test_set_install_hash_length(hash_length, mutable_config, tmp_path: pathlib.Path):
+def test_set_install_hash_length(
+    hash_length, mutable_config, tmp_path: pathlib.Path, ctx: SpackContext
+):
     mutable_config.set("config:install_hash_length", hash_length)
-    with spack.test.harness.use_store(str(tmp_path)):
-        spec = spack.concretize.concretize_one("libelf", spack.test.harness.current())
+    with spack.test.harness.use_store(ctx, str(tmp_path)):
+        spec = spack.concretize.concretize_one("libelf", ctx)
         prefix = spec.prefix
         hash_str = prefix.rsplit("-")[-1]
         assert len(hash_str) == hash_length
 
 
 @pytest.mark.usefixtures("mock_packages")
-def test_set_install_hash_length_upper_case(mutable_config, tmp_path: pathlib.Path):
+def test_set_install_hash_length_upper_case(
+    mutable_config, tmp_path: pathlib.Path, ctx: SpackContext
+):
     mutable_config.set("config:install_hash_length", 5)
     with spack.test.harness.use_store(
-        str(tmp_path), extra_data={"projections": {"all": "{name}-{HASH}"}}
+        ctx, str(tmp_path), extra_data={"projections": {"all": "{name}-{HASH}"}}
     ):
-        spec = spack.concretize.concretize_one("libelf", spack.test.harness.current())
+        spec = spack.concretize.concretize_one("libelf", ctx)
         prefix = spec.prefix
         hash_str = prefix.rsplit("-")[-1]
         assert len(hash_str) == 5
