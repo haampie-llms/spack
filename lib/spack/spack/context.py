@@ -255,19 +255,32 @@ class SpackContext:
 
 
 class _ProcessContext(SpackContext):
-    """A context whose members are the process globals, read at each access.
+    """The context of the process. Its configuration, store, repositories, caches and
+    environment are the process globals, read at each access; its other members are built once
+    per process configuration.
 
-    This is a transitional view: it goes away together with the globals.
+    This is transitional: it goes away together with the globals.
     """
 
     def __init__(self) -> None:
         self.is_bootstrap = False
         self._before_activation = {}
+        #: Configuration the members in ``__dict__`` were built from
+        self._built_from: Optional[object] = None
+
+    def _drop_members_of_other_config(self, config: Optional[object]) -> None:
+        if config is not self._built_from:
+            for name in _OWN_MEMBERS:
+                self.__dict__.pop(name, None)
+            self._built_from = config
 
     @property
     def config(self) -> "spack.config.Configuration":
         import spack.config
+        from spack.util.lang import ensure_unwrapped
 
+        config = ensure_unwrapped(spack.config.CONFIG)
+        self._drop_members_of_other_config(config)
         return spack.config.CONFIG
 
     def activate(
@@ -367,9 +380,27 @@ class _ProcessContext(SpackContext):
         return spack.compilers.libraries.process_compiler_cache()
 
     def __reduce__(self):
-        return _ProcessContext, ()
+        return default, ()
+
+
+#: Members the process context builds itself, instead of reading them from the globals
+_OWN_MEMBERS = tuple(
+    name
+    for name, value in vars(SpackContext).items()
+    if isinstance(value, _member) and name not in vars(_ProcessContext)
+)
+
+_PROCESS_CONTEXT = _ProcessContext()
 
 
 def default() -> SpackContext:
-    """Return a view of the process globals as a context (transitional)."""
-    return _ProcessContext()
+    """Return the context of the process (transitional)."""
+    import spack.config
+    from spack.util.lang import Singleton
+
+    # Do not create the process configuration just to find out whether it changed
+    config = spack.config.CONFIG
+    _PROCESS_CONTEXT._drop_members_of_other_config(
+        config._instance if isinstance(config, Singleton) else config
+    )
+    return _PROCESS_CONTEXT
