@@ -63,7 +63,6 @@ import spack.util.executable
 import spack.util.file_cache
 import spack.util.git
 import spack.util.gpg
-import spack.util.lang
 import spack.util.libc
 import spack.util.lock
 import spack.util.naming
@@ -708,9 +707,9 @@ def mock_binary_index(monkeypatch, tmp_path_factory: pytest.TempPathFactory, ctx
     tmpdir = tmp_path_factory.mktemp("mock_binary_index")
     index_path = tmpdir / "binary_index"
     mock_index = spack.binary_distribution.BinaryIndexCache(
-        str(index_path), config=spack.config.CONFIG, client=ctx.network
+        str(index_path), config=ctx.config, client=ctx.network
     )
-    monkeypatch.setattr(spack.binary_distribution, "BINARY_INDEX", mock_index)
+    monkeypatch.setitem(ctx.__dict__, "binary_index", mock_index)
     yield
 
 
@@ -782,7 +781,9 @@ def _use_test_platform(test_platform, _load_clingo):
 #
 @pytest.fixture(scope="session")
 def mock_packages_repo():
-    yield spack.repo.from_path(spack.paths.mock_packages_path, cache=spack.caches.MISC_CACHE)
+    yield spack.repo.from_path(
+        spack.paths.mock_packages_path, cache=spack.caches.misc_cache(config=spack.config.CONFIG)
+    )
 
 
 @pytest.fixture
@@ -1456,8 +1457,16 @@ def _compiler_cache_in_memory() -> spack.compilers.libraries.CompilerCache:
     return spack.compilers.libraries.CompilerCache()
 
 
+class _InMemoryCompilerCache:
+    """Descriptor giving every context a compiler cache that does not persist."""
+
+    def __get__(self, obj, objtype=None):
+        return spack.compilers.libraries.CompilerCache()
+
+
 @pytest.fixture(autouse=True)
 def disable_compiler_output_cache(monkeypatch):
+    monkeypatch.setattr(SpackContext, "compiler_cache", _InMemoryCompilerCache())
     monkeypatch.setattr(
         spack.compilers.libraries, "process_compiler_cache", _compiler_cache_in_memory
     )
@@ -2310,9 +2319,7 @@ def inode_cache():
 @pytest.fixture(autouse=True)
 def brand_new_binary_cache():
     yield
-    spack.binary_distribution.BINARY_INDEX = spack.util.lang.Singleton(
-        spack.binary_distribution._binary_index
-    )
+    spack.context.default().__dict__.pop("binary_index", None)
 
 
 def _trivial_content_hash(self, content=None, *, repo: spack.repo.RepoPath) -> str:
@@ -2507,7 +2514,6 @@ def shell_as(shell):
 def nullify_globals(request, monkeypatch):
     ensure_configuration_fixture_run_before(request)
     monkeypatch.setattr(spack.config, "CONFIG", None)
-    monkeypatch.setattr(spack.caches, "MISC_CACHE", None)
     monkeypatch.setattr(spack.repo, "PATH", None)
     monkeypatch.setattr(spack.store, "STORE", None)
 

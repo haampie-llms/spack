@@ -2173,7 +2173,11 @@ def create_and_enable(
 #: Global package repository instance.
 PATH = cast(
     RepoPath,
-    Singleton(lambda: create_and_enable(spack.config.CONFIG, cache=spack.caches.MISC_CACHE)),
+    Singleton(
+        lambda: create_and_enable(
+            spack.config.CONFIG, cache=spack.caches.misc_cache(config=spack.config.CONFIG)
+        )
+    ),
 )
 
 
@@ -2341,7 +2345,7 @@ def use_repositories(
         if isinstance(x, Repo)
         else Repo(
             spack.config.canonicalize_path(x, config=spack.config.CONFIG),
-            cache=spack.caches.MISC_CACHE,
+            cache=spack.caches.misc_cache(config=spack.config.CONFIG),
             overrides=overrides,
         )
         for x in paths_and_repos

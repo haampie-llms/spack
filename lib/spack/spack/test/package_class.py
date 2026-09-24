@@ -14,7 +14,6 @@ import shutil
 
 import pytest
 
-import spack.binary_distribution
 import spack.concretize
 import spack.deptypes as dt
 import spack.error
@@ -62,7 +61,7 @@ def mpileaks_possible_deps(mock_packages, mpi_names, compiler_names):
 
 
 @pytest.fixture(params=[NoStaticAnalysis, StaticAnalysis])
-def mock_inspector(config, mock_packages, request):
+def mock_inspector(config, mock_packages, request, ctx: SpackContext):
     inspector_cls = request.param
     if inspector_cls is NoStaticAnalysis:
         return inspector_cls(configuration=config, repo=mock_packages)
@@ -70,7 +69,7 @@ def mock_inspector(config, mock_packages, request):
         configuration=config,
         repo=mock_packages,
         store=spack.store.STORE,
-        binary_index=spack.binary_distribution.BINARY_INDEX,
+        binary_index=ctx.binary_index,
     )
 
 

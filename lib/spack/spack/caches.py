@@ -4,19 +4,16 @@
 
 """Caches used by Spack to store data"""
 
-from typing import cast
-
 import spack.config
 import spack.fetch_strategy
 import spack.paths
 import spack.util.file_cache
-import spack.util.lang
 
 
 def misc_cache_location(*, config: spack.config.Configuration) -> str:
-    """The ``MISC_CACHE`` is Spack's cache for small data.
+    """Location of Spack's cache for small data.
 
-    Currently the ``MISC_CACHE`` stores indexes for virtual dependency
+    Currently the misc cache stores indexes for virtual dependency
     providers and for which packages provide which tags.
     """
     path = config.get("config:misc_cache", spack.paths.default_misc_cache_path)
@@ -28,17 +25,6 @@ def misc_cache(*, config: spack.config.Configuration) -> spack.util.file_cache.F
     return spack.util.file_cache.FileCache(
         misc_cache_location(config=config), enable_lock=config.get("config:locks", True)
     )
-
-
-def _create_global_misc_cache() -> spack.util.file_cache.FileCache:
-    """Build the misc cache from the global configuration."""
-    return misc_cache(config=spack.config.CONFIG)
-
-
-#: Spack's cache for small data
-MISC_CACHE = cast(
-    spack.util.file_cache.FileCache, spack.util.lang.Singleton(_create_global_misc_cache)
-)
 
 
 def fetch_cache_location(*, config: spack.config.Configuration) -> str:

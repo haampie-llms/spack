@@ -243,9 +243,7 @@ def _all_available_compilers(
     compilers = compilers_from_yaml + compilers_from_store
 
     if remote:
-        candidates = spack.binary_distribution.update_cache_and_get_specs(
-            ctx.binary_index, config=ctx.config
-        )
+        candidates = spack.binary_distribution.update_cache_and_get_specs(ctx.binary_index)
         compilers.extend([x for x in candidates if _is_compiler(x)])
     return compilers
 

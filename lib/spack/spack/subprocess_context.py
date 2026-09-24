@@ -120,7 +120,9 @@ class GlobalStateMarshaler:
             return
         spack.config.CONFIG = self.config
         spack.repo.enable_repo(
-            spack.repo.RepoPath.from_config(self.config, cache=spack.caches.MISC_CACHE)
+            spack.repo.RepoPath.from_config(
+                self.config, cache=spack.caches.misc_cache(config=self.config)
+            )
         )
         spack.platforms.host = self.platform
         spack.store.STORE = self.store

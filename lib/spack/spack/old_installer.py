@@ -42,7 +42,6 @@ from typing import TYPE_CHECKING, Dict, Iterator, List, Optional, Set, Tuple, Un
 
 from spack.vendor.typing_extensions import Literal
 
-import spack.binary_distribution
 import spack.build_environment
 import spack.builder
 import spack.config
@@ -483,7 +482,7 @@ def _try_install_from_binary_cache(
             index_only=True,
             config=spack.config.CONFIG,
             client=spack.util.web.NetworkClient.from_config(spack.config.CONFIG),
-            binary_index=spack.binary_distribution.BINARY_INDEX,
+            binary_index=pkg.context.binary_index,
             gpg=pkg.context.gpg,
         )
 

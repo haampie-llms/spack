@@ -18,7 +18,6 @@ import spack.vendor.jinja2
 
 import spack.archspec
 import spack.binary_distribution
-import spack.caches
 import spack.cmd
 import spack.compilers.config
 import spack.compilers.libraries
@@ -2911,7 +2910,7 @@ packages:
         request_str = "callpath ^mpich"
         reused = spack.concretize.concretize_one(f"{request_str} ^dyninst@8.1.1", ctx)
         monkeypatch.setattr(
-            spack.solver.reuse, "_specs_from_mirror", lambda binary_index, config: [reused]
+            spack.solver.reuse, "_specs_from_mirror", lambda binary_index: [reused]
         )
 
         # Exclude dyninst from reuse, so we expect that the old version is not taken into account
@@ -5597,14 +5596,14 @@ def test_specs_from_mirror_warns_when_index_missing(monkeypatch, ctx: SpackConte
         config=spack.config.CONFIG, client=ctx.network
     )
 
-    def fake_update(*, config):
+    def fake_update():
         binary_index.mirrors_without_index = {"file:///fake-mirror"}
 
     monkeypatch.setattr(binary_index, "update", fake_update)
     monkeypatch.setattr(binary_index, "get_all_built_specs", lambda: [])
 
     with pytest.warns(UserWarning, match="cannot be used in concretization"):
-        spack.solver.reuse._specs_from_mirror(binary_index, spack.config.CONFIG)
+        spack.solver.reuse._specs_from_mirror(binary_index)
 
 
 @pytest.mark.parametrize(
@@ -6113,12 +6112,7 @@ def test_concretize_one_reports_an_already_concrete_spec_as_no_work(
 #: The process globals a SpackContext replaces, as (module, attribute) pairs.
 #: ``spack.repo.PATH`` is missing: ``Spec`` resolves virtuals and computes package hashes
 #: through it, so a solve still reads it.
-_CONTEXT_GLOBALS = [
-    (spack.config, "CONFIG"),
-    (spack.caches, "MISC_CACHE"),
-    (spack.store, "STORE"),
-    (spack.binary_distribution, "BINARY_INDEX"),
-]
+_CONTEXT_GLOBALS = [(spack.config, "CONFIG"), (spack.store, "STORE")]
 
 
 @pytest.fixture()
@@ -6235,7 +6229,7 @@ def test_buildcache_query_reads_no_global(break_globals, injected_context):
     """Querying an injected buildcache index reads the injected configuration."""
     with break_globals():
         query = spack.binary_distribution.BinaryCacheQuery(
-            True, index=injected_context.binary_index, config=injected_context.config
+            True, index=injected_context.binary_index
         )
 
         assert query(Spec("pkg-a")) == []

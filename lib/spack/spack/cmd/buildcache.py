@@ -627,7 +627,7 @@ def install_fn(args, ctx):
         args.subparser.error("a spec argument is required to install from a buildcache")
 
     query = spack.binary_distribution.BinaryCacheQuery(
-        all_architectures=args.otherarch, index=ctx.binary_index, config=ctx.config
+        all_architectures=args.otherarch, index=ctx.binary_index
     )
     matches = spack.store.find(args.specs, multiple=args.multiple, query_fn=query)
     spack.repo.attach_packages(matches, ctx)
@@ -650,9 +650,7 @@ def install_fn(args, ctx):
 def list_fn(args, ctx):
     """list binary packages available from mirrors"""
     try:
-        specs = spack.binary_distribution.update_cache_and_get_specs(
-            ctx.binary_index, config=ctx.config
-        )
+        specs = spack.binary_distribution.update_cache_and_get_specs(ctx.binary_index)
     except spack.binary_distribution.FetchCacheError as e:
         tty.die(e)
 
@@ -1049,7 +1047,7 @@ def update_view(
     # local cache.
     index_exists = True
     try:
-        ctx.binary_index._fetch_and_cache_index(mirror_metadata, client=ctx.network)
+        ctx.binary_index._fetch_and_cache_index(mirror_metadata)
     except spack.binary_distribution.BuildcacheIndexNotExists:
         index_exists = False
 
@@ -1127,7 +1125,7 @@ def check_index_fn(args, ctx):
     index_exists = True
     missing_index_blob = False
     try:
-        ctx.binary_index._fetch_and_cache_index(mirror_metadata, client=ctx.network)
+        ctx.binary_index._fetch_and_cache_index(mirror_metadata)
     except spack.binary_distribution.BuildcacheIndexNotExists:
         index_exists = False
     except spack.binary_distribution.FetchIndexError:
