@@ -18,7 +18,6 @@ import spack.buildcache_migrate as migrate
 import spack.buildcache_prune
 import spack.cmd.buildcache
 import spack.concretize
-import spack.config
 import spack.context
 import spack.environment as ev
 import spack.error
@@ -855,7 +854,9 @@ def test_buildcache_prune_no_orphans(tmp_path, mutable_database, mock_gnupghome,
 
 
 @pytest.mark.parametrize("dry_run", [False, True])
-def test_buildcache_prune_orphaned_blobs(tmp_path, mutable_database, mock_gnupghome, dry_run):
+def test_buildcache_prune_orphaned_blobs(
+    tmp_path, mutable_database, mock_gnupghome, dry_run, ctx: SpackContext
+):
     # Create a mirror and push a package to it
     mirror_directory = str(tmp_path)
 
@@ -879,7 +880,7 @@ def test_buildcache_prune_orphaned_blobs(tmp_path, mutable_database, mock_gnupgh
     manifest_url = URLBuildcacheEntry.get_manifest_url(
         spec, mirror_url=f"file://{mirror_directory}"
     )
-    client = web_util.NetworkClient.from_config(spack.config.CONFIG)
+    client = web_util.NetworkClient.from_config(ctx.config)
     web_util.remove_url(manifest_url, client=client)
 
     # Ensure the blobs are still there before pruning
@@ -899,7 +900,9 @@ def test_buildcache_prune_orphaned_blobs(tmp_path, mutable_database, mock_gnupgh
 
 
 @pytest.mark.parametrize("dry_run", [False, True])
-def test_buildcache_prune_orphaned_manifest(tmp_path, mutable_database, mock_gnupghome, dry_run):
+def test_buildcache_prune_orphaned_manifest(
+    tmp_path, mutable_database, mock_gnupghome, dry_run, ctx: SpackContext
+):
     # Create a mirror and push a package to it
     mirror_directory = str(tmp_path)
 
@@ -920,7 +923,7 @@ def test_buildcache_prune_orphaned_manifest(tmp_path, mutable_database, mock_gnu
     manifest_url = f"file://{cache_entry.get_manifest_url(spec=spec, mirror_url=mirror_directory)}"
 
     # Remove the blobs from the cache, orphaning the manifest
-    client = web_util.NetworkClient.from_config(spack.config.CONFIG)
+    client = web_util.NetworkClient.from_config(ctx.config)
     for blob_file in manifest.data:
         blob_url = cache_entry.get_blob_url(mirror_url=mirror_directory, record=blob_file)
         web_util.remove_url(url=f"file://{blob_url}", client=client)
@@ -940,7 +943,7 @@ def test_buildcache_prune_orphaned_manifest(tmp_path, mutable_database, mock_gnu
 
 @pytest.mark.parametrize("dry_run", [False, True])
 def test_buildcache_prune_direct_with_keeplist(
-    tmp_path: pathlib.Path, mutable_database, mock_gnupghome, dry_run
+    tmp_path: pathlib.Path, mutable_database, mock_gnupghome, dry_run, ctx: SpackContext
 ):
     """Test direct pruning functionality with a keeplist file"""
     mirror_directory = str(tmp_path)
@@ -972,14 +975,14 @@ def test_buildcache_prune_direct_with_keeplist(
     output = buildcache(*cmd_args)
 
     # Since all packages are in the keeplist, nothing should be pruned
-    client = web_util.NetworkClient.from_config(spack.config.CONFIG)
+    client = web_util.NetworkClient.from_config(ctx.config)
     assert web_util.url_exists(manifest_url, client=client)
     assert "No specs to prune - all specs are in the keeplist" in output
 
 
 @pytest.mark.parametrize("dry_run", [False, True])
 def test_buildcache_prune_direct_removes_unlisted(
-    tmp_path: pathlib.Path, mutable_database, mock_gnupghome, dry_run
+    tmp_path: pathlib.Path, mutable_database, mock_gnupghome, dry_run, ctx: SpackContext
 ):
     """Test that direct pruning removes specs not in the keeplist"""
     mirror_directory = str(tmp_path)
@@ -1002,7 +1005,7 @@ def test_buildcache_prune_direct_removes_unlisted(
     )
     manifest_url = cache_entry.get_manifest_url(spec1, f"file://{mirror_directory}")
 
-    client = web_util.NetworkClient.from_config(spack.config.CONFIG)
+    client = web_util.NetworkClient.from_config(ctx.config)
     assert web_util.url_exists(manifest_url, client=client)
 
     # Run direct pruning
@@ -1050,7 +1053,11 @@ def test_buildcache_prune_with_invalid_keep_hash(
 
 
 def test_buildcache_prune_new_specs_race_condition(
-    tmp_path: pathlib.Path, mutable_database, mock_gnupghome, monkeypatch: pytest.MonkeyPatch
+    tmp_path: pathlib.Path,
+    mutable_database,
+    mock_gnupghome,
+    monkeypatch: pytest.MonkeyPatch,
+    ctx: SpackContext,
 ):
     """Test that specs uploaded after pruning begins are protected"""
     mirror_directory = str(tmp_path)
@@ -1088,7 +1095,7 @@ def test_buildcache_prune_new_specs_race_condition(
 
     # Run end-to-end buildcache prune - this should not delete `libelf`, despite it
     # not being in the keeplist, because its mtime is after the pruning started
-    client = web_util.NetworkClient.from_config(spack.config.CONFIG)
+    client = web_util.NetworkClient.from_config(ctx.config)
     assert web_util.url_exists(manifest_url, client=client)
     buildcache("prune", "my-mirror", "--keeplist", str(keeplist_file))
     assert web_util.url_exists(manifest_url, client=client)
@@ -1136,9 +1143,13 @@ def read_specs_in_index(mirror_directory, view):
     mirror_metadata = spack.binary_distribution.MirrorMetadata(
         f"file://{mirror_directory}", spack.mirrors.mirror.SUPPORTED_URL_LAYOUT_VERSIONS[0], view
     )
-    client = web_util.NetworkClient.from_config(spack.config.CONFIG)
+    client = web_util.NetworkClient.from_config(spack.context.default().config)
     fetcher = spack.binary_distribution.DefaultIndexHandler(
-        mirror_metadata, None, urlopen=client.urlopen, config=spack.config.CONFIG, client=client
+        mirror_metadata,
+        None,
+        urlopen=client.urlopen,
+        config=spack.context.default().config,
+        client=client,
     )
     result = fetcher.conditional_fetch()
     db_dict = json.loads(result.data)

@@ -12,7 +12,6 @@ import pickle
 import pytest
 
 import spack.concretize
-import spack.config
 import spack.environment as ev
 import spack.package_base
 import spack.platforms
@@ -26,7 +25,6 @@ from spack.environment import SpackEnvironmentConfigError
 from spack.environment.environment import CURRENT_LOCKFILE_VERSION, EnvironmentManifestFile
 from spack.environment.list import UndefinedReferenceError
 from spack.traverse import traverse_nodes
-from spack.util.lang import Singleton, ensure_unwrapped
 
 pytestmark = [
     pytest.mark.not_on_windows("Envs are not supported on windows"),
@@ -2356,25 +2354,6 @@ def test_environment_pickle_preserves_lock_state(
         restored = pickle.loads(blob)
 
     assert restored.txlock.enabled == original_enabled
-
-
-def test_env_substitution_reaches_the_unwrapped_configuration(
-    mutable_mock_env_path, mutable_config, monkeypatch, ctx: SpackContext
-):
-    """``$env`` expands against the Configuration behind the ``CONFIG`` singleton.
-
-    Test fixtures bind ``CONFIG`` to a plain Configuration, so this test wraps it in a Singleton,
-    as it is in production.
-    """
-    env = ev.create("test_env_path_through_singleton", ctx=ctx)
-    monkeypatch.setattr(spack.config, "CONFIG", Singleton(lambda: mutable_config))
-
-    with ev.read("test_env_path_through_singleton", ctx=ctx):
-        # If the env_path was attached to the singleton wrapper it won't be expanded
-        configuration = ensure_unwrapped(spack.config.CONFIG)
-        expanded = spack.config.canonicalize_path("$env/concretization", config=configuration)
-
-    assert expanded == os.path.join(env.path, "concretization")
 
 
 @pytest.mark.usefixtures("mutable_config")

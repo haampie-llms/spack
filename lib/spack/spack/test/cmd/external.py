@@ -8,7 +8,6 @@ import sys
 import pytest
 
 import spack.cmd.external
-import spack.config
 import spack.cray_manifest
 import spack.detection
 import spack.detection.path
@@ -80,12 +79,11 @@ def test_find_external_cmd_not_buildable(
     """
     version = "1.foo"
 
-    @classmethod
     def _determine_version(cls, exe):
         return version
 
     cmake_cls = mock_packages.get_pkg_class("cmake")
-    monkeypatch.setattr(cmake_cls, "determine_version", _determine_version)
+    monkeypatch.setattr(cmake_cls, "determine_version", classmethod(_determine_version))
 
     cmake_path = mock_executable("cmake", output=f"echo cmake version {version}")
     os.environ["PATH"] = str(cmake_path.parent)
@@ -254,23 +252,24 @@ def test_list_detectable_packages(mutable_config):
     assert external.returncode == 0
 
 
-def test_overriding_prefix(mock_executable, mutable_config, monkeypatch, mock_packages):
+def test_overriding_prefix(
+    mock_executable, mutable_config, monkeypatch, mock_packages, ctx: SpackContext
+):
     gcc_exe = mock_executable("gcc", output="echo 4.2.1")
     search_dir = gcc_exe.parent
 
-    @classmethod
     def _determine_variants(cls, exes, version_str):
         return "languages=c", {"prefix": "/opt/gcc/bin", "compilers": {"c": exes[0]}}
 
     gcc_cls = mock_packages.get_pkg_class("gcc")
-    monkeypatch.setattr(gcc_cls, "determine_variants", _determine_variants)
+    monkeypatch.setattr(gcc_cls, "determine_variants", classmethod(_determine_variants))
 
     finder = spack.detection.path.ExecutablesFinder()
     detected_specs = finder.find(
         pkg_name="gcc",
         initial_guess=[str(search_dir)],
         repository=mock_packages,
-        config=spack.config.CONFIG,
+        config=ctx.config,
         additional_search_paths=[],
     )
 
@@ -305,12 +304,11 @@ def test_use_tags_for_detection(
 ):
     versions = {"cmake": "3.19.1", "openssl": "2.8.3"}
 
-    @classmethod
     def _determine_version(cls, exe):
         return versions[os.path.basename(exe)]
 
     cmake_cls = mock_packages.get_pkg_class("cmake")
-    monkeypatch.setattr(cmake_cls, "determine_version", _determine_version)
+    monkeypatch.setattr(cmake_cls, "determine_version", classmethod(_determine_version))
 
     # Prepare an environment to detect a fake cmake
     cmake_exe = mock_executable("cmake", output=f"echo cmake version {versions['cmake']}")
@@ -341,7 +339,6 @@ def test_failures_in_scanning_do_not_result_in_an_error(
         "cmake", output="echo cmake version 3.23.3", subdir=("second", "bin")
     )
 
-    @classmethod
     def _determine_version(cls, exe):
         name = pathlib.Path(exe).parent.parent.name
         if name == "first":
@@ -351,7 +348,7 @@ def test_failures_in_scanning_do_not_result_in_an_error(
         assert False, f"Unexpected exe path {exe}"
 
     cmake_cls = mock_packages.get_pkg_class("cmake")
-    monkeypatch.setattr(cmake_cls, "determine_version", _determine_version)
+    monkeypatch.setattr(cmake_cls, "determine_version", classmethod(_determine_version))
     monkeypatch.setenv("PATH", f"{cmake_exe1.parent}{os.pathsep}{cmake_exe2.parent}")
 
     try:
@@ -373,12 +370,11 @@ def test_detect_virtuals(mock_executable, mutable_config, monkeypatch, mock_pack
     config sets them to buildable)"""
     version = "4.0.2"
 
-    @classmethod
     def _determine_version(cls, exe):
         return version
 
     cmake_cls = mock_packages.get_pkg_class("mpich")
-    monkeypatch.setattr(cmake_cls, "determine_version", _determine_version)
+    monkeypatch.setattr(cmake_cls, "determine_version", classmethod(_determine_version))
 
     mpich = mock_executable("mpichversion", output=f"echo MPICH Version:    {version}")
     prefix = os.path.dirname(mpich)

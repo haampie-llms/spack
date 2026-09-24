@@ -10,7 +10,6 @@ from urllib.error import HTTPError
 import pytest
 
 import spack.concretize
-import spack.config
 import spack.environment as ev
 import spack.error
 import spack.paths
@@ -582,7 +581,7 @@ def test_ci_run_standalone_tests_not_installed_cdash(
     os.environ["SPACK_CDASH_BUILD_NAME"] = "ci-test-build"
     os.environ["SPACK_CDASH_BUILD_STAMP"] = "ci-test-build-stamp"
     os.environ["CI_RUNNER_DESCRIPTION"] = "test-runner"
-    client = spack.util.web.NetworkClient.from_config(spack.config.CONFIG)
+    client = spack.util.web.NetworkClient.from_config(ctx.config)
     handler = ci.CDashHandler(ci_cdash, urlopen=client.urlopen, config=ctx.config)
     ci.run_standalone_tests(
         log_file=str(log_file),
@@ -618,7 +617,7 @@ def test_ci_skipped_report(tmp_path: pathlib.Path, config, monkeypatch, ctx: Spa
     os.environ["SPACK_CDASH_BUILD_NAME"] = "fake-test-build"
     os.environ["SPACK_CDASH_BUILD_STAMP"] = "ci-test-build-stamp"
     os.environ["CI_RUNNER_DESCRIPTION"] = "test-runner"
-    client = spack.util.web.NetworkClient.from_config(spack.config.CONFIG)
+    client = spack.util.web.NetworkClient.from_config(ctx.config)
     handler = ci.CDashHandler(ci_cdash, urlopen=client.urlopen, config=ctx.config)
     reason = "Testing skip"
     handler.report_skipped(spec, str(tmp_path), reason=reason)
