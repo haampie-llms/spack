@@ -122,7 +122,8 @@ def emulate_env_utility(cmd_name, context: Context, args, ctx: spack.context.Spa
             ),
         )
 
-    build_environment.setup_package(spec.package, args.dirty, context)
+    dirty = args.dirty if args.dirty is not None else ctx.config.get("config:dirty")
+    build_environment.setup_package(spec.package, dirty, context)
 
     if args.dump:
         # Dump a source-able environment to a text file.

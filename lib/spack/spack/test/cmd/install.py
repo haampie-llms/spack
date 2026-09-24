@@ -18,7 +18,6 @@ import spack
 import spack.cmd.common.arguments
 import spack.cmd.install
 import spack.concretize
-import spack.config
 import spack.environment as ev
 import spack.error
 import spack.hooks.sbom_generate
@@ -124,7 +123,7 @@ def test_install_package_already_installed(
 @pytest.mark.parametrize(
     "arguments,expected",
     [
-        ([], spack.config.CONFIG.get("config:dirty")),  # default from config file
+        ([], None),  # default from config file, read when the command runs
         (["--clean"], False),
         (["--dirty"], True),
     ],

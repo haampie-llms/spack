@@ -9,7 +9,6 @@ from typing import List, Optional
 import spack.binary_distribution
 import spack.cmd
 import spack.compilers.config
-import spack.config
 import spack.context
 import spack.spec
 from spack.cmd.common import arguments
@@ -37,7 +36,7 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     find_parser.add_argument(
         "--scope",
         action=arguments.ConfigScope,
-        default=lambda: spack.config.CONFIG.default_modify_scope("packages"),
+        default=lambda config: config.default_modify_scope("packages"),
         help="configuration scope to modify",
     )
     arguments.add_common_arguments(find_parser, ["jobs"])

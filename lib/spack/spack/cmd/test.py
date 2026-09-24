@@ -200,7 +200,7 @@ def test_run(args, ctx):
     try:
         test_suite(
             remove_directory=not args.keep_stage,
-            dirty=args.dirty,
+            dirty=args.dirty if args.dirty is not None else ctx.config.get("config:dirty"),
             fail_first=args.fail_first,
             externals=args.externals,
             timeout=args.timeout,

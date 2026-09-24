@@ -816,7 +816,7 @@ def bash(args: Namespace, out: IO, config: spack.config.Configuration) -> None:
 @formatter
 def fish(args, out, config):
     parser = get_all_spack_commands(out)
-    writer = FishCompletionWriter(parser.prog, out, args.aliases)
+    writer = FishCompletionWriter(parser.prog, out, args.aliases, config.scopes.keys())
     writer.write(parser)
 
 

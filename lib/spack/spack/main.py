@@ -30,6 +30,7 @@ import spack.vendor.archspec.cpu
 
 import spack
 import spack.cmd
+import spack.cmd.common.arguments
 import spack.config
 import spack.context
 import spack.environment
@@ -625,6 +626,7 @@ def _invoke_command(command, parser, args, unknown_args, ctx: spack.context.Spac
     if "ctx" in params:
         kwargs["ctx"] = ctx
 
+    spack.cmd.common.arguments.apply_deferred_config(args, ctx)
     return_val = command(parser, args, **kwargs)
 
     # Allow commands to return and error code if they want

@@ -136,7 +136,7 @@ def dev_build(self, args, ctx):
         keep_prefix=args.keep_prefix,
         install_deps=not args.ignore_deps,
         verbose=not args.quiet,
-        dirty=args.dirty,
+        dirty=args.dirty if args.dirty is not None else ctx.config.get("config:dirty"),
         stop_before=args.before,
         skip_patch=args.skip_patch,
         stop_at=args.until,
