@@ -334,7 +334,13 @@ def install_from_buildcache(
     send_state("relocating", state_stream)
     with timer.measure("install"):
         spack.binary_distribution.extract_tarball(
-            spec, tarball_stage, force=False, timer=timer, config=ctx.config, store=ctx.store
+            spec,
+            tarball_stage,
+            force=False,
+            timer=timer,
+            config=ctx.config,
+            store=ctx.store,
+            patchelf=ctx.patchelf,
         )
 
     if spec.spliced:  # overwrite old metadata with new
@@ -676,7 +682,7 @@ def _enable_sandbox(
 
 def _rewire_no_db(
     spec: spack.spec.Spec,
-    store: spack.store.Store,
+    ctx: "spack.context.SpackContext",
     timer: spack.util.timer.BaseTimer = spack.util.timer.NULL_TIMER,
 ) -> None:
     """Rewire a spliced spec from its build_spec prefix, without writing to the database."""
@@ -684,13 +690,15 @@ def _rewire_no_db(
     try:
         with timer.measure("setup"):
             tarball = os.path.join(tmpdir, f"{spec.dag_hash()}.tar.gz")
-            spack.binary_distribution.create_tarball(spec.build_spec, tarball, store=store)
+            spack.binary_distribution.create_tarball(spec.build_spec, tarball, store=ctx.store)
         with timer.measure("pre-install"):
             spack.hooks.pre_install(spec)
         with timer.measure("extract"):
             spack.binary_distribution.extract_buildcache_tarball(tarball, destination=spec.prefix)
         with timer.measure("relocate"):
-            spack.binary_distribution.relocate_package(spec, store=store)
+            spack.binary_distribution.relocate_package(
+                spec, store=ctx.store, patchelf=ctx.patchelf
+            )
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -727,7 +735,7 @@ def _install(
     if spec.build_spec is not spec:
         if install_policy == "source_only":
             send_state("rewiring", state_stream)
-            _rewire_no_db(spec, store, timer)
+            _rewire_no_db(spec, pkg.context, timer)
             _post_install(pkg, spec, explicit, timer, cache=False)
             return
         # Binary cache was the only option; signal miss for force_source expansion.

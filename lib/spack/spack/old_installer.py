@@ -434,6 +434,7 @@ def _process_binary_cache_tarball(
             timer=timer,
             config=spack.config.CONFIG,
             store=spack.store.STORE,
+            patchelf=pkg.context.patchelf,
         )
 
         if pkg.spec.spliced:  # overwrite old metadata with new
@@ -1364,7 +1365,7 @@ class RewireTask(Task):
                 self.status = oldstatus
                 return ExecuteResult.MISSING_BUILD_SPEC
         try:
-            spack.rewiring.rewire_node(self.pkg.spec, self.explicit)
+            spack.rewiring.rewire_node(self.pkg.spec, self.explicit, self.pkg.context)
             _print_installed_pkg(self.pkg.prefix)
             self.record.succeed()
             return ExecuteResult.SUCCESS

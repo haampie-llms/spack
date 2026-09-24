@@ -2,11 +2,12 @@
 #
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
 import collections
+import functools
 import itertools
 import os
 import re
 import sys
-from typing import Dict, Iterable, List, Optional
+from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Optional
 
 import spack.vendor.macholib.mach_o
 import spack.vendor.macholib.MachO
@@ -15,21 +16,28 @@ import spack.util.filesystem as fs
 import spack.util.lang
 from spack.util import elf, executable, tty
 from spack.util.filesystem import readlink, symlink
-from spack.util.lang import memoized
 
 from .relocate_text import BinaryFilePrefixReplacer, PrefixToPrefix, TextFilePrefixReplacer
 
+if TYPE_CHECKING:
+    import spack.context
 
-@memoized
-def _patchelf() -> Optional[executable.Executable]:
-    """Return the full path to the patchelf binary, if available, else None."""
-    import spack.bootstrap
+#: Returns the patchelf executable, if available, else None
+PatchelfFinder = Callable[[], Optional[executable.Executable]]
 
-    if sys.platform == "darwin":
-        return None
 
-    with spack.bootstrap.ensure_bootstrap_configuration():
-        return spack.bootstrap.ensure_patchelf_in_path_or_raise()
+def patchelf_finder(ctx: "spack.context.SpackContext") -> PatchelfFinder:
+    """Return a function that finds patchelf on its first call, bootstrapping it in ``ctx``."""
+
+    @functools.lru_cache(maxsize=None)
+    def find() -> Optional[executable.Executable]:
+        import spack.bootstrap
+
+        if sys.platform == "darwin":
+            return None
+        return spack.bootstrap.ensure_patchelf_in_path_or_raise(ctx)
+
+    return find
 
 
 def _decode_macho_data(bytestring):
@@ -163,7 +171,7 @@ def _macholib_get_paths(cur_path):
 
 
 def _set_elf_rpaths_and_interpreter(
-    target: str, rpaths: List[str], interpreter: Optional[str] = None
+    target: str, rpaths: List[str], interpreter: Optional[str] = None, *, patchelf: PatchelfFinder
 ) -> Optional[str]:
     """Replace the original RPATH of the target with the paths passed as arguments.
 
@@ -171,6 +179,7 @@ def _set_elf_rpaths_and_interpreter(
         target: target executable. Must be an ELF object.
         rpaths: paths to be set in the RPATH
         interpreter: optionally set the interpreter
+        patchelf: finds the patchelf executable
 
     Returns:
         A string concatenating the stdout and stderr of the call to ``patchelf`` if it was invoked
@@ -186,7 +195,9 @@ def _set_elf_rpaths_and_interpreter(
         if interpreter:
             args.extend(["--set-interpreter", interpreter])
         args.append(target)
-        return _patchelf()(*args, output=str, error=str)
+        exe = patchelf()
+        assert exe is not None, "patchelf is required to relocate ELF binaries"
+        return exe(*args, output=str, error=str)
     except executable.ProcessError as e:
         tty.warn(str(e))
         return None
@@ -213,9 +224,11 @@ def relocate_macho_binaries(path_names, prefix_to_prefix):
         _modify_macho_object(path_name, rpaths, deps, idpath, paths_to_paths)
 
 
-def relocate_elf_binaries(binaries: Iterable[str], prefix_to_prefix: Dict[str, str]) -> None:
+def relocate_elf_binaries(
+    binaries: Iterable[str], prefix_to_prefix: Dict[str, str], *, patchelf: PatchelfFinder
+) -> None:
     """Take a list of binaries, and an ordered prefix to prefix mapping, and update the rpaths
-    accordingly."""
+    accordingly. ``patchelf`` is used where the rpaths cannot be updated in place."""
 
     # Transform to binary string
     prefix_to_prefix_bin = {
@@ -229,7 +242,9 @@ def relocate_elf_binaries(binaries: Iterable[str], prefix_to_prefix: Dict[str, s
             # Fall back to `patchelf --set-rpath ... --set-interpreter ...`
             rpaths = e.rpath.new_value.decode("utf-8").split(":") if e.rpath else []
             interpreter = e.pt_interp.new_value.decode("utf-8") if e.pt_interp else None
-            _set_elf_rpaths_and_interpreter(path, rpaths=rpaths, interpreter=interpreter)
+            _set_elf_rpaths_and_interpreter(
+                path, rpaths=rpaths, interpreter=interpreter, patchelf=patchelf
+            )
 
 
 def relocate_links(links: Iterable[str], prefix_to_prefix: Dict[str, str]) -> None:

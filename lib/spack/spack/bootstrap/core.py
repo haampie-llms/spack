@@ -30,7 +30,6 @@ import uuid
 from typing import Any, Callable, Dict, Generic, List, Optional, Sequence, Type, TypeVar
 
 import spack.binary_distribution
-import spack.compilers.libraries
 import spack.concretize
 import spack.config
 import spack.context
@@ -45,8 +44,8 @@ import spack.user_environment
 import spack.util.executable
 import spack.util.spack_yaml
 import spack.util.url
-import spack.util.web
 import spack.version
+from spack.error import ExplicitDatabaseUpgradeError
 from spack.util import tty
 from spack.util.lang import GroupedExceptionHandler
 
@@ -71,9 +70,8 @@ ConfigDictionary = Dict[str, Any]
 #: Whatever a bootstrapper's store probe returns on success
 ResultT = TypeVar("ResultT")
 
-
-def _concretize(spec: "spack.spec.Spec") -> "spack.spec.Spec":
-    return spack.concretize.concretize_one(spec, spack.context.default())
+#: Turns an abstract spec into a concrete one, in the bootstrap context
+Concretizer = Callable[[spack.spec.Spec, spack.context.SpackContext], spack.spec.Spec]
 
 
 class BootstrapRequest(Generic[ResultT]):
@@ -89,15 +87,16 @@ class BootstrapRequest(Generic[ResultT]):
         self,
         abstract_spec: spack.spec.Spec,
         metadata_name: str,
-        probe: Callable[[spack.spec.Spec], Optional[ResultT]],
+        probe: Callable[[spack.spec.Spec, spack.context.SpackContext], Optional[ResultT]],
         installer_args: Dict[str, Any],
-        concretize: Callable[[spack.spec.Spec], spack.spec.Spec],
+        concretize: Concretizer,
     ) -> None:
         #: Spec to be installed to satisfy this request
         self.abstract_spec = abstract_spec
         #: Name of the buildcache metadata file for this software
         self.metadata_name = metadata_name
-        #: Returns the software from the store, or None if it is not usable from there
+        #: Returns the software from the store of the bootstrap context, or None if it is not
+        #: usable from there
         self.probe = probe
         #: Extra arguments for the installer, when building from sources
         self.installer_args = installer_args
@@ -106,10 +105,7 @@ class BootstrapRequest(Generic[ResultT]):
 
     @classmethod
     def for_module(
-        cls,
-        module: str,
-        abstract_spec_str: str,
-        concretize: Optional[Callable[[spack.spec.Spec], spack.spec.Spec]] = None,
+        cls, module: str, abstract_spec_str: str, concretize: Optional[Concretizer] = None
     ) -> "BootstrapRequest[bool]":
         """Return a request for a module importable in the interpreter running Spack.
 
@@ -149,11 +145,11 @@ class BootstrapRequest(Generic[ResultT]):
 class Bootstrapper:
     """Interface for "core" software bootstrappers"""
 
-    def __init__(self, conf: ConfigDictionary) -> None:
+    def __init__(self, conf: ConfigDictionary, ctx: spack.context.SpackContext) -> None:
         self.name = conf["name"]
-        self.metadata_dir = spack.config.canonicalize_path(
-            conf["metadata"], config=spack.config.CONFIG
-        )
+        #: Bootstrap context the software is installed in
+        self.ctx = ctx
+        self.metadata_dir = spack.config.canonicalize_path(conf["metadata"], config=ctx.config)
 
         # Check for relative paths, and turn them into absolute paths
         # root is the metadata_dir
@@ -207,14 +203,12 @@ class BuildcacheBootstrapper(Bootstrapper):
         return data
 
     def _install_by_hash(self, pkg_hash: str, pkg_sha256: str) -> None:
-        # The caller is inside ensure_bootstrap_configuration, which already selects the platform
+        ctx = self.ctx
         query = spack.binary_distribution.BinaryCacheQuery(
-            all_architectures=True,
-            index=spack.binary_distribution.BINARY_INDEX,
-            config=spack.config.CONFIG,
+            all_architectures=True, index=ctx.binary_index, config=ctx.config
         )
         for match in spack.store.find([f"/{pkg_hash}"], multiple=False, query_fn=query):
-            spack.repo.attach_packages([match], spack.context.default())
+            spack.repo.attach_packages([match], ctx)
             spack.binary_distribution.install_root_node(
                 # allow_missing is true since when bootstrapping clingo we truncate runtime
                 # deps such as gcc-runtime, since we link libstdc++ statically, and the other
@@ -225,21 +219,23 @@ class BuildcacheBootstrapper(Bootstrapper):
                 force=True,
                 sha256=pkg_sha256,
                 allow_missing=True,
-                config=spack.config.CONFIG,
-                client=spack.util.web.NetworkClient.from_config(spack.config.CONFIG),
-                store=spack.store.STORE,
+                config=ctx.config,
+                client=ctx.network,
+                store=ctx.store,
+                patchelf=ctx.patchelf,
             )
 
     def _install_and_test(
         self, request: BootstrapRequest[ResultT], bincache_data
     ) -> Optional[ResultT]:
         # Ensure we see only the buildcache being used to bootstrap
-        with spack.config.CONFIG.override(self.mirror_scope):
+        with self.ctx.config.override(self.mirror_scope):
             # This index is currently needed to get the compiler used to build some
             # specs that we know by dag hash.
-            spack.binary_distribution.BINARY_INDEX.regenerate_spec_cache()
+            binary_index = self.ctx.binary_index
+            binary_index.regenerate_spec_cache()
             index = spack.binary_distribution.update_cache_and_get_specs(
-                spack.binary_distribution.BINARY_INDEX, config=spack.config.CONFIG
+                binary_index, config=self.ctx.config
             )
 
             if not index:
@@ -249,7 +245,7 @@ class BuildcacheBootstrapper(Bootstrapper):
                 for _, pkg_hash, pkg_sha256 in item["binaries"]:
                     self._install_by_hash(pkg_hash, pkg_sha256)
 
-                result = request.probe(request.abstract_spec)
+                result = request.probe(request.abstract_spec, self.ctx)
                 if result:
                     return result
         return None
@@ -267,18 +263,18 @@ class SourceBootstrapper(Bootstrapper):
 
         # If we compile code from sources detecting a few build tools
         # might reduce compilation time by a fair amount
-        _add_externals_if_missing()
+        _add_externals_if_missing(self.ctx)
 
         # Try to build and install from sources
-        concrete_spec = request.concretize(request.abstract_spec)
+        concrete_spec = request.concretize(request.abstract_spec, self.ctx)
 
         tty.debug(f"[BOOTSTRAP] Try installing '{request.abstract_spec}' from sources")
-        with spack.config.CONFIG.override(self.mirror_scope):
+        with self.ctx.config.override(self.mirror_scope):
             spack.installer_dispatch.create_installer(
                 [concrete_spec.package], **request.installer_args
             ).install()
 
-        return request.probe(concrete_spec)
+        return request.probe(concrete_spec, self.ctx)
 
 
 #: Map a bootstrapper type to the corresponding class
@@ -288,14 +284,14 @@ _bootstrap_methods: Dict[str, Type[Bootstrapper]] = {
 }
 
 
-def create_bootstrapper(conf: ConfigDictionary) -> Bootstrapper:
+def create_bootstrapper(conf: ConfigDictionary, ctx: spack.context.SpackContext) -> Bootstrapper:
     """Return a bootstrap object built according to the configuration argument"""
-    return _bootstrap_methods[conf["type"]](conf)
+    return _bootstrap_methods[conf["type"]](conf, ctx)
 
 
-def source_is_enabled(conf: ConfigDictionary) -> bool:
+def source_is_enabled(conf: ConfigDictionary, config: spack.config.Configuration) -> bool:
     """Returns True if the source is enabled for bootstrapping, False otherwise"""
-    return spack.config.CONFIG.get("bootstrap:trusted").get(conf["name"], False)
+    return config.get("bootstrap:trusted").get(conf["name"], False)
 
 
 def _cannot_bootstrap_message(
@@ -325,15 +321,16 @@ def _cannot_bootstrap_message(
     return msg
 
 
-def enabled_bootstrapping_sources() -> List[ConfigDictionary]:
+def enabled_bootstrapping_sources(config: spack.config.Configuration) -> List[ConfigDictionary]:
     """Return the configured bootstrapping sources that are enabled, in order."""
-    return [x for x in bootstrapping_sources() if source_is_enabled(x)]
+    return [x for x in bootstrapping_sources(config) if source_is_enabled(x, config)]
 
 
 def _bootstrap_or_raise(
     request: BootstrapRequest[ResultT],
     what: str,
     error_type: Type[Exception],
+    ctx: spack.context.SpackContext,
     sources: Optional[Sequence[ConfigDictionary]] = None,
 ) -> ResultT:
     """Make the requested software available in the bootstrap store, or raise.
@@ -344,27 +341,33 @@ def _bootstrap_or_raise(
         request: software to be bootstrapped, and the probe that tests for it
         what: description of the software, to be used in the error message
         error_type: exception to be raised if no source succeeds
+        ctx: bootstrap context the software is installed in
         sources: sources to be tried. Defaults to the enabled ones from configuration.
 
     Raises:
         error_type: if the software could not be bootstrapped
     """
     # Every source installs into the same store, so check it once for all of them
-    result = request.probe(request.abstract_spec)
+    result = request.probe(request.abstract_spec, ctx)
     if result:
         return result
 
     # Fail before extracting the tarball if the database cannot be modified.
-    spack.store.STORE.db.ensure_latest_db_version()
+    try:
+        ctx.store.db.ensure_latest_db_version()
+    except ExplicitDatabaseUpgradeError as e:
+        if e._long_message:
+            e._long_message = e._long_message.replace("spack reindex", "spack -b reindex")
+        raise
 
     if sources is None:
-        sources = enabled_bootstrapping_sources()
+        sources = enabled_bootstrapping_sources(ctx.config)
 
     exception_handler = GroupedExceptionHandler()
 
     for current_config in sources:
         with exception_handler.forward(current_config["name"], Exception):
-            result = create_bootstrapper(current_config).try_to_bootstrap(request)
+            result = create_bootstrapper(current_config, ctx).try_to_bootstrap(request)
             if result:
                 return result
 
@@ -375,8 +378,9 @@ def _bootstrap_or_raise(
 
 def ensure_module_importable_or_raise(
     module: str,
+    ctx: spack.context.SpackContext,
     abstract_spec: Optional[str] = None,
-    concretize: Optional[Callable[[spack.spec.Spec], spack.spec.Spec]] = None,
+    concretize: Optional[Concretizer] = None,
 ):
     """Make the requested module available for import, or raise.
 
@@ -388,6 +392,7 @@ def ensure_module_importable_or_raise(
 
     Args:
         module: module to be imported in the current interpreter
+        ctx: context whose bootstrap context the module is installed in
         abstract_spec: abstract spec that might provide the module. If not
             given it defaults to "module"
         concretize: how to concretize the spec, when building from sources. Defaults to
@@ -406,12 +411,14 @@ def ensure_module_importable_or_raise(
         BootstrapRequest.for_module(module, abstract_spec, concretize=concretize),
         what=f'the "{module}" Python module',
         error_type=ImportError,
+        ctx=ctx.bootstrap,
     )
 
 
 def ensure_executables_in_path_or_raise(
     executables: Sequence[str],
     abstract_spec: str,
+    ctx: spack.context.SpackContext,
     cmd_check: Optional[Callable[[spack.util.executable.Executable], bool]] = None,
 ) -> spack.util.executable.Executable:
     """Ensure that some executables are in path or raise.
@@ -420,6 +427,7 @@ def ensure_executables_in_path_or_raise(
         executables: executables to be searched in the PATH, in order. The function
             exits on the first one found.
         abstract_spec: abstract spec that provides the executables
+        ctx: context whose bootstrap context the executables are installed in
         cmd_check: callable predicate that takes a ``spack.util.executable.Executable``
             command and validates it. Should return ``True`` if the executable is
             acceptable, ``False`` otherwise. Can be used to, e.g., ensure a suitable
@@ -436,21 +444,24 @@ def ensure_executables_in_path_or_raise(
         if not cmd_check or cmd_check(cmd):
             return cmd
 
+    bootstrap = ctx.bootstrap
     found = _bootstrap_or_raise(
         BootstrapRequest.for_executables(executables, abstract_spec),
         what=f"any of the {', '.join(executables)} executables",
         error_type=RuntimeError,
+        ctx=bootstrap,
     )
     # Additional environment variables needed to run the command
     found.command.add_default_envmod(
         spack.user_environment.modifications_for_specs(
-            found.spec, ctx=spack.context.default(), set_package_py_globals=False
+            found.spec, ctx=bootstrap, set_package_py_globals=False
         )
     )
     return found.command
 
 
-def _add_externals_if_missing() -> None:
+def _add_externals_if_missing(ctx: spack.context.SpackContext) -> None:
+    """Detect build tools as externals in the ``bootstrap`` scope of the bootstrap context."""
     search_list = [
         # clingo
         "cmake",
@@ -462,16 +473,14 @@ def _add_externals_if_missing() -> None:
     ]
     if IS_WINDOWS:
         search_list.append("winbison")
-    externals = spack.detection.by_path(
-        search_list, repo=spack.repo.PATH, config=spack.config.CONFIG
-    )
+    externals = spack.detection.by_path(search_list, repo=ctx.repo, config=ctx.config)
     # System git is typically deprecated, so mark as non-buildable to force it as external
     non_buildable_externals = {k: externals.pop(k) for k in ("git",) if k in externals}
     spack.detection.update_configuration(
-        externals, config=spack.config.CONFIG, scope="bootstrap", buildable=True
+        externals, config=ctx.config, scope="bootstrap", buildable=True
     )
     spack.detection.update_configuration(
-        non_buildable_externals, config=spack.config.CONFIG, scope="bootstrap", buildable=False
+        non_buildable_externals, config=ctx.config, scope="bootstrap", buildable=False
     )
 
 
@@ -485,25 +494,32 @@ def clingo_root_spec(platform: Optional[str] = None, target: Optional[str] = Non
     return _root_spec("clingo-bootstrap@spack+python", platform=platform, target=target)
 
 
-def _concretize_clingo(abstract_spec: spack.spec.Spec) -> spack.spec.Spec:
+def _concretize(
+    abstract_spec: spack.spec.Spec, ctx: spack.context.SpackContext
+) -> spack.spec.Spec:
+    """Concretize in the bootstrap context."""
+    return spack.concretize.concretize_one(abstract_spec, ctx)
+
+
+def _concretize_clingo(
+    abstract_spec: spack.spec.Spec, ctx: spack.context.SpackContext
+) -> spack.spec.Spec:
     """Return the clingo spec to be built, edited from a prototype.
 
     The ``abstract_spec`` argument is discarded, so a change to ``clingo_root_spec()`` has
     no effect on what is built from sources.
     """
     concrete = ClingoBootstrapConcretizer(
-        spack.config.CONFIG,
-        repo=spack.repo.PATH,
-        compiler_cache=spack.compilers.libraries.process_compiler_cache(),
+        ctx.config, repo=ctx.repo, compiler_cache=ctx.compiler_cache
     ).concretize()
-    spack.repo.attach_packages([concrete], spack.context.default())
+    spack.repo.attach_packages([concrete], ctx)
     return concrete
 
 
-def ensure_clingo_importable_or_raise() -> None:
+def ensure_clingo_importable_or_raise(ctx: spack.context.SpackContext) -> None:
     """Ensure that the clingo module is available for import."""
     ensure_module_importable_or_raise(
-        module="clingo", abstract_spec=clingo_root_spec(), concretize=_concretize_clingo
+        "clingo", ctx, abstract_spec=clingo_root_spec(), concretize=_concretize_clingo
     )
 
 
@@ -513,11 +529,13 @@ def gnupg_root_spec() -> str:
     return _root_spec(f"{root_spec_name}@2.3:")
 
 
-def ensure_gpg_in_path_or_raise() -> spack.util.executable.Executable:
-    """Ensure gpg or gpg2 are in the PATH or raise."""
-    return ensure_executables_in_path_or_raise(
-        executables=["gpg2", "gpg"], abstract_spec=gnupg_root_spec()
-    )
+def ensure_gpg_in_path_or_raise(
+    ctx: Optional[spack.context.SpackContext] = None,
+) -> spack.util.executable.Executable:
+    """Ensure gpg or gpg2 are in the PATH or raise. Without a context, the process view is used
+    (transitional)."""
+    ctx = ctx if ctx is not None else spack.context.default()
+    return ensure_executables_in_path_or_raise(["gpg2", "gpg"], gnupg_root_spec(), ctx)
 
 
 def patchelf_root_spec() -> str:
@@ -547,23 +565,23 @@ def verify_patchelf(patchelf: "spack.util.executable.Executable") -> bool:
     return version >= spack.version.Version("0.13.1")
 
 
-def ensure_patchelf_in_path_or_raise() -> spack.util.executable.Executable:
+def ensure_patchelf_in_path_or_raise(
+    ctx: spack.context.SpackContext,
+) -> spack.util.executable.Executable:
     """Ensure patchelf is in the PATH or raise."""
     # If the latest patchelf cannot be provided, e.g. because the compiler doesn't
     # support C++17, retry with the newest version that does not require it.
     try:
         return ensure_executables_in_path_or_raise(
-            executables=["patchelf"], abstract_spec=patchelf_root_spec(), cmd_check=verify_patchelf
+            ["patchelf"], patchelf_root_spec(), ctx, cmd_check=verify_patchelf
         )
     except RuntimeError:
         return ensure_executables_in_path_or_raise(
-            executables=["patchelf"],
-            abstract_spec=_root_spec("patchelf@0.13.1:0.13"),
-            cmd_check=verify_patchelf,
+            ["patchelf"], _root_spec("patchelf@0.13.1:0.13"), ctx, cmd_check=verify_patchelf
         )
 
 
-def ensure_winsdk_external_or_raise() -> None:
+def ensure_winsdk_external_or_raise(ctx: spack.context.SpackContext) -> None:
     """Ensure the Windows SDK + WGL are available on system
     If both of these package are found, the Spack user or bootstrap
     configuration (depending on where Spack is running)
@@ -576,12 +594,12 @@ def ensure_winsdk_external_or_raise() -> None:
     This is different from all other current bootstrap dependency
     checks.
     """
-    if set(["win-sdk", "wgl"]).issubset(spack.config.CONFIG.get("packages").keys()):
+    if set(["win-sdk", "wgl"]).issubset(ctx.config.get("packages").keys()):
         return
     tty.debug("Detecting Windows SDK and WGL installations")
     # find the externals sequentially to avoid subprocesses being spawned
     externals = spack.detection.by_path(
-        ["win-sdk", "wgl"], repo=spack.repo.PATH, max_workers=1, config=spack.config.CONFIG
+        ["win-sdk", "wgl"], repo=ctx.repo, config=ctx.config, max_workers=1
     )
     if not set(["win-sdk", "wgl"]) == externals.keys():
         missing_packages_lst = []
@@ -598,15 +616,15 @@ def ensure_winsdk_external_or_raise() -> None:
     # wgl/sdk are not required for bootstrapping Spack, but
     # are required for building anything non trivial
     # add to user config so they can be used by subsequent Spack ops
-    spack.detection.update_configuration(externals, config=spack.config.CONFIG, buildable=False)
+    spack.detection.update_configuration(externals, config=ctx.config, buildable=False)
 
 
-def ensure_core_dependencies() -> None:
+def ensure_core_dependencies(ctx: spack.context.SpackContext) -> None:
     """Ensure the presence of all the core dependencies."""
     if sys.platform.lower() == "linux":
-        ensure_patchelf_in_path_or_raise()
-    ensure_gpg_in_path_or_raise()
-    ensure_clingo_importable_or_raise()
+        ensure_patchelf_in_path_or_raise(ctx)
+    ensure_gpg_in_path_or_raise(ctx)
+    ensure_clingo_importable_or_raise(ctx)
 
 
 def all_core_root_specs() -> List[str]:
@@ -614,21 +632,20 @@ def all_core_root_specs() -> List[str]:
     return [clingo_root_spec(), gnupg_root_spec(), patchelf_root_spec()]
 
 
-def bootstrapping_sources(scope: Optional[str] = None):
+def bootstrapping_sources(config: spack.config.Configuration, scope: Optional[str] = None):
     """Return the list of configured sources of software for bootstrapping Spack
 
     Args:
+        config: configuration the sources are read from
         scope: if a valid configuration scope is given, return the
             list only from that scope
     """
-    source_configs = spack.config.CONFIG.get("bootstrap:sources", default=None, scope=scope)
+    source_configs = config.get("bootstrap:sources", default=None, scope=scope)
     source_configs = source_configs or []
     list_of_sources = []
     for entry in source_configs:
         current = copy.copy(entry)
-        metadata_dir = spack.config.canonicalize_path(
-            entry["metadata"], config=spack.config.CONFIG
-        )
+        metadata_dir = spack.config.canonicalize_path(entry["metadata"], config=config)
         metadata_yaml = os.path.join(metadata_dir, METADATA_YAML_FILENAME)
         try:
             with open(metadata_yaml, encoding="utf-8") as stream:

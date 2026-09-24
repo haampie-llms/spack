@@ -4,7 +4,6 @@
 """High-level functions to concretize list of specs"""
 
 import contextlib
-import importlib
 import sys
 import time
 from collections import Counter
@@ -28,6 +27,7 @@ import spack.context
 import spack.error
 import spack.hash_lookup
 import spack.repo
+import spack.solver.compat
 import spack.solver.core
 import spack.traverse
 import spack.util.parallel
@@ -211,11 +211,7 @@ def _concretize_separately(
         ui: frontend to report progress to.
         processes: size of the process pool
     """
-    from spack.bootstrap import (
-        ensure_bootstrap_configuration,
-        ensure_clingo_importable_or_raise,
-        ensure_winsdk_external_or_raise,
-    )
+    from spack.bootstrap import ensure_winsdk_external_or_raise
 
     to_concretize = [abstract for abstract, concrete in spec_list if not concrete]
     args = [
@@ -224,16 +220,12 @@ def _concretize_separately(
         if not abstract.concrete
     ]
     ret = [(i, abstract) for i, abstract in enumerate(to_concretize) if abstract.concrete]
-    try:
-        # Ensure we don't try to bootstrap clingo in parallel
-        importlib.import_module("clingo")
-    except ImportError:
-        with ensure_bootstrap_configuration():
-            ensure_clingo_importable_or_raise()
+    # Ensure we don't try to bootstrap clingo in parallel
+    spack.solver.compat.load_clingo(ctx)
 
     # ensure we don't try to detect winsdk in parallel
     if sys.platform == "win32":
-        ensure_winsdk_external_or_raise()
+        ensure_winsdk_external_or_raise(ctx)
 
     # Ensure all the indexes have been built or updated, since
     # otherwise the processes in the pool may timeout on waiting

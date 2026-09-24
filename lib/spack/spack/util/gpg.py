@@ -528,9 +528,8 @@ class Gpg:
         """Create a GPG function wrapper"""
         import spack.bootstrap
 
-        with spack.bootstrap.ensure_bootstrap_configuration():
-            spack.bootstrap.ensure_gpg_in_path_or_raise()
-            result = finder()
+        spack.bootstrap.ensure_gpg_in_path_or_raise()
+        result = finder()
 
         if result is None:
             return None

@@ -1039,17 +1039,16 @@ def _main(argv=None):
     cmd_name = args.command[0]
     cmd_name, args.command = resolve_alias(cmd_name, args.command)
 
-    # set up a bootstrap context, if asked.
-    # bootstrap context needs to include parsing the command, b/c things
-    # like `ConstraintAction` and `ConfigSetAction` happen at parse time.
-    bootstrap_context = spack.util.lang.nullcontext()
-    if args.bootstrap:
-        from spack import bootstrap  # avoid circular imports
-
-        bootstrap_context = bootstrap.ensure_bootstrap_configuration()
-
-    with bootstrap_context:
+    if not args.bootstrap:
         return finish_parse_and_run(parser, cmd_name, args, env_format_error)
+
+    try:
+        return finish_parse_and_run(parser, cmd_name, args, env_format_error)
+    except spack.error.ExplicitDatabaseUpgradeError as e:
+        # The bootstrap store is reindexed with `spack -b reindex`
+        if e._long_message:
+            e._long_message = e._long_message.replace("spack reindex", "spack -b reindex")
+        raise
 
 
 def finish_parse_and_run(parser, cmd_name, main_args, env_format_error):
@@ -1072,6 +1071,8 @@ def finish_parse_and_run(parser, cmd_name, main_args, env_format_error):
     spack.paths.set_working_dir()
 
     ctx = spack.context.default()
+    if main_args.bootstrap:
+        ctx = ctx.bootstrap
 
     # now we can actually execute the command.
     if main_args.spack_profile or main_args.sorted_profile or main_args.profile_file:

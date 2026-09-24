@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     import spack.compilers.libraries
     import spack.config
     import spack.environment
+    import spack.relocate
     import spack.repo
     import spack.store
     import spack.util.file_cache
@@ -54,9 +55,12 @@ class SpackContext:
         config: "spack.config.Configuration",
         *,
         environment: Optional["spack.environment.Environment"] = None,
+        is_bootstrap: bool = False,
     ) -> None:
         self._config = config
         self._environment = environment
+        #: Whether this context bootstraps Spack's own dependencies
+        self.is_bootstrap = is_bootstrap
         #: Members replaced by activating an environment, restored by deactivating it
         self._before_activation: Dict[str, Any] = {}
 
@@ -118,6 +122,30 @@ class SpackContext:
 
         return spack.util.web.NetworkClient.from_config(self.config)
 
+    @_member
+    def bootstrap(self) -> "SpackContext":
+        """Context to bootstrap Spack's own dependencies in. It shares the repositories, caches
+        and network client of this context."""
+        if self.is_bootstrap:
+            return self
+        import spack.bootstrap.config
+
+        result = SpackContext(spack.bootstrap.config.bootstrap_config(self), is_bootstrap=True)
+        result.share(self, "repo", "misc_cache", "compiler_cache", "network")
+        return result
+
+    @_member
+    def patchelf(self) -> "spack.relocate.PatchelfFinder":
+        """Finds patchelf on its first call, bootstrapping it if needed."""
+        import spack.relocate
+
+        return spack.relocate.patchelf_finder(self)
+
+    def share(self, other: "SpackContext", *members: str) -> None:
+        """Use the given members of ``other`` instead of building them from ``config``."""
+        for member in members:
+            self.__dict__[member] = getattr(other, member)
+
     def activate(
         self, env: "spack.environment.Environment", *, use_env_repo: bool = False
     ) -> None:
@@ -178,7 +206,11 @@ class SpackContext:
                 value.enable()
 
     def __reduce__(self):
-        return SpackContext, (self._config,), {"_environment": self._environment}
+        return (
+            SpackContext,
+            (self._config,),
+            {"_environment": self._environment, "is_bootstrap": self.is_bootstrap},
+        )
 
     def __setstate__(self, state):
         self._before_activation = {}
@@ -192,6 +224,7 @@ class _ProcessContext(SpackContext):
     """
 
     def __init__(self) -> None:
+        self.is_bootstrap = False
         self._before_activation = {}
 
     @property

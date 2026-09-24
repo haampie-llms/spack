@@ -737,21 +737,21 @@ def test_platform():
 
 
 @pytest.fixture(autouse=True, scope="session")
-def _use_test_platform(test_platform):
+def _load_clingo():
+    """Bootstrap clingo before tests monkeypatch the host platform or target."""
+    try:
+        spack.solver.compat.load_clingo(spack.context.default())
+    except ImportError:
+        pass
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _use_test_platform(test_platform, _load_clingo):
     # This is the only context manager used at session scope (see note
     # below for more insight) since we want to use the test platform as
     # a default during tests.
     with spack.platforms.use_platform(test_platform):
         yield
-
-
-@pytest.fixture(autouse=True, scope="session")
-def _load_clingo():
-    """Bootstrap clingo before tests monkeypatch the host target."""
-    try:
-        spack.solver.compat.clingo()
-    except ImportError:
-        pass
 
 
 #
