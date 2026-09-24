@@ -10,7 +10,7 @@ from typing import Any, Dict
 import spack.store
 import spack.util.file_permissions as fp
 import spack.util.spack_json as sjson
-from spack.package_base import spack_times_log
+from spack.package_base import _spack_build_logfile, spack_times_log
 from spack.util import tty
 from spack.util.filesystem import readlink
 
@@ -162,8 +162,8 @@ def check_spec_manifest(spec):
             if path == manifest_file:
                 continue
 
-            # Do not check the install times log file.
-            if entry == spack_times_log:
+            # Do not check the install times log and build log, written after the manifest.
+            if entry in (spack_times_log, _spack_build_logfile + ".gz"):
                 continue
 
             data = manifest.pop(path, {})

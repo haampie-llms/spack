@@ -18,8 +18,8 @@ import spack.package_prefs
 import spack.repo
 import spack.store
 from spack.config import Configuration
+from spack.installer import PackageInstaller
 from spack.modules.common import UpstreamModuleIndex
-from spack.old_installer import PackageInstaller
 from spack.util.filesystem import readlink
 
 pytestmark = [
