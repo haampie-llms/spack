@@ -790,7 +790,7 @@ def mirror_destroy(args, ctx):
     elif args.mirror_url:
         mirror_url = args.mirror_url
 
-    client = web_util.NetworkClient.from_config(ctx.config)
+    client = ctx.network
     web_util.remove_url(mirror_url, recursive=True, client=client)
 
 

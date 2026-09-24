@@ -750,10 +750,12 @@ def save_specfile_fn(args, ctx):
 
 
 def copy_buildcache_entry(
-    cache_entry: URLBuildcacheEntry, destination_url: str, config: spack.config.Configuration
+    cache_entry: URLBuildcacheEntry,
+    destination_url: str,
+    config: spack.config.Configuration,
+    client: web_util.NetworkClient,
 ):
     """Download buildcache entry and copy it to the destination_url"""
-    client = web_util.NetworkClient.from_config(config)
     try:
         spec_dict = cache_entry.fetch_metadata()
         cache_entry.fetch_archive()
@@ -846,7 +848,7 @@ def sync_fn(args, ctx):
         if args.dest_mirror:
             tty.warn(f"Ignoring unused argument: {args.dest_mirror.name}")
 
-        manifest_copy(glob.glob(args.manifest_glob), ctx.config, args.src_mirror)
+        manifest_copy(glob.glob(args.manifest_glob), ctx.config, ctx.network, args.src_mirror)
         return 0
 
     if args.src_mirror is None or args.dest_mirror is None:
@@ -876,12 +878,13 @@ def sync_fn(args, ctx):
         )
         src_cache_entry = cache_class(src_mirror_url, s, allow_unsigned=True)
         src_cache_entry.read_manifest()
-        copy_buildcache_entry(src_cache_entry, dest_mirror_url, ctx.config)
+        copy_buildcache_entry(src_cache_entry, dest_mirror_url, ctx.config, ctx.network)
 
 
 def manifest_copy(
     manifest_file_list: List[str],
     config: spack.config.Configuration,
+    client: web_util.NetworkClient,
     dest_mirror: Optional[spack.mirrors.mirror.Mirror] = None,
 ):
     """Read manifest files containing information about specific specs to copy
@@ -910,7 +913,7 @@ def manifest_copy(
         else:
             destination_url = cache_class.get_base_url(copy_obj["dest"])
         tty.debug("copying {0} to {1}".format(copy_obj["src"], destination_url))
-        copy_buildcache_entry(src_cache_entry, destination_url, config)
+        copy_buildcache_entry(src_cache_entry, destination_url, config, client)
 
 
 def update_index(
@@ -1005,8 +1008,7 @@ def update_view(
     # local cache.
     index_exists = True
     try:
-        client = web_util.NetworkClient.from_config(ctx.config)
-        ctx.binary_index._fetch_and_cache_index(mirror_metadata, client=client)
+        ctx.binary_index._fetch_and_cache_index(mirror_metadata, client=ctx.network)
     except spack.binary_distribution.BuildcacheIndexNotExists:
         index_exists = False
 
@@ -1075,8 +1077,7 @@ def check_index_fn(args, ctx):
     index_exists = True
     missing_index_blob = False
     try:
-        client = web_util.NetworkClient.from_config(ctx.config)
-        ctx.binary_index._fetch_and_cache_index(mirror_metadata, client=client)
+        ctx.binary_index._fetch_and_cache_index(mirror_metadata, client=ctx.network)
     except spack.binary_distribution.BuildcacheIndexNotExists:
         index_exists = False
     except spack.binary_distribution.FetchIndexError:

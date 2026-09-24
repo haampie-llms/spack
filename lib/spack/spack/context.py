@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     import spack.repo
     import spack.store
     import spack.util.file_cache
+    import spack.util.web
 
 T = TypeVar("T")
 
@@ -93,6 +94,13 @@ class SpackContext:
         import spack.binary_distribution
 
         return spack.binary_distribution.BinaryIndexCache(config=self.config)
+
+    @_member
+    def network(self) -> "spack.util.web.NetworkClient":
+        """Network settings and the URL opener built from them."""
+        import spack.util.web
+
+        return spack.util.web.NetworkClient.from_config(self.config)
 
     def __reduce__(self):
         return SpackContext, (self._config,), {"_environment": self._environment}

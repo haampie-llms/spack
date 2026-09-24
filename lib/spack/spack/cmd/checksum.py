@@ -139,7 +139,7 @@ def checksum(parser, args, ctx):
     # here we check whether the crawled and computed URLs disagree, and if so, prioritize the
     # former if that URL exists (just sending a HEAD request that is).
     url_changed_for_version = set()
-    client = web_util.NetworkClient.from_config(ctx.config)
+    client = ctx.network
     for version, url in url_dict.items():
         possible_urls = pkg.all_urls_for_version(version)
         if url not in possible_urls:
