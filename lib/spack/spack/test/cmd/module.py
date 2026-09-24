@@ -13,7 +13,7 @@ import spack.main
 import spack.modules
 import spack.modules.lmod
 import spack.repo
-import spack.store
+import spack.test.utilities
 from spack.config import Configuration
 from spack.context import SpackContext
 from spack.installer import PackageInstaller
@@ -28,8 +28,8 @@ pytestmark = pytest.mark.not_on_windows("does not run on windows")
 def ensure_module_files_are_there(mock_packages_repo, mock_store, mock_configuration_scopes):
     """Generate module files for module tests."""
     module = spack.main.SpackCommand("module")
-    with spack.store.use_store(str(mock_store)):
-        with spack.config.use_configuration(*mock_configuration_scopes):
+    with spack.config.use_configuration(*mock_configuration_scopes):
+        with spack.test.utilities.use_store(str(mock_store)):
             with spack.repo.use_repositories(mock_packages_repo):
                 module("tcl", "refresh", "-y")
 

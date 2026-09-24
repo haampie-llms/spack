@@ -27,7 +27,7 @@ import spack.platforms.test
 import spack.repo
 import spack.solver.reuse
 import spack.spec
-import spack.store
+import spack.test.utilities
 from spack.context import SpackContext
 from spack.cray_manifest import compiler_from_entry, entries_to_specs
 from spack.externals_config import external_config_with_implicit_externals
@@ -523,9 +523,9 @@ def test_reusable_externals_cray_manifest_from_upstream(
     """Tests that specs imported from a manifest into an upstream store are reusable downstream."""
     upstream_root = tmp_path / "upstream"
 
-    with spack.store.use_store(str(upstream_root)):
+    with spack.test.utilities.use_store(str(upstream_root)):
         spack.cray_manifest.read(path=str(manifest_file), apply_updates=True, ctx=ctx)
-        imported = {x.dag_hash() for x in spack.store.STORE.db.query_local()}
+        imported = {x.dag_hash() for x in ctx.store.db.query_local()}
 
     assert imported, "the manifest imported no spec"
 

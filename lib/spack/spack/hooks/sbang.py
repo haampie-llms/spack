@@ -66,29 +66,11 @@ def sbang_shebang_line_for(store: spack.store.Store) -> str:
     return "#!/bin/sh %s" % sbang_install_path_for(store)
 
 
-def sbang_install_path() -> str:
-    """Location sbang is installed within the install tree (package API)."""
-    return sbang_install_path_for(spack.store.STORE)
-
-
-def sbang_shebang_line() -> str:
-    """Full shebang line that should be prepended to files to use sbang (package API)."""
-    return sbang_shebang_line_for(spack.store.STORE)
-
-
 def get_interpreter(binary_string):
     # The interpreter may be preceded with ' ' and \t, is itself any byte that
     # follows until the first occurrence of ' ', \t, \0, \n or end of file.
     match = interpreter_regex.match(binary_string)
     return None if match is None else match.group(1)
-
-
-def filter_shebang(path):
-    """
-    Adds a second shebang line, using sbang, at the beginning of a file, if necessary
-    (package API).
-    """
-    return filter_shebang_for(path, spack.store.STORE)
 
 
 def filter_shebang_for(path, store: spack.store.Store):

@@ -8,10 +8,12 @@ import gzip
 import os
 import time
 import traceback
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import spack.error
-import spack.store
+
+if TYPE_CHECKING:
+    import spack.store
 
 reporter = None
 report_file = None
@@ -63,11 +65,11 @@ class RequestRecord(Record):
         ]
         self.packages = []
 
-    def skip_installed(self):
+    def skip_installed(self, store: "spack.store.Store"):
         """Insert records for all nodes in the DAG that are no-ops for this request"""
-        with spack.store.STORE.db.read_transaction():
+        with store.db.read_transaction():
             for dep in filter(
-                lambda x: spack.store.STORE.db.installed(x) or x.external, self._spec.traverse()
+                lambda x: store.db.installed(x) or x.external, self._spec.traverse()
             ):
                 record = InstallRecord(dep)
                 record.skip(msg="Spec external or already installed")
@@ -188,7 +190,7 @@ class NullRequestRecord(RequestRecord):
     def __init__(self) -> None:
         dict.__init__(self)
 
-    def skip_installed(self) -> None:
+    def skip_installed(self, store: "spack.store.Store") -> None:
         pass
 
     def append_record(self, record) -> None:

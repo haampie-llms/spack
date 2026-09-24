@@ -28,7 +28,6 @@ import spack.schema.env
 import spack.solver.asp
 import spack.spec
 import spack.stage
-import spack.store
 import spack.util.environment
 import spack.util.filesystem as fs
 import spack.util.link_tree
@@ -3939,11 +3938,11 @@ spack:
       root: {0}
 """.format(install_root)
     )
-    current_store_root = str(spack.store.STORE.root)
+    current_store_root = str(ctx.store.root)
     assert str(current_store_root) != str(install_root)
     with ev.Environment(str(tmp_path), ctx=ctx):
-        assert str(spack.store.STORE.root) == str(install_root)
-    assert str(spack.store.STORE.root) == current_store_root
+        assert str(ctx.store.root) == str(install_root)
+    assert str(ctx.store.root) == current_store_root
 
 
 def test_activate_temp(monkeypatch, tmp_path: pathlib.Path, ctx: SpackContext):

@@ -146,7 +146,7 @@ def test_missing_upstream_build_dep(
     repo_builder.add_package("z")
     repo_builder.add_package("y", dependencies=[("z", "build", None)])
 
-    monkeypatch.setattr(spack.store.STORE, "db", downstream_db)
+    monkeypatch.setattr(ctx.store, "db", downstream_db)
 
     with spack.repo.use_repositories(repo_builder.root):
         y = spack.concretize.concretize_one("y", ctx)
@@ -238,11 +238,11 @@ def test_add_to_upstream_after_downstream(
         assert len(qresults) == 1
         (queried_spec,) = qresults
         try:
-            orig_db = spack.store.STORE.db
-            spack.store.STORE.db = downstream_db
+            orig_db = ctx.store.db
+            ctx.store.db = downstream_db
             assert queried_spec.prefix == downstream_db.layout.path_for_spec(spec)
         finally:
-            spack.store.STORE.db = orig_db
+            ctx.store.db = orig_db
 
 
 def test_cannot_write_upstream(tmp_path: pathlib.Path, mock_packages, config, ctx: SpackContext):
@@ -641,7 +641,7 @@ class ReadModify:
 
     def __call__(self):
         # Runs in a child process where the global store is legitimately re-established.
-        db = spack.store.STORE.db
+        db = spack.context.default().store.db
         # check that other process can read DB
         _check_db_sanity(db)
         with db.write_transaction():
@@ -872,13 +872,11 @@ def test_old_external_entries_prefix(mutable_database: Database):
     assert record.spec.prefix == record.spec.external_path
 
 
-def test_uninstall_by_spec(mutable_database):
+def test_uninstall_by_spec(mutable_database, ctx: SpackContext):
     with mutable_database.write_transaction():
         for spec in mutable_database.query():
             if mutable_database.installed(spec):
-                spack.package_base.PackageBase.uninstall_by_spec(
-                    spec, spack.store.STORE, force=True
-                )
+                spack.package_base.PackageBase.uninstall_by_spec(spec, ctx.store, force=True)
             else:
                 mutable_database.remove(spec)
     assert len(mutable_database.query()) == 0
@@ -1333,7 +1331,7 @@ def test_reindex_with_upstreams(
         )
     )
 
-    monkeypatch.setattr(spack.store, "STORE", upstream_store)
+    monkeypatch.setitem(ctx.__dict__, "store", upstream_store)
     PackageInstaller([callpath.package], fake=True, explicit=True).install()
 
     local_store = spack.store.create(
@@ -1347,7 +1345,7 @@ def test_reindex_with_upstreams(
             )
         )
     )
-    monkeypatch.setattr(spack.store, "STORE", local_store)
+    monkeypatch.setitem(ctx.__dict__, "store", local_store)
     PackageInstaller([mpileaks.package], fake=True, explicit=True).install()
 
     # Sanity check that callpath is from upstream.
@@ -1357,7 +1355,7 @@ def test_reindex_with_upstreams(
     # Install mpileaks also upstream with the same hash to ensure that determining upstreamness
     # checks local installs before upstream databases, even when the local database is being
     # reindexed.
-    monkeypatch.setattr(spack.store, "STORE", upstream_store)
+    monkeypatch.setitem(ctx.__dict__, "store", upstream_store)
     PackageInstaller([mpileaks.package], fake=True, explicit=True).install()
 
     # Delete the local database

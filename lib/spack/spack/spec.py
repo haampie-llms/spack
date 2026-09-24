@@ -2412,9 +2412,7 @@ class Spec:
         try:
             # If the spec is in the DB, check the installed
             # attribute of the record
-            from spack.store import STORE
-
-            return STORE.db.get_record(self).installed
+            return self.package.context.store.db.get_record(self).installed
         except KeyError:
             # If the spec is not in the DB, the method
             #  above raises a Key error
@@ -2426,9 +2424,7 @@ class Spec:
         if not self.concrete:
             return False
 
-        from spack.store import STORE
-
-        upstream, record = STORE.db.query_by_spec_hash(self.dag_hash())
+        upstream, record = self.package.context.store.db.query_by_spec_hash(self.dag_hash())
         return upstream and record and record.installed
 
     @overload

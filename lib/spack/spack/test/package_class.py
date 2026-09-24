@@ -20,7 +20,6 @@ import spack.error
 import spack.install_test
 import spack.package_base
 import spack.spec
-import spack.store
 import spack.subprocess_context
 import spack.util.filesystem as fs
 from spack.context import SpackContext
@@ -66,10 +65,7 @@ def mock_inspector(config, mock_packages, request, ctx: SpackContext):
     if inspector_cls is NoStaticAnalysis:
         return inspector_cls(configuration=config, repo=mock_packages)
     return inspector_cls(
-        configuration=config,
-        repo=mock_packages,
-        store=spack.store.STORE,
-        binary_index=ctx.binary_index,
+        configuration=config, repo=mock_packages, store=ctx.store, binary_index=ctx.binary_index
     )
 
 

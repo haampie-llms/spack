@@ -9,7 +9,6 @@ import pytest
 import spack.database
 import spack.environment as ev
 import spack.package_base
-import spack.store
 import spack.traverse
 from spack.cmd.stage import StageFilter
 from spack.config import Configuration
@@ -173,13 +172,13 @@ def test_stage_spec_filters(
                 should_be_filtered.append(spec)
         for ins in installed:
             if skip_installed and spec.satisfies(Spec(ins)):
-                assert spack.store.STORE.db.installed(spec)
+                assert ctx.store.db.installed(spec)
                 should_be_filtered.append(spec)
         for exc in exclusions:
             if spec.satisfies(Spec(exc)):
                 should_be_filtered.append(spec)
 
-    filter = StageFilter(exclusions, skip_installed=skip_installed, store=spack.store.STORE)
+    filter = StageFilter(exclusions, skip_installed=skip_installed, store=ctx.store)
     specs_to_stage = [s for s in all_specs if not filter(s)]
     specs_were_filtered = [skip not in specs_to_stage for skip in should_be_filtered]
 

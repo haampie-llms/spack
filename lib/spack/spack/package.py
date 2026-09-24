@@ -64,7 +64,6 @@ from spack.error import (
     SpackAPIWarning,
     SpackError,
 )
-from spack.hooks.sbang import filter_shebang, sbang_install_path, sbang_shebang_line
 from spack.install_test import (
     SkipTest,
     cache_extra_test_sources,
@@ -234,6 +233,33 @@ def filter_system_paths(paths: Iterable[str]) -> List[str]:
         "spack.package.filter_system_paths is deprecated", category=SpackAPIWarning, stacklevel=2
     )
     return _filter_system_paths(paths)
+
+
+def sbang_install_path() -> str:
+    """Location sbang is installed within the install tree."""
+    # Local imports to avoid polluting the package API
+    import spack.context
+    import spack.hooks.sbang
+
+    return spack.hooks.sbang.sbang_install_path_for(spack.context.default().store)
+
+
+def sbang_shebang_line() -> str:
+    """Full shebang line that should be prepended to files to use sbang."""
+    # Local imports to avoid polluting the package API
+    import spack.context
+    import spack.hooks.sbang
+
+    return spack.hooks.sbang.sbang_shebang_line_for(spack.context.default().store)
+
+
+def filter_shebang(path: str) -> bool:
+    """Adds a second shebang line, using sbang, at the beginning of a file, if necessary."""
+    # Local imports to avoid polluting the package API
+    import spack.context
+    import spack.hooks.sbang
+
+    return spack.hooks.sbang.filter_shebang_for(path, spack.context.default().store)
 
 
 def determine_number_of_jobs(

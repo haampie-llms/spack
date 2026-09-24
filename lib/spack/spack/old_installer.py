@@ -242,7 +242,7 @@ def _handle_external_and_upstream(pkg: "spack.package_base.PackageBase", explici
         _print_installed_pkg(f"{pkg.prefix} (external {package_id(pkg.spec)})")
         return True
 
-    if spack.store.STORE.db.installed_upstream(pkg.spec):
+    if pkg.context.store.db.installed_upstream(pkg.spec):
         tty.verbose(
             f"{package_id(pkg.spec)} is installed in an upstream Spack instance at "
             f"{pkg.spec.prefix}"
@@ -373,9 +373,9 @@ def _process_external_package(pkg: "spack.package_base.PackageBase", explicit: b
         # Check if the package was already registered in the DB.
         # If this is the case, then only make explicit if required.
         tty.debug(f"{pre} already registered in DB")
-        record = spack.store.STORE.db.get_record(spec)
+        record = pkg.context.store.db.get_record(spec)
         if explicit and not record.explicit:
-            spack.store.STORE.db.mark(spec, "explicit", True)
+            pkg.context.store.db.mark(spec, "explicit", True)
 
     except KeyError:
         # If not, register it and generate the module file.
@@ -386,7 +386,7 @@ def _process_external_package(pkg: "spack.package_base.PackageBase", explicit: b
 
         # Add to the DB
         tty.debug(f"{pre} registering into DB")
-        spack.store.STORE.db.add(spec, explicit=explicit)
+        pkg.context.store.db.add(spec, explicit=explicit)
 
 
 def _process_binary_cache_tarball(
@@ -426,27 +426,27 @@ def _process_binary_cache_tarball(
 
     tty.msg(f"Extracting {package_id(pkg.spec)} from binary cache")
 
-    with timer.measure("install"), spack.store.filter_padding(store=spack.store.STORE):
+    with timer.measure("install"), spack.store.filter_padding(store=pkg.context.store):
         binary_distribution.extract_tarball(
             pkg.spec,
             tarball_stage,
             force=False,
             timer=timer,
             config=spack.config.CONFIG,
-            store=spack.store.STORE,
+            store=pkg.context.store,
             patchelf=pkg.context.patchelf,
         )
 
         if pkg.spec.spliced:  # overwrite old metadata with new
-            spack.store.STORE.layout.write_spec(
-                pkg.spec, spack.store.STORE.layout.spec_file_path(pkg.spec)
+            pkg.context.store.layout.write_spec(
+                pkg.spec, pkg.context.store.layout.spec_file_path(pkg.spec)
             )
 
         if hasattr(pkg, "_post_buildcache_install_hook"):
             pkg._post_buildcache_install_hook()
 
         pkg.installed_from_binary_cache = True
-        spack.store.STORE.db.add(pkg.spec, explicit=explicit)
+        pkg.context.store.db.add(pkg.spec, explicit=explicit)
         return True
 
 
@@ -565,7 +565,7 @@ def log(pkg: "spack.package_base.PackageBase") -> None:
     Args:
         pkg: the package that was built and installed
     """
-    packages_dir = spack.store.STORE.layout.build_packages_path(pkg.spec)
+    packages_dir = pkg.context.store.layout.build_packages_path(pkg.spec)
 
     # Remove first if we're overwriting another build
     try:
@@ -588,7 +588,7 @@ def log(pkg: "spack.package_base.PackageBase") -> None:
     with fs.working_dir(pkg.stage.path):
         errors = io.StringIO()
         target_dir = os.path.join(
-            spack.store.STORE.layout.metadata_path(pkg.spec), "archived-files"
+            pkg.context.store.layout.metadata_path(pkg.spec), "archived-files"
         )
 
         for glob_expr in spack.builder.create(pkg).archive_files:
@@ -743,7 +743,7 @@ class BuildRequest:
         # if build deps are explicitly requested.
         if include_build_deps or not (
             policy == "cache_only"
-            or spack.store.STORE.db.installed(pkg.spec)
+            or pkg.context.store.db.installed(pkg.spec)
             and pkg.spec.dag_hash() not in self.overwrite
         ):
             depflag |= dt.BUILD
@@ -1012,7 +1012,7 @@ class Task:
         if not os.path.exists(pkg.spec.prefix):
             path = spack.util.path.debug_padded_filter(pkg.spec.prefix)
             tty.debug(f"Creating the installation directory {path}")
-            spack.store.STORE.layout.create_install_directory(pkg.spec, config=spack.config.CONFIG)
+            pkg.context.store.layout.create_install_directory(pkg.spec, config=spack.config.CONFIG)
         else:
             # Set the proper group for the prefix
             group = prefs.get_package_group(pkg.spec, config=spack.config.CONFIG)
@@ -1028,10 +1028,10 @@ class Task:
                 os.chmod(pkg.spec.prefix, perms)
 
             # Ensure the metadata path exists as well
-            fs.mkdirp(spack.store.STORE.layout.metadata_path(pkg.spec), mode=perms)
+            fs.mkdirp(pkg.context.store.layout.metadata_path(pkg.spec), mode=perms)
 
         # Always write host environment - we assume this can change
-        spack.store.STORE.layout.write_host_environment(pkg.spec)
+        pkg.context.store.layout.write_host_environment(pkg.spec)
 
     @property
     def install_action(self):
@@ -1128,7 +1128,7 @@ def check_db(spec: "spack.spec.Spec") -> Tuple[Optional[spack.database.InstallRe
         spec is considered installed
     """
     try:
-        rec = spack.store.STORE.db.get_record(spec)
+        rec = spec.package.context.store.db.get_record(spec)
         installed_in_db = rec.installed if rec else False
     except KeyError:
         # KeyError is raised if there is no matching spec in the database
@@ -1282,7 +1282,7 @@ class BuildTask(Task):
             spack.package_base.PackageBase._verbose = self.process_handle.complete()
             # Note: PARENT of the build process adds the new package to
             # the database, so that we don't need to re-read from file.
-            spack.store.STORE.db.add(pkg.spec, explicit=self.explicit)
+            self.pkg.context.store.db.add(pkg.spec, explicit=self.explicit)
         except spack.error.StopPhase as e:
             # A StopPhase exception means that do_install was asked to
             # stop early from clients, and is not an error at this point
@@ -1342,7 +1342,7 @@ class RewireTask(Task):
         """
         oldstatus = self.status
         self.status = BuildStatus.INSTALLING
-        if not spack.store.STORE.db.installed(self.pkg.spec.build_spec):
+        if not self.pkg.context.store.db.installed(self.pkg.spec.build_spec):
             try:
                 install_args = self.request.install_args
                 unsigned = install_args.get("unsigned")
@@ -1441,6 +1441,10 @@ class PackageInstaller:
             # to omit this option on Windows for now
             concurrent_packages = 1
 
+        #: Resources of the packages to install
+        self.ctx = packages[0].context
+        self.store = self.ctx.store
+
         if isinstance(explicit, bool):
             explicit = {pkg.spec.dag_hash() for pkg in packages} if explicit else set()
 
@@ -1499,7 +1503,7 @@ class PackageInstaller:
         self.installed: Set[str] = set()
 
         # Data store layout
-        self.layout = spack.store.STORE.layout
+        self.layout = self.store.layout
 
         # Locks on specs being built, keyed on the package's unique id
         self.locks: Dict[str, Tuple[str, Optional[lk.Lock]]] = {}
@@ -1520,7 +1524,7 @@ class PackageInstaller:
             for build_request in self.build_requests:
                 # Skip reporting for already installed specs
                 request_record = spack.report.RequestRecord(build_request.pkg.spec)
-                request_record.skip_installed()
+                request_record.skip_installed(self.store)
                 self.reports[build_request.pkg_id] = request_record
         else:
             self.reports = {
@@ -1580,7 +1584,7 @@ class PackageInstaller:
             dep_id = package_id(dep)
 
             # Check for failure since a prefix lock is not required
-            if spack.store.STORE.failure_tracker.has_failed(dep):
+            if self.store.failure_tracker.has_failed(dep):
                 action = "'spack install' the dependency"
                 msg = f"{dep_id} is marked as an install failure: {action}"
                 raise spack.error.InstallError(err.format(request.pkg_id, msg), pkg=dep_pkg)
@@ -1594,7 +1598,7 @@ class PackageInstaller:
                 raise spack.error.InstallError(err.format(request.pkg_id, msg), pkg=request.pkg)
 
             # Flag external and upstream packages as being installed
-            if dep_pkg.spec.external or spack.store.STORE.db.installed_upstream(dep_pkg.spec):
+            if dep_pkg.spec.external or self.store.db.installed_upstream(dep_pkg.spec):
                 self._flag_installed(dep_pkg)
                 continue
 
@@ -1642,7 +1646,7 @@ class PackageInstaller:
 
         if not installed_in_db:
             # Ensure there is no other installed spec with the same prefix dir
-            if spack.store.STORE.db.is_occupied_install_prefix(task.pkg.spec.prefix):
+            if self.store.db.is_occupied_install_prefix(task.pkg.spec.prefix):
                 task.error_result = spack.error.InstallError(
                     f"Install prefix collision for {task.pkg_id}",
                     long_msg=f"Prefix directory {task.pkg.spec.prefix} already "
@@ -1671,7 +1675,7 @@ class PackageInstaller:
 
             # Only update the explicit entry once for the explicit package
             if task.explicit and not rec.explicit:
-                spack.store.STORE.db.mark(task.pkg.spec, "explicit", True)
+                self.store.db.mark(task.pkg.spec, "explicit", True)
 
     def _cleanup_all_tasks(self) -> None:
         """Cleanup all tasks to include releasing their locks."""
@@ -1733,7 +1737,7 @@ class PackageInstaller:
             raise ExternalPackageError(f"{pre} is external")
 
         # Upstream packages cannot be installed locally.
-        if spack.store.STORE.db.installed_upstream(pkg.spec):
+        if self.store.db.installed_upstream(pkg.spec):
             raise UpstreamPackageError(f"{pre} is upstream")
 
         # The package must have a prefix lock at this stage.
@@ -1788,7 +1792,7 @@ class PackageInstaller:
             if lock is None:
                 tty.debug(msg.format("Acquiring", desc, pkg_id, pretty_seconds(timeout or 0)))
                 op = "acquire"
-                lock = spack.store.STORE.prefix_locker.lock(pkg.spec, timeout)
+                lock = self.store.prefix_locker.lock(pkg.spec, timeout)
                 if timeout != lock.default_timeout:
                     tty.warn(f"Expected prefix lock timeout {timeout}, not {lock.default_timeout}")
                 if lock_type == "read":
@@ -1843,7 +1847,7 @@ class PackageInstaller:
             # Clear any persistent failure markings _unless_ they are
             # associated with another process in this parallel build
             # of the spec.
-            spack.store.STORE.failure_tracker.clear(dep, force=False)
+            self.store.failure_tracker.clear(dep, force=False)
 
         # Queue the build spec.
         build_pkg_id = package_id(spec.build_spec)
@@ -1890,12 +1894,12 @@ class PackageInstaller:
                 # Clear any persistent failure markings _unless_ they are
                 # associated with another process in this parallel build
                 # of the spec.
-                spack.store.STORE.failure_tracker.clear(dep, force=False)
+                self.store.failure_tracker.clear(dep, force=False)
 
         install_package = request.install_args.get("install_package")
         if install_package and request.pkg_id not in self.build_tasks:
             # Be sure to clear any previous failure
-            spack.store.STORE.failure_tracker.clear(request.spec, force=True)
+            self.store.failure_tracker.clear(request.spec, force=True)
 
             # If not installing dependencies, then determine their
             # installation status before proceeding
@@ -2095,7 +2099,7 @@ class PackageInstaller:
         err = "" if exc is None else f": {str(exc)}"
         tty.debug(f"Flagging {pkg_id} as failed{err}")
         if mark:
-            self.failed[pkg_id] = spack.store.STORE.failure_tracker.mark(task.pkg.spec)
+            self.failed[pkg_id] = self.store.failure_tracker.mark(task.pkg.spec)
         else:
             self.failed[pkg_id] = None
         task.status = BuildStatus.FAILED
@@ -2197,7 +2201,7 @@ class PackageInstaller:
 
         # Flag a failed spec.  Do not need an (install) prefix lock since
         # assume using a separate (failed) prefix lock file.
-        if pkg_id in self.failed or spack.store.STORE.failure_tracker.has_failed(spec):
+        if pkg_id in self.failed or self.store.failure_tracker.has_failed(spec):
             term_status.clear()
             tty.warn(f"{pkg_id} failed to install")
             self._update_failed(task)
@@ -2319,7 +2323,7 @@ class PackageInstaller:
 
         # Overwrite install exception handling
         except fs.CouldNotRestoreDirectoryBackup as e:
-            spack.store.STORE.db.remove(task.pkg.spec)
+            self.store.db.remove(task.pkg.spec)
             tty.error(
                 f"Recovery of install dir of {task.pkg.name} failed due to "
                 f"{e.outer_exception.__class__.__name__}: {str(e.outer_exception)}. "
@@ -2361,7 +2365,7 @@ class PackageInstaller:
 
         # Perform basic task cleanup for the installed spec to
         # include downgrading the write to a read lock
-        if spack.store.STORE.db.installed(pkg.spec):
+        if self.store.db.installed(pkg.spec):
             self._cleanup_task(pkg)
             # mark installed if we haven't yet - may be discovering installed for the first time
             self._update_installed(task)
@@ -2392,7 +2396,7 @@ class PackageInstaller:
 
         self._check_deprecations()
         self._init_queue()
-        spack.store.STORE.install_sbang(config=spack.config.CONFIG)
+        self.store.install_sbang(config=spack.config.CONFIG)
         failed_build_requests = []
         install_status = InstallStatus(len(self.build_pq))
         active_tasks: List[Task] = []
@@ -2720,12 +2724,14 @@ def build_process(pkg: "spack.package_base.PackageBase", install_args: dict) -> 
     installer = BuildProcessInstaller(pkg, install_args)
 
     # don't print long padded paths in executable debug output.
-    with spack.store.filter_padding(store=spack.store.STORE):
+    with spack.store.filter_padding(store=pkg.context.store):
         return installer.run()
 
 
-def deprecate(spec: "spack.spec.Spec", deprecator: "spack.spec.Spec", link_fn) -> None:
-    """Deprecate this package in favor of deprecator spec"""
+def deprecate(
+    spec: "spack.spec.Spec", deprecator: "spack.spec.Spec", link_fn, *, store: "spack.store.Store"
+) -> None:
+    """Deprecate this package in favor of deprecator spec, in ``store``"""
     # Here we assume we don't deprecate across different stores, and that same hash
     # means same binary artifacts
     if spec.dag_hash() == deprecator.dag_hash():
@@ -2736,28 +2742,28 @@ def deprecate(spec: "spack.spec.Spec", deprecator: "spack.spec.Spec", link_fn) -
         return
 
     # Install deprecator if it isn't installed already
-    if not spack.store.STORE.db.query(deprecator):
+    if not store.db.query(deprecator):
         PackageInstaller([deprecator.package], explicit=True).install()
 
-    old_deprecator = spack.store.STORE.db.deprecator(spec)
+    old_deprecator = store.db.deprecator(spec)
     if old_deprecator:
         # Find this spec file from its old deprecation
-        specfile = spack.store.STORE.layout.deprecated_file_path(spec, old_deprecator)
+        specfile = store.layout.deprecated_file_path(spec, old_deprecator)
     else:
-        specfile = spack.store.STORE.layout.spec_file_path(spec)
+        specfile = store.layout.spec_file_path(spec)
 
     # copy spec metadata to "deprecated" dir of deprecator
-    depr_specfile = spack.store.STORE.layout.deprecated_file_path(spec, deprecator)
+    depr_specfile = store.layout.deprecated_file_path(spec, deprecator)
     fs.mkdirp(os.path.dirname(depr_specfile))
     shutil.copy2(specfile, depr_specfile)
 
     # Any specs deprecated in favor of this spec are re-deprecated in favor of its new deprecator
-    for deprecated in spack.store.STORE.db.specs_deprecated_by(spec):
-        deprecate(deprecated, deprecator, link_fn)
+    for deprecated in store.db.specs_deprecated_by(spec):
+        deprecate(deprecated, deprecator, link_fn, store=store)
 
     # Now that we've handled metadata, uninstall and replace with link
     spack.package_base.PackageBase.uninstall_by_spec(
-        spec, spack.store.STORE, force=True, deprecator=deprecator
+        spec, store, force=True, deprecator=deprecator
     )
     link_fn(deprecator.prefix, spec.prefix)
 

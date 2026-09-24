@@ -11,7 +11,6 @@ import spack.cmd.uninstall
 import spack.environment
 import spack.error
 import spack.repo
-import spack.store
 from spack.context import SpackContext
 from spack.database import Database
 from spack.enums import InstallRecordStatus
@@ -92,7 +91,7 @@ def test_correct_installed_dependents(mutable_database: Database, ctx: SpackCont
 
     # Retrieve all dependent hashes (explicit and implicit, combined)
     explicit_dependents, implicit_dependents = spack.cmd.uninstall.installed_dependents(
-        dependencies, store=spack.store.STORE
+        dependencies, store=ctx.store
     )
     dependents = explicit_dependents + implicit_dependents
     assert dependents
@@ -127,7 +126,7 @@ def test_recursive_uninstall(mutable_database_store: Store):
 
 
 @pytest.mark.db
-def test_uninstall_implicit_dependents_blocks_on_explicit(mutable_database):
+def test_uninstall_implicit_dependents_blocks_on_explicit(mutable_database, ctx: SpackContext):
     """`-r/--implicit-dependents` must refuse when an explicitly installed dependent exists.
 
     In the mock DB, ``mpileaks`` (explicit) transitively depends on ``libelf``, so uninstalling
@@ -137,24 +136,24 @@ def test_uninstall_implicit_dependents_blocks_on_explicit(mutable_database):
         uninstall("-y", "-r", "libelf")
 
     # Nothing was removed.
-    assert len(spack.store.STORE.db.query("libelf", installed=True)) == 1
-    assert len(spack.store.STORE.db.query("mpileaks", installed=True)) == 3
+    assert len(ctx.store.db.query("libelf", installed=True)) == 1
+    assert len(ctx.store.db.query("mpileaks", installed=True)) == 3
 
 
 @pytest.mark.db
-def test_uninstall_implicit_dependents_removes_implicit_chain(mutable_database):
+def test_uninstall_implicit_dependents_removes_implicit_chain(mutable_database, ctx: SpackContext):
     """`-r/--implicit-dependents` recursively uninstalls implicitly installed dependents.
 
     After marking ``mpileaks`` implicit, every dependent of ``libelf`` is implicit, so ``-r``
     should remove the whole chain."""
-    with spack.store.STORE.db.write_transaction():
-        for spec in spack.store.STORE.db.query("mpileaks"):
-            spack.store.STORE.db.mark(spec, "explicit", False)
+    with ctx.store.db.write_transaction():
+        for spec in ctx.store.db.query("mpileaks"):
+            ctx.store.db.mark(spec, "explicit", False)
 
     uninstall("-y", "-r", "libelf")
 
     for name in ("libelf", "callpath", "dyninst", "mpileaks", "libdwarf"):
-        assert len(spack.store.STORE.db.query(name, installed=True)) == 0
+        assert len(ctx.store.db.query(name, installed=True)) == 0
 
 
 @pytest.mark.db
@@ -321,7 +320,7 @@ class TestUninstallFromEnv:
             e = spack.environment.read(env_name, ctx=ctx)
             with e:
                 for _, concretized_spec in e.concretized_specs():
-                    assert spack.store.STORE.db.installed(concretized_spec)
+                    assert ctx.store.db.installed(concretized_spec)
 
     def test_uninstall_force_dependency_shared_between_envs(
         self, environment_setup, ctx: SpackContext
@@ -341,7 +340,7 @@ class TestUninstallFromEnv:
             )
 
             for _, concretized_spec in e1.concretized_specs():
-                assert not spack.store.STORE.db.installed(concretized_spec)
+                assert not ctx.store.db.installed(concretized_spec)
 
         # Everything in e2 depended on diamond-link-bottom, so should also
         # have been uninstalled. The roots should be unchanged though.
@@ -351,7 +350,7 @@ class TestUninstallFromEnv:
                 ["diamond-link-right", "diamond-link-bottom"]
             )
             for _, concretized_spec in e2.concretized_specs():
-                assert not spack.store.STORE.db.installed(concretized_spec)
+                assert not ctx.store.db.installed(concretized_spec)
 
     def test_uninstall_remove_dependency_shared_between_envs(
         self, environment_setup, ctx: SpackContext
@@ -371,7 +370,7 @@ class TestUninstallFromEnv:
             output = uninstall("-y", "--dependents", "--remove", "diamond-link-bottom")
             assert "The following specs will be removed but not uninstalled" in output
             assert not list(e1.roots())
-            assert not spack.store.STORE.db.installed(dtdiamondleft)
+            assert not ctx.store.db.installed(dtdiamondleft)
 
         # Since -f was not specified, all specs in e2 should still be installed
         # (and e2 should be unchanged)
@@ -381,7 +380,7 @@ class TestUninstallFromEnv:
                 ["diamond-link-right", "diamond-link-bottom"]
             )
             for _, concretized_spec in e2.concretized_specs():
-                assert spack.store.STORE.db.installed(concretized_spec)
+                assert ctx.store.db.installed(concretized_spec)
 
     def test_uninstall_dependency_shared_between_envs_fail(
         self, environment_setup, ctx: SpackContext
@@ -402,7 +401,7 @@ class TestUninstallFromEnv:
             ["diamond-link-left", "diamond-link-bottom"]
         )
         for _, concretized_spec in e1.concretized_specs():
-            assert spack.store.STORE.db.installed(concretized_spec)
+            assert ctx.store.db.installed(concretized_spec)
 
     def test_uninstall_force_and_remove_dependency_shared_between_envs(
         self, environment_setup, ctx: SpackContext
@@ -421,7 +420,7 @@ class TestUninstallFromEnv:
             )
             uninstall("-f", "-y", "--dependents", "--remove", "diamond-link-bottom")
             assert not list(e1.roots())
-            assert not spack.store.STORE.db.installed(dtdiamondleft)
+            assert not ctx.store.db.installed(dtdiamondleft)
 
         e2 = spack.environment.read("e2", ctx=ctx)
         with e2:
@@ -429,7 +428,7 @@ class TestUninstallFromEnv:
                 ["diamond-link-right", "diamond-link-bottom"]
             )
             for _, concretized_spec in e2.concretized_specs():
-                assert not spack.store.STORE.db.installed(concretized_spec)
+                assert not ctx.store.db.installed(concretized_spec)
 
     def test_uninstall_keep_dependents_dependency_shared_between_envs(
         self, environment_setup, ctx: SpackContext
@@ -450,7 +449,7 @@ class TestUninstallFromEnv:
             # diamond-link-bottom was removed from the list of roots (note that
             # it would still be installed since diamond-link-left depends on it)
             assert {x.name for x in e1.roots()} == set(["diamond-link-left"])
-            assert spack.store.STORE.db.installed(dtdiamondleft)
+            assert ctx.store.db.installed(dtdiamondleft)
 
         e2 = spack.environment.read("e2", ctx=ctx)
         with e2:
@@ -462,10 +461,10 @@ class TestUninstallFromEnv:
                 for (_, concrete) in e2.concretized_specs()
                 if concrete.name == "diamond-link-right"
             )
-            assert spack.store.STORE.db.installed(dtdiamondright)
+            assert ctx.store.db.installed(dtdiamondright)
             dtdiamondbottom = next(
                 concrete
                 for (_, concrete) in e2.concretized_specs()
                 if concrete.name == "diamond-link-bottom"
             )
-            assert not spack.store.STORE.db.installed(dtdiamondbottom)
+            assert not ctx.store.db.installed(dtdiamondbottom)
