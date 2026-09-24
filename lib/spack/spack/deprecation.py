@@ -253,9 +253,7 @@ def deprecation_attributes_str(reason: str, severity: str, labels: Iterable[str]
     return f"{result}, labels: {labels_str}" if labels_str else result
 
 
-def reusable(
-    specs: Iterable["spack.spec.Spec"], *, policy: Optional[Policy] = None
-) -> List["spack.spec.Spec"]:
+def reusable(specs: Iterable["spack.spec.Spec"], *, policy: Policy) -> List["spack.spec.Spec"]:
     """Return the subset of ``specs`` that can be reused under the deprecation policy.
 
     A candidate is rejected when it, or any node in its checked closure, has a disallowed
@@ -264,10 +262,9 @@ def reusable(
 
     Args:
         specs: the reuse candidates.
-        policy: the policy to apply; defaults to the configured one.
+        policy: the policy to apply.
     """
-    resolved = policy or Policy.from_config(spack.config.CONFIG, repo=spack.repo.PATH)
-    deptypes = resolved.deptypes
+    deptypes = policy.deptypes
     candidates = list(specs)
 
     # One post-order pass over the union of the candidate DAGs, keyed by hash so a node shared
@@ -276,7 +273,7 @@ def reusable(
     for node in spack.traverse.traverse_nodes(
         candidates, deptype=deptypes, order="post", key=spack.traverse.by_dag_hash
     ):
-        if resolved.disallowed(node) or any(
+        if policy.disallowed(node) or any(
             edge.spec.dag_hash() in rejected
             for edge in node.edges_to_dependencies(depflag=deptypes)
         ):
@@ -285,21 +282,16 @@ def reusable(
     return [s for s in candidates if s.dag_hash() not in rejected]
 
 
-def check_deprecations(
-    seeds: Iterable["spack.spec.Spec"], *, policy: Optional[Policy] = None
-) -> None:
+def check_deprecations(seeds: Iterable["spack.spec.Spec"], *, policy: Policy) -> None:
     """Raise if the DAG reachable from any seed contains a disallowed deprecation.
 
     Args:
         seeds: the specs to check, together with the DAG reachable from them.
-        policy: the policy to apply, together with the closure it checks; defaults to the
-            configured one.
+        policy: the policy to apply, together with the closure it checks.
     """
-    resolved = policy or Policy.from_config(spack.config.CONFIG, repo=spack.repo.PATH)
-
     violations: List[str] = []
-    for node in spack.traverse.traverse_nodes(list(seeds), deptype=resolved.deptypes):
-        found = resolved.disallowed(node)
+    for node in spack.traverse.traverse_nodes(list(seeds), deptype=policy.deptypes):
+        found = policy.disallowed(node)
         if found:
             violations.append(_format_violations(node, found))
 

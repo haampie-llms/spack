@@ -90,7 +90,7 @@ def graph(parser, args, ctx: spack.context.SpackContext):
         tty.die("no spec matching the query")
 
     if args.static:
-        static_graph_dot(specs, depflag=args.deptype)
+        static_graph_dot(specs, depflag=args.deptype, ctx=ctx)
         return
 
     if args.dot:

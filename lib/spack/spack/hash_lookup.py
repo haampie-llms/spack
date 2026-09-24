@@ -8,9 +8,8 @@ searching the active environment, the installed store, the binary cache, and
 configured externals (via spack.externals_config).
 """
 
-from typing import List, Optional
+from typing import List
 
-import spack.active_environment
 import spack.binary_distribution
 import spack.context
 import spack.error
@@ -43,8 +42,7 @@ def _lookup_one(
     Searches in order: active environment, configured externals, installed store, binary cache.
     Raises InvalidHashError if nothing matches, AmbiguousHashError if more than one matches.
     """
-    # The active environment is not part of SpackContext, so it is still read globally.
-    active_env = spack.active_environment.active_environment()
+    active_env = context.environment
 
     matches = (
         (active_env.all_matching_specs(spec) if active_env else [])
@@ -67,7 +65,7 @@ def _lookup_one(
 
 
 def lookup_hash(
-    spec: "spack.spec.Spec", *, context: Optional[spack.context.SpackContext] = None
+    spec: "spack.spec.Spec", *, context: spack.context.SpackContext
 ) -> "spack.spec.Spec":
     """Return a copy of spec with all abstract-hash nodes replaced by their concrete counterparts.
 
@@ -76,8 +74,6 @@ def lookup_hash(
     """
     if spec.concrete or not any(node.abstract_hash for node in spec.traverse()):
         return spec
-
-    context = context or spack.context.default()
 
     result = spec.copy(deps=False)
     if result.abstract_hash:
@@ -101,9 +97,7 @@ def lookup_hash(
     return result
 
 
-def replace_hash(
-    spec: "spack.spec.Spec", *, context: Optional[spack.context.SpackContext] = None
-) -> None:
+def replace_hash(spec: "spack.spec.Spec", *, context: spack.context.SpackContext) -> None:
     """Populate spec in-place by resolving all abstract-hash nodes.
 
     Destructive counterpart to lookup_hash. No-op if spec has no abstract-hash nodes.

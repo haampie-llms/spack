@@ -408,7 +408,7 @@ def _mirror(args, ctx):
         spack.util.tty.msg(msg.format(spec_str, mirror_dir))
         # Suppress tty from the call below for terser messages
         spack.util.tty.set_msg_enabled(False)
-        spec = spack.concretize.concretize_one(spec_str)
+        spec = spack.concretize.concretize_one(spec_str, ctx)
         for node in spec.traverse():
             if node.external:
                 continue

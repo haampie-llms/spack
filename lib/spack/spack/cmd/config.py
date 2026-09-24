@@ -432,7 +432,7 @@ def _can_update_config_file(scope: spack.config.ConfigScope, cfg_file):
     return False
 
 
-def _config_change_requires_scope(config, path, spec, scope, match_spec=None):
+def _config_change_requires_scope(config, repo, path, spec, scope, match_spec=None):
     """Return whether or not anything changed."""
     require = config.get(path, scope=scope)
     if not require:
@@ -452,7 +452,7 @@ def _config_change_requires_scope(config, path, spec, scope, match_spec=None):
             return spec_str
         elif not init_spec.intersects(spec):
             changed = True
-            return str(spack.spec.Spec.override(init_spec, spec))
+            return str(spack.spec.Spec.override(init_spec, spec, repo=repo))
         else:
             # Don't override things if they intersect, otherwise we'd
             # be e.g. attaching +debug to every single version spec
@@ -479,7 +479,7 @@ def _config_change_requires_scope(config, path, spec, scope, match_spec=None):
     return changed
 
 
-def _config_change(config, config_path, match_spec_str=None):
+def _config_change(config, repo, config_path, match_spec_str=None):
     all_components = spack.config.process_config_path(config_path)
     key_components = all_components[:-1]
     key_path = ":".join(key_components)
@@ -499,7 +499,7 @@ def _config_change(config, config_path, match_spec_str=None):
         changed = False
         for scope in config.writable_scope_names():
             changed |= _config_change_requires_scope(
-                config, key_path, spec, scope, match_spec=match_spec
+                config, repo, key_path, spec, scope, match_spec=match_spec
             )
 
         if not changed:
@@ -526,7 +526,7 @@ def _config_change(config, config_path, match_spec_str=None):
 
 
 def config_change(args, ctx):
-    _config_change(ctx.config, args.path, args.match_spec)
+    _config_change(ctx.config, ctx.repo, args.path, args.match_spec)
 
 
 def config_update(args, ctx):

@@ -202,7 +202,7 @@ def parse_specs(
 
     to_concretize: List[spack.concretize.SpecPairInput] = [(s, None) for s in specs]
     return spack.concretize.concretize_spec_pairs(
-        to_concretize, tests=tests, ui=ui or TerminalUI()
+        to_concretize, ctx, tests=tests, ui=ui or TerminalUI()
     )
 
 
@@ -214,9 +214,9 @@ def matching_spec_from_env(spec, ctx: "spack.context.SpackContext"):
     """
     env = ctx.environment
     if env:
-        return env.matching_spec(spec) or spack.concretize.concretize_one(spec)
+        return env.matching_spec(spec) or spack.concretize.concretize_one(spec, ctx)
     else:
-        return spack.concretize.concretize_one(spec)
+        return spack.concretize.concretize_one(spec, ctx)
 
 
 def matching_specs_from_env(specs, ctx: "spack.context.SpackContext"):
@@ -233,7 +233,7 @@ def matching_specs_from_env(specs, ctx: "spack.context.SpackContext"):
         [(concrete, concrete) for _, concrete in env.concretized_specs()] if env else []
     )
     return spack.concretize.concretize_spec_pairs(
-        spec_pairs + additional_concrete_specs, ui=TerminalUI()
+        spec_pairs + additional_concrete_specs, ctx, ui=TerminalUI()
     )[: len(spec_pairs)]
 
 

@@ -19,6 +19,7 @@ import spack.config
 import spack.package_base
 import spack.repo
 import spack.spec
+from spack.context import SpackContext
 from spack.util.filesystem import working_dir
 from spack.version import (
     ClosedOpenRange,
@@ -756,6 +757,7 @@ def test_git_hash_comparisons(
     commit_idx,
     expected_satisfies,
     expected_not_satisfies,
+    ctx: SpackContext,
 ):
     """Check that hashes compare properly to versions"""
     repo_path, filename, commits = mock_git_version_info
@@ -764,7 +766,7 @@ def test_git_hash_comparisons(
     )
 
     spec = spack.concretize.concretize_one(
-        spack.spec.Spec(f"git-test-commit@{commits[commit_idx]}")
+        spack.spec.Spec(f"git-test-commit@{commits[commit_idx]}"), ctx
     )
     for item in expected_satisfies:
         assert spec.satisfies(item)
@@ -773,7 +775,9 @@ def test_git_hash_comparisons(
         assert not spec.satisfies(item)
 
 
-def test_git_ref_comparisons(mock_git_version_info, install_mockery, mock_packages, monkeypatch):
+def test_git_ref_comparisons(
+    mock_git_version_info, install_mockery, mock_packages, monkeypatch, ctx: SpackContext
+):
     """Check that hashes compare properly to versions"""
     repo_path, filename, commits = mock_git_version_info
     monkeypatch.setattr(
@@ -781,13 +785,13 @@ def test_git_ref_comparisons(mock_git_version_info, install_mockery, mock_packag
     )
 
     # Spec based on tag v1.0
-    spec_tag = spack.concretize.concretize_one("git-test-commit@git.v1.0")
+    spec_tag = spack.concretize.concretize_one("git-test-commit@git.v1.0", ctx)
     assert spec_tag.satisfies("@1.0")
     assert not spec_tag.satisfies("@1.1:")
     assert str(spec_tag.version) == "git.v1.0=1.0"
 
     # Spec based on branch 1.x
-    spec_branch = spack.concretize.concretize_one("git-test-commit@git.1.x")
+    spec_branch = spack.concretize.concretize_one("git-test-commit@git.1.x", ctx)
     assert spec_branch.satisfies("@1.2")
     assert spec_branch.satisfies("@1.1:1.3")
     assert str(spec_branch.version) == "git.1.x=1.2"
@@ -1158,7 +1162,7 @@ def test_inclusion_upperbound():
 
 @pytest.mark.not_on_windows("Not supported on Windows (yet)")
 def test_git_version_assignment_survives_serialization(
-    mock_git_version_info, mock_packages, config, monkeypatch
+    mock_git_version_info, mock_packages, config, monkeypatch, ctx: SpackContext
 ):
     """Test that the Spack version assigned to a git ref at concretization round-trips
     through serialization."""
@@ -1166,14 +1170,14 @@ def test_git_version_assignment_survives_serialization(
     monkeypatch.setattr(
         spack.package_base.PackageBase, "git", "file://%s" % repo_path, raising=False
     )
-    spec = spack.concretize.concretize_one(f"git-test-commit@{commits[-2]}")
+    spec = spack.concretize.concretize_one(f"git-test-commit@{commits[-2]}", ctx)
     assert spec.satisfies("@1.0")
     assert spack.spec.Spec.from_dict(spec.to_dict()) == spec
 
 
 @pytest.mark.not_on_windows("Not supported on Windows (yet)")
 def test_resolved_git_version_is_shown_in_str(
-    mock_git_version_info, mock_packages, config, monkeypatch
+    mock_git_version_info, mock_packages, config, monkeypatch, ctx: SpackContext
 ):
     """Test that a GitVersion from a commit without a user supplied version is printed
     as <hash>=<version>, and not just <hash>."""
@@ -1182,7 +1186,7 @@ def test_resolved_git_version_is_shown_in_str(
         spack.package_base.PackageBase, "git", "file://%s" % repo_path, raising=False
     )
     commit = commits[-3]
-    spec = spack.concretize.concretize_one(f"git-test-commit@{commit}")
+    spec = spack.concretize.concretize_one(f"git-test-commit@{commit}", ctx)
 
     assert spec.version.satisfies(ver("1.0"))
     assert str(spec.version) == f"{commit}=1.0-git.1"

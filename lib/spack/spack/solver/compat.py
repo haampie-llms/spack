@@ -59,6 +59,8 @@ def _ensure_clingo_or_raise(clingo_mod: ModuleType) -> None:
     import spack.config
     import spack.paths as sp
 
+    config = spack.config.CONFIG
+
     try:
         clingo_mod.Symbol
     except AttributeError:
@@ -82,8 +84,7 @@ def _ensure_clingo_or_raise(clingo_mod: ModuleType) -> None:
         if (
             pathlib.Path(
                 spack.config.canonicalize_path(
-                    spack.config.CONFIG.get("bootstrap:root", sp.default_user_bootstrap_path),
-                    config=spack.config.CONFIG,
+                    config.get("bootstrap:root", sp.default_user_bootstrap_path), config=config
                 )
             )
             in pathlib.Path(clingo_mod.__file__).parents

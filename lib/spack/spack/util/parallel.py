@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
 import concurrent.futures
+import functools
 import multiprocessing
 import os
 import sys
@@ -80,12 +81,14 @@ def imap_unordered(
     maxtaskperchild: Optional[int] = None,
     debug=False,
     serialize_env: bool = False,
+    shared: Any = None,
 ):
     """Wrapper around multiprocessing.Pool.imap_unordered.
 
     Args:
-        f: function to apply
+        f: function to apply, called as ``f(shared, args)``
         list_of_args: list of tuples of args for the task
+        shared: object sent once to each worker process, and passed to every task
         processes: maximum number of processes allowed
         debug: if False, raise an exception containing just the error messages
             from workers, if True an exception with complete stacktraces
@@ -97,16 +100,21 @@ def imap_unordered(
     """
 
     if not ENABLE_PARALLELISM or len(list_of_args) <= 1:
-        yield from map(f, list_of_args)
+        yield from (f(shared, args) for args in list_of_args)
         return
 
     from spack.subprocess_context import GlobalStateMarshaler
 
     marshaler = GlobalStateMarshaler(serialize_env=serialize_env)
     with multiprocessing.Pool(
-        processes, initializer=marshaler.restore, maxtasksperchild=maxtaskperchild
+        processes,
+        initializer=_init_worker,
+        initargs=(marshaler, shared),
+        maxtasksperchild=maxtaskperchild,
     ) as p:
-        for result in p.imap_unordered(Task(f), list_of_args):
+        for result in p.imap_unordered(
+            Task(functools.partial(_call_with_shared, f)), list_of_args
+        ):
             if isinstance(result, ErrorFromWorker):
                 raise RuntimeError(result.stacktrace if debug else str(result))
             yield result

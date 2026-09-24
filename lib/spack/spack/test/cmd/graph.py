@@ -5,6 +5,7 @@
 import pytest
 
 import spack.concretize
+from spack.context import SpackContext
 from spack.main import SpackCommand, SpackCommandError
 
 graph = SpackCommand("graph")
@@ -26,9 +27,9 @@ def test_graph_dot():
 
 @pytest.mark.db
 @pytest.mark.usefixtures("mock_packages", "database")
-def test_graph_dot_hashes():
+def test_graph_dot_hashes(ctx: SpackContext):
     """Tests that --long/--very-long control the hash in --dot node labels"""
-    spec = spack.concretize.concretize_one("dt-diamond")
+    spec = spack.concretize.concretize_one("dt-diamond", ctx)
     no_hash = f'label="{spec.format("{name}{@version}")}"'
     short_hash = f'label="{spec.format("{name}{@version}{/hash:7}")}"'
     full_hash = f'label="{spec.format("{name}{@version}{/hash}")}"'

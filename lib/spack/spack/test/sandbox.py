@@ -18,6 +18,7 @@ from typing import List, Tuple
 import spack.concretize
 import spack.sandbox
 import spack.store
+from spack.context import SpackContext
 from spack.installer.build import _enable_sandbox
 
 
@@ -137,13 +138,18 @@ class MockSandbox(spack.sandbox.Sandbox):
 
 
 def test_enable_sandbox_paths(
-    config, mock_packages, monkeypatch, temporary_store: spack.store.Store, tmp_path: pathlib.Path
+    config,
+    mock_packages,
+    monkeypatch,
+    temporary_store: spack.store.Store,
+    tmp_path: pathlib.Path,
+    ctx: SpackContext,
 ):
     """Test that _enable_sandbox in the installer calls allow_read/allow_write correctly."""
     mock_sandbox = MockSandbox()
     monkeypatch.setattr(spack.sandbox, "get_sandbox", lambda: mock_sandbox)
 
-    spec = spack.concretize.concretize_one("dependent-install")
+    spec = spack.concretize.concretize_one("dependent-install", ctx)
 
     # Create prefix directories so resolved.exists() passes
     pathlib.Path(spec.prefix).mkdir(parents=True, exist_ok=True)

@@ -10,6 +10,7 @@ import spack.environment as ev
 import spack.repo
 import spack.spec
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.main import SpackCommand
 
 pytestmark = [
@@ -156,8 +157,8 @@ def test_mutate_namespace(repo_builder):
 
 
 @pytest.mark.parametrize("constraint", ["foo", "foo.bar", "foo%cmake@1.0", "foo@1.1:", "foo/abc"])
-def test_mutate_spec_invalid(constraint):
-    spec = spack.concretize.concretize_one("cmake-client")
+def test_mutate_spec_invalid(constraint, ctx: SpackContext):
+    spec = spack.concretize.concretize_one("cmake-client", ctx)
     with pytest.raises(spack.spec.SpecMutationError):
         spec.mutate(spack.spec.Spec(constraint))
 

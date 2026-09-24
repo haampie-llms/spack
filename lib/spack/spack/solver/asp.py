@@ -66,7 +66,6 @@ import spack.variant as vt
 import spack.version as vn
 import spack.version.git_ref_lookup
 from spack import traverse
-from spack.active_environment import active_environment
 from spack.compilers.libraries import CompilerPropertyDetector
 from spack.enums import DeprecationSeverity
 from spack.spec import EMPTY_SPEC
@@ -2508,7 +2507,7 @@ class SpackSolverSetup:
         # they will be used in addition to command line specs
         # in determining known versions/targets/os
         dev_specs: Tuple[spack.spec.Spec, ...] = ()
-        env = active_environment()
+        env = self.context.environment
         if env:
             dev_specs = tuple(
                 self._assign_git_versions(spack.spec.Spec(info["spec"])).constrained(
@@ -3351,10 +3350,10 @@ def post_process_concretization_result(
     for s in specs.values():
         # Add external paths to specs with just external modules
         _ensure_external_path_if_external(s, repo=context.repo)
-        _develop_specs_from_env(s, active_environment(), config=context.config)
+        _develop_specs_from_env(s, context.environment, config=context.config)
 
         # check for commits must happen after all version adaptations are complete
-        _specs_with_commits(s, repo=context.repo)
+        _specs_with_commits(s, ctx=context)
 
     # mark concrete and assign hashes to all specs in the solve
     spack.spec.assign_hashes(roots.values(), repo=context.repo)
@@ -3412,8 +3411,8 @@ def execute_explicit_splices(
     return new_specs
 
 
-def _specs_with_commits(spec, *, repo: spack.repo.RepoPath):
-    pkg_class = repo.get_pkg_class(spec.fullname)
+def _specs_with_commits(spec, *, ctx: "spack.context.SpackContext"):
+    pkg_class = ctx.repo.get_pkg_class(spec.fullname)
     if not pkg_class.needs_commit(spec.version):
         return
 

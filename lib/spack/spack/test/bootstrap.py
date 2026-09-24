@@ -454,7 +454,7 @@ def _fake_request(probes: List[Any], result: Optional[str] = None):
         metadata_name="zlib",
         probe=probe,
         installer_args={},
-        concretize=spack.concretize.concretize_one,
+        concretize=spack.bootstrap.core._concretize,
     )
 
 
@@ -567,7 +567,7 @@ class _RecordingInstaller:
 class _FakeConcreteSpec:
     """Stand-in for the result of concretization. Holds a recognizable ``package``."""
 
-    def __init__(self, abstract_spec: Any) -> None:
+    def __init__(self, abstract_spec: Any, ctx: Any = None) -> None:
         self.abstract_spec = abstract_spec
         self.package = f"package of {abstract_spec}"
 

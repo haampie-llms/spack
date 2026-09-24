@@ -180,7 +180,7 @@ def solve(parser, args, ctx: spack.context.SpackContext):
     if not specs:
         return
 
-    spack.concretize.ensure_compilers_in_configuration()
+    spack.concretize.ensure_compilers_in_configuration(ctx=ctx)
     solver = asp.Solver(context=ctx)
     output = sys.stdout if "asp" in show else None
     setup_only = set(show) == {"asp"}

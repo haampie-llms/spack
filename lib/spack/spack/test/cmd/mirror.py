@@ -212,8 +212,8 @@ def test_mirror_spec_from_env(
 
 
 @pytest.fixture
-def source_for_pkg_with_hash(mock_packages, tmp_path: pathlib.Path):
-    s = spack.concretize.concretize_one("trivial-pkg-with-valid-hash")
+def source_for_pkg_with_hash(mock_packages, tmp_path: pathlib.Path, ctx: SpackContext):
+    s = spack.concretize.concretize_one("trivial-pkg-with-valid-hash", ctx)
     local_url_basename = os.path.basename(s.package.url)
     local_path = tmp_path / local_url_basename
     local_path.write_text(s.package.hashed_content, encoding="utf-8")
@@ -231,7 +231,8 @@ def test_mirror_skip_unstable(
     mirror_dir = str(tmp_path_factory.mktemp("mirror-dir"))
 
     specs = [
-        spack.concretize.concretize_one(x) for x in ["git-test", "trivial-pkg-with-valid-hash"]
+        spack.concretize.concretize_one(x, ctx)
+        for x in ["git-test", "trivial-pkg-with-valid-hash"]
     ]
     spack.cmd.mirror.create(mirror_dir, specs, ctx, skip_unstable_versions=True)
 
@@ -271,7 +272,8 @@ def test_exclude_specs(mock_packages, config, ctx: SpackContext):
 
     mirror_specs = spack.cmd.mirror._specs_to_mirror(args, ctx)
     expected_include = {
-        spack.concretize.concretize_one(x) for x in ["mpich@3.0.3", "mpich@3.0.4", "mpich@3.0"]
+        spack.concretize.concretize_one(x, ctx)
+        for x in ["mpich@3.0.3", "mpich@3.0.4", "mpich@3.0"]
     }
     expected_exclude = {spack.spec.Spec(x) for x in ["mpich@3.0.1", "mpich@3.0.2", "mpich@1.0"]}
     assert expected_include <= set(mirror_specs)
@@ -305,7 +307,8 @@ mpich@1.0
 
     mirror_specs = spack.cmd.mirror._specs_to_mirror(args, ctx)
     expected_include = {
-        spack.concretize.concretize_one(x) for x in ["mpich@3.0.3", "mpich@3.0.4", "mpich@3.0"]
+        spack.concretize.concretize_one(x, ctx)
+        for x in ["mpich@3.0.3", "mpich@3.0.4", "mpich@3.0"]
     }
     expected_exclude = {spack.spec.Spec(x) for x in ["mpich@3.0.1", "mpich@3.0.2", "mpich@1.0"]}
     assert expected_include <= set(mirror_specs)
@@ -757,6 +760,7 @@ def test_git_provenance_url_fails_mirror_resolves_commit(
     tmp_path: pathlib.Path,
     mutable_config,
     mirror_knows_commit,
+    ctx: SpackContext,
 ):
     """Extract git commit from a source mirror since other methods failed"""
     repo_path = mock_git_repository.path
@@ -774,7 +778,7 @@ def test_git_provenance_url_fails_mirror_resolves_commit(
         mirror("create", "-d", mirror_path, "git-test-commit@main")
     mirror("add", "--type", "source", "test-mirror", mirror_path)
 
-    spec = spack.concretize.concretize_one("git-test-commit@main")
+    spec = spack.concretize.concretize_one("git-test-commit@main", ctx)
 
     assert spec.package.fetcher.source_id() == gold_commit
     assert "commit" in spec.variants
@@ -784,7 +788,13 @@ def test_git_provenance_url_fails_mirror_resolves_commit(
 @pytest.mark.require_provenance
 @pytest.mark.disable_clean_stage_check
 def test_git_provenance_relative_to_mirror(
-    git, mock_git_version_info, mock_packages, monkeypatch, tmp_path: pathlib.Path, mutable_config
+    git,
+    mock_git_version_info,
+    mock_packages,
+    monkeypatch,
+    tmp_path: pathlib.Path,
+    mutable_config,
+    ctx: SpackContext,
 ):
     """Integration test to evaluate how commit resolution should behave with a mirror
 
@@ -808,10 +818,10 @@ def test_git_provenance_relative_to_mirror(
     git("-C", repo_path, "commit", "--no-gpg-sign", "--allow-empty", "-m", "bump sha")
     head_commit = git("-C", repo_path, "rev-parse", "main", output=str).strip()
 
-    spec_mirror = spack.concretize.concretize_one("git-test-commit@main")
+    spec_mirror = spack.concretize.concretize_one("git-test-commit@main", ctx)
     assert spec_mirror.variants["commit"].value == mirror_commit
 
-    spec_head = spack.concretize.concretize_one(f"git-test-commit@main commit={head_commit}")
+    spec_head = spack.concretize.concretize_one(f"git-test-commit@main commit={head_commit}", ctx)
     assert spec_head.variants["commit"].value == head_commit
 
 

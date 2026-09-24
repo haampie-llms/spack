@@ -64,7 +64,7 @@ def mock_package_perms(monkeypatch):
 def test_modules_written_with_proper_permissions(
     mock_module_filename, mock_package_perms, mock_packages, config, ctx: SpackContext
 ):
-    spec = spack.concretize.concretize_one("mpileaks")
+    spec = spack.concretize.concretize_one("mpileaks", ctx)
 
     # The code tested is common to all module types, but has to be tested from
     # one. Tcl picked at random
@@ -83,7 +83,7 @@ def test_modules_default_symlink(
     config,
     ctx: SpackContext,
 ):
-    spec = spack.concretize.concretize_one("mpileaks@2.3")
+    spec = spack.concretize.concretize_one("mpileaks@2.3", ctx)
     mock_module_defaults(spec.format("{name}{@version}"), True)
 
     generator_cls = spack.modules.module_types[module_type]
@@ -185,7 +185,7 @@ def test_load_installed_package_not_in_repo(
     install_mockery, mock_fetch, monkeypatch, ctx: SpackContext
 ):
     """Test that installed packages that have been removed are still loadable"""
-    spec = spack.concretize.concretize_one("trivial-install-test-package")
+    spec = spack.concretize.concretize_one("trivial-install-test-package", ctx)
     PackageInstaller([spec.package], explicit=True).install()
     spack.modules.module_types["tcl"].from_spec(spec, "default", True, ctx=ctx).write()
 

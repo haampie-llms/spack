@@ -182,7 +182,7 @@ def test_bootstrap_mirror_metadata(
     """
     old_create = spack.cmd.mirror.create
     monkeypatch.setattr(spack.cmd.mirror, "create", lambda p, s, r: old_create(p, [], r))
-    monkeypatch.setattr(spack.concretize, "concretize_one", lambda p: spack.spec.Spec(p))
+    monkeypatch.setattr(spack.concretize, "concretize_one", lambda p, ctx: spack.spec.Spec(p))
 
     # Create the mirror in a temporary folder
     _bootstrap("mirror", str(tmp_path))

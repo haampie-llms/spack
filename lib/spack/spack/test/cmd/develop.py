@@ -291,13 +291,14 @@ def test_develop_full_git_repo(
     monkeypatch,
     mutable_config,
     request,
+    ctx: SpackContext,
 ):
     repo_path, filename, commits = mock_git_version_info
     monkeypatch.setattr(
         spack.package_base.PackageBase, "git", "file://%s" % repo_path, raising=False
     )
 
-    spec = spack.concretize.concretize_one("git-test-commit@1.2")
+    spec = spack.concretize.concretize_one("git-test-commit@1.2", ctx)
     try:
         spec.package.do_stage()
         commits = _git_commit_list(spec.package.stage[0].source_path)

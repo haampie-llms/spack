@@ -30,6 +30,7 @@ import spack.repo
 import spack.spec
 import spack.util.spack_json as sjson
 import spack.util.spack_yaml as syaml
+from spack.context import SpackContext
 from spack.spec import Spec, save_dependency_specfiles
 from spack.test.conftest import RepoBuilder
 from spack.util.spack_yaml import SpackYAMLError, syaml_dict
@@ -102,16 +103,16 @@ def test_invalid_json_spec(invalid_json, error_message):
         "mpileaks",
     ],
 )
-def test_roundtrip_concrete_specs(abstract_spec, config, mock_packages):
+def test_roundtrip_concrete_specs(abstract_spec, config, mock_packages, ctx: SpackContext):
     check_yaml_round_trip(Spec(abstract_spec))
     check_json_round_trip(Spec(abstract_spec))
-    concrete_spec = spack.concretize.concretize_one(abstract_spec)
+    concrete_spec = spack.concretize.concretize_one(abstract_spec, ctx)
     check_yaml_round_trip(concrete_spec)
     check_json_round_trip(concrete_spec)
 
 
-def test_yaml_subdag(config, mock_packages):
-    spec = spack.concretize.concretize_one("mpileaks^mpich+debug")
+def test_yaml_subdag(config, mock_packages, ctx: SpackContext):
+    spec = spack.concretize.concretize_one("mpileaks^mpich+debug", ctx)
     yaml_spec = Spec.from_yaml(spec.to_yaml())
     json_spec = Spec.from_json(spec.to_json())
 
@@ -121,7 +122,7 @@ def test_yaml_subdag(config, mock_packages):
 
 
 @pytest.mark.parametrize("spec_str", ["mpileaks ^zmpi", "dttop", "dtuse"])
-def test_using_ordered_dict(config, mock_packages, spec_str):
+def test_using_ordered_dict(config, mock_packages, spec_str, ctx: SpackContext):
     """Checks that we use syaml_dicts for spec serialization.
 
     Necessary to make sure that dag_hash is stable across python
@@ -140,7 +141,7 @@ def test_using_ordered_dict(config, mock_packages, spec_str):
                     max_level = nlevel
         return max_level
 
-    s = spack.concretize.concretize_one(spec_str)
+    s = spack.concretize.concretize_one(spec_str, ctx)
     level = descend_and_check(s.to_node_dict())
     # level just makes sure we are doing something here
     assert level >= 5
@@ -148,7 +149,7 @@ def test_using_ordered_dict(config, mock_packages, spec_str):
 
 @pytest.mark.parametrize("spec_str", ["mpileaks ^zmpi", "dttop", "dtuse"])
 def test_ordered_read_not_required_for_consistent_dag_hash(
-    spec_str, mutable_config: spack.config.Configuration, mock_packages
+    spec_str, mutable_config: spack.config.Configuration, mock_packages, ctx: SpackContext
 ):
     """Make sure ordered serialization isn't required to preserve hashes.
 
@@ -172,7 +173,7 @@ def test_ordered_read_not_required_for_consistent_dag_hash(
         },
     )
 
-    spec = spack.concretize.concretize_one(spec_str)
+    spec = spack.concretize.concretize_one(spec_str, ctx)
 
     if spec_str == "dtuse":
         assert spec.external and spec.extra_attributes == extra_attributes
@@ -234,7 +235,7 @@ def check_specs_equal(original_spec, spec_yaml_path):
 
 
 def test_save_dependency_spec_jsons_subset(
-    tmp_path: pathlib.Path, config, repo_builder: RepoBuilder
+    tmp_path: pathlib.Path, config, repo_builder: RepoBuilder, ctx: SpackContext
 ):
     output_path = tmp_path / "spec_jsons"
     output_path.mkdir()
@@ -248,7 +249,7 @@ def test_save_dependency_spec_jsons_subset(
     repo_builder.add_package("pkg-a", dependencies=[("pkg-b", None, None), ("pkg-c", None, None)])
 
     with spack.repo.use_repositories(repo_builder.root):
-        spec_a = spack.concretize.concretize_one("pkg-a")
+        spec_a = spack.concretize.concretize_one("pkg-a", ctx)
         b_spec = spec_a["pkg-b"]
         c_spec = spec_a["pkg-c"]
 
@@ -258,7 +259,7 @@ def test_save_dependency_spec_jsons_subset(
         assert check_specs_equal(c_spec, str(output_path / "pkg-c.json"))
 
 
-def test_legacy_yaml(install_mockery, mock_packages):
+def test_legacy_yaml(install_mockery, mock_packages, ctx: SpackContext):
     """Tests a simple legacy YAML with a dependency and ensures spec survives
     concretization."""
     yaml = """
@@ -315,7 +316,7 @@ spec:
     build_hash: iaapywazxgetn6gfv2cfba353qzzqvhy
 """
     spec = Spec.from_yaml(yaml)
-    concrete_spec = spack.concretize.concretize_one(spec)
+    concrete_spec = spack.concretize.concretize_one(spec, ctx)
     assert concrete_spec.eq_dag(spec)
 
 
@@ -585,14 +586,16 @@ def test_specfile_alias_is_updated():
 
 
 @pytest.mark.parametrize("spec_str", ["mpileaks %gcc", "mpileaks ^zmpi ^callpath%gcc"])
-def test_direct_edges_and_round_tripping_to_dict(spec_str, config, mock_packages):
+def test_direct_edges_and_round_tripping_to_dict(
+    spec_str, config, mock_packages, ctx: SpackContext
+):
     """Tests that we preserve edge information when round-tripping to dict"""
     original = Spec(spec_str)
     reconstructed = Spec.from_dict(original.to_dict())
     assert original == reconstructed
     assert original.to_dict() == reconstructed.to_dict()
 
-    concrete = spack.concretize.concretize_one(spec_str)
+    concrete = spack.concretize.concretize_one(spec_str, ctx)
     concrete_reconstructed = Spec.from_dict(concrete.to_dict())
     assert concrete == concrete_reconstructed
     assert concrete.to_dict() == concrete_reconstructed.to_dict()
@@ -629,10 +632,10 @@ def test_parallel_edges_are_serialized_in_a_canonical_order(mock_packages):
     assert forward.dag_hash() == backward.dag_hash()
 
 
-def test_pickle_preserves_identity_and_prefix(config, mock_packages):
+def test_pickle_preserves_identity_and_prefix(config, mock_packages, ctx: SpackContext):
     """When pickling multiple specs that share dependencies, the identity of those dependencies
     should be preserved when unpickling."""
-    mpileaks_before: Spec = spack.concretize.concretize_one("mpileaks")
+    mpileaks_before: Spec = spack.concretize.concretize_one("mpileaks", ctx)
     callpath_before = mpileaks_before.dependencies("callpath")[0]
     callpath_before.set_prefix("/fake/prefix/callpath")
     specs_before = [mpileaks_before, callpath_before]
@@ -651,9 +654,9 @@ def test_pickle_preserves_identity_and_prefix(config, mock_packages):
     assert mpileaks_before.to_dict() == mpileaks_after.to_dict()
 
 
-def test_edge_virtuals_reconstructed_for_specfile_v3(config, mock_packages):
+def test_edge_virtuals_reconstructed_for_specfile_v3(config, mock_packages, ctx: SpackContext):
     """Virtuals on edges are recorded from v4 on, so a v3 spec file needs them reconstructed."""
-    as_dict = spack.concretize.concretize_one("mpileaks ^mpich").to_dict()
+    as_dict = spack.concretize.concretize_one("mpileaks ^mpich", ctx).to_dict()
     as_dict["spec"]["_meta"]["version"] = 3
     for node in as_dict["spec"]["nodes"]:
         node.pop("provided_virtuals", None)

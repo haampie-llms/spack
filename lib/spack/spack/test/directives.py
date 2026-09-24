@@ -9,6 +9,7 @@ import spack.concretize
 import spack.directives
 import spack.spec
 import spack.version
+from spack.context import SpackContext
 from spack.directives import (
     _make_when_spec,
     conflicts,
@@ -73,24 +74,24 @@ def test_constraints_from_context_are_merged(mock_packages: RepoPath):
 
 
 @pytest.mark.regression("27754")
-def test_extends_spec(config, mock_packages):
-    extender = spack.concretize.concretize_one("extends-spec")
-    extendee = spack.concretize.concretize_one("extendee")
+def test_extends_spec(config, mock_packages, ctx: SpackContext):
+    extender = spack.concretize.concretize_one("extends-spec", ctx)
+    extendee = spack.concretize.concretize_one("extendee", ctx)
 
     assert extender.dependencies()
     assert extender.package.extends(extendee)
 
 
 @pytest.mark.regression("48024")
-def test_conditionally_extends_transitive_dep(config, mock_packages):
-    spec = spack.concretize.concretize_one("conditionally-extends-transitive-dep")
+def test_conditionally_extends_transitive_dep(config, mock_packages, ctx: SpackContext):
+    spec = spack.concretize.concretize_one("conditionally-extends-transitive-dep", ctx)
 
     assert not spec.package.extendee_spec
 
 
 @pytest.mark.regression("48025")
-def test_conditionally_extends_direct_dep(config, mock_packages):
-    spec = spack.concretize.concretize_one("conditionally-extends-direct-dep")
+def test_conditionally_extends_direct_dep(config, mock_packages, ctx: SpackContext):
+    spec = spack.concretize.concretize_one("conditionally-extends-direct-dep", ctx)
 
     assert not spec.package.extendee_spec
 
@@ -186,11 +187,11 @@ def test_version_type_validation():
     ],
 )
 def test_redistribute_directive(
-    config, mock_packages: RepoPath, spec_str, distribute_src, distribute_bin
+    config, mock_packages: RepoPath, spec_str, distribute_src, distribute_bin, ctx: SpackContext
 ):
     spec = spack.spec.Spec(spec_str)
     assert mock_packages.get_pkg_class(spec.fullname).redistribute_source(spec) == distribute_src
-    concretized_spec = spack.concretize.concretize_one(spec)
+    concretized_spec = spack.concretize.concretize_one(spec, ctx)
     assert concretized_spec.package.redistribute_binary == distribute_bin
 
 

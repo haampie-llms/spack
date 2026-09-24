@@ -13,6 +13,7 @@ import spack.error
 import spack.package_base
 import spack.stage
 import spack.util.web
+from spack.context import SpackContext
 from spack.main import SpackCommand
 from spack.package_base import ManualDownloadRequiredError
 from spack.repo import RepoPath
@@ -318,8 +319,10 @@ def test_checksum_url(mock_packages, config):
         spack_checksum(f"{pkg_cls.url}")
 
 
-def test_checksum_verification_fails(config, mock_packages, capfd, can_fetch_versions):
-    spec = spack.concretize.concretize_one("zlib")
+def test_checksum_verification_fails(
+    config, mock_packages, capfd, can_fetch_versions, ctx: SpackContext
+):
+    spec = spack.concretize.concretize_one("zlib", ctx)
     pkg = spec.package
     versions = list(pkg.versions.keys())
     version_hashes = {versions[0]: "abadhash", Version("0.1"): "123456789"}

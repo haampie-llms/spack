@@ -465,12 +465,13 @@ class TestLmod:
         module_configuration,
         install_mockery,
         mock_fetch,
+        ctx: SpackContext,
     ):
         with ev.create_in_dir(str(tmp_path), with_view=True) as e:
             module_configuration("with_view")
             install("--fake", "--add", "cmake")
 
-            spec = spack.concretize.concretize_one("cmake")
+            spec = spack.concretize.concretize_one("cmake", ctx)
 
             content = modulefile_content("cmake")
             expected = e.default_view.get_projection_for_spec(spec)
@@ -490,7 +491,7 @@ class TestLmod:
         """Tests the addition and removal of hide command in modulerc."""
         module_configuration("hide_implicits")
 
-        spec = spack.concretize.concretize_one("mpileaks@2.3")
+        spec = spack.concretize.concretize_one("mpileaks@2.3", ctx)
 
         # mpileaks is defined as implicit, thus hide command should appear in modulerc
         writer = writer_cls.from_spec(spec, "default", False, ctx=ctx)
@@ -542,8 +543,8 @@ class TestLmod:
         # three versions of mpileaks are implicit
         writer = writer_cls.from_spec(spec, "default", False, ctx=ctx)
         writer.write(overwrite=True)
-        spec_alt1 = spack.concretize.concretize_one("mpileaks@2.2")
-        spec_alt2 = spack.concretize.concretize_one("mpileaks@2.1")
+        spec_alt1 = spack.concretize.concretize_one("mpileaks@2.2", ctx)
+        spec_alt2 = spack.concretize.concretize_one("mpileaks@2.1", ctx)
         writer_alt1 = writer_cls.from_spec(spec_alt1, "default", False, ctx=ctx)
         writer_alt1.write(overwrite=True)
         writer_alt2 = writer_cls.from_spec(spec_alt2, "default", False, ctx=ctx)

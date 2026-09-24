@@ -16,6 +16,7 @@ import spack.error
 import spack.spec
 import spack.store
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.main import SpackCommand, SpackCommandError
 from spack.store import Store
 
@@ -243,10 +244,10 @@ def test_spec_unification_from_cli(
 
 
 def test_buildcache_status_fn_marks_absent_spec(
-    temporary_store: Store, install_mockery, mock_packages
+    temporary_store: Store, install_mockery, mock_packages, ctx: SpackContext
 ):
     """Tests the basic semantics of build_cache_status_fn."""
-    s = spack.concretize.concretize_one("mpileaks")
+    s = spack.concretize.concretize_one("mpileaks", ctx)
     assert temporary_store.db.install_status(s) == spack.spec.InstallStatus.absent
 
     status_fn = spack.cmd.buildcache_status_fn({s.dag_hash()}, store=temporary_store)

@@ -6,6 +6,7 @@ import itertools
 import pytest
 
 import spack.concretize
+from spack.context import SpackContext
 from spack.environment.list import SpecListParser
 from spack.installer import PackageInstaller
 from spack.spec import Spec
@@ -179,10 +180,10 @@ class TestSpecList:
         )
         assert len(result.specs) == 1
 
-    def test_spec_list_exclude_with_abstract_hashes(self, install_mockery):
+    def test_spec_list_exclude_with_abstract_hashes(self, install_mockery, ctx: SpackContext):
         # Put mpich in the database so it can be referred to by hash.
-        mpich_1 = spack.concretize.concretize_one("mpich+debug")
-        mpich_2 = spack.concretize.concretize_one("mpich~debug")
+        mpich_1 = spack.concretize.concretize_one("mpich+debug", ctx)
+        mpich_2 = spack.concretize.concretize_one("mpich~debug", ctx)
         PackageInstaller([mpich_1.package, mpich_2.package], explicit=True, fake=True).install()
 
         # Create matrix and exclude +debug, which excludes the first mpich after its abstract hash

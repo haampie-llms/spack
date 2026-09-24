@@ -34,6 +34,7 @@ import spack.active_environment
 import spack.caches
 import spack.concretize
 import spack.config
+import spack.context
 import spack.deptypes as dt
 import spack.error
 import spack.filesystem_view as fsv
@@ -1599,7 +1600,7 @@ class Environment:
             raise ValueError(f"{str(match_spec)} matches multiple specs")
 
         for idx, spec in matches:
-            override_spec = Spec.override(spec, change_spec)
+            override_spec = Spec.override(spec, change_spec, repo=spack.repo.PATH)
             if list_name == USER_SPECS_KEY:
                 self.manifest.override_user_spec(str(override_spec), idx=idx)
             else:
@@ -2818,7 +2819,11 @@ class EnvironmentConcretizer:
         )
 
         with spack.concretize.solve_group(
-            self.ui, group=group, kind=kind, spec_list=[(x, None) for x in new_user_specs]
+            self.ui,
+            group=group,
+            kind=kind,
+            spec_list=[(x, None) for x in new_user_specs],
+            config=spack.config.CONFIG,
         ) as processes:
             if not new_user_specs:
                 return []
@@ -2923,7 +2928,7 @@ class EnvironmentConcretizer:
     ) -> List[SpecPair]:
         specs_to_concretize = self._user_spec_pairs(to_compute, to_keep)
         result = spack.concretize._concretize_together_when_possible(
-            specs_to_concretize, tests=tests, factory=factory, ui=self.ui
+            specs_to_concretize, spack.context.default(), tests=tests, factory=factory, ui=self.ui
         )
         result = [x for x in result if x[0] in to_compute]
         for abstract, concrete in result:
@@ -2943,7 +2948,7 @@ class EnvironmentConcretizer:
         to_concretize = self._user_spec_pairs(to_compute, to_keep)
         try:
             concrete_pairs = spack.concretize._concretize_together(
-                to_concretize, tests=tests, factory=factory, ui=self.ui
+                to_concretize, spack.context.default(), tests=tests, factory=factory, ui=self.ui
             )
         except spack.error.UnsatisfiableSpecError as e:
             # "Enhance" the error message for multiple root specs, suggest a less strict
@@ -2980,7 +2985,12 @@ class EnvironmentConcretizer:
         """Concretization strategy that concretizes separately one user spec after the other"""
         to_concretize = [(x, None) for x in to_compute]
         concrete_pairs = spack.concretize._concretize_separately(
-            to_concretize, tests=tests, factory=factory, ui=self.ui, processes=processes
+            to_concretize,
+            spack.context.default(),
+            tests=tests,
+            factory=factory,
+            ui=self.ui,
+            processes=processes,
         )
 
         for abstract, concrete in concrete_pairs:

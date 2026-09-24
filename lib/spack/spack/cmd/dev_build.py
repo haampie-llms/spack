@@ -113,7 +113,7 @@ def dev_build(self, args, ctx):
 
     # Forces the build to run out of the source directory.
     spec.constrain(f'dev_path="{source_path}"')
-    spec = spack.concretize.concretize_one(spec)
+    spec = spack.concretize.concretize_one(spec, ctx)
 
     if ctx.store.db.installed(spec):
         tty.error("Already installed in %s" % spec.prefix)
