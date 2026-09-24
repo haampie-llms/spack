@@ -6,9 +6,13 @@ import io
 import pathlib
 import sys
 
+import pytest
+
 from spack.main import SpackCommand
 
 log_parse = SpackCommand("log-parse")
+
+pytestmark = pytest.mark.usefixtures("config")
 
 LOG = b"""line 1
 line 2

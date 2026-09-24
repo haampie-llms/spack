@@ -197,6 +197,7 @@ def test_view_extension_conflict_ignored(
         assert fin.read() == "1.0"
 
 
+@pytest.mark.usefixtures("config")
 def test_view_fails_with_missing_projections_file(tmp_path: pathlib.Path):
     viewpath = str(tmp_path / "view")
     (tmp_path / "view").mkdir()
