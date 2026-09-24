@@ -19,6 +19,7 @@ from urllib.request import Request
 import spack
 import spack.binary_distribution
 import spack.builder
+import spack.config
 import spack.config as cfg
 import spack.environment as ev
 import spack.main
@@ -272,7 +273,11 @@ def create_already_built_pruner(check_index_only: bool = True) -> PrunerCallback
 
     def rebuild_filter(s: spack.spec.Spec) -> RebuildDecision:
         spec_locations = spack.binary_distribution.get_mirrors_for_spec(
-            spec=s, index_only=check_index_only
+            spec=s,
+            index_only=check_index_only,
+            config=spack.config.CONFIG,
+            client=web_util.NetworkClient.from_config(spack.config.CONFIG),
+            binary_index=spack.binary_distribution.BINARY_INDEX,
         )
 
         if not spec_locations:
@@ -648,7 +653,13 @@ def push_to_build_cache(spec: spack.spec.Spec, mirror_url: str, sign_binaries: b
     signing_key = spack.binary_distribution.select_signing_key() if sign_binaries else None
     mirror = spack.mirrors.mirror.Mirror.from_url(mirror_url)
     try:
-        with spack.binary_distribution.make_uploader(mirror, signing_key=signing_key) as uploader:
+        with spack.binary_distribution.make_uploader(
+            mirror,
+            signing_key=signing_key,
+            config=spack.config.CONFIG,
+            client=web_util.NetworkClient.from_config(spack.config.CONFIG),
+            store=spack.store.STORE,
+        ) as uploader:
             uploader.push_or_raise([spec])
         return True
     except spack.binary_distribution.PushToBuildCacheError as e:

@@ -413,7 +413,7 @@ def find(parser, args, ctx: spack.context.SpackContext):
         tty.die(f"No package matches the query: {' '.join(args.constraint)}")
 
     if args.install_status or args.show_concretized:
-        spack.binary_distribution.load_buildcache_index()
+        spack.binary_distribution.load_buildcache_index(ctx.binary_index)
         status_fn = cmd.buildcache_status_fn(ctx.binary_index, store=ctx.store)
     else:
         status_fn = None

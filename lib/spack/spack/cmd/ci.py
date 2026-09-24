@@ -272,7 +272,7 @@ def ci_reindex(args, ctx):
     remote_mirror_url = mirror_urls[0]
     mirror = spack.mirrors.mirror.Mirror(remote_mirror_url)
 
-    buildcache.update_index(mirror, ctx.config, update_keys=True)
+    buildcache.update_index(mirror, ctx.config, ctx.network, update_keys=True)
 
 
 def ci_rebuild(args, ctx):
@@ -443,7 +443,13 @@ def ci_rebuild(args, ctx):
     matches = (
         None
         if full_rebuild
-        else spack.binary_distribution.get_mirrors_for_spec(job_spec, index_only=False)
+        else spack.binary_distribution.get_mirrors_for_spec(
+            job_spec,
+            index_only=False,
+            config=ctx.config,
+            client=ctx.network,
+            binary_index=ctx.binary_index,
+        )
     )
 
     if matches:

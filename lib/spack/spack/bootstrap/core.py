@@ -44,6 +44,7 @@ import spack.user_environment
 import spack.util.executable
 import spack.util.spack_yaml
 import spack.util.url
+import spack.util.web
 import spack.version
 from spack.util import tty
 from spack.util.lang import GroupedExceptionHandler
@@ -203,7 +204,9 @@ class BuildcacheBootstrapper(Bootstrapper):
     def _install_by_hash(self, pkg_hash: str, pkg_sha256: str) -> None:
         # The caller is inside ensure_bootstrap_configuration, which already selects the platform
         query = spack.binary_distribution.BinaryCacheQuery(
-            all_architectures=True, config=spack.config.CONFIG
+            all_architectures=True,
+            index=spack.binary_distribution.BINARY_INDEX,
+            config=spack.config.CONFIG,
         )
         for match in spack.store.find([f"/{pkg_hash}"], multiple=False, query_fn=query):
             spack.binary_distribution.install_root_node(
@@ -216,6 +219,9 @@ class BuildcacheBootstrapper(Bootstrapper):
                 force=True,
                 sha256=pkg_sha256,
                 allow_missing=True,
+                config=spack.config.CONFIG,
+                client=spack.util.web.NetworkClient.from_config(spack.config.CONFIG),
+                store=spack.store.STORE,
             )
 
     def _install_and_test(
@@ -227,7 +233,7 @@ class BuildcacheBootstrapper(Bootstrapper):
             # specs that we know by dag hash.
             spack.binary_distribution.BINARY_INDEX.regenerate_spec_cache()
             index = spack.binary_distribution.update_cache_and_get_specs(
-                config=spack.config.CONFIG
+                spack.binary_distribution.BINARY_INDEX, config=spack.config.CONFIG
             )
 
             if not index:

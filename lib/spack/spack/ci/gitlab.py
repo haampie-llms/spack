@@ -18,6 +18,7 @@ import spack.mirrors.mirror
 import spack.schema
 import spack.spec
 import spack.util.spack_yaml as syaml
+import spack.util.web
 from spack.util import tty
 
 from .common import (
@@ -268,7 +269,11 @@ def generate_gitlab_yaml(pipeline: PipelineDag, spack_ci: SpackCIConfig, options
             # Let downstream jobs know whether the spec needed rebuilding, regardless
             # whether DAG pruning was enabled or not.
             already_built = spack.binary_distribution.get_mirrors_for_spec(
-                spec=release_spec, index_only=True
+                spec=release_spec,
+                index_only=True,
+                config=spack.config.CONFIG,
+                client=spack.util.web.NetworkClient.from_config(spack.config.CONFIG),
+                binary_index=spack.binary_distribution.BINARY_INDEX,
             )
             job_vars["SPACK_SPEC_NEEDS_REBUILD"] = "False" if already_built else "True"
 
