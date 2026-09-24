@@ -230,10 +230,12 @@ def update_configuration(
     return all_new_specs
 
 
-def set_virtuals_nonbuildable(virtuals: Set[str], scope: Optional[str] = None) -> List[str]:
+def set_virtuals_nonbuildable(
+    virtuals: Set[str], scope: Optional[str] = None, *, config: spack.config.Configuration
+) -> List[str]:
     """Update packages:virtual:buildable:False for the provided virtual packages, if the property
     is not set by the user. Returns the list of virtual packages that have been updated."""
-    packages = spack.config.CONFIG.get("packages")
+    packages = config.get("packages")
     new_config = {}
     for virtual in virtuals:
         # If the user has set the buildable prop do not override it
@@ -242,9 +244,9 @@ def set_virtuals_nonbuildable(virtuals: Set[str], scope: Optional[str] = None) -
         new_config[virtual] = {"buildable": False}
 
     # Update the provided scope
-    spack.config.CONFIG.set(
+    config.set(
         "packages",
-        spack.schema.merge_yaml(spack.config.CONFIG.get("packages", scope=scope), new_config),
+        spack.schema.merge_yaml(config.get("packages", scope=scope), new_config),
         scope=scope,
     )
 
@@ -380,9 +382,12 @@ class WindowsKitExternalPaths:
         return sdk_paths
 
 
-def find_win32_additional_install_paths() -> List[str]:
+def find_win32_additional_install_paths(additional_search_paths: List[str]) -> List[str]:
     """Not all programs on Windows live on the PATH
     Return a list of other potential install locations.
+
+    Args:
+        additional_search_paths: extra paths configured by the user
     """
     drive_letter = _windows_drive()
     windows_search_ext = []
@@ -400,9 +405,7 @@ def find_win32_additional_install_paths() -> List[str]:
     windows_search_ext.append("%s\\ProgramData\\chocolatey\\bin" % drive_letter)
     # Add search path for NuGet package manager default install location
     windows_search_ext.append(os.path.join(user, ".nuget", "packages"))
-    windows_search_ext.extend(
-        spack.config.CONFIG.get("config:additional_external_search_paths", default=[])
-    )
+    windows_search_ext.extend(additional_search_paths)
     windows_search_ext.extend(spack.util.environment.get_path("PATH"))
     return windows_search_ext
 

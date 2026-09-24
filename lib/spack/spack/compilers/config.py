@@ -80,7 +80,7 @@ def find_compilers(
     compiler_pkgs = repo.packages_with_tags(COMPILER_TAG, full=True)
 
     detected_packages = spack.detection.by_path(
-        compiler_pkgs, repo=repo, path_hints=default_paths, max_workers=max_workers
+        compiler_pkgs, repo=repo, config=config, path_hints=default_paths, max_workers=max_workers
     )
 
     new_compilers = spack.detection.update_configuration(

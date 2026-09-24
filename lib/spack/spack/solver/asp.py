@@ -67,7 +67,7 @@ import spack.version as vn
 import spack.version.git_ref_lookup
 from spack import traverse
 from spack.active_environment import active_environment
-from spack.compilers.libraries import CompilerPropertyDetector, FileCompilerCache
+from spack.compilers.libraries import CompilerPropertyDetector
 from spack.enums import DeprecationSeverity
 from spack.spec import EMPTY_SPEC
 from spack.util import tty
@@ -1169,7 +1169,7 @@ class SpackSolverSetup:
         deprecation_policy: Optional[spack.deprecation.Policy] = None,
     ):
         self.context = context
-        self.compiler_cache = FileCompilerCache(self.context.misc_cache)
+        self.compiler_cache = self.context.compiler_cache
         self.possible_graph = create_graph_analyzer(self.context)
 
         # these are all initialized in setup()
@@ -2967,7 +2967,7 @@ def possible_compilers(
 ) -> Tuple[Set["spack.spec.Spec"], Set["spack.spec.Spec"]]:
     result, rejected = set(), set()
 
-    cache = FileCompilerCache(context.misc_cache)
+    cache = context.compiler_cache
     # Compilers defined in configuration
     for c in spack.compilers.config.all_compilers_from(context.config, repo=context.repo):
         detector = CompilerPropertyDetector(c, repo=context.repo, cache=cache)

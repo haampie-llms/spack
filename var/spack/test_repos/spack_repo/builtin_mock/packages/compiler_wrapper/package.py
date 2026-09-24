@@ -11,6 +11,7 @@ from spack_repo.builtin_mock.build_systems.generic import Package
 import spack.vendor.archspec.cpu
 
 import spack.compilers.libraries
+import spack.context
 import spack.package_base
 from spack.package import *
 from spack.util import lang
@@ -279,6 +280,9 @@ class CompilerWrapper(Package):
 
 
 def _implicit_rpaths(pkg: spack.package_base.PackageBase) -> List[str]:
-    detector = spack.compilers.libraries.CompilerPropertyDetector(pkg.spec)
+    ctx = spack.context.default()
+    detector = spack.compilers.libraries.CompilerPropertyDetector(
+        pkg.spec, repo=ctx.repo, cache=ctx.compiler_cache
+    )
     paths = detector.implicit_rpaths()
     return paths

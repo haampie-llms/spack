@@ -456,7 +456,9 @@ def _add_externals_if_missing() -> None:
     ]
     if IS_WINDOWS:
         search_list.append("winbison")
-    externals = spack.detection.by_path(search_list, repo=spack.repo.PATH)
+    externals = spack.detection.by_path(
+        search_list, repo=spack.repo.PATH, config=spack.config.CONFIG
+    )
     # System git is typically deprecated, so mark as non-buildable to force it as external
     non_buildable_externals = {k: externals.pop(k) for k in ("git",) if k in externals}
     spack.detection.update_configuration(
@@ -486,7 +488,7 @@ def _concretize_clingo(abstract_spec: spack.spec.Spec) -> spack.spec.Spec:
     return ClingoBootstrapConcretizer(
         spack.config.CONFIG,
         repo=spack.repo.PATH,
-        compiler_cache=spack.compilers.libraries.COMPILER_CACHE,
+        compiler_cache=spack.compilers.libraries.process_compiler_cache(),
     ).concretize()
 
 
@@ -570,7 +572,9 @@ def ensure_winsdk_external_or_raise() -> None:
         return
     tty.debug("Detecting Windows SDK and WGL installations")
     # find the externals sequentially to avoid subprocesses being spawned
-    externals = spack.detection.by_path(["win-sdk", "wgl"], repo=spack.repo.PATH, max_workers=1)
+    externals = spack.detection.by_path(
+        ["win-sdk", "wgl"], repo=spack.repo.PATH, max_workers=1, config=spack.config.CONFIG
+    )
     if not set(["win-sdk", "wgl"]) == externals.keys():
         missing_packages_lst = []
         if "wgl" not in externals:

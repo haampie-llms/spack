@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Callable, Generic, Optional, TypeVar, ove
 
 if TYPE_CHECKING:
     import spack.binary_distribution
+    import spack.compilers.libraries
     import spack.config
     import spack.environment
     import spack.repo
@@ -96,6 +97,13 @@ class SpackContext:
         return spack.binary_distribution.BinaryIndexCache(config=self.config, client=self.network)
 
     @_member
+    def compiler_cache(self) -> "spack.compilers.libraries.CompilerCache":
+        """Cache for compiler output (implicit rpaths, libc, ...)."""
+        import spack.compilers.libraries
+
+        return spack.compilers.libraries.FileCompilerCache(self.misc_cache)
+
+    @_member
     def network(self) -> "spack.util.web.NetworkClient":
         """Network settings and the URL opener built from them."""
         import spack.util.web
@@ -153,6 +161,12 @@ class _ProcessContext(SpackContext):
         import spack.binary_distribution
 
         return spack.binary_distribution.BINARY_INDEX
+
+    @property  # type: ignore[override]
+    def compiler_cache(self) -> "spack.compilers.libraries.CompilerCache":
+        import spack.compilers.libraries
+
+        return spack.compilers.libraries.process_compiler_cache()
 
     def __reduce__(self):
         return _ProcessContext, ()

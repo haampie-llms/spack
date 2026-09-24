@@ -7,6 +7,7 @@ import sys
 
 import pytest
 
+import spack.config
 import spack.detection
 import spack.detection.common
 import spack.detection.path
@@ -86,7 +87,10 @@ def test_detect_specs_deduplicates_across_prefixes(tmp_path, monkeypatch, mock_p
 
     finder = spack.detection.path.ExecutablesFinder()
     detected = finder.detect_specs(
-        pkg=cmake_cls, paths=[str(exe_a), str(exe_b)], repo_path=mock_packages
+        pkg=cmake_cls,
+        paths=[str(exe_a), str(exe_b)],
+        repo_path=mock_packages,
+        config=spack.config.CONFIG,
     )
 
     # Both prefixes produce cmake@3.17.1; only the first should be kept.
@@ -174,6 +178,7 @@ def test_detect_specs_validates_variants_with_injected_repo(tmp_path, monkeypatc
             pkg=gcc_cls,
             paths=[str(p / "bin" / "gcc") for p in prefixes.values()],
             repo_path=mock_packages,
+            config=spack.config.CONFIG,
         )
 
     assert len(detected) == 1
