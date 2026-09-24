@@ -2442,7 +2442,7 @@ def _trust_keys_v2(mirror_url, yes_to_all=False, install=False, trust=False, for
         link = os.path.join(keys_url, fingerprint + ".pub")
 
         with stage_from_config(
-            link, name="build_cache", keep=True, config=spack.config.CONFIG
+            link, name="build_cache", keep=True, config=spack.config.CONFIG, client=client
         ) as stage:
             if os.path.exists(stage.save_filename) and force:
                 os.remove(stage.save_filename)

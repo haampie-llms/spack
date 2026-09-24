@@ -17,6 +17,7 @@ import spack.mirrors.mirror
 import spack.oci.opener
 import spack.stage
 import spack.util.url
+import spack.util.web
 from spack.util import tty
 
 from .image import Digest, ImageReference
@@ -370,4 +371,5 @@ def make_stage(
         name=digest.digest,
         keep=keep,
         config=spack.config.CONFIG,
+        client=spack.util.web.NetworkClient.from_config(spack.config.CONFIG),
     )

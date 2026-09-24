@@ -20,6 +20,7 @@ import spack.spec
 import spack.stage
 import spack.tengine
 import spack.util.gpg
+import spack.util.web
 from spack.util import tty
 
 from .config import root_path, spec_for_current_python, store_path
@@ -175,7 +176,11 @@ def download_and_trust_key():
     with open(fingerprint_file, "r", encoding="utf-8") as f:
         fingerprint, key_endpoint = f.readline().strip("\n").split(";")
     fingerprint = fingerprint.strip().upper()
-    with spack.stage.stage_from_config(key_endpoint, config=spack.config.CONFIG) as stage:
+    with spack.stage.stage_from_config(
+        key_endpoint,
+        config=spack.config.CONFIG,
+        client=spack.util.web.NetworkClient.from_config(spack.config.CONFIG),
+    ) as stage:
         try:
             stage.fetch()
         except spack.error.FetchError as e:

@@ -753,7 +753,11 @@ def validate_standard_versions(
             url_dict[version] = url
 
     version_hashes = spack.stage.get_checksums_for_versions(
-        url_dict, pkg.name, fetch_options=pkg.fetch_options, config=config
+        url_dict,
+        pkg.name,
+        fetch_options=pkg.fetch_options,
+        config=config,
+        client=web_util.NetworkClient.from_config(config),
     )
 
     for version, sha in version_hashes.items():
@@ -784,7 +788,9 @@ def validate_git_versions(
     for version in versions:
         fetcher = spack.package_base.for_package_version(pkg, version)
         assert isinstance(fetcher, spack.fetch_strategy.GitFetchStrategy)
-        with spack.stage.stage_from_config(fetcher, config=config) as stage:
+        with spack.stage.stage_from_config(
+            fetcher, config=config, client=web_util.NetworkClient.from_config(config)
+        ) as stage:
             known_commit = pkg.versions[version]["commit"]
             try:
                 stage.fetch()

@@ -9,26 +9,31 @@ import pytest
 
 import spack.util.url as url_util
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.fetch_strategy import CacheURLFetchStrategy, NoCacheError
 from spack.stage import stage_from_config
 from spack.util.filesystem import mkdirp
 
 
 @pytest.mark.parametrize("_fetch_method", ["curl", "urllib"])
-def test_fetch_missing_cache(mutable_config: Configuration, tmp_path: pathlib.Path, _fetch_method):
+def test_fetch_missing_cache(
+    mutable_config: Configuration, tmp_path: pathlib.Path, _fetch_method, ctx: SpackContext
+):
     """Ensure raise a missing cache file."""
     testpath = str(tmp_path)
     non_existing = os.path.join(testpath, "non-existing")
     with mutable_config.override("config:url_fetch_method", _fetch_method):
         url = url_util.path_to_file_url(non_existing)
         fetcher = CacheURLFetchStrategy(url=url)
-        with stage_from_config(fetcher, path=testpath, config=mutable_config):
+        with stage_from_config(fetcher, path=testpath, config=mutable_config, client=ctx.network):
             with pytest.raises(NoCacheError, match=r"No cache"):
                 fetcher.fetch()
 
 
 @pytest.mark.parametrize("_fetch_method", ["curl", "urllib"])
-def test_fetch(mutable_config: Configuration, tmp_path: pathlib.Path, _fetch_method):
+def test_fetch(
+    mutable_config: Configuration, tmp_path: pathlib.Path, _fetch_method, ctx: SpackContext
+):
     """Ensure a fetch after expanding is effectively a no-op."""
     cache_dir = tmp_path / "cache"
     stage_dir = tmp_path / "stage"
@@ -39,7 +44,9 @@ def test_fetch(mutable_config: Configuration, tmp_path: pathlib.Path, _fetch_met
     url = url_util.path_to_file_url(str(cache))
     with mutable_config.override("config:url_fetch_method", _fetch_method):
         fetcher = CacheURLFetchStrategy(url=url)
-        with stage_from_config(fetcher, path=str(stage_dir), config=mutable_config) as stage:
+        with stage_from_config(
+            fetcher, path=str(stage_dir), config=mutable_config, client=ctx.network
+        ) as stage:
             source_path = stage.source_path
             mkdirp(source_path)
             fetcher.fetch()

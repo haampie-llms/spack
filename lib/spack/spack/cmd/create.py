@@ -12,6 +12,7 @@ import spack.config
 import spack.repo
 import spack.stage
 import spack.util.file_cache
+import spack.util.web
 from spack.spec import Spec
 from spack.url import (
     UndetectableNameError,
@@ -981,7 +982,9 @@ def get_versions(
     if args.url is not None and args.template != "bundle" and valid_url:
         # Find available versions
         try:
-            url_dict = find_versions_of_archive(args.url)
+            url_dict = find_versions_of_archive(
+                args.url, client=spack.util.web.NetworkClient.from_config(config)
+            )
             if len(url_dict) > 1 and not args.batch and sys.stdin.isatty():
                 url_dict_filtered = spack.stage.interactive_version_filter(url_dict, config=config)
                 if url_dict_filtered is None:
@@ -998,7 +1001,12 @@ def get_versions(
             url_dict = {version: args.url}
 
         version_hashes = spack.stage.get_checksums_for_versions(
-            url_dict, name, first_stage_function=guesser, keep_stage=args.keep_stage, config=config
+            url_dict,
+            name,
+            first_stage_function=guesser,
+            keep_stage=args.keep_stage,
+            config=config,
+            client=spack.util.web.NetworkClient.from_config(config),
         )
 
         versions = get_version_lines(version_hashes)

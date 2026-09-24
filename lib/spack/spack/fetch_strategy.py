@@ -366,8 +366,7 @@ class URLFetchStrategy(FetchStrategy):
     @property
     def curl(self) -> Executable:
         if not self._curl:
-            client = web_util.NetworkClient.from_config(spack.config.CONFIG)
-            self._curl = web_util.require_curl(client=client)
+            self._curl = web_util.require_curl(client=self.stage.client)
         return self._curl
 
     def source_id(self):
@@ -407,7 +406,7 @@ class URLFetchStrategy(FetchStrategy):
             )
 
     def _fetch_from_url(self, url):
-        fetch_method = spack.config.CONFIG.get("config:url_fetch_method", "urllib")
+        fetch_method = self.stage.client.fetch_method
         if fetch_method.startswith("curl"):
             return self._fetch_curl(url, config_args=fetch_method.split()[1:])
         else:
@@ -437,7 +436,7 @@ class URLFetchStrategy(FetchStrategy):
             url, headers={"User-Agent": web_util.SPACK_USER_AGENT, "Accept": "*/*"}
         )
 
-        client = web_util.NetworkClient.from_config(spack.config.CONFIG)
+        client = self.stage.client
         response_headers_str = None
         for attempt in range(retries):
             try:
@@ -506,8 +505,7 @@ class URLFetchStrategy(FetchStrategy):
 
             timeout = self.extra_options.get("timeout")
 
-        client = web_util.NetworkClient.from_config(spack.config.CONFIG)
-        base_args = web_util.base_curl_fetch_args(url, timeout, client=client)
+        base_args = web_util.base_curl_fetch_args(url, timeout, client=self.stage.client)
         curl_args = config_args + save_args + base_args + cookie_args
 
         # Run curl but grab the mime type from the http headers
@@ -588,7 +586,7 @@ class URLFetchStrategy(FetchStrategy):
             self.archive_file,
             url_util.path_to_file_url(destination),
             keep_original=True,
-            client=web_util.NetworkClient.from_config(spack.config.CONFIG),
+            client=self.stage.client,
         )
 
     @_needs_stage
@@ -674,9 +672,7 @@ class OCIRegistryFetchStrategy(URLFetchStrategy):
             os.remove(file)
 
         try:
-            urlopen = self._urlopen or spack.oci.opener.opener_for(
-                web_util.NetworkClient.from_config(spack.config.CONFIG)
-            )
+            urlopen = self._urlopen or spack.oci.opener.opener_for(self.stage.client)
             response = urlopen(self.url)
             tty.verbose(f"Fetching {self.url}")
             with open(file, "wb") as f:
@@ -858,7 +854,8 @@ class GitFetchStrategy(VCSFetchStrategy):
         # to __init__
         forwarded_args = copy.copy(kwargs)
         forwarded_args.pop("name", None)
-        self._config = forwarded_args.pop("config", None)
+        # Settings source for use without a stage, e.g. version lookups
+        self.config: Optional[spack.config.Configuration] = forwarded_args.pop("config", None)
         super().__init__(**forwarded_args)
 
         self._git = None
@@ -883,9 +880,18 @@ class GitFetchStrategy(VCSFetchStrategy):
         return spack.version.Version(version_string)
 
     @property
-    def config(self) -> "spack.config.Configuration":
-        """Configuration this fetcher reads its git settings from."""
-        return self._config if self._config is not None else spack.config.CONFIG
+    def verify_ssl(self) -> bool:
+        """Whether git verifies SSL certificates, from the explicit config or else the stage."""
+        if self.config is not None:
+            return bool(self.config.get("config:verify_ssl"))
+        return self.stage.client.verify_ssl
+
+    @property
+    def debug(self) -> bool:
+        """Whether git runs verbosely, from the explicit config or else the stage."""
+        if self.config is not None:
+            return bool(self.config.get("config:debug"))
+        return self.stage.debug
 
     @property
     def git(self):
@@ -903,7 +909,7 @@ class GitFetchStrategy(VCSFetchStrategy):
 
             # If the user asked for insecure fetching, make that work
             # with git as well.
-            if not self.config.get("config:verify_ssl"):
+            if not self.verify_ssl:
                 self._git.add_default_env("GIT_SSL_NO_VERIFY", "true")
 
         return self._git
@@ -964,7 +970,7 @@ class GitFetchStrategy(VCSFetchStrategy):
         tty.debug(f"Cloning git repository: {self._repo_info()}")
 
         git = self.git
-        debug = self.config.get("config:debug")
+        debug = self.debug
 
         # We don't need to worry about which commit/branch/tag is checked out
         clone_args = ["clone", "--bare"]
@@ -984,11 +990,7 @@ class GitFetchStrategy(VCSFetchStrategy):
         checkout_ref = self.commit or self.tag or self.branch
         fetch_ref = self.tag or self.branch
 
-        kwargs = {
-            "debug": spack.config.CONFIG.get("config:debug"),
-            "git_exe": self.git,
-            "dest": name,
-        }
+        kwargs = {"debug": self.debug, "git_exe": self.git, "dest": name}
 
         # TODO(psakievich) The use of the minimal clone need clearer justification via package API
         # or something. There is a trade space of storage minimization vs available git information
@@ -1023,7 +1025,7 @@ class GitFetchStrategy(VCSFetchStrategy):
             with working_dir(dest):
                 for submodule_to_delete in self.submodules_delete:
                     args = ["rm", submodule_to_delete]
-                    if not spack.config.CONFIG.get("config:debug"):
+                    if not self.debug:
                         args.insert(1, "--quiet")
                     git(*args)
 
@@ -1045,7 +1047,7 @@ class GitFetchStrategy(VCSFetchStrategy):
 
         with working_dir(dest):
             for args in git_commands:
-                if not spack.config.CONFIG.get("config:debug"):
+                if not self.debug:
                     args.insert(1, "--quiet")
                 git(*args)
 
@@ -1054,7 +1056,7 @@ class GitFetchStrategy(VCSFetchStrategy):
         with working_dir(self.stage.source_path):
             co_args = ["checkout", "."]
             clean_args = ["clean", "-f"]
-            if spack.config.CONFIG.get("config:debug"):
+            if self.debug:
                 co_args.insert(1, "--quiet")
                 clean_args.insert(1, "--quiet")
 
@@ -1352,7 +1354,7 @@ class HgFetchStrategy(VCSFetchStrategy):
 
         args = ["clone"]
 
-        if not spack.config.CONFIG.get("config:verify_ssl"):
+        if not self.stage.client.verify_ssl:
             args.append("--insecure")
 
         if self.revision:

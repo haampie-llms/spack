@@ -21,6 +21,8 @@ import spack.repo
 import spack.spec
 import spack.stage
 import spack.util.url as url_util
+import spack.util.web
+from spack.context import SpackContext
 from spack.repo import RepoPath
 from spack.spec import Spec
 from spack.stage import stage_from_config
@@ -92,14 +94,16 @@ data_path = os.path.join(spack.paths.test_path, "data", "patch")
         (os.path.join(data_path, "foo.patch"), platform_url_sha, None),
     ],
 )
-def test_url_patch(mock_packages, mock_patch_stage, filename, sha256, archive_sha256, config):
+def test_url_patch(
+    mock_packages, mock_patch_stage, filename, sha256, archive_sha256, config, ctx: SpackContext
+):
     # Make a patch object
     url = url_util.path_to_file_url(filename)
     s = spack.concretize.concretize_one("patch")
 
     # make a stage
     with stage_from_config(
-        url, config=config
+        url, config=config, client=ctx.network
     ) as stage:  # TODO: url isn't used; maybe refactor Stage
         stage.mirror_path = mock_patch_stage
 
@@ -126,7 +130,7 @@ third line
                 )
         # apply the patch and compare files
         patch = spack.patch.UrlPatch(s.package, url, sha256=sha256, archive_sha256=archive_sha256)
-        patch_stage = stage_from_config(patch.fetcher(), config=config)
+        patch_stage = stage_from_config(patch.fetcher(), config=config, client=ctx.network)
         with patch_stage:
             patch_stage.create()
             patch_stage.fetch()
@@ -146,7 +150,7 @@ third line
         patch = spack.patch.UrlPatch(
             s.package, url, sha256=sha256, archive_sha256=archive_sha256, reverse=True
         )
-        patch_stage = stage_from_config(patch.fetcher(), config=config)
+        patch_stage = stage_from_config(patch.fetcher(), config=config, client=ctx.network)
         with patch_stage:
             patch_stage.create()
             patch_stage.fetch()
@@ -507,7 +511,11 @@ def test_patch_no_file(config):
     patch.path = "test"
     with pytest.raises(spack.error.NoSuchPatchError, match="No such patch:"):
         spack.patch.apply_patch(
-            stage_from_config("https://example.com/foo.patch", config=config).source_path,
+            stage_from_config(
+                "https://example.com/foo.patch",
+                config=config,
+                client=spack.util.web.NetworkClient.from_config(config),
+            ).source_path,
             patch.path,
         )
 

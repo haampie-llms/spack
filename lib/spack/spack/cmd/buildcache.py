@@ -808,7 +808,7 @@ def copy_buildcache_entry(
     manifest_src_url = cache_entry.remote_manifest_url
     manifest_dest_url = cache_entry.get_manifest_url(target_spec, destination_url)
 
-    manifest_stage = spack.stage.stage_from_config(manifest_src_url, config=config)
+    manifest_stage = spack.stage.stage_from_config(manifest_src_url, config=config, client=client)
 
     try:
         manifest_stage.create()

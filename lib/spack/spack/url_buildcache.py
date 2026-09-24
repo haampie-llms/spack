@@ -401,7 +401,11 @@ class URLBuildcacheEntry:
         """
         if record not in self.stages:
             blob_url = self.get_blob_url(self.mirror_url, record)
-            blob_stage = spack.stage.stage_from_config(blob_url, config=spack.config.CONFIG)
+            blob_stage = spack.stage.stage_from_config(
+                blob_url,
+                config=spack.config.CONFIG,
+                client=web_util.NetworkClient.from_config(spack.config.CONFIG),
+            )
 
             # Fetch the blob, or else cleanup and exit early
             try:
@@ -932,7 +936,9 @@ class URLBuildcacheEntryV2(URLBuildcacheEntry):
             )
 
         self.spec_stage = spack.stage.stage_from_config(
-            self.remote_spec_url, config=spack.config.CONFIG
+            self.remote_spec_url,
+            config=spack.config.CONFIG,
+            client=web_util.NetworkClient.from_config(spack.config.CONFIG),
         )
 
         # Fetch the spec file, or else cleanup and exit early
@@ -993,7 +999,9 @@ class URLBuildcacheEntryV2(URLBuildcacheEntry):
             self.spec_stage = None
 
         self.archive_stage = spack.stage.stage_from_config(
-            self.remote_archive_url, config=spack.config.CONFIG
+            self.remote_archive_url,
+            config=spack.config.CONFIG,
+            client=web_util.NetworkClient.from_config(spack.config.CONFIG),
         )
 
         # Fetch the archive file, or else cleanup and exit early

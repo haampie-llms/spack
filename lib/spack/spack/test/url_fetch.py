@@ -19,6 +19,7 @@ import spack.url
 import spack.util.web as web_util
 import spack.version
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.stage import stage_from_config
 from spack.util import crypto, tty
 from spack.util.executable import which
@@ -76,12 +77,16 @@ def pkg_factory():
 
 
 @pytest.mark.parametrize("method", ["curl", "urllib"])
-def test_urlfetchstrategy_bad_url(tmp_path: pathlib.Path, mutable_config, method):
+def test_urlfetchstrategy_bad_url(
+    tmp_path: pathlib.Path, mutable_config, method, ctx: SpackContext
+):
     """Ensure fetch with bad URL fails as expected."""
     mutable_config.set("config:url_fetch_method", method)
     fetcher = fs.URLFetchStrategy(url=(tmp_path / "does-not-exist").as_uri())
 
-    with stage_from_config(fetcher, path=str(tmp_path / "stage"), config=mutable_config):
+    with stage_from_config(
+        fetcher, path=str(tmp_path / "stage"), config=mutable_config, client=ctx.network
+    ):
         with pytest.raises(fs.FailedDownloadError) as exc:
             fetcher.fetch()
 
@@ -96,13 +101,17 @@ def test_urlfetchstrategy_bad_url(tmp_path: pathlib.Path, mutable_config, method
         assert isinstance(exception.reason, FileNotFoundError)
 
 
-def test_fetch_options(mutable_config: Configuration, tmp_path: pathlib.Path, mock_archive):
+def test_fetch_options(
+    mutable_config: Configuration, tmp_path: pathlib.Path, mock_archive, ctx: SpackContext
+):
     with mutable_config.override("config:url_fetch_method", "curl"):
         fetcher = fs.URLFetchStrategy(
             url=mock_archive.url, fetch_options={"cookie": "True", "timeout": 10}
         )
 
-        with stage_from_config(fetcher, path=str(tmp_path), config=mutable_config):
+        with stage_from_config(
+            fetcher, path=str(tmp_path), config=mutable_config, client=ctx.network
+        ):
             assert fetcher.archive_file is None
             fetcher.fetch()
             archive_file = fetcher.archive_file
@@ -124,9 +133,13 @@ def test_fetch_curl_options(
             assert args[1:3] == ("-k", "-q")
             raise StopIteration
 
-        monkeypatch.setattr(type(fetcher.curl), "__call__", check_args)
-
-        with stage_from_config(fetcher, path=str(tmp_path), config=mutable_config):
+        with stage_from_config(
+            fetcher,
+            path=str(tmp_path),
+            config=mutable_config,
+            client=web_util.NetworkClient.from_config(mutable_config),
+        ):
+            monkeypatch.setattr(type(fetcher.curl), "__call__", check_args)
             assert fetcher.archive_file is None
             with pytest.raises(StopIteration):
                 fetcher.fetch()
@@ -134,12 +147,18 @@ def test_fetch_curl_options(
 
 @pytest.mark.parametrize("_fetch_method", ["curl", "urllib"])
 def test_archive_file_errors(
-    tmp_path: pathlib.Path, mutable_config: Configuration, mock_archive, _fetch_method
+    tmp_path: pathlib.Path,
+    mutable_config: Configuration,
+    mock_archive,
+    _fetch_method,
+    ctx: SpackContext,
 ):
     """Ensure FetchStrategy commands may only be used as intended"""
     with mutable_config.override("config:url_fetch_method", _fetch_method):
         fetcher = fs.URLFetchStrategy(url=mock_archive.url)
-        with stage_from_config(fetcher, path=str(tmp_path), config=mutable_config) as stage:
+        with stage_from_config(
+            fetcher, path=str(tmp_path), config=mutable_config, client=ctx.network
+        ) as stage:
             assert fetcher.archive_file is None
             with pytest.raises(fs.NoArchiveFileError):
                 fetcher.archive(str(tmp_path))
@@ -282,7 +301,12 @@ def test_unknown_hash(checksum_type):
 
 @pytest.mark.skipif(which("curl") is None, reason="Urllib does not have built-in status bar")
 def test_url_with_status_bar(
-    mutable_config: Configuration, tmp_path: pathlib.Path, mock_archive, monkeypatch, capfd
+    mutable_config: Configuration,
+    tmp_path: pathlib.Path,
+    mock_archive,
+    monkeypatch,
+    capfd,
+    ctx: SpackContext,
 ):
     """Ensure fetch with status bar option succeeds."""
 
@@ -295,7 +319,9 @@ def test_url_with_status_bar(
     monkeypatch.setattr(tty, "msg_enabled", is_true)
     with mutable_config.override("config:url_fetch_method", "curl"):
         fetcher = fs.URLFetchStrategy(url=mock_archive.url)
-        with stage_from_config(fetcher, path=testpath, config=mutable_config) as stage:
+        with stage_from_config(
+            fetcher, path=testpath, config=mutable_config, client=ctx.network
+        ) as stage:
             assert fetcher.archive_file is None
             stage.fetch()
 
@@ -304,11 +330,15 @@ def test_url_with_status_bar(
 
 
 @pytest.mark.parametrize("_fetch_method", ["curl", "urllib"])
-def test_url_extra_fetch(tmp_path: pathlib.Path, mutable_config, mock_archive, _fetch_method):
+def test_url_extra_fetch(
+    tmp_path: pathlib.Path, mutable_config, mock_archive, _fetch_method, ctx: SpackContext
+):
     """Ensure a fetch after downloading is effectively a no-op."""
     mutable_config.set("config:url_fetch_method", _fetch_method)
     fetcher = fs.URLFetchStrategy(url=mock_archive.url)
-    with stage_from_config(fetcher, path=str(tmp_path), config=mutable_config) as stage:
+    with stage_from_config(
+        fetcher, path=str(tmp_path), config=mutable_config, client=ctx.network
+    ) as stage:
         assert fetcher.archive_file is None
         stage.fetch()
         archive_file = fetcher.archive_file
@@ -352,12 +382,16 @@ def test_candidate_urls(
 
 
 @pytest.mark.regression("19673")
-def test_missing_curl(tmp_path: pathlib.Path, missing_curl, mutable_config, monkeypatch):
+def test_missing_curl(
+    tmp_path: pathlib.Path, missing_curl, mutable_config, monkeypatch, ctx: SpackContext
+):
     """Ensure a fetch involving missing curl package reports the error."""
     mutable_config.set("config:url_fetch_method", "curl")
     fetcher = fs.URLFetchStrategy(url="http://example.com/file.tar.gz")
     with pytest.raises(spack.error.FetchError, match="curl is required but not found"):
-        with stage_from_config(fetcher, path=str(tmp_path), config=mutable_config) as stage:
+        with stage_from_config(
+            fetcher, path=str(tmp_path), config=mutable_config, client=ctx.network
+        ) as stage:
             stage.fetch()
 
 

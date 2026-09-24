@@ -54,14 +54,18 @@ def test_buildcache(tmp_path: pathlib.Path, mutable_config: Configuration, ctx: 
 
     # Create the build cache and put it directly into the mirror
     mirror_path = str(tmp_path / "test-mirror")
-    spack.cmd.mirror.create(mirror_path, specs=[], repo=ctx.repo)
+    spack.cmd.mirror.create(mirror_path, specs=[], ctx=ctx)
 
     # register mirror with spack config
     mirrors = {"spack-mirror-test": url_util.path_to_file_url(mirror_path)}
     mutable_config.set("mirrors", mirrors)
 
     with spack.stage.stage_from_config(
-        mirrors["spack-mirror-test"], name="build_cache", keep=True, config=mutable_config
+        mirrors["spack-mirror-test"],
+        name="build_cache",
+        keep=True,
+        config=mutable_config,
+        client=ctx.network,
     ):
         parser = argparse.ArgumentParser()
         buildcache.setup_parser(parser)

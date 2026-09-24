@@ -155,7 +155,7 @@ def _migrate_spec(
     # location
     archive_stage_path = os.path.join(tmpdir, f"archive_stage_{s.name}_{s.dag_hash()}")
     archive_stage = spack.stage.stage_from_config(
-        v2_archive_url, path=archive_stage_path, config=spack.config.CONFIG
+        v2_archive_url, path=archive_stage_path, config=spack.config.CONFIG, client=client
     )
 
     try:
