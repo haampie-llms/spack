@@ -192,7 +192,7 @@ def test_repo_dump_virtuals(
 
 @pytest.mark.parametrize("repos", [["mock"], ["extra"], ["mock", "extra"], ["extra", "mock"]])
 def test_repository_construction_doesnt_use_globals(
-    nullify_globals, tmp_path: pathlib.Path, repos, repo_builder: RepoBuilder
+    tmp_path: pathlib.Path, repos, repo_builder: RepoBuilder
 ):
     def _repo_descriptors(repos):
         descriptors = {}
@@ -243,7 +243,6 @@ def test_use_repositories_and_import(ctx: SpackContext):
         import spack_repo.builtin_mock.packages.cmake.package  # type: ignore[import]  # noqa: F401
 
 
-@pytest.mark.usefixtures("nullify_globals")
 class TestRepo:
     """Test that the Repo class work correctly, and does not depend on globals,
     except the REPOS_FINDER.
@@ -338,7 +337,6 @@ class TestRepo:
             assert r2.issubset(r1)
 
 
-@pytest.mark.usefixtures("nullify_globals")
 class TestRepoPath:
     def test_creation_from_string(self, mock_test_cache):
         repo = spack.repo.RepoPath.from_descriptors(

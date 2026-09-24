@@ -243,7 +243,6 @@ def _concretize_separately(
             processes=processes,
             debug=tty.is_debug(),
             maxtaskperchild=1,
-            context=ctx,
             shared=(ctx, ctx.environment),
         ),
         start=1,

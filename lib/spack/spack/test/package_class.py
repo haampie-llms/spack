@@ -8,6 +8,7 @@ etc.).  Only methods like ``possible_dependencies()`` that deal with the
 static DSL metadata for packages.
 """
 
+import multiprocessing
 import os
 import pathlib
 import shutil
@@ -331,8 +332,11 @@ def test_deserialize_preserves_package_attribute(config, mock_packages, ctx: Spa
     x = spack.concretize.concretize_one("mpileaks", ctx).package
     assert x.spec._package is x
 
-    y = spack.subprocess_context.deserialize(spack.subprocess_context.serialize(x))
+    spawn = multiprocessing.get_context("spawn")
+    y = spack.subprocess_context.PackageInstallContext(x, ctx=spawn).restore()
     assert y.spec._package is y
+    # The package's context is the one whose repositories were enabled on restore
+    assert "repo" in y.context.__dict__
 
 
 @pytest.mark.require_provenance

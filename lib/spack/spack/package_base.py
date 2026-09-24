@@ -92,10 +92,6 @@ FLAG_HANDLER_RETURN_TYPE = Tuple[
 FLAG_HANDLER_TYPE = Callable[[str, Iterable[str]], FLAG_HANDLER_RETURN_TYPE]
 
 
-#: Context of packages that were not given one, set by ``spack.main`` (transitional)
-default_context: Optional[Callable[[], "spack.context.SpackContext"]] = None
-
-
 def global_license_dir(config: spack.config.Configuration) -> str:
     """Returns the directory where license files for all packages are stored."""
     return spack.config.canonicalize_path(config.get("config:license_dir"), config=config)
@@ -765,9 +761,7 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
     def context(self) -> "spack.context.SpackContext":
         """Configuration, store, repositories, ... the package reads."""
         if self._context is None:
-            if default_context is None:
-                raise PackageError(f"package {self.name} has no context")
-            self._context = default_context()
+            raise PackageError(f"package {self.name} has no context")
         return self._context
 
     @context.setter

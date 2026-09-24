@@ -849,7 +849,7 @@ def test_push_to_build_cache(
     mirror_dir = scratch / "mirror"
     mirror_url = mirror_dir.as_uri()
 
-    ci.import_signing_key(_signing_key())
+    ci.import_signing_key(_signing_key(), ctx)
 
     with working_dir(tmp_path):
         with open("spack.yaml", "w", encoding="utf-8") as f:

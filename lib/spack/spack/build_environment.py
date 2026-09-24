@@ -69,6 +69,7 @@ import spack.builder
 import spack.compilers.libraries
 import spack.config
 import spack.deptypes as dt
+import spack.detection
 import spack.error
 import spack.hooks.sbang
 import spack.multimethod
@@ -633,6 +634,7 @@ def set_package_py_globals(pkg, context: Context = Context.BUILD):
     module.static_to_shared_library = static_to_shared_library
 
     # Package API functions that take no package, bound to the package's context
+
     ctx = pkg.context
     module.determine_number_of_jobs = functools.partial(
         spack.config.determine_number_of_jobs, config=ctx.config
@@ -644,6 +646,12 @@ def set_package_py_globals(pkg, context: Context = Context.BUILD):
         spack.hooks.sbang.sbang_shebang_line_for, ctx.store
     )
     module.filter_shebang = lambda path: spack.hooks.sbang.filter_shebang_for(path, ctx.store)
+    module.find_compilers = functools.partial(
+        spack.detection.find_compilers, config=ctx.config, repo=ctx.repo
+    )
+    module.environment_modifications_for_specs = functools.partial(
+        modifications_for_specs, ctx=ctx
+    )
 
     module.propagate_changes_to_mro()
 
@@ -1799,20 +1807,3 @@ def modifications_for_specs(
         spack.user_environment.project_env_mods(*topo_ordered, view=view, env=env, config=config)
 
     return env
-
-
-def environment_modifications_for_specs(
-    *specs: spack.spec.Spec, view=None, set_package_py_globals: bool = True
-):
-    """Same as :func:`modifications_for_specs`, in the context of the package of the first spec.
-
-    This is part of the package API; library code calls :func:`modifications_for_specs`.
-    """
-    if not specs:
-        return EnvironmentModifications()
-    return modifications_for_specs(
-        *specs,
-        ctx=specs[0].package.context,
-        view=view,
-        set_package_py_globals=set_package_py_globals,
-    )

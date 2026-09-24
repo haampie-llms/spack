@@ -243,14 +243,14 @@ def test_pipeline_dag(config, repo_builder: RepoBuilder, ctx: SpackContext):
 
 
 @pytest.mark.not_on_windows("Not supported on Windows (yet)")
-def test_import_signing_key(mock_gnupghome):
+def test_import_signing_key(mock_gnupghome, ctx: SpackContext):
     signing_key_dir = spack.paths.mock_gpg_keys_path
     signing_key_path = os.path.join(signing_key_dir, "package-signing-key")
     with open(signing_key_path, encoding="utf-8") as fd:
         signing_key = fd.read()
 
     # Just make sure this does not raise any exceptions
-    ci.import_signing_key(signing_key)
+    ci.import_signing_key(signing_key, ctx)
 
 
 def test_download_and_extract_artifacts(tmp_path: pathlib.Path, monkeypatch):

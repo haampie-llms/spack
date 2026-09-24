@@ -17,7 +17,6 @@ import spack.build_environment
 import spack.concretize
 import spack.config
 import spack.deptypes as dt
-import spack.package
 import spack.package_base
 import spack.spec
 import spack.subprocess_context
@@ -522,13 +521,6 @@ def test_parallel_false_is_not_propagating(config, mock_packages, ctx: SpackCont
     assert s["pkg-b"].package.module.make_jobs == spack.config.determine_number_of_jobs(
         parallel=s["pkg-b"].package.parallel, config=ctx.config
     )
-
-
-def test_package_api_determine_number_of_jobs_without_config(mutable_config):
-    """Recipes may call determine_number_of_jobs without a configuration"""
-    mutable_config.set("config:build_jobs", 3)
-    assert spack.package.determine_number_of_jobs(parallel=True, max_cpus=8) == 3
-    assert spack.package.determine_number_of_jobs(parallel=False) == 1
 
 
 @pytest.mark.parametrize(

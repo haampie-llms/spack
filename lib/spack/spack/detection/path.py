@@ -7,6 +7,8 @@ and running executables.
 
 import collections
 import concurrent.futures
+import functools
+import inspect
 import os
 import pathlib
 import re
@@ -271,6 +273,8 @@ class Finder:
             repo_path: repositories providing the packages
             config: configuration of the detection
         """
+        _bind_package_api(pkg, repo=repo_path, config=config)
+
         if not hasattr(pkg, "determine_spec_details"):
             warnings.warn(
                 f"{pkg.name} must define 'determine_spec_details' in order"
@@ -462,6 +466,23 @@ def _find(
         initial_guess=initial_guess,
         additional_search_paths=additional_search_paths,
     )
+
+
+def _bind_package_api(
+    pkg: Type["spack.package_base.PackageBase"],
+    *,
+    repo: spack.repo.RepoPath,
+    config: spack.config.Configuration,
+) -> None:
+    """Binds the package API functions that take no package to the detection resources, in the
+    modules of the package class and its bases."""
+    bound_find_compilers = functools.partial(find_compilers, config=config, repo=repo)
+    for cls in inspect.getmro(pkg):
+        module = sys.modules.get(cls.__module__)
+        if module is None or cls.__module__.startswith("spack."):
+            continue
+        if hasattr(module, "find_compilers"):
+            module.find_compilers = bound_find_compilers  # type: ignore[attr-defined]
 
 
 def by_path(

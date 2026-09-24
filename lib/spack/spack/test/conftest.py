@@ -40,7 +40,6 @@ import spack.compilers.config
 import spack.compilers.libraries
 import spack.concretize
 import spack.config
-import spack.context
 import spack.database
 import spack.directives_meta
 import spack.environment as ev
@@ -83,7 +82,6 @@ from spack.fetch_strategy import URLFetchStrategy
 from spack.installer import PackageInstaller
 from spack.repo import RepoPath
 from spack.test.harness import SpackCommand
-from spack.test.utilities import UnusableGlobal
 from spack.util import tty
 from spack.util.filesystem import copy, join_path, mkdirp, remove_linked_tree, working_dir
 from spack.util.pattern import Bunch
@@ -2463,13 +2461,6 @@ def shell_as(shell):
         # restore old shell if one was set
         if _shell:
             os.environ["SPACK_SHELL"] = _shell
-
-
-@pytest.fixture()
-def nullify_globals(ctx: SpackContext, monkeypatch):
-    """Makes reading the context of the process raise, to test that code uses the one it is
-    given."""
-    monkeypatch.setattr(spack.context, "_DEFAULT", UnusableGlobal("spack.context.default()"))
 
 
 def pytest_runtest_setup(item):

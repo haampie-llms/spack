@@ -1274,7 +1274,7 @@ def test_older_readable_db_is_read_in_place_and_refuses_writes(
     [spack.database.NO_LOCK, spack.database.NO_TIMEOUT, spack.database.DEFAULT_LOCK_CFG, None],
 )
 def test_database_construction_doesnt_use_globals(
-    tmp_path: pathlib.Path, config: Configuration, nullify_globals, lock_cfg
+    tmp_path: pathlib.Path, config: Configuration, lock_cfg
 ):
     lock_cfg = lock_cfg or spack.database.lock_configuration(config)
     db = Database(str(tmp_path), lock_cfg=lock_cfg)

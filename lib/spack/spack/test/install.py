@@ -902,7 +902,7 @@ def test_deprecated_build_only_dependency_is_not_blocked(
     # This must not raise: the deprecated node is build-transitive, outside the runtime closure of
     # the requested root.
     spack.installer_dispatch.create_installer([spec.package]).install()
-    assert spec.installed
+    assert ctx.store.db.installed(spec)
 
 
 def test_installer_scope_all_gates_build_transitive_deprecation(
