@@ -2,7 +2,6 @@
 #
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
 import argparse
-import builtins
 import filecmp
 import gzip
 import itertools
@@ -22,7 +21,8 @@ import spack.environment as ev
 import spack.error
 import spack.hooks.sbom_generate
 import spack.installer
-import spack.old_installer
+import spack.installer.build
+import spack.installer.core
 import spack.package_base
 import spack.reporters.cdash
 import spack.util.filesystem as fs
@@ -70,34 +70,44 @@ def test_install_package_and_dependency(
     assert 'errors="0"' in content
 
 
-def _check_runtests_none(pkg):
-    assert not pkg.run_tests
+class _BuildRequestRecorder:
+    """Records the run_tests of each build request. A module level class, so that build
+    processes can unpickle the patch."""
+
+    def __init__(self):
+        self.run_tests = {}
+
+    def __call__(self, *args, **kwargs):
+        request = spack.installer.build.BuildRequest(*args, **kwargs)
+        self.run_tests[request.spec.name] = request.run_tests
+        return request
 
 
-def _check_runtests_root(pkg):
-    assert pkg.run_tests == (pkg.name == "dependent-install")
-
-
-def _check_runtests_all(pkg):
-    assert pkg.run_tests
+def _record_run_tests(monkeypatch):
+    recorder = _BuildRequestRecorder()
+    monkeypatch.setattr(spack.installer.core, "BuildRequest", recorder)
+    return recorder.run_tests
 
 
 @pytest.mark.disable_clean_stage_check
 def test_install_runtests_notests(monkeypatch, mock_packages, mock_fetch, install_mockery):
-    monkeypatch.setattr(spack.package_base.PackageBase, "_unit_test_check", _check_runtests_none)
+    run_tests = _record_run_tests(monkeypatch)
     install("-v", "dependent-install")
+    assert run_tests and not any(run_tests.values())
 
 
 @pytest.mark.disable_clean_stage_check
 def test_install_runtests_root(monkeypatch, mock_packages, mock_fetch, install_mockery):
-    monkeypatch.setattr(spack.package_base.PackageBase, "_unit_test_check", _check_runtests_root)
+    run_tests = _record_run_tests(monkeypatch)
     install("--test=root", "dependent-install")
+    assert run_tests and all(v == (name == "dependent-install") for name, v in run_tests.items())
 
 
 @pytest.mark.disable_clean_stage_check
 def test_install_runtests_all(monkeypatch, mock_packages, mock_fetch, install_mockery):
-    monkeypatch.setattr(spack.package_base.PackageBase, "_unit_test_check", _check_runtests_all)
+    run_tests = _record_run_tests(monkeypatch)
     install("--test=all", "dependent-install")
+    assert run_tests and all(run_tests.values())
 
 
 def test_install_package_already_installed(
@@ -419,76 +429,6 @@ def test_junit_output_with_failures(tmp_path: pathlib.Path, exc_typename, msg):
     # We want to have both stdout and stderr
     assert "<system-out>" in content
     assert msg in content
-
-
-def _throw(task, exc_typename, exc_type, msg):
-    # Self is a spack.old_installer.Task
-    exc_type = getattr(builtins, exc_typename)
-    exc = exc_type(msg)
-    task.fail(exc)
-
-
-def _runtime_error(task, *args, **kwargs):
-    _throw(task, "RuntimeError", spack.error.InstallError, "something weird happened")
-
-
-def _keyboard_error(task, *args, **kwargs):
-    _throw(task, "KeyboardInterrupt", KeyboardInterrupt, "Ctrl-C strikes again")
-
-
-@pytest.mark.disable_clean_stage_check
-@pytest.mark.parametrize(
-    "exc_typename,expected_exc,msg",
-    [
-        ("RuntimeError", spack.error.InstallError, "something weird happened"),
-        ("KeyboardInterrupt", KeyboardInterrupt, "Ctrl-C strikes again"),
-    ],
-)
-def test_junit_output_with_errors(
-    exc_typename,
-    expected_exc,
-    msg,
-    mock_packages,
-    mock_archive,
-    mock_fetch,
-    install_mockery,
-    tmp_path: pathlib.Path,
-    monkeypatch,
-    mutable_config,
-):
-    mutable_config.set("config:installer", "old")
-    throw = _keyboard_error if expected_exc is KeyboardInterrupt else _runtime_error
-    monkeypatch.setattr(spack.old_installer.BuildTask, "complete", throw)
-
-    with fs.working_dir(str(tmp_path)):
-        install(
-            "--verbose",
-            "--log-format=junit",
-            "--log-file=test.xml",
-            "trivial-install-test-dependent",
-            fail_on_error=False,
-        )
-
-    assert isinstance(install.error, expected_exc)
-
-    files = list(tmp_path.iterdir())
-    filename = tmp_path / "test.xml"
-    assert filename in files
-
-    content = filename.read_text()
-
-    # Only original error is reported, dependent
-    # install is skipped and it is not an error.
-    assert 'tests="0"' not in content
-    assert 'failures="0"' in content
-    assert 'errors="0"' not in content
-
-    # Nothing should have succeeded
-    assert 'errors="0"' not in content
-
-    # We want to have both stdout and stderr
-    assert "<system-out>" in content
-    assert f'error message="{msg}"' in content
 
 
 @pytest.fixture(params=["yaml", "json"])
