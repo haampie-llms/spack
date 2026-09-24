@@ -7,7 +7,7 @@ import pytest
 
 import spack.compilers.config
 import spack.compilers.libraries
-import spack.config
+import spack.context
 import spack.detection
 import spack.spec
 from spack.test.utilities import UnusableGlobal
@@ -32,11 +32,11 @@ done
     )
     prefix = gcc_path.parent.parent
     arch = spack.spec.ArchSpec.default_arch()
-    # The repository indexes are built lazily through a cache created from spack.config.CONFIG
+    # The repository indexes are built lazily through a cache created from the process context
     mock_packages.packages_with_tags("compiler")
 
     with monkeypatch.context() as m:
-        for module, attribute in [(spack.config, "CONFIG")]:
+        for module, attribute in [(spack.context, "_DEFAULT")]:
             m.setattr(module, attribute, UnusableGlobal(f"{module.__name__}.{attribute}"))
 
         with monkeypatch.context():

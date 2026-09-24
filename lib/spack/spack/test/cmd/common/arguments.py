@@ -20,28 +20,31 @@ from spack.solver.asp import UnsatisfiableSpecError
 
 
 @pytest.fixture()
-def job_parser():
-    # --jobs needs to write to a command_line config scope, so this is the only
-    # scope we create.
+def job_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser()
     arguments.add_common_arguments(p, ["jobs"])
+    return p
+
+
+@pytest.fixture()
+def job_context() -> SpackContext:
+    # --jobs needs to write to a command_line config scope, so this is the only
+    # scope we create.
     scopes = [spack.config.InternalConfigScope("command_line", {"config": {}})]
-
-    with spack.config.use_configuration(*scopes):
-        yield p
+    return SpackContext(spack.config.create_from(*scopes))
 
 
-def test_setting_jobs_flag(job_parser, ctx: SpackContext):
+def test_setting_jobs_flag(job_parser, job_context: SpackContext):
     namespace = job_parser.parse_args(["-j", "24"])
-    arguments.apply_deferred_config(namespace, ctx)
+    arguments.apply_deferred_config(namespace, job_context)
     assert namespace.jobs == 24
-    assert spack.config.CONFIG.get("config:build_jobs", scope="command_line") == 24
+    assert job_context.config.get("config:build_jobs", scope="command_line") == 24
 
 
-def test_omitted_job_flag(job_parser):
+def test_omitted_job_flag(job_parser, job_context: SpackContext):
     namespace = job_parser.parse_args([])
     assert namespace.jobs is None
-    assert spack.config.CONFIG.get("config:build_jobs") is None
+    assert job_context.config.get("config:build_jobs") is None
 
 
 def test_negative_integers_not_allowed_for_parallel_jobs(job_parser):

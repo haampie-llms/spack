@@ -22,7 +22,6 @@ import pytest
 
 import spack.binary_distribution
 import spack.concretize
-import spack.config
 import spack.context
 import spack.environment as ev
 import spack.main
@@ -338,7 +337,9 @@ def test_generate_index_missing(
 
 @pytest.mark.usefixtures("install_mockery", "mock_packages", "mock_fetch")
 @pytest.mark.parametrize("view", ["", "test_view"])
-def test_push_index_keeps_records_of_other_formats(tmp_path: pathlib.Path, view: str):
+def test_push_index_keeps_records_of_other_formats(
+    tmp_path: pathlib.Path, view: str, ctx: SpackContext
+):
     """Pushing an index replaces only the record of the format it writes"""
     mirror_dir = tmp_path / "mirror"
     mirror_url = url_util.path_to_file_url(str(mirror_dir))
@@ -374,9 +375,9 @@ def test_push_index_keeps_records_of_other_formats(tmp_path: pathlib.Path, view:
     metadata = spack.url_buildcache.MirrorMetadata(
         mirror_url, spack.binary_distribution.CURRENT_BUILD_CACHE_LAYOUT_VERSION, view
     )
-    client = web_util.NetworkClient.from_config(spack.config.CONFIG)
+    client = web_util.NetworkClient.from_config(ctx.config)
     result = spack.binary_distribution.DefaultIndexHandler(
-        metadata, None, urlopen=client.urlopen, config=spack.config.CONFIG, client=client
+        metadata, None, urlopen=client.urlopen, config=ctx.config, client=client
     ).conditional_fetch()
     assert result.hash == new["checksum"]
 

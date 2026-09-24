@@ -7,8 +7,8 @@ import sys
 
 import pytest
 
-import spack.config
 import spack.util.remote_file_cache as rfc_util
+from spack.context import SpackContext
 from spack.util import tty
 from spack.util.filesystem import join_path
 
@@ -23,40 +23,36 @@ gitlab_url = "https://gitlab.fake.io/user/repo/-/blob/config/defaults"
         ("bad:///this/is/a/file/url/include.yaml", "Invalid URL scheme"),
     ],
 )
-def test_rfc_local_path_bad_scheme(path, err):
+def test_rfc_local_path_bad_scheme(path, err, ctx: SpackContext):
     with pytest.raises(ValueError, match=err):
-        _ = rfc_util.local_path(path, "", config=spack.config.CONFIG)
+        _ = rfc_util.local_path(path, "", config=ctx.config)
 
 
 @pytest.mark.not_on_windows("Unix path")
-def test_rfc_local_file_unix():
+def test_rfc_local_file_unix(ctx: SpackContext):
     assert (
-        rfc_util.local_path("/a/b/c/d/e/config.py", "", config=spack.config.CONFIG)
+        rfc_util.local_path("/a/b/c/d/e/config.py", "", config=ctx.config)
         == "/a/b/c/d/e/config.py"
     )
     assert (
-        rfc_util.local_path(
-            "file:///this/is/a/file/url/include.yaml", "", config=spack.config.CONFIG
-        )
+        rfc_util.local_path("file:///this/is/a/file/url/include.yaml", "", config=ctx.config)
         == "/this/is/a/file/url/include.yaml"
     )
 
 
 @pytest.mark.only_windows("Windows path")
-def test_rfc_local_file_windows():
+def test_rfc_local_file_windows(ctx: SpackContext):
     assert (
-        rfc_util.local_path(r"C:\Files (x86)\Windows\10", "", config=spack.config.CONFIG)
+        rfc_util.local_path(r"C:\Files (x86)\Windows\10", "", config=ctx.config)
         == r"C:\Files (x86)\Windows\10"
     )
-    assert (
-        rfc_util.local_path(r"D:/spack stage", "", config=spack.config.CONFIG) == r"D:\spack stage"
-    )
+    assert rfc_util.local_path(r"D:/spack stage", "", config=ctx.config) == r"D:\spack stage"
 
 
-def test_rfc_remote_local_path_no_dest():
+def test_rfc_remote_local_path_no_dest(ctx: SpackContext):
     path = f"{gitlab_url}/packages.yaml"
     with pytest.raises(ValueError, match="Requires the destination argument"):
-        _ = rfc_util.local_path(path, "", config=spack.config.CONFIG)
+        _ = rfc_util.local_path(path, "", config=ctx.config)
 
 
 packages_yaml_sha256 = (
@@ -84,7 +80,14 @@ packages_yaml_sha256 = (
     ],
 )
 def test_rfc_remote_local_path(
-    tmp_path: pathlib.Path, mutable_empty_config, mock_fetch_url_text, url, sha256, err, msg
+    tmp_path: pathlib.Path,
+    mutable_empty_config,
+    mock_fetch_url_text,
+    url,
+    sha256,
+    err,
+    msg,
+    ctx: SpackContext,
 ):
     def _has_content(filename):
         # The first element of all configuration files for this test happen to
@@ -103,10 +106,10 @@ def test_rfc_remote_local_path(
     if err is not None:
         with mutable_empty_config.override("config:url_fetch_method", "curl"):
             with pytest.raises(err, match=msg):
-                rfc_util.local_path(url, sha256, dest_dir, config=spack.config.CONFIG)
+                rfc_util.local_path(url, sha256, dest_dir, config=ctx.config)
     else:
         with mutable_empty_config.override("config:url_fetch_method", "curl"):
-            path = rfc_util.local_path(url, sha256, dest_dir, config=spack.config.CONFIG)
+            path = rfc_util.local_path(url, sha256, dest_dir, config=ctx.config)
             assert os.path.exists(path)
             # Ensure correct file is "fetched"
             assert os.path.basename(path) == os.path.basename(url)

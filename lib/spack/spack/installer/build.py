@@ -28,7 +28,6 @@ from spack.vendor.typing_extensions import Protocol
 import spack.binary_distribution
 import spack.build_environment
 import spack.builder
-import spack.config
 import spack.error
 import spack.hooks
 import spack.mirrors.mirror
@@ -722,7 +721,7 @@ def _install(
     timer = spack.util.timer.Timer()
 
     if request.fake:
-        store.layout.create_install_directory(spec, config=spack.config.CONFIG)
+        store.layout.create_install_directory(spec, config=pkg.context.config)
         _do_fake_install(pkg)
         _post_install(pkg, spec, explicit, timer, cache=False)
         return
@@ -749,7 +748,7 @@ def _install(
 
     unmodified_env = os.environ.copy()
     env_mods = spack.build_environment.setup_package(pkg, dirty=request.dirty)
-    store.layout.create_install_directory(spec, config=spack.config.CONFIG)
+    store.layout.create_install_directory(spec, config=pkg.context.config)
 
     stage = pkg.stage
     stage.keep = request.keep_stage
@@ -858,8 +857,6 @@ def start_build(request: BuildRequest, jobserver: JobServerBase) -> ChildInfo:
     gmake = next(iter(spec.dependencies("gmake")), None)
     makeflags = jobserver.makeflags(gmake)
 
-    # As a performance optimization, we do not serialize the environment which
-    # is slow to serialize and not needed in the build job
     proc = Process(
         target=worker_function,
         args=(
@@ -869,7 +866,7 @@ def start_build(request: BuildRequest, jobserver: JobServerBase) -> ChildInfo:
             channels.control_r,
             channels.tee_control_w,
             makeflags,
-            GlobalStateMarshaler(),
+            GlobalStateMarshaler(context=spec.package.context),
         ),
     )
     proc.start()

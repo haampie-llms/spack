@@ -101,22 +101,11 @@ spack = ["spack"]
 "*-ci-package.py" = ["F403", "F405", "F821"]
 # Files that still read process globals; the list shrinks as the globals are deleted
 "lib/spack/spack/test/**" = ["TID251"]
-"lib/spack/spack/bootstrap/config.py" = ["TID251"]
-"lib/spack/spack/context.py" = ["TID251"]
-"lib/spack/spack/hooks/write_install_manifest.py" = ["TID251"]
-"lib/spack/spack/installer/build.py" = ["TID251"]
-"lib/spack/spack/installer/core.py" = ["TID251"]
-"lib/spack/spack/installer_dispatch.py" = ["TID251"]
 "lib/spack/spack/main.py" = ["TID251"]
-"lib/spack/spack/modules/common.py" = ["TID251"]
-"lib/spack/spack/old_installer.py" = ["TID251"]
 "lib/spack/spack/package.py" = ["TID251"]
-"lib/spack/spack/subprocess_context.py" = ["TID251"]
-"share/spack/qa/config_state.py" = ["TID251"]
 "share/spack/qa/environment_activation.py" = ["TID251"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
-"spack.config.CONFIG".msg = "take a configuration argument"
 "spack.context.default".msg = "take a context argument"
 
 

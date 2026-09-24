@@ -9,7 +9,7 @@ import pytest
 
 import spack.cmd.modules
 import spack.concretize
-import spack.config
+import spack.context
 import spack.error
 import spack.modules
 import spack.modules.common
@@ -173,7 +173,7 @@ module_index:
     mock_db = MockDb(dbs, {s1.dag_hash(): "d1"})
     upstream_index = UpstreamModuleIndex(mock_db, module_indices)
 
-    ctx = SpackContext(spack.config.CONFIG)
+    ctx = SpackContext(spack.context.default().config)
     ctx.store = types.SimpleNamespace(db=mock_db)
     m1_path = spack.modules.get_module("tcl", s1, True, ctx=ctx, upstream_index=upstream_index)
     assert m1_path == "/path/to/a"

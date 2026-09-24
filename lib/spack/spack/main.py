@@ -931,6 +931,10 @@ def add_command_line_scopes(
         cfg.push_scope(scope, priority=ConfigScopePriority.CUSTOM)
 
 
+#: Whether ``config:debug`` is set, so that errors are reported with their traceback
+_SHOW_TRACEBACK = False
+
+
 def _main(argv=None):
     """Logic for the main entry point for the Spack command.
 
@@ -961,20 +965,34 @@ def _main(argv=None):
     # avoid loading all the modules from spack.cmd when we don't need
     # them, which reduces startup latency.
     parser = make_argument_parser()
-    parser.config = spack.config.CONFIG
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
+
+    # version is special as it does not require a command or loading and additional infrastructure
+    if args.version:
+        print(spack.get_version())
+        return 0
+
+    config = spack.config.create()
+    parser.config = config
+    ctx = spack.context.SpackContext(config)
+    # Library code without a context of its own reads this one (transitional)
+    spack.context.set_default(ctx)
+
+    if (
+        sys.platform == "darwin"
+        and multiprocessing.get_start_method(allow_none=True) is None
+        and config.get("config:installer") == "new"
+    ):
+        # Forkserver is significantly faster than spawn. This has to be configured once and early
+        # in the process.
+        multiprocessing.set_start_method("forkserver")
 
     # Just print help and exit if run with no arguments at all
     no_args = (len(sys.argv) == 1) if argv is None else (len(argv) == 0)
     if no_args:
         parser.print_help()
         return 1
-
-    # version is special as it does not require a command or loading and additional infrastructure
-    if args.version:
-        print(spack.get_version())
-        return 0
 
     # ------------------------------------------------------------------------
     # This part of the `main()` sets up Spack's configuration.
@@ -993,7 +1011,7 @@ def _main(argv=None):
     # try to find an active environment here, so that we can activate it later
     if not args.no_env:
         try:
-            env = spack.cmd.find_environment(args, spack.context.default())
+            env = spack.cmd.find_environment(args, ctx)
         except (spack.config.ConfigFormatError, ev.SpackEnvironmentConfigError) as e:
             # print the context but delay this exception so that commands like
             # `spack config edit` can still work with a bad environment.
@@ -1004,12 +1022,12 @@ def _main(argv=None):
         if env_format_error:
             # Allow command to continue without env in case it is `spack config edit`
             # All other cases will raise in `finish_parse_and_run`
-            spack.context.default().environment_error = env_format_error
+            ctx.environment_error = env_format_error
             return
         # do not call activate here, as it has a lot of expensive function calls to deal
-        # with mutation of spack.config.CONFIG -- but we are still building the config.
-        env.manifest.prepare_config_scope(spack.config.CONFIG)
-        spack.context.default()._set_environment(env)
+        # with mutation of the configuration -- but we are still building the config.
+        env.manifest.prepare_config_scope(config)
+        ctx._set_environment(env)
 
     # add the environment
     if env:
@@ -1017,17 +1035,19 @@ def _main(argv=None):
 
     # Push scopes from the command line last
     if args.config_scopes:
-        add_command_line_scopes(spack.config.CONFIG, args.config_scopes)
-    spack.config.CONFIG.push_scope(
+        add_command_line_scopes(config, args.config_scopes)
+    config.push_scope(
         spack.config.InternalConfigScope("command_line"), priority=ConfigScopePriority.COMMAND_LINE
     )
-    setup_main_options(args, parser.config)
+    setup_main_options(args, config)
+    global _SHOW_TRACEBACK
+    _SHOW_TRACEBACK = config.get("config:debug")
 
     # ------------------------------------------------------------------------
     # Things that require configuration should go below here
     # ------------------------------------------------------------------------
     if args.print_shell_vars:
-        print_setup_info(parser.config, *args.print_shell_vars.split(","))
+        print_setup_info(config, *args.print_shell_vars.split(","))
         return 0
 
     # -h and -H are special as they do not require a command, but
@@ -1044,13 +1064,13 @@ def _main(argv=None):
 
     # Try to load the particular command the caller asked for.
     cmd_name = args.command[0]
-    cmd_name, args.command = resolve_alias(cmd_name, args.command, parser.config)
+    cmd_name, args.command = resolve_alias(cmd_name, args.command, config)
 
     if not args.bootstrap:
-        return finish_parse_and_run(parser, cmd_name, args, env_format_error)
+        return finish_parse_and_run(parser, cmd_name, args, ctx)
 
     try:
-        return finish_parse_and_run(parser, cmd_name, args, env_format_error)
+        return finish_parse_and_run(parser, cmd_name, args, ctx)
     except spack.error.ExplicitDatabaseUpgradeError as e:
         # The bootstrap store is reindexed with `spack -b reindex`
         if e._long_message:
@@ -1058,7 +1078,7 @@ def _main(argv=None):
         raise
 
 
-def finish_parse_and_run(parser, cmd_name, main_args, env_format_error):
+def finish_parse_and_run(parser, cmd_name, main_args, ctx: spack.context.SpackContext):
     """Finish parsing after we know the command to run."""
     # add the found command to the parser and re-run then re-parse
     command = parser.add_command(cmd_name)
@@ -1069,15 +1089,14 @@ def finish_parse_and_run(parser, cmd_name, main_args, env_format_error):
 
     # Now that we know what command this is and what its args are, determine
     # whether we can continue with a bad environment and raise if not.
-    if env_format_error:
+    if ctx.environment_error:
         subcommand = getattr(args, "config_command", None)
         if (cmd_name, subcommand) != ("config", "edit"):
-            raise env_format_error
+            raise ctx.environment_error
 
     # many operations will fail without a working directory.
     spack.paths.set_working_dir()
 
-    ctx = spack.context.default()
     if main_args.bootstrap:
         ctx = ctx.bootstrap
 
@@ -1137,14 +1156,6 @@ def main(argv=None):
             the executable name. If None, parses from sys.argv.
 
     """
-    if (
-        sys.platform == "darwin"
-        and multiprocessing.get_start_method(allow_none=True) is None
-        and spack.config.CONFIG.get("config:installer") == "new"
-    ):
-        # Forkserver is significantly faster than spawn. This has to be configured once and early
-        # in the process.
-        multiprocessing.set_start_method("forkserver")
     # When using the forkserver start method, preload the following modules to improve startup
     # time of child processes.
     multiprocessing.set_forkserver_preload(["spack.main", "spack.package", "spack.installer"])
@@ -1162,19 +1173,19 @@ def main(argv=None):
         e.die()  # gracefully die on any SpackErrors
 
     except KeyboardInterrupt:
-        if spack.config.CONFIG.get("config:debug") or spack.error.SHOW_BACKTRACE:
+        if _SHOW_TRACEBACK or spack.error.SHOW_BACKTRACE:
             raise
         sys.stderr.write("\n")
         tty.error("Keyboard interrupt.")
         return signal.SIGINT.value
 
     except SystemExit as e:
-        if spack.config.CONFIG.get("config:debug") or spack.error.SHOW_BACKTRACE:
+        if _SHOW_TRACEBACK or spack.error.SHOW_BACKTRACE:
             traceback.print_exc()
         return e.code
 
     except Exception as e:
-        if spack.config.CONFIG.get("config:debug") or spack.error.SHOW_BACKTRACE:
+        if _SHOW_TRACEBACK or spack.error.SHOW_BACKTRACE:
             raise
         tty.error(e)
         return 3

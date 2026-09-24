@@ -20,15 +20,12 @@ import pickle
 from types import ModuleType
 from typing import TYPE_CHECKING, Optional
 
-import spack.caches
-import spack.config
 import spack.paths
 import spack.platforms
 import spack.repo
-import spack.util.lang
 
 if TYPE_CHECKING:
-    import spack.environment
+    import spack.context
     import spack.package_base
 
 #: Used in tests to track monkeypatches that need to be restored in child processes
@@ -53,15 +50,17 @@ def deserialize(serialized_pkg: io.BytesIO) -> "spack.package_base.PackageBase":
 
 
 class SpackTestProcess:
-    def __init__(self, fn):
+    def __init__(self, fn, *, context: Optional["spack.context.SpackContext"] = None):
         self.fn = fn
+        #: Context of the child process (transitional)
+        self.context = context
 
     def _restore_and_run(self, fn, test_state):
         test_state.restore()
         fn()
 
     def create(self):
-        test_state = GlobalStateMarshaler()
+        test_state = GlobalStateMarshaler(context=self.context)
         return multiprocessing.Process(target=self._restore_and_run, args=(self.fn, test_state))
 
 
@@ -76,7 +75,7 @@ class PackageInstallContext:
         ctx: Optional[multiprocessing.context.BaseContext] = None,
     ):
         ctx = ctx or multiprocessing.get_context()
-        self.global_state = GlobalStateMarshaler(ctx=ctx, env=pkg.context.environment)
+        self.global_state = GlobalStateMarshaler(ctx=ctx, context=pkg.context)
         self.pkg = pkg if ctx.get_start_method() == "fork" else serialize(pkg)
         self.spack_working_dir = spack.paths.spack_working_dir
 
@@ -87,43 +86,38 @@ class PackageInstallContext:
 
 
 class GlobalStateMarshaler:
-    """Class to serialize and restore global state for child processes if needed.
-
-    Spack may modify state that is normally read from disk or command line in memory;
-    this object is responsible for properly serializing that state to be applied to a subprocess.
+    """Class to serialize and restore the process state that child processes need, and that is
+    not part of the context they receive: the platform, the working directory and, in tests,
+    monkeypatches. The ``context`` passed in becomes the context of the child process
+    (transitional).
     """
 
     def __init__(
         self,
         *,
         ctx: Optional[Optional[multiprocessing.context.BaseContext]] = None,
-        env: Optional["spack.environment.Environment"] = None,
+        context: Optional["spack.context.SpackContext"] = None,
     ) -> None:
         ctx = ctx or multiprocessing.get_context()
         self.is_forked = ctx.get_start_method() == "fork"
         if self.is_forked:
             return
 
-        self.config = spack.util.lang.ensure_unwrapped(spack.config.CONFIG)
         self.platform = spack.platforms.host
         self.test_patches = TestPatches.create()
         self.spack_working_dir = spack.paths.spack_working_dir
-        #: Environment to activate in the child process
-        self.env = env
+        self.context = context
 
     def restore(self):
         if self.is_forked:
             return
-        spack.config.CONFIG = self.config
-        # Enable the repositories of the configuration, to import package modules
-        spack.repo.create_and_enable(
-            self.config, cache=spack.caches.misc_cache(config=self.config)
-        )
         spack.platforms.host = self.platform
         spack.paths.spack_working_dir = self.spack_working_dir
         self.test_patches.restore()
-        if self.env:
-            self.env.activate()
+        if self.context is not None:
+            self.context.make_default()
+            # Enable its repositories, to import package modules
+            _ = self.context.repo
 
 
 class TestPatches:

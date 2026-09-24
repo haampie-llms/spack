@@ -229,7 +229,7 @@ def install_upstream(
     mock_db_root = str(tmp_path_factory.mktemp("mock_db_root"))
     upstream_layout = gen_mock_layout("a")
     prepared_db = spack.database.Database(mock_db_root, layout=upstream_layout)
-    spack.config.CONFIG.push_scope(
+    ctx.config.push_scope(
         spack.config.InternalConfigScope(
             name="install-upstream-fixture",
             data={"upstreams": {"mock1": {"install_tree": prepared_db.root}}},

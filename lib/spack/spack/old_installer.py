@@ -44,7 +44,6 @@ from spack.vendor.typing_extensions import Literal
 
 import spack.build_environment
 import spack.builder
-import spack.config
 import spack.database
 import spack.deprecation
 import spack.deptypes as dt
@@ -59,7 +58,6 @@ import spack.store
 import spack.util.filesystem as fs
 import spack.util.lock as lk
 import spack.util.path
-import spack.util.web
 from spack import binary_distribution
 from spack.installer.build import _do_fake_install, _write_timer_json, dump_packages
 from spack.url_buildcache import BuildcacheEntryError
@@ -133,7 +131,9 @@ class InstallAction(enum.Enum):
 
 
 class InstallStatus:
-    def __init__(self, pkg_count: int):
+    def __init__(self, pkg_count: int, *, enabled: bool = True):
+        #: Whether the status is shown (``config:install_status``)
+        self.enabled = enabled
         # Counters used for showing status information
         self.pkg_num: int = 0
         self.pkg_count: int = pkg_count
@@ -147,7 +147,7 @@ class InstallStatus:
             self.pkg_ids.add(pkg_id)
 
     def set_term_title(self, text: str):
-        if not spack.config.CONFIG.get("config:install_status", True):
+        if not self.enabled:
             return
 
         if not sys.stdout.isatty():
@@ -415,8 +415,8 @@ def _process_binary_cache_tarball(
             pkg.spec.build_spec,
             unsigned,
             mirrors_for_spec,
-            config=spack.config.CONFIG,
-            client=spack.util.web.NetworkClient.from_config(spack.config.CONFIG),
+            config=pkg.context.config,
+            client=pkg.context.network,
             gpg=pkg.context.gpg,
         )
 
@@ -431,7 +431,7 @@ def _process_binary_cache_tarball(
             tarball_stage,
             force=False,
             timer=timer,
-            config=spack.config.CONFIG,
+            config=pkg.context.config,
             store=pkg.context.store,
             patchelf=pkg.context.patchelf,
         )
@@ -468,7 +468,7 @@ def _try_install_from_binary_cache(
     if not any(
         m.matches_binary(pkg.spec, direction="fetch")
         for m in spack.mirrors.mirror.MirrorCollection.from_config(
-            spack.config.CONFIG, binary=True
+            pkg.context.config, binary=True
         ).values()
     ):
         return False
@@ -479,8 +479,8 @@ def _try_install_from_binary_cache(
         mirrors = binary_distribution.get_mirrors_for_spec(
             pkg.spec,
             index_only=True,
-            config=spack.config.CONFIG,
-            client=spack.util.web.NetworkClient.from_config(spack.config.CONFIG),
+            config=pkg.context.config,
+            client=pkg.context.network,
             binary_index=pkg.context.binary_index,
             gpg=pkg.context.gpg,
         )
@@ -533,7 +533,7 @@ def install_msg(name: str, pid: int, install_status: InstallStatus) -> str:
     pre = f"{pid}: " if tty.show_pid() else ""
     post = (
         " @*{%s}" % install_status.get_progress()
-        if install_status and spack.config.CONFIG.get("config:install_status", True)
+        if install_status and install_status.enabled
         else ""
     )
     return pre + colorize("@*{Installing} @*g{%s}%s" % (name, post))
@@ -1011,10 +1011,10 @@ class Task:
         if not os.path.exists(pkg.spec.prefix):
             path = spack.util.path.debug_padded_filter(pkg.spec.prefix)
             tty.debug(f"Creating the installation directory {path}")
-            pkg.context.store.layout.create_install_directory(pkg.spec, config=spack.config.CONFIG)
+            pkg.context.store.layout.create_install_directory(pkg.spec, config=pkg.context.config)
         else:
             # Set the proper group for the prefix
-            group = prefs.get_package_group(pkg.spec, config=spack.config.CONFIG)
+            group = prefs.get_package_group(pkg.spec, config=pkg.context.config)
             if group:
                 fs.chgrp(pkg.spec.prefix, group)
 
@@ -1022,7 +1022,7 @@ class Task:
             # This has to be done after group because changing groups blows
             # away the sticky group bit on the directory
             mode = os.stat(pkg.spec.prefix).st_mode
-            perms = prefs.get_package_dir_permissions(pkg.spec, config=spack.config.CONFIG)
+            perms = prefs.get_package_dir_permissions(pkg.spec, config=pkg.context.config)
             if mode != perms:
                 os.chmod(pkg.spec.prefix, perms)
 
@@ -1448,7 +1448,7 @@ class PackageInstaller:
             explicit = {pkg.spec.dag_hash() for pkg in packages} if explicit else set()
 
         if concurrent_packages is None:
-            concurrent_packages = spack.config.CONFIG.get("config:concurrent_packages", default=1)
+            concurrent_packages = self.ctx.config.get("config:concurrent_packages", default=1)
         # The value 0 means no concurrency in the old installer.
         if concurrent_packages == 0:
             concurrent_packages = 1
@@ -2375,8 +2375,7 @@ class PackageInstaller:
         """Refuse to deploy specs with a disallowed deprecation in their DAG."""
         roots = [request.pkg.spec for request in self.build_requests]
         spack.deprecation.check_deprecations(
-            roots,
-            policy=spack.deprecation.Policy.from_config(spack.config.CONFIG, repo=self.ctx.repo),
+            roots, policy=spack.deprecation.Policy.from_config(self.ctx.config, repo=self.ctx.repo)
         )
 
     def install(self) -> None:
@@ -2395,9 +2394,11 @@ class PackageInstaller:
 
         self._check_deprecations()
         self._init_queue()
-        self.store.install_sbang(config=spack.config.CONFIG)
+        self.store.install_sbang(config=self.ctx.config)
         failed_build_requests = []
-        install_status = InstallStatus(len(self.build_pq))
+        install_status = InstallStatus(
+            len(self.build_pq), enabled=self.ctx.config.get("config:install_status", True)
+        )
         active_tasks: List[Task] = []
 
         # Only enable the terminal status line when we're in a tty without debug info
@@ -2559,7 +2560,7 @@ class BuildProcessInstaller:
         self.timer = timer.Timer()
 
         # If we are using a padded path, filter the output to compress padded paths
-        padding = spack.config.CONFIG.get("config:install_tree:padded_length", None)
+        padding = pkg.context.config.get("config:install_tree:padded_length", None)
         self.filter_fn = spack.util.path.padding_filter if padding else None
 
         # info/debug information

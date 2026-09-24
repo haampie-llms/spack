@@ -20,7 +20,6 @@ import spack.util.executable as exe
 import spack.util.filesystem as fs
 import spack.util.git
 import spack.util.spack_yaml as syaml
-from spack.config import Configuration
 from spack.context import SpackContext
 
 pytestmark = pytest.mark.not_on_windows(
@@ -348,17 +347,12 @@ include:
 
 
 @pytest.mark.regression("52664")
-def test_env_substitution_via_main_entrypoint(
-    mutable_mock_env_path, mutable_config: Configuration, ctx: SpackContext
-):
+def test_env_substitution_via_main_entrypoint(tmp_path: pathlib.Path, capfd):
     """Tests that an environment activated through the CLI entrypoint can substitute ``$env``"""
-    env = ev.create("test", ctx=ctx)
-    assert mutable_config.env_path is None
-
-    # Just call a fast command
-    spack.main._main(["-e", "test", "config", "scopes"])
-
-    assert mutable_config.env_path == env.path
-    assert (
-        spack.config.substitute_path_variables("$env/foo", config=ctx.config) == f"{env.path}/foo"
+    (tmp_path / "spack.yaml").write_text("spack:\n  specs: []\n")
+    code = (
+        "import spack.config; "
+        "print(spack.config.substitute_path_variables('$env/foo', ctx.config))"
     )
+    spack.main._main(["-e", str(tmp_path), "python", "-c", code])
+    assert capfd.readouterr().out.strip() == f"{tmp_path}/foo"
