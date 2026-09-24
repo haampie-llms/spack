@@ -67,6 +67,8 @@ class SpackContext:
         self._before_activation: Dict[str, Any] = {}
         #: GnuPG home of ``gpg``; ``None`` for ``SPACK_GNUPGHOME``, or Spack's own
         self.gpg_home: Optional[str] = None
+        #: Error reading the environment to activate, if its manifest is broken
+        self.environment_error: Optional[Exception] = None
 
     @property
     def config(self) -> "spack.config.Configuration":
@@ -270,16 +272,17 @@ class SpackContext:
 
 
 class _ProcessContext(SpackContext):
-    """The context of the process. Its configuration, store, repositories, caches and
-    environment are the process globals, read at each access; its other members are built once
-    per process configuration.
+    """The context of the process. Its configuration is the process global ``CONFIG``, read at
+    each access; its other members are built once per process configuration.
 
-    This is transitional: it goes away together with the globals.
+    This is transitional: it goes away together with ``CONFIG``.
     """
 
     def __init__(self) -> None:
         self.is_bootstrap = False
         self.gpg_home = None
+        self.environment_error = None
+        self._environment = None
         self._before_activation = {}
         #: Configuration the members in ``__dict__`` were built from
         self._built_from: Optional[object] = None
@@ -300,19 +303,12 @@ class _ProcessContext(SpackContext):
         return spack.config.CONFIG
 
     def _set_environment(self, env: Optional["spack.environment.Environment"]) -> None:
-        import spack.active_environment
         import spack.config
         from spack.util.lang import ensure_unwrapped
 
-        spack.active_environment._active_environment = env
+        self._environment = env
         # Write through the singleton, so code holding an unwrapped reference sees it
         ensure_unwrapped(spack.config.CONFIG).env_path = env.path if env is not None else None
-
-    @property
-    def environment(self) -> Optional["spack.environment.Environment"]:
-        from spack.active_environment import active_environment
-
-        return active_environment()
 
     def __reduce__(self):
         return default, ()

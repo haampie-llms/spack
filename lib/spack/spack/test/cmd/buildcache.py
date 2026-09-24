@@ -28,7 +28,6 @@ import spack.repo
 import spack.spec
 import spack.util.url as url_util
 import spack.util.web as web_util
-from spack.active_environment import active_environment
 from spack.context import SpackContext
 from spack.installer import PackageInstaller
 from spack.paths import test_path
@@ -303,7 +302,7 @@ def test_buildcache_sync(
 
         manifest_file = str(tmp_path / "manifest_dest.json")
         with open(manifest_file, "w", encoding="utf-8") as fd:
-            test_env = active_environment()
+            test_env = ctx.environment
             assert test_env is not None
 
             manifest: Dict[str, Dict[str, str]] = {}

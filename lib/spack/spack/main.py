@@ -33,9 +33,7 @@ import spack.cmd
 import spack.cmd.common.arguments
 import spack.config
 import spack.context
-import spack.environment
 import spack.environment as ev
-import spack.environment.environment
 import spack.error
 import spack.package_base
 import spack.paths
@@ -1006,7 +1004,7 @@ def _main(argv=None):
         if env_format_error:
             # Allow command to continue without env in case it is `spack config edit`
             # All other cases will raise in `finish_parse_and_run`
-            spack.environment.environment._active_environment_error = env_format_error
+            spack.context.default().environment_error = env_format_error
             return
         # do not call activate here, as it has a lot of expensive function calls to deal
         # with mutation of spack.config.CONFIG -- but we are still building the config.

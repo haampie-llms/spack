@@ -20,6 +20,7 @@ import spack.deptypes as dt
 import spack.package
 import spack.package_base
 import spack.spec
+import spack.subprocess_context
 import spack.util.environment
 import spack.util.module_cmd
 import spack.util.spack_yaml as syaml
@@ -975,9 +976,17 @@ def _pipe_fn(*, duplex: bool = False) -> Tuple[_TestPipe, _TestPipe]:
     return _TestPipe(), _TestPipe()
 
 
+class _TestInstallContext:
+    """Stands in for the package the tests do not have: no process is started to receive it."""
+
+    def __init__(self, pkg):
+        pass
+
+
 @pytest.fixture()
 def mock_build_process(monkeypatch):
     monkeypatch.setattr(spack.build_environment, "BuildProcess", _TestProcess)
+    monkeypatch.setattr(spack.subprocess_context, "PackageInstallContext", _TestInstallContext)
     monkeypatch.setattr(multiprocessing, "Pipe", _pipe_fn)
 
     def _factory(*, runtime: int):

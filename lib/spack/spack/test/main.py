@@ -20,7 +20,6 @@ import spack.util.executable as exe
 import spack.util.filesystem as fs
 import spack.util.git
 import spack.util.spack_yaml as syaml
-from spack.active_environment import active_environment
 from spack.config import Configuration
 from spack.context import SpackContext
 
@@ -185,7 +184,7 @@ spack:
     assert len(config.scopes) == 2
     assert config.get("config:install_tree:root") == "/tmp/first"
 
-    assert active_environment() is None  # shouldn't cause an environment to be activated
+    assert ctx.environment is None  # shouldn't cause an environment to be activated
 
 
 def test_include_cfg(mock_low_high_config, write_config_file, tmp_path: pathlib.Path):

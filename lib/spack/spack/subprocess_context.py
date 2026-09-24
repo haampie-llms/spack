@@ -26,9 +26,9 @@ import spack.paths
 import spack.platforms
 import spack.repo
 import spack.util.lang
-from spack.active_environment import active_environment
 
 if TYPE_CHECKING:
+    import spack.environment
     import spack.package_base
 
 #: Used in tests to track monkeypatches that need to be restored in child processes
@@ -76,7 +76,7 @@ class PackageInstallContext:
         ctx: Optional[multiprocessing.context.BaseContext] = None,
     ):
         ctx = ctx or multiprocessing.get_context()
-        self.global_state = GlobalStateMarshaler(ctx=ctx, serialize_env=True)
+        self.global_state = GlobalStateMarshaler(ctx=ctx, env=pkg.context.environment)
         self.pkg = pkg if ctx.get_start_method() == "fork" else serialize(pkg)
         self.spack_working_dir = spack.paths.spack_working_dir
 
@@ -97,7 +97,7 @@ class GlobalStateMarshaler:
         self,
         *,
         ctx: Optional[Optional[multiprocessing.context.BaseContext]] = None,
-        serialize_env: bool = False,
+        env: Optional["spack.environment.Environment"] = None,
     ) -> None:
         ctx = ctx or multiprocessing.get_context()
         self.is_forked = ctx.get_start_method() == "fork"
@@ -108,10 +108,8 @@ class GlobalStateMarshaler:
         self.platform = spack.platforms.host
         self.test_patches = TestPatches.create()
         self.spack_working_dir = spack.paths.spack_working_dir
-        if serialize_env:
-            self.env = active_environment()
-        else:
-            self.env = None
+        #: Environment to activate in the child process
+        self.env = env
 
     def restore(self):
         if self.is_forked:
