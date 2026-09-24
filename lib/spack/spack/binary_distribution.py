@@ -1076,16 +1076,15 @@ class Uploader:
         force: bool,
         update_index: bool,
         *,
-        config: spack.config.Configuration,
-        client: web_util.NetworkClient,
-        store: spack.store.Store,
+        ctx: "spack.context.SpackContext",
     ):
         self.mirror = mirror
         self.force = force
         self.update_index = update_index
-        self.config = config
-        self.client = client
-        self.store = store
+        self.ctx = ctx
+        self.config = ctx.config
+        self.client = ctx.network
+        self.store = ctx.store
 
         self.tmpdir: str
         self.executor: concurrent.futures.Executor
@@ -1095,7 +1094,7 @@ class Uploader:
 
     def __enter__(self):
         self._tmpdir = tempfile.TemporaryDirectory(dir=spack.stage.stage_root(self.config))
-        self._executor = spack.util.parallel.make_concurrent_executor()
+        self._executor = spack.util.parallel.make_concurrent_executor(shared=self.ctx)
 
         self.tmpdir = self._tmpdir.__enter__()
         self.executor = self.executor = self._executor.__enter__()
@@ -1135,11 +1134,9 @@ class OCIUploader(Uploader):
         update_index: bool,
         base_image: Optional[str],
         *,
-        config: spack.config.Configuration,
-        client: web_util.NetworkClient,
-        store: spack.store.Store,
+        ctx: "spack.context.SpackContext",
     ) -> None:
-        super().__init__(mirror, force, update_index, config=config, client=client, store=store)
+        super().__init__(mirror, force, update_index, ctx=ctx)
         self.target_image = spack.oci.oci.image_from_mirror(mirror)
         self.base_image = ImageReference.from_string(base_image) if base_image else None
 
@@ -1194,7 +1191,7 @@ class OCIUploader(Uploader):
             None,
             None,
             *roots,
-            client=self.client,
+            ctx=self.ctx,
         )
 
         tty.info(f"Tagged {tagged_image}")
@@ -1208,11 +1205,9 @@ class URLUploader(Uploader):
         update_index: bool,
         signing_key: Optional[str],
         *,
-        config: spack.config.Configuration,
-        client: web_util.NetworkClient,
-        store: spack.store.Store,
+        ctx: "spack.context.SpackContext",
     ) -> None:
-        super().__init__(mirror, force, update_index, config=config, client=client, store=store)
+        super().__init__(mirror, force, update_index, ctx=ctx)
         self.url = mirror.push_url
         self.signing_key = signing_key
 
@@ -1240,30 +1235,16 @@ def make_uploader(
     signing_key: Optional[str] = None,
     base_image: Optional[str] = None,
     *,
-    config: spack.config.Configuration,
-    client: web_util.NetworkClient,
-    store: spack.store.Store,
+    ctx: "spack.context.SpackContext",
 ) -> Uploader:
     """Builder for the appropriate uploader based on the mirror type"""
     if spack.oci.image.is_oci_url(mirror.push_url):
         return OCIUploader(
-            mirror=mirror,
-            force=force,
-            update_index=update_index,
-            base_image=base_image,
-            config=config,
-            client=client,
-            store=store,
+            mirror=mirror, force=force, update_index=update_index, base_image=base_image, ctx=ctx
         )
     else:
         return URLUploader(
-            mirror=mirror,
-            force=force,
-            update_index=update_index,
-            signing_key=signing_key,
-            config=config,
-            client=client,
-            store=store,
+            mirror=mirror, force=force, update_index=update_index, signing_key=signing_key, ctx=ctx
         )
 
 
@@ -1507,6 +1488,11 @@ def _oci_archspec_to_gooarch(spec: spack.spec.Spec) -> str:
     return name_map.get(name, name)
 
 
+def _oci_put_manifest_task(ctx: "spack.context.SpackContext", *args) -> None:
+    """Pushes a manifest from a worker whose shared object is the context."""
+    _oci_put_manifest(*args, ctx=ctx)
+
+
 def _oci_put_manifest(
     base_images: Dict[str, Tuple[dict, dict]],
     checksums: Dict[str, spack.oci.oci.Blob],
@@ -1515,8 +1501,9 @@ def _oci_put_manifest(
     extra_config: Optional[dict],
     annotations: Optional[dict],
     *specs: spack.spec.Spec,
-    client: web_util.NetworkClient,
+    ctx: "spack.context.SpackContext",
 ):
+    client = ctx.network
     architecture = _oci_archspec_to_gooarch(specs[0])
 
     expected_blobs: List[spack.spec.Spec] = [
@@ -1538,7 +1525,7 @@ def _oci_put_manifest(
         base_manifest_mediaType == "application/vnd.docker.distribution.manifest.v2+json"
     )
 
-    spack.user_environment.environment_modifications_for_specs(*specs).apply_modifications(env)
+    spack.user_environment.modifications_for_specs(*specs, ctx=ctx).apply_modifications(env)
 
     # Create an oci.image.config file
     config = copy.deepcopy(base_config)
@@ -1764,8 +1751,8 @@ def _oci_push(
     # Upload manifests
     tty.info("Uploading manifests")
     manifest_futures = [
-        executor.submit(
-            _oci_put_manifest,
+        executor.submit_shared(  # type: ignore[attr-defined]
+            _oci_put_manifest_task,
             base_images,
             checksums,
             target_image.with_tag(_oci_default_tag(spec)),
@@ -1773,7 +1760,6 @@ def _oci_push(
             extra_config(spec),
             {"org.opencontainers.image.description": spec.format()},
             spec,
-            client=client,
         )
         for spec in manifests_to_upload
     ]
@@ -2284,7 +2270,7 @@ def extract_tarball(
     """
     timer.start("extract")
 
-    if os.path.exists(spec.prefix):
+    if os.path.exists(store.prefix_of(spec)):
         if force:
             shutil.rmtree(spec.prefix)
         else:

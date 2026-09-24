@@ -80,7 +80,7 @@ def test_uninstall_non_existing_package(
     spec._package = None
     monkeypatch.setattr(spack.repo.PATH, "get", find_nothing)
     with pytest.raises(spack.repo.UnknownPackageError):
-        spec.package
+        spack.repo.attach_packages([spec], ctx)
 
     # Ensure we can uninstall it
     PackageBase.uninstall_by_spec(spec, ctx.store)
@@ -674,6 +674,8 @@ def test_install_from_binary_with_missing_patch_succeeds(
     s_dict["spec"]["nodes"][0]["patches"] = patches
     s_dict["spec"]["nodes"][0]["parameters"]["patches"] = patches
     s = Spec.from_dict(s_dict)
+    temporary_store.assign_prefix(s)
+    spack.repo.attach_packages([s], ctx)
 
     # Create an install dir for it
     os.makedirs(os.path.join(s.prefix, ".spack"))
@@ -685,9 +687,7 @@ def test_install_from_binary_with_missing_patch_succeeds(
 
     # Push it to a binary cache
     mirror = spack.mirrors.mirror.Mirror.from_local_path(str(tmp_path / "my_build_cache"))
-    with binary_distribution.make_uploader(
-        mirror=mirror, config=ctx.config, client=ctx.network, store=ctx.store
-    ) as uploader:
+    with binary_distribution.make_uploader(mirror=mirror, ctx=ctx) as uploader:
         uploader.push_or_raise([s])
 
     # Now re-install it.
@@ -721,6 +721,7 @@ def test_install_spliced(
 
     # Do the splice.
     out = spec.splice(dep, transitive)
+    spack.repo.attach_packages([out], ctx)
     installer = spack.installer_dispatch.create_installer(
         [out.package], verbose=True, fail_fast=True
     )
@@ -740,6 +741,7 @@ def test_install_spliced_build_spec_installed(
 
     # Do the splice.
     out = spec.splice(dep, transitive)
+    spack.repo.attach_packages([out], ctx)
     spack.installer_dispatch.create_installer([out.build_spec.package]).install()
 
     installer = spack.installer_dispatch.create_installer(
@@ -777,6 +779,7 @@ def test_install_splice_root_from_binary(
     ).install()
 
     out = original_spec.splice(spec_to_splice, transitive)
+    spack.repo.attach_packages([out], ctx)
 
     buildcache = SpackCommand("buildcache")
     buildcache(

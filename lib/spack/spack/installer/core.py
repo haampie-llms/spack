@@ -786,6 +786,7 @@ class PackageInstaller:
             log_path=self.log_paths[dag_hash],
             stop_before=self.stop_before if is_root else None,
             stop_at=self.stop_at if is_root else None,
+            ctx=self.ctx,
         )
         child_info = self.launcher(request, jobserver)
         child_info.prefix_lock = prefix_lock

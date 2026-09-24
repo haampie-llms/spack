@@ -10,6 +10,7 @@ import pytest
 
 import spack.concretize
 import spack.deptypes as dt
+import spack.repo
 import spack.rewiring
 from spack.context import SpackContext
 from spack.installer import PackageInstaller
@@ -42,6 +43,7 @@ def test_rewire_db(
     dep = spack.concretize.concretize_one("splice-h+foo", ctx)
     PackageInstaller([spec.package, dep.package], explicit=True).install()
     spliced_spec = spec.splice(dep, transitive=transitive)
+    spack.repo.attach_packages([spliced_spec], ctx)
     assert spec.dag_hash() != spliced_spec.dag_hash()
 
     spack.rewiring.rewire(spliced_spec, ctx.store)
@@ -68,6 +70,7 @@ def test_rewire_bin(
     dep = spack.concretize.concretize_one("garply cflags=-g", ctx)
     PackageInstaller([spec.package, dep.package], explicit=True).install()
     spliced_spec = spec.splice(dep, transitive=transitive)
+    spack.repo.attach_packages([spliced_spec], ctx)
 
     assert spec.dag_hash() != spliced_spec.dag_hash()
 
@@ -99,6 +102,7 @@ def test_rewire_writes_new_metadata(
     dep = spack.concretize.concretize_one("garply cflags=-g", ctx)
     PackageInstaller([spec.package, dep.package], explicit=True).install()
     spliced_spec = spec.splice(dep, transitive=True)
+    spack.repo.attach_packages([spliced_spec], ctx)
     spack.rewiring.rewire(spliced_spec, ctx.store)
 
     # test install manifests
@@ -143,6 +147,7 @@ def test_uninstall_rewired_spec(
     dep = spack.concretize.concretize_one("garply cflags=-g", ctx)
     PackageInstaller([spec.package, dep.package], explicit=True).install()
     spliced_spec = spec.splice(dep, transitive=transitive)
+    spack.repo.attach_packages([spliced_spec], ctx)
     spack.rewiring.rewire(spliced_spec, ctx.store)
     spliced_spec.package.do_uninstall()
     assert len(temporary_store.db.query(spliced_spec)) == 0
@@ -174,6 +179,7 @@ def test_rewire_virtual(mock_fetch, install_mockery, ctx: SpackContext):
     PackageInstaller([spec.package, alt_spec.package]).install()
 
     spliced_spec = spec.splice(alt_spec, True)
+    spack.repo.attach_packages([spliced_spec], ctx)
     spack.rewiring.rewire(spliced_spec, ctx.store)
 
     # Confirm the original spec still has the original virtual implementation.

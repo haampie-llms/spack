@@ -8,6 +8,7 @@ import os
 import spack.cmd
 import spack.environment as ev
 import spack.package_base
+import spack.repo
 import spack.traverse
 from spack.cmd.common import arguments
 from spack.util import tty
@@ -104,6 +105,7 @@ def stage(parser, args, ctx):
 
 def _stage_env(env: ev.Environment, filter):
     tty.msg(f"Staging specs from environment {env.name}")
+    spack.repo.attach_packages(env.concrete_roots(), env.ctx)
     for spec in spack.traverse.traverse_nodes(env.concrete_roots()):
         if filter(spec):
             continue

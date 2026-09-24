@@ -7,6 +7,7 @@ from typing import List, Optional
 
 import spack.cmd
 import spack.package_base
+import spack.repo
 import spack.spec
 import spack.verify
 import spack.verify_libraries
@@ -93,6 +94,7 @@ def verify_versions(args, ctx):
     3. Installed package version deprecated in the package recipe
     """
     specs = args.specs(ctx, installed=True)
+    spack.repo.attach_packages(specs, ctx, skip_unknown=True)
 
     msg_lines = _verify_version(specs)
     if msg_lines:
@@ -106,13 +108,11 @@ def _verify_version(specs):
     deprecated_version = []
 
     for spec in specs:
-        try:
-            pkg = spec.package
-        except Exception as e:
-            tty.debug(str(e))
+        if not spec.has_package:
             missing_package.append(spec)
             continue
 
+        pkg = spec.package
         if spec.version not in pkg.versions:
             unknown_version.append(spec)
             continue
@@ -144,16 +144,16 @@ def _verify_version(specs):
 def verify_libraries(args, ctx):
     """verify that shared libraries of install packages can be located in rpaths (Linux only)"""
     specs_from_db = [s for s in args.specs(ctx, installed=True) if not s.external]
+    spack.repo.attach_packages(specs_from_db, ctx, skip_unknown=True)
 
     tty.info(f"Checking {len(specs_from_db)} packages for shared library resolution")
 
     errors = 0
     for spec in specs_from_db:
-        try:
-            pkg = spec.package
-        except Exception:
+        if not spec.has_package:
             tty.warn(f"Skipping {spec.cformat('{name}{@version}{/hash}')} due to missing package")
-        error_msg = _verify_libraries(spec, pkg.unresolved_libraries)
+            continue
+        error_msg = _verify_libraries(spec, spec.package.unresolved_libraries)
         if error_msg is not None:
             errors += 1
             tty.error(error_msg)

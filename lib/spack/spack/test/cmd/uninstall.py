@@ -10,6 +10,7 @@ import pytest
 import spack.cmd.uninstall
 import spack.environment
 import spack.error
+import spack.repo
 import spack.store
 from spack.context import SpackContext
 from spack.database import Database
@@ -42,11 +43,26 @@ def test_multiple_matches(mutable_database):
 
 
 @pytest.mark.db
-def test_uninstall_older_readable_db_fails_before_removing(mutable_database, bumped_db_version):
+def test_uninstall_package_not_in_repo(mutable_database, monkeypatch, ctx: SpackContext):
+    """Installed specs whose package was removed from the repo can still be uninstalled."""
+
+    def find_nothing(*args):
+        raise spack.repo.UnknownPackageError("Repo package access is disabled for test")
+
+    monkeypatch.setattr(spack.repo.PATH, "get", find_nothing)
+    spec = mutable_database.query_local("libelf")[0]
+    spack.cmd.uninstall.do_uninstall([spec], ctx, force=True)
+    assert not mutable_database.query_local("libelf")
+
+
+@pytest.mark.db
+def test_uninstall_older_readable_db_fails_before_removing(
+    mutable_database, bumped_db_version, ctx: SpackContext
+):
     """Nothing is removed when the database needs an explicit reindex to be modified."""
     spec = mutable_database.query_local("libelf")[0]
     with pytest.raises(spack.error.ExplicitDatabaseUpgradeError):
-        spack.cmd.uninstall.do_uninstall([spec], store=spack.store.STORE, force=True)
+        spack.cmd.uninstall.do_uninstall([spec], ctx, force=True)
     assert os.path.isdir(spec.prefix)
     assert Database(mutable_database.root).query_local("libelf")
 
@@ -59,7 +75,7 @@ def test_installed_dependents(mutable_database):
 
 
 @pytest.mark.db
-def test_correct_installed_dependents(mutable_database: Database):
+def test_correct_installed_dependents(mutable_database: Database, ctx: SpackContext):
     # Test whether we return the right dependents.
 
     # Take callpath from the database
@@ -71,6 +87,7 @@ def test_correct_installed_dependents(mutable_database: Database):
     assert dependents and dependencies
 
     # Uninstall it, so it's missing.
+    spack.repo.attach_packages([callpath], ctx)
     callpath.package.do_uninstall(force=True)
 
     # Retrieve all dependent hashes (explicit and implicit, combined)

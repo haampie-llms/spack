@@ -15,7 +15,9 @@ from typing import NamedTuple, Optional, Sequence, Union
 
 import spack.vendor.archspec.cpu
 
+import spack.context
 import spack.platforms
+import spack.repo
 import spack.spec
 import spack.store
 import spack.util.environment
@@ -65,6 +67,7 @@ def _try_import_from_store(module: str, query_spec: Union[str, "spack.spec.Spec"
 
         # if python is installed, ask it for the layout
         if spack.store.STORE.db.installed(python):
+            spack.repo.attach_packages([python], spack.context.default())
             module_paths = [
                 os.path.join(candidate_spec.prefix, python.package.purelib),
                 os.path.join(candidate_spec.prefix, python.package.platlib),

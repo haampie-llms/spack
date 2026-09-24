@@ -38,6 +38,7 @@ import sys
 
 import spack.cmd
 import spack.filesystem_view as fsv
+import spack.repo
 import spack.schema.projections
 from spack.config import validate
 from spack.util import spack_yaml as s_yaml
@@ -227,6 +228,7 @@ def view(parser, args, ctx):
         # only link commands need to disambiguate specs
         env = ctx.environment
         specs = [spack.cmd.disambiguate_spec(s, env, store=ctx.store) for s in specs]
+        spack.repo.attach_packages(specs, ctx)
 
     elif args.action in actions_status:
         # no specs implies all
@@ -254,11 +256,14 @@ def view(parser, args, ctx):
             raise
 
     elif args.action in actions_remove:
+        all_specs = set(view.get_all_specs())
+        spack.repo.attach_packages([*specs, *all_specs], ctx)
         view.remove_specs(
             *specs,
             with_dependencies=with_dependencies,
             exclude=args.exclude,
             with_dependents=not args.no_remove_dependents,
+            all_specs=all_specs,
         )
 
     elif args.action in actions_status:

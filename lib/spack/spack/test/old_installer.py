@@ -685,6 +685,7 @@ def test_rewire_task_no_tarball(config, mock_packages, monkeypatch, ctx: SpackCo
     spec = spack.concretize.concretize_one("splice-t", ctx)
     dep = spack.concretize.concretize_one("splice-h+foo", ctx)
     out = spec.splice(dep)
+    spack.repo.attach_packages([out], ctx)
 
     rewire_task = inst.RewireTask(out.package, inst.BuildRequest(out.package, {}))
     monkeypatch.setattr(inst, "_process_binary_cache_tarball", false)
