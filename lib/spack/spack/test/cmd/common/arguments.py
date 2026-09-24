@@ -31,8 +31,9 @@ def job_parser():
         yield p
 
 
-def test_setting_jobs_flag(job_parser):
+def test_setting_jobs_flag(job_parser, ctx: SpackContext):
     namespace = job_parser.parse_args(["-j", "24"])
+    arguments.apply_deferred_config(namespace, ctx)
     assert namespace.jobs == 24
     assert spack.config.CONFIG.get("config:build_jobs", scope="command_line") == 24
 
@@ -165,33 +166,39 @@ def test_use_buildcache_type():
         assert arguments.use_buildcache("sometimes")
 
 
-def test_missing_config_scopes_are_valid_scope_arguments(mock_missing_dir_include_scopes):
+def test_missing_config_scopes_are_valid_scope_arguments(
+    mock_missing_dir_include_scopes, ctx: SpackContext
+):
     """Test that if an included scope does not have a directory or file,
     we can still specify it as a scope as an argument"""
     a = argparse.ArgumentParser()
     a.add_argument(
         "--scope",
         action=arguments.ConfigScope,
-        default=lambda: spack.config.CONFIG.default_modify_scope(),
+        default=lambda config: config.default_modify_scope(),
         help="configuration scope to modify",
     )
     namespace = a.parse_args(["--scope", "sub_base"])
+    arguments.apply_deferred_config(namespace, ctx)
     assert namespace.scope == "sub_base"
 
 
-def test_missing_config_scopes_not_valid_read_scope(mock_missing_dir_include_scopes):
+def test_missing_config_scopes_not_valid_read_scope(
+    mock_missing_dir_include_scopes, ctx: SpackContext
+):
     """Ensures that if a missing include scope is the subject of a read
-    operation, we fail at the argparse level"""
+    operation, we fail before running the command"""
     a = argparse.ArgumentParser()
     a.add_argument(
         "--scope",
         action=arguments.ConfigScope,
         type=arguments.config_scope_readable_validator,
-        default=lambda: spack.config.CONFIG.default_modify_scope(),
+        default=lambda config: config.default_modify_scope(),
         help="configuration scope to modify",
     )
-    with pytest.raises(SystemExit):
-        a.parse_args(["--scope", "sub_base"])
+    namespace = a.parse_args(["--scope", "sub_base"])
+    with pytest.raises(ValueError, match="scope context does not exist"):
+        arguments.apply_deferred_config(namespace, ctx)
 
 
 def test_deprecated_flag_allows_deprecations_on_packages_with_an_allow_list(
@@ -212,7 +219,7 @@ def test_deprecated_flag_allows_deprecations_on_packages_with_an_allow_list(
 
 
 def test_deprecated_flag_is_honored_by_the_install_time_check(
-    mutable_config: Configuration, mock_packages
+    mutable_config: Configuration, mock_packages, ctx: SpackContext
 ):
     """Tests that after --deprecated is parsed the install-time check accepts every deprecation,
     including those on a package with an 'allow' list of its own.
@@ -228,6 +235,7 @@ def test_deprecated_flag_is_honored_by_the_install_time_check(
 
     parser = argparse.ArgumentParser()
     arguments.add_concretizer_args(parser)
-    parser.parse_args(["--deprecated"])
+    namespace = parser.parse_args(["--deprecated"])
+    arguments.apply_deferred_config(namespace, ctx)
 
     spack.deprecation.check_deprecations([concrete])  # must not raise

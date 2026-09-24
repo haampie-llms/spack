@@ -36,7 +36,7 @@ def cache_opt(use_buildcache: str, default: InstallPolicy) -> InstallPolicy:
     return default
 
 
-def install_kwargs_from_args(args):
+def install_kwargs_from_args(args, config):
     """Translate command line arguments into a dictionary that will be passed
     to the package installer.
     """
@@ -57,7 +57,7 @@ def install_kwargs_from_args(args):
         "verbose": args.verbose or args.install_verbose,
         "show_log_on_error": args.show_log_on_error,
         "fake": args.fake,
-        "dirty": args.dirty,
+        "dirty": args.dirty if args.dirty is not None else config.get("config:dirty"),
         "root_policy": cache_opt(pkg_use_bc, default),
         "dependencies_policy": cache_opt(dep_use_bc, default),
         "include_build_deps": args.include_build_deps,
@@ -324,7 +324,7 @@ def install(parser, args, ctx):
     arguments.sanitize_reporter_options(args)
 
     reporter = args.reporter() if args.log_format else None
-    install_kwargs = install_kwargs_from_args(args)
+    install_kwargs = install_kwargs_from_args(args, ctx.config)
     env = ctx.environment
 
     if not env and not args.spec:

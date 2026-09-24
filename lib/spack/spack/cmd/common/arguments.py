@@ -5,18 +5,18 @@
 import argparse
 import os
 import textwrap
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable
 
 import spack.cmd
 import spack.config
 import spack.deprecation
 import spack.deptypes as dt
+import spack.error
 import spack.mirrors.mirror
 import spack.mirrors.utils
 import spack.reporters
 import spack.spec
 import spack.util.web
-from spack.active_environment import active_environment
 from spack.util.lang import stable_partition
 from spack.util.pattern import Args
 
@@ -55,6 +55,43 @@ def add_common_arguments(parser, list_of_arguments):
 
         x = _arguments[argument]()
         parser.add_argument(*x.flags, **x.kwargs)
+
+
+def defer_config(namespace: argparse.Namespace, fn: Callable[["SpackContext"], None]) -> None:
+    """Record a configuration change to apply once the command's context exists."""
+    deferred = getattr(namespace, "_deferred_config", None)
+    if deferred is None:
+        deferred = []
+        setattr(namespace, "_deferred_config", deferred)
+    deferred.append(fn)
+
+
+class Deferred:
+    """Value of an argument that depends on the command's context, resolved before it runs."""
+
+    def __init__(self, fn: Callable[["SpackContext"], Any]) -> None:
+        self.fn = fn
+
+
+def _resolve(value: Any, ctx: "SpackContext") -> Any:
+    if isinstance(value, Deferred):
+        try:
+            return value.fn(ctx)
+        except argparse.ArgumentTypeError as e:
+            raise spack.error.SpackError(str(e)) from e
+    if isinstance(value, list):
+        return [_resolve(v, ctx) for v in value]
+    return value
+
+
+def apply_deferred_config(args: argparse.Namespace, ctx: "SpackContext") -> None:
+    """Apply the configuration changes recorded while parsing ``args``, and resolve the
+    arguments whose value depends on the context."""
+    for fn in getattr(args, "_deferred_config", ()):
+        fn(ctx)
+    args._deferred_config = []
+    for key, value in list(vars(args).items()):
+        setattr(args, key, _resolve(value, ctx))
 
 
 class ConstraintAction(argparse.Action):
@@ -111,7 +148,9 @@ class SetParallelJobs(argparse.Action):
             msg = 'invalid value for argument "{0}" [expected a positive integer, got "{1}"]'
             raise ValueError(msg.format(option_string, jobs))
 
-        spack.config.CONFIG.set("config:build_jobs", jobs, scope="command_line")
+        defer_config(
+            namespace, lambda ctx: ctx.config.set("config:build_jobs", jobs, scope="command_line")
+        )
 
         setattr(namespace, "jobs", jobs)
 
@@ -128,8 +167,11 @@ class SetConcurrentPackages(argparse.Action):
             msg = 'invalid value for argument "{0}" [expected a positive integer, got "{1}"]'
             raise ValueError(msg.format(option_string, concurrent_packages))
 
-        spack.config.CONFIG.set(
-            "config:concurrent_packages", concurrent_packages, scope="command_line"
+        defer_config(
+            namespace,
+            lambda ctx: ctx.config.set(
+                "config:concurrent_packages", concurrent_packages, scope="command_line"
+            ),
         )
 
         setattr(namespace, "concurrent_packages", concurrent_packages)
@@ -147,38 +189,46 @@ class DeptypeAction(argparse.Action):
 
 
 class ConfigScope(argparse.Action):
-    """Pick the currently configured config scopes."""
+    """Pick one of the configured config scopes.
+
+    Scope names are validated, and a callable default is evaluated, against the configuration
+    of the command once it is known, see :func:`apply_deferred_config`.
+    """
+
+    #: Completion writers list the configured scopes as choices
+    picks_config_scope = True
 
     def __init__(self, *args, **kwargs) -> None:
         kwargs.setdefault("metavar", spack.config.SCOPES_METAVAR)
+        self.readable = kwargs.get("type") is config_scope_readable_validator
+        kwargs.pop("type", None)
+        default = kwargs.get("default")
+        if callable(default):
+            kwargs["default"] = Deferred(lambda ctx: default(ctx.config))
         super().__init__(*args, **kwargs)
-
-    @property
-    def default(self):
-        return self._default() if callable(self._default) else self._default
-
-    @default.setter
-    def default(self, value):
-        self._default = value
-
-    @property
-    def choices(self):
-        return spack.config.CONFIG.scopes.keys()
-
-    @choices.setter
-    def choices(self, value):
-        pass
 
     def __call__(self, parser, namespace, values, option_string=None):
         setattr(namespace, self.dest, values)
+        readable = self.readable
+
+        def _validate(ctx: "SpackContext") -> None:
+            if readable:
+                if values not in ctx.config.existing_scope_names():
+                    raise ValueError(
+                        f"Invalid scope argument {values} "
+                        "for config read operation, scope context does not exist"
+                    )
+            elif values not in ctx.config.scopes:
+                choices = ", ".join(repr(x) for x in ctx.config.scopes.keys())
+                parser.error(
+                    f"argument {option_string}: invalid choice: {values!r} (choose from {choices})"
+                )
+
+        defer_config(namespace, _validate)
 
 
 def config_scope_readable_validator(value):
-    if value not in spack.config.CONFIG.existing_scope_names():
-        raise ValueError(
-            f"Invalid scope argument {value} "
-            "for config read operation, scope context does not exist"
-        )
+    """Marks a :class:`ConfigScope` argument that must name an existing scope."""
     return value
 
 
@@ -328,7 +378,7 @@ def clean():
     return Args(
         "--clean",
         action="store_false",
-        default=spack.config.CONFIG.get("config:dirty"),
+        default=None,
         dest="dirty",
         help="unset harmful variables in the build environment (default)",
     )
@@ -349,7 +399,7 @@ def dirty():
     return Args(
         "--dirty",
         action="store_true",
-        default=spack.config.CONFIG.get("config:dirty"),
+        default=None,
         dest="dirty",
         help="preserve user environment in spack's build environment (danger!)",
     )
@@ -553,7 +603,7 @@ class ConfigSetAction(argparse.Action):
 
     This works like a ``store_const`` action but you can set the
     ``dest`` to some Spack configuration path (like ``concretizer:reuse``)
-    and the ``const`` will be stored there using ``spack.config.CONFIG.set()``
+    and the ``const`` will be stored there in the ``command_line`` scope of the configuration
     """
 
     def __init__(
@@ -588,16 +638,17 @@ class ConfigSetAction(argparse.Action):
         )
 
     def __call__(self, parser, namespace, values, option_string):
-        if self.require_environment and not active_environment():
-            raise argparse.ArgumentTypeError(
-                f"argument '{self.option_strings[-1]}' requires an environment"
-            )
+        # Set the config option to the const from the constructor. This is only called if the
+        # argument is actually specified on the command line.
+        option, path, const = self.option_strings[-1], self.config_path, self.const
+        require_environment = self.require_environment
 
-        # Retrieve the name of the config option and set it to
-        # the const from the constructor or a value from the CLI.
-        # Note that this is only called if the argument is actually
-        # specified on the command line.
-        spack.config.CONFIG.set(self.config_path, self.const, scope="command_line")
+        def _set(ctx: "SpackContext") -> None:
+            if require_environment and not ctx.environment:
+                raise argparse.ArgumentTypeError(f"argument '{option}' requires an environment")
+            ctx.config.set(path, const, scope="command_line")
+
+        defer_config(namespace, _set)
 
 
 class AllowDeprecatedAction(argparse.Action):
@@ -611,7 +662,7 @@ class AllowDeprecatedAction(argparse.Action):
         )
 
     def __call__(self, parser, namespace, values, option_string=None):
-        spack.deprecation.allow_every_deprecation(spack.config.CONFIG)
+        defer_config(namespace, lambda ctx: spack.deprecation.allow_every_deprecation(ctx.config))
         setattr(namespace, self.dest, True)
 
 
@@ -781,10 +832,13 @@ def mirror_name_or_url(m):
         return spack.mirrors.mirror.Mirror(m)
 
     # Otherwise, the named mirror is required to exist.
-    try:
-        return spack.mirrors.utils.require_mirror_name(m)
-    except ValueError as e:
-        raise argparse.ArgumentTypeError(f"{e}. Did you mean {os.path.join('.', m)}?") from e
+    def _lookup(ctx: "SpackContext"):
+        try:
+            return spack.mirrors.utils.require_mirror_name(m, ctx.config)
+        except ValueError as e:
+            raise argparse.ArgumentTypeError(f"{e}. Did you mean {os.path.join('.', m)}?") from e
+
+    return Deferred(_lookup)
 
 
 def mirror_url(url):
@@ -802,7 +856,10 @@ def mirror_directory(path):
 
 
 def mirror_name(name):
-    try:
-        return spack.mirrors.utils.require_mirror_name(name)
-    except ValueError as e:
-        raise argparse.ArgumentTypeError(str(e)) from e
+    def _lookup(ctx: "SpackContext"):
+        try:
+            return spack.mirrors.utils.require_mirror_name(name, ctx.config)
+        except ValueError as e:
+            raise argparse.ArgumentTypeError(str(e)) from e
+
+    return Deferred(_lookup)
