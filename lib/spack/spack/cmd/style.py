@@ -497,14 +497,13 @@ def missing_tools(tools_to_run: List[str]) -> List[str]:
     return [t for t in tools_to_run if not tools[t].installed]
 
 
-def _bootstrap_dev_dependencies():
+def _bootstrap_dev_dependencies(ctx):
     import spack.bootstrap
 
-    with spack.bootstrap.ensure_bootstrap_configuration():
-        spack.bootstrap.ensure_environment_dependencies()
+    spack.bootstrap.ensure_environment_dependencies(ctx)
 
 
-def style(parser, args):
+def style(parser, args, ctx):
     if args.spec_strings:
         if not args.files:
             tty.die("No files provided to check spec strings.")
@@ -542,7 +541,7 @@ def style(parser, args):
 
     tools_to_run = [t for t in tool_names if t in selected]
     if missing_tools(tools_to_run):
-        _bootstrap_dev_dependencies()
+        _bootstrap_dev_dependencies(ctx)
 
     return_code = 0
     with working_dir(str(args.root)):

@@ -141,7 +141,9 @@ def test_relocate_text_bin(binary_with_rpaths, prefix_like):
 
 @pytest.mark.requires_executables("patchelf", "gcc")
 @skip_unless_linux
-def test_relocate_elf_binaries_absolute_paths(binary_with_rpaths, copy_binary, prefix_tmpdir):
+def test_relocate_elf_binaries_absolute_paths(
+    binary_with_rpaths, copy_binary, prefix_tmpdir, ctx: SpackContext
+):
     # Create an executable, set some RPATHs, copy it to another location
     lib_dir = prefix_tmpdir / "lib"
     lib_dir.mkdir()
@@ -149,7 +151,9 @@ def test_relocate_elf_binaries_absolute_paths(binary_with_rpaths, copy_binary, p
     new_binary = copy_binary(orig_binary)
 
     spack.relocate.relocate_elf_binaries(
-        binaries=[str(new_binary)], prefix_to_prefix={str(orig_binary.parent): "/foo"}
+        binaries=[str(new_binary)],
+        prefix_to_prefix={str(orig_binary.parent): "/foo"},
+        patchelf=ctx.patchelf,
     )
 
     # Some compilers add rpaths so ensure changes included in final result

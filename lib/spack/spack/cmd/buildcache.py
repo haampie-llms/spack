@@ -642,6 +642,7 @@ def install_fn(args, ctx):
             config=ctx.config,
             client=ctx.network,
             store=ctx.store,
+            patchelf=ctx.patchelf,
         )
 
 
