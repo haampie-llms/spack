@@ -941,12 +941,11 @@ def manifest_copy(
 
 def update_index(
     mirror: spack.mirrors.mirror.Mirror,
-    config: spack.config.Configuration,
-    client: web_util.NetworkClient,
+    ctx: "spack.context.SpackContext",
     update_keys=False,
     timer=timer_mod.NULL_TIMER,
-    repo_provider: Optional[spack.repo.RepoProvider] = None,
 ):
+    config, client, repo_provider = ctx.config, ctx.network, ctx.repo_provider
     timer.start()
     # Special case OCI images for now.
     try:
@@ -957,15 +956,9 @@ def update_index(
     if image_ref:
         with tempfile.TemporaryDirectory(
             dir=spack.stage.stage_root(config)
-        ) as tmpdir, spack.util.parallel.make_concurrent_executor() as executor:
+        ) as tmpdir, spack.util.parallel.make_concurrent_executor(shared=ctx) as executor:
             spack.binary_distribution._oci_update_index(
-                image_ref,
-                tmpdir,
-                executor,
-                timer=timer,
-                config=config,
-                client=client,
-                repo_provider=repo_provider,
+                image_ref, tmpdir, executor, timer=timer, ctx=ctx
             )
         return
 
@@ -1258,14 +1251,7 @@ def update_index_fn(args, ctx):
             ctx=ctx,
         )
     else:
-        update_index(
-            args.mirror,
-            ctx.config,
-            ctx.network,
-            update_keys=args.keys,
-            timer=t,
-            repo_provider=ctx.repo_provider,
-        )
+        update_index(args.mirror, ctx, update_keys=args.keys, timer=t)
 
     if tty.is_verbose():
         tty.msg("Timing summary:")
