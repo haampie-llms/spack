@@ -15,7 +15,6 @@ import sys
 import pytest
 
 import spack.config
-import spack.subprocess_context
 import spack.test.harness
 from spack.config import Configuration
 from spack.context import SpackContext
@@ -649,7 +648,7 @@ class ReadModify:
 
 
 def test_030_db_sanity_from_another_process(mutable_database, ctx: SpackContext):
-    spack_process = spack.subprocess_context.SpackTestProcess(ReadModify(), context=ctx)
+    spack_process = spack.test.harness.SpackTestProcess(ReadModify())
     p = spack_process.create()
     p.start()
     p.join()

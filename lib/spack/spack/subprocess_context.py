@@ -49,21 +49,6 @@ def deserialize(serialized_pkg: io.BytesIO) -> "spack.package_base.PackageBase":
     return pkg
 
 
-class SpackTestProcess:
-    def __init__(self, fn, *, context: Optional["spack.context.SpackContext"] = None):
-        self.fn = fn
-        #: Context of the child process (transitional)
-        self.context = context
-
-    def _restore_and_run(self, fn, test_state):
-        test_state.restore()
-        fn()
-
-    def create(self):
-        test_state = GlobalStateMarshaler(context=self.context)
-        return multiprocessing.Process(target=self._restore_and_run, args=(self.fn, test_state))
-
-
 class PackageInstallContext:
     """Captures the in-memory process state of a package installation that needs to be transmitted
     to a child process."""
