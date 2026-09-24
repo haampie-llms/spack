@@ -7,7 +7,6 @@ import os
 import tempfile
 
 import spack.binary_distribution
-import spack.config
 import spack.mirrors.mirror
 import spack.paths
 import spack.stage
@@ -138,7 +137,7 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     sign.set_defaults(func=gpg_sign, subparser=sign)
 
 
-def gpg_create(args):
+def gpg_create(args, ctx):
     """create a new key"""
     if args.export or args.secret:
         old_sec_keys = spack.util.gpg.signing_keys()
@@ -158,7 +157,7 @@ def gpg_create(args):
         spack.util.gpg.export_keys(args.secret, new_keys, secret=True)
 
 
-def gpg_export(args):
+def gpg_export(args, ctx):
     """export a gpg key, optionally including secret key"""
     keys = args.keys
     if not keys:
@@ -166,17 +165,17 @@ def gpg_export(args):
     spack.util.gpg.export_keys(args.location, keys, args.secret)
 
 
-def gpg_list(args):
+def gpg_list(args, ctx):
     """list keys available in the keyring"""
     spack.util.gpg.glist(args.trusted, args.signing, args.fmt)
 
 
-def gpg_trust(args):
+def gpg_trust(args, ctx):
     """add a key to the keyring"""
     spack.util.gpg.trust(args.keyfile, yes_to_all=args.yes_to_all)
 
 
-def gpg_init(args):
+def gpg_init(args, ctx):
     """add the default keys to the keyring"""
     import_dir = args.import_dir
     if import_dir is None:
@@ -189,12 +188,12 @@ def gpg_init(args):
             spack.util.gpg.trust(os.path.join(root, filename), yes_to_all=args.yes_to_all)
 
 
-def gpg_untrust(args):
+def gpg_untrust(args, ctx):
     """remove a key from the keyring"""
     spack.util.gpg.untrust(args.signing, *args.keys)
 
 
-def gpg_publish(args):
+def gpg_publish(args, ctx):
     """publish public keys to a build cache"""
 
     mirror = None
@@ -202,19 +201,19 @@ def gpg_publish(args):
         url = spack.util.url.path_to_file_url(args.directory)
         mirror = spack.mirrors.mirror.Mirror(url, url)
     elif args.mirror_name:
-        mirror = spack.mirrors.mirror.MirrorCollection.from_config(
-            spack.config.CONFIG, binary=True
-        ).lookup(args.mirror_name)
+        mirror = spack.mirrors.mirror.MirrorCollection.from_config(ctx.config, binary=True).lookup(
+            args.mirror_name
+        )
     elif args.mirror_url:
         mirror = spack.mirrors.mirror.Mirror(args.mirror_url, args.mirror_url)
 
-    with tempfile.TemporaryDirectory(dir=spack.stage.stage_root(spack.config.CONFIG)) as tmpdir:
+    with tempfile.TemporaryDirectory(dir=spack.stage.stage_root(ctx.config)) as tmpdir:
         spack.binary_distribution._url_push_keys(
             mirror, keys=args.keys, tmpdir=tmpdir, update_index=args.update_index
         )
 
 
-def gpg_sign(args):
+def gpg_sign(args, ctx):
     """sign a package"""
     args.subparser.error(
         "This command has been deprecated as it no longer applies to any supported build cache. "
@@ -222,7 +221,7 @@ def gpg_sign(args):
     )
 
 
-def gpg_verify(args):
+def gpg_verify(args, ctx):
     """verify a signed package"""
     args.subparser.error(
         "This command has been deprecated as it no longer applies to any supported build cache. "
@@ -230,6 +229,6 @@ def gpg_verify(args):
     )
 
 
-def gpg(parser, args):
+def gpg(parser, args, ctx):
     if args.func:
-        args.func(args)
+        args.func(args, ctx)

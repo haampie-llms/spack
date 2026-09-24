@@ -31,6 +31,7 @@ import spack.vendor.archspec.cpu
 import spack
 import spack.cmd
 import spack.config
+import spack.context
 import spack.environment
 import spack.environment as ev
 import spack.environment.environment
@@ -610,27 +611,21 @@ def setup_main_options(args):
         color.set_color_when(args.color)
 
 
-def allows_unknown_args(command):
-    """Implements really simple argument injection for unknown arguments.
+def _invoke_command(command, parser, args, unknown_args, ctx: spack.context.SpackContext):
+    """Run a spack command *without* setting spack global options.
 
-    Commands may add an optional argument called "unknown args" to
-    indicate they can handle unknown args, and we'll pass the unknown
-    args in.
+    Commands receive ``unknown_args`` and ``ctx`` when their signature asks for them.
     """
-    info = dict(inspect.getmembers(command))
-    varnames = info["__code__"].co_varnames
-    argcount = info["__code__"].co_argcount
-    return argcount == 3 and varnames[2] == "unknown_args"
+    params = inspect.signature(command).parameters
+    kwargs = {}
+    if "unknown_args" in params:
+        kwargs["unknown_args"] = unknown_args
+    elif unknown_args:
+        args.subparser.error("unrecognized arguments: %s" % " ".join(unknown_args))
+    if "ctx" in params:
+        kwargs["ctx"] = ctx
 
-
-def _invoke_command(command, parser, args, unknown_args):
-    """Run a spack command *without* setting spack global options."""
-    if allows_unknown_args(command):
-        return_val = command(parser, args, unknown_args)
-    else:
-        if unknown_args:
-            args.subparser.error("unrecognized arguments: %s" % " ".join(unknown_args))
-        return_val = command(parser, args)
+    return_val = command(parser, args, **kwargs)
 
     # Allow commands to return and error code if they want
     return 0 if return_val is None else return_val
@@ -685,7 +680,9 @@ class SpackCommand:
                 command = self.parser.add_command(self.command_name)
                 args, unknown = self.parser.parse_known_args([self.command_name, *argv])
                 setup_main_options(args)
-                self.returncode = _invoke_command(command, self.parser, args, unknown)
+                self.returncode = _invoke_command(
+                    command, self.parser, args, unknown, spack.context.default()
+                )
         except SystemExit as e:
             # When the command calls sys.exit instead of returning an exit code
             self.error = e
@@ -733,7 +730,7 @@ class SpackCommand:
                 self.binary_output = tmp_file.read()
 
 
-def _profile_wrapper(command, main_args, parser, args, unknown_args):
+def _profile_wrapper(command, main_args, parser, args, unknown_args, ctx):
     import cProfile
 
     try:
@@ -755,7 +752,7 @@ def _profile_wrapper(command, main_args, parser, args, unknown_args):
         # make a profiler and run the code.
         pr = cProfile.Profile()
         pr.enable()
-        return _invoke_command(command, parser, args, unknown_args)
+        return _invoke_command(command, parser, args, unknown_args, ctx)
 
     finally:
         pr.disable()
@@ -1068,6 +1065,8 @@ def finish_parse_and_run(parser, cmd_name, main_args, env_format_error):
     # many operations will fail without a working directory.
     spack.paths.set_working_dir()
 
+    ctx = spack.context.default()
+
     # now we can actually execute the command.
     if main_args.spack_profile or main_args.sorted_profile or main_args.profile_file:
         new_args = [sys.executable, "-m", "cProfile"]
@@ -1094,7 +1093,7 @@ def finish_parse_and_run(parser, cmd_name, main_args, env_format_error):
             "The --profile flag is deprecated and will be removed in Spack v1.3. "
             f"Use `{formatted_args}` instead."
         )
-        _profile_wrapper(command, main_args, parser, args, unknown)
+        _profile_wrapper(command, main_args, parser, args, unknown, ctx)
     elif main_args.pdb:
         new_args = [sys.executable, "-m", "pdb", spack.paths.spack_script]
         new_args.extend(arg for arg in sys.argv[1:] if arg != "--pdb")
@@ -1105,10 +1104,10 @@ def finish_parse_and_run(parser, cmd_name, main_args, env_format_error):
         )
         import pdb
 
-        pdb.runctx("_invoke_command(command, parser, args, unknown)", globals(), locals())
+        pdb.runctx("_invoke_command(command, parser, args, unknown, ctx)", globals(), locals())
         return 0
     else:
-        return _invoke_command(command, parser, args, unknown)
+        return _invoke_command(command, parser, args, unknown, ctx)
 
 
 def main(argv=None):

@@ -10,7 +10,6 @@ import runpy
 import sys
 
 import spack
-import spack.repo
 from spack.util import tty
 
 description = "launch an interpreter as spack would launch a command"
@@ -56,7 +55,7 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     )
 
 
-def python(parser, args, unknown_args):
+def python(parser, args, unknown_args, ctx):
     if args.python_version:
         print("Python", platform.python_version())
         return
@@ -77,8 +76,8 @@ def python(parser, args, unknown_args):
     if args.python_command and args.python_args:
         args.subparser.error("you can only specify a command OR script, but not both")
 
-    # Ensure that spack.repo.PATH is initialized
-    spack.repo.PATH.repos
+    # Ensure that the package repositories are initialized
+    ctx.repo.repos
 
     # Run user choice of interpreter
     if args.python_interpreter == "ipython":

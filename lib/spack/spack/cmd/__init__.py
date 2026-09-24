@@ -10,23 +10,20 @@ import re
 import subprocess
 import sys
 import textwrap
-from typing import Callable, Container, Generator, List, Optional, Sequence, Union
+from typing import TYPE_CHECKING, Callable, Container, Generator, List, Optional, Sequence, Union
 
 import spack.concretize
-import spack.config
 import spack.environment as ev
 import spack.error
 import spack.extensions
 import spack.paths
 import spack.spec
 import spack.spec_parser
-import spack.store
 import spack.user_environment as uenv
 import spack.util.spack_json as sjson
 import spack.util.spack_yaml as syaml
 import spack.util.string
 from spack import traverse
-from spack.active_environment import active_environment
 from spack.concretize_ui import ConcretizerUI, TerminalUI
 from spack.util import tty
 from spack.util.filesystem import join_path
@@ -35,6 +32,9 @@ from spack.util.tty.colify import colify
 from spack.util.tty.color import colorize
 
 from ..enums import InstallRecordStatus
+
+if TYPE_CHECKING:
+    import spack.context
 
 # cmd has a submodule called "list" so preserve the python list module
 python_list = list
@@ -184,6 +184,7 @@ def quote_kvp(string: str) -> str:
 
 def parse_specs(
     args: Union[str, List[str]],
+    ctx: "spack.context.SpackContext",
     concretize: bool = False,
     tests: spack.concretize.TestsType = False,
     ui: Optional[ConcretizerUI] = None,
@@ -194,7 +195,7 @@ def parse_specs(
     args = [args] if isinstance(args, str) else args
     arg_string = " ".join([quote_kvp(arg) for arg in args])
 
-    toolchains = spack.config.CONFIG.get("toolchains", {})
+    toolchains = ctx.config.get("toolchains", {})
     specs = spack.spec.parse(arg_string, toolchains=toolchains)
     if not concretize:
         return specs
@@ -205,20 +206,20 @@ def parse_specs(
     )
 
 
-def matching_spec_from_env(spec):
+def matching_spec_from_env(spec, ctx: "spack.context.SpackContext"):
     """
     Returns a concrete spec, matching what is available in the environment.
     If no matching spec is found in the environment (or if no environment is
     active), this will return the given spec but concretized.
     """
-    env = active_environment()
+    env = ctx.environment
     if env:
         return env.matching_spec(spec) or spack.concretize.concretize_one(spec)
     else:
         return spack.concretize.concretize_one(spec)
 
 
-def matching_specs_from_env(specs):
+def matching_specs_from_env(specs, ctx: "spack.context.SpackContext"):
     """
     Same as ``matching_spec_from_env`` but respects spec unification rules.
 
@@ -226,7 +227,7 @@ def matching_specs_from_env(specs):
     matching spec is found, this will return the given spec but concretized in the
     context of the active environment and other given specs, with unification rules applied.
     """
-    env = active_environment()
+    env = ctx.environment
     spec_pairs = [(spec, env.matching_spec(spec) if env else None) for spec in specs]
     additional_concrete_specs = (
         [(concrete, concrete) for _, concrete in env.concretized_specs()] if env else []
@@ -239,6 +240,8 @@ def matching_specs_from_env(specs):
 def disambiguate_spec(
     spec: spack.spec.Spec,
     env: Optional[ev.Environment],
+    *,
+    store: "spack.store.Store",
     local: bool = False,
     installed: Union[bool, InstallRecordStatus] = True,
     first: bool = False,
@@ -253,12 +256,16 @@ def disambiguate_spec(
         first: returns the first matching spec, even if more than one match is found
     """
     hashes = env.all_hashes() if env else None
-    return disambiguate_spec_from_hashes(spec, hashes, local, installed, first)
+    return disambiguate_spec_from_hashes(
+        spec, hashes, store=store, local=local, installed=installed, first=first
+    )
 
 
 def disambiguate_spec_from_hashes(
     spec: spack.spec.Spec,
     hashes: Optional[List[str]],
+    *,
+    store: "spack.store.Store",
     local: bool = False,
     installed: Union[bool, InstallRecordStatus] = True,
     first: bool = False,
@@ -273,9 +280,9 @@ def disambiguate_spec_from_hashes(
         first: returns the first matching spec, even if more than one match is found
     """
     if local:
-        matching_specs = spack.store.STORE.db.query_local(spec, hashes=hashes, installed=installed)
+        matching_specs = store.db.query_local(spec, hashes=hashes, installed=installed)
     else:
-        matching_specs = spack.store.STORE.db.query(spec, hashes=hashes, installed=installed)
+        matching_specs = store.db.query(spec, hashes=hashes, installed=installed)
     if not matching_specs:
         tty.die(f"Spec '{spec}' matches no installed packages.")
 
@@ -313,7 +320,7 @@ def gray_hash(spec, length):
 
 
 def buildcache_status_fn(
-    available_hashes: Container[str],
+    available_hashes: Container[str], *, store: "spack.store.Store"
 ) -> Callable[["spack.spec.Spec"], "spack.spec.InstallStatus"]:
     """Return a status_fn that marks not-installed specs present in a buildcache as [b].
 
@@ -323,7 +330,7 @@ def buildcache_status_fn(
     """
 
     def _status_fn(spec: "spack.spec.Spec") -> "spack.spec.InstallStatus":
-        status = spack.store.STORE.db.install_status(spec)
+        status = store.db.install_status(spec)
         if (
             status in (spack.spec.InstallStatus.absent, spack.spec.InstallStatus.missing)
             and spec.dag_hash() in available_hashes
@@ -511,19 +518,16 @@ def display_specs(specs, args=None, **kwargs):
         path_fmt = "%%-%ds%%s" % (max_width + 2)
 
         out = ""
-        # getting lots of prefixes requires DB lookups. Ensure
-        # all spec.prefix calls are in one transaction.
-        with spack.store.STORE.db.read_transaction():
-            for string, spec in formatted:
-                if not string:
-                    # print newline from above
-                    out += "\n"
-                    continue
+        for string, spec in formatted:
+            if not string:
+                # print newline from above
+                out += "\n"
+                continue
 
-                if paths:
-                    out += path_fmt % (string, spec.prefix) + "\n"
-                else:
-                    out += string + "\n"
+            if paths:
+                out += path_fmt % (string, spec.prefix) + "\n"
+            else:
+                out += string + "\n"
 
         return out
 
@@ -620,18 +624,20 @@ def extant_file(f):
     return f
 
 
-def require_active_env(parser):
+def require_active_env(
+    parser: argparse.ArgumentParser, env: Optional[ev.Environment]
+) -> ev.Environment:
     """Used by commands to get the active environment.
 
     If an environment is not found, calls ``parser.error()`` which prints usage and exits.
 
     Arguments:
         parser: the subparser for the command (typically ``args.subparser``)
+        env: the environment of the command, if any
 
     Returns:
-        (spack.environment.Environment): the active environment
+        the active environment
     """
-    env = active_environment()
     if env:
         return env
     parser.error(

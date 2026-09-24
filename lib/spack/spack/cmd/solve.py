@@ -11,11 +11,9 @@ import spack.binary_distribution
 import spack.cmd
 import spack.cmd.spec
 import spack.concretize
-import spack.config
 import spack.context
 import spack.package_base
 import spack.spec
-from spack.active_environment import active_environment
 from spack.solver import asp
 from spack.solver.error import format_unsolved
 from spack.solver.result import OptimizationKind
@@ -127,7 +125,7 @@ def _process_result(result, show, required_format, kwargs):
         tty.msg(format_unsolved(result.unsolved_specs))
 
 
-def solve(parser, args):
+def solve(parser, args, ctx: spack.context.SpackContext):
     # these are the same options as `spack spec`
     fmt = spack.spec.DISPLAY_FORMAT
     if args.namespaces:
@@ -136,7 +134,7 @@ def solve(parser, args):
     show_status = args.install_status
     if show_status:
         spack.binary_distribution.load_buildcache_index()
-        status_fn = spack.cmd.buildcache_status_fn(spack.binary_distribution.BINARY_INDEX)
+        status_fn = spack.cmd.buildcache_status_fn(ctx.binary_index, store=ctx.store)
     else:
         status_fn = None
 
@@ -158,7 +156,7 @@ def solve(parser, args):
     # process output options
     show = re.split(r"\s*,\s*", args.show)
     if "all" in show:
-        show = show_options
+        show = list(show_options)
     for d in show:
         if d not in show_options:
             raise ValueError(
@@ -170,9 +168,9 @@ def solve(parser, args):
     required_format = args.format
 
     # If we have an active environment, pick the specs from there
-    env = active_environment()
+    env = ctx.environment
     if args.specs:
-        specs = spack.cmd.parse_specs(args.specs)
+        specs = spack.cmd.parse_specs(args.specs, ctx)
     elif env:
         specs = list(env.user_specs)
     else:
@@ -183,10 +181,10 @@ def solve(parser, args):
         return
 
     spack.concretize.ensure_compilers_in_configuration()
-    solver = asp.Solver(context=spack.context.default())
+    solver = asp.Solver(context=ctx)
     output = sys.stdout if "asp" in show else None
     setup_only = set(show) == {"asp"}
-    unify = spack.config.CONFIG.get("concretizer:unify")
+    unify = ctx.config.get("concretizer:unify")
     if unify == "when_possible":
         for idx, result in enumerate(
             solver.solve_in_rounds(specs, out=output, timers=args.timers, stats=args.stats)
@@ -208,7 +206,7 @@ def solve(parser, args):
             _process_result(result, show, required_format, kwargs)
     else:
         for spec in specs:
-            tty.msg("SOLVING SPEC:", spec)
+            tty.msg("SOLVING SPEC:", str(spec))
             result = solver.solve(
                 [spec], out=output, timers=args.timers, stats=args.stats, setup_only=setup_only
             )

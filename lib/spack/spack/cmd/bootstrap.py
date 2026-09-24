@@ -140,25 +140,25 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     )
 
 
-def _enable_or_disable(args):
+def _enable_or_disable(args, ctx):
     value = args.subcommand == "enable"
     if args.name is None:
         # Set to True if we called "enable", otherwise set to false
-        old_value = spack.config.CONFIG.get("bootstrap:enable", scope=args.scope)
+        old_value = ctx.config.get("bootstrap:enable", scope=args.scope)
         if old_value == value:
             spack.util.tty.msg("Bootstrapping is already {}d".format(args.subcommand))
         else:
-            spack.config.CONFIG.set("bootstrap:enable", value, scope=args.scope)
+            ctx.config.set("bootstrap:enable", value, scope=args.scope)
             spack.util.tty.msg("Bootstrapping has been {}d".format(args.subcommand))
         return
 
     if value is True:
-        _enable_source(args)
+        _enable_source(args, ctx.config)
     else:
-        _disable_source(args)
+        _disable_source(args, ctx.config)
 
 
-def _reset(args):
+def _reset(args, ctx):
     if not args.yes_to_all:
         msg = [
             "Bootstrapping configuration is being reset to Spack's defaults. "
@@ -169,15 +169,15 @@ def _reset(args):
         if not ok_to_continue:
             raise RuntimeError("Aborting")
 
-    for scope in spack.config.CONFIG.writable_scopes:
+    for scope in ctx.config.writable_scopes:
         # The default scope should stay untouched
         if scope.name == "defaults":
             continue
 
         # If we are in an env scope we can't delete a file, but the best we
         # can do is nullify the corresponding configuration
-        if scope.name.startswith("env") and spack.config.CONFIG.get("bootstrap", scope=scope.name):
-            spack.config.CONFIG.set("bootstrap", {}, scope=scope.name)
+        if scope.name.startswith("env") and ctx.config.get("bootstrap", scope=scope.name):
+            ctx.config.set("bootstrap", {}, scope=scope.name)
             continue
 
         # If we are outside of an env scope delete the bootstrap.yaml file
@@ -186,25 +186,25 @@ def _reset(args):
         if os.path.exists(bootstrap_yaml):
             shutil.move(bootstrap_yaml, backup_file)
 
-        spack.config.CONFIG.clear_caches()
+        ctx.config.clear_caches()
 
 
-def _root(args):
+def _root(args, ctx):
     if args.path:
-        spack.config.CONFIG.set("bootstrap:root", args.path, scope=args.scope)
+        ctx.config.set("bootstrap:root", args.path, scope=args.scope)
     elif args.scope:
-        if args.scope not in spack.config.CONFIG.existing_scope_names():
+        if args.scope not in ctx.config.existing_scope_names():
             spack.util.tty.die(
                 f"The argument --scope={args.scope} must refer to an existing scope."
             )
 
-    root = spack.config.CONFIG.get("bootstrap:root", default=None, scope=args.scope)
+    root = ctx.config.get("bootstrap:root", default=None, scope=args.scope)
     if root:
         root = spack.config.canonicalize_path(root)
     print(root)
 
 
-def _list(args):
+def _list(args, ctx):
     sources = spack.bootstrap.core.bootstrapping_sources(scope=args.scope)
     if not sources:
         spack.util.tty.msg("No method available for bootstrapping Spack's dependencies")
@@ -241,7 +241,7 @@ def _list(args):
 
             fmt("  Description", "".join(description_lines))
 
-    trusted = spack.config.CONFIG.get("bootstrap:trusted", {})
+    trusted = ctx.config.get("bootstrap:trusted", {})
 
     def sort_fn(x):
         x_trust = trusted.get(x["name"], None)
@@ -256,15 +256,16 @@ def _list(args):
         _print_method(s, trusted.get(s["name"], None))
 
 
-def _write_bootstrapping_source_status(name, enabled, scope=None):
+def _write_bootstrapping_source_status(name, enabled, config, scope=None):
     """Write if a bootstrapping source is enable or disabled to config file.
 
     Args:
         name (str): name of the bootstrapping source.
         enabled (bool): True if the source is enabled, False if it is disabled.
+        config: configuration to modify.
         scope (None or str): configuration scope to modify. If none use the default scope.
     """
-    sources = spack.config.CONFIG.get("bootstrap:sources")
+    sources = config.get("bootstrap:sources")
 
     matches = [s for s in sources if s["name"] == name]
     if not matches:
@@ -284,23 +285,23 @@ def _write_bootstrapping_source_status(name, enabled, scope=None):
 
     # Setting the scope explicitly is needed to not copy over to a new scope
     # the entire default configuration for bootstrap.yaml
-    scope = scope or spack.config.CONFIG.default_modify_scope("bootstrap")
-    spack.config.CONFIG.add("bootstrap:trusted:{0}:{1}".format(name, str(enabled)), scope=scope)
+    scope = scope or config.default_modify_scope("bootstrap")
+    config.add("bootstrap:trusted:{0}:{1}".format(name, str(enabled)), scope=scope)
 
 
-def _enable_source(args):
-    _write_bootstrapping_source_status(args.name, enabled=True, scope=args.scope)
+def _enable_source(args, config):
+    _write_bootstrapping_source_status(args.name, enabled=True, config=config, scope=args.scope)
     msg = '"{0}" is now enabled for bootstrapping'
     spack.util.tty.msg(msg.format(args.name))
 
 
-def _disable_source(args):
-    _write_bootstrapping_source_status(args.name, enabled=False, scope=args.scope)
+def _disable_source(args, config):
+    _write_bootstrapping_source_status(args.name, enabled=False, config=config, scope=args.scope)
     msg = '"{0}" is now disabled and will not be used for bootstrapping'
     spack.util.tty.msg(msg.format(args.name))
 
 
-def _status(args):
+def _status(args, ctx):
     sections = ["core", "buildcache"]
     if args.optional:
         sections.append("optional")
@@ -333,7 +334,7 @@ def _status(args):
         sys.exit(1)
 
 
-def _add(args):
+def _add(args, ctx):
     initial_sources = spack.bootstrap.core.bootstrapping_sources()
     names = [s["name"] for s in initial_sources]
 
@@ -352,18 +353,18 @@ def _add(args):
         raise RuntimeError('the file "{0}" does not exist'.format(file))
 
     # Insert the new source as the highest priority one
-    write_scope = args.scope or spack.config.CONFIG.default_modify_scope(section="bootstrap")
-    sources = spack.config.CONFIG.get("bootstrap:sources", scope=write_scope) or []
+    write_scope = args.scope or ctx.config.default_modify_scope(section="bootstrap")
+    sources = ctx.config.get("bootstrap:sources", scope=write_scope) or []
     sources = [{"name": args.name, "metadata": args.metadata_dir}] + sources
-    spack.config.CONFIG.set("bootstrap:sources", sources, scope=write_scope)
+    ctx.config.set("bootstrap:sources", sources, scope=write_scope)
 
     msg = 'New bootstrapping source "{0}" added in the "{1}" configuration scope'
     spack.util.tty.msg(msg.format(args.name, write_scope))
     if args.trust:
-        _enable_source(args)
+        _enable_source(args, ctx.config)
 
 
-def _remove(args):
+def _remove(args, ctx):
     initial_sources = spack.bootstrap.core.bootstrapping_sources()
     names = [s["name"] for s in initial_sources]
     if args.name not in names:
@@ -373,24 +374,24 @@ def _remove(args):
         )
         raise RuntimeError(msg.format(args.name))
 
-    for current_scope in spack.config.CONFIG.scopes:
-        sources = spack.config.CONFIG.get("bootstrap:sources", scope=current_scope) or []
+    for current_scope in ctx.config.scopes:
+        sources = ctx.config.get("bootstrap:sources", scope=current_scope) or []
         if args.name in [s["name"] for s in sources]:
             sources = [s for s in sources if s["name"] != args.name]
-            spack.config.CONFIG.set("bootstrap:sources", sources, scope=current_scope)
+            ctx.config.set("bootstrap:sources", sources, scope=current_scope)
             msg = (
                 'Removed the bootstrapping source named "{0}" from the "{1}" configuration scope.'
             )
             spack.util.tty.msg(msg.format(args.name, current_scope))
-        trusted = spack.config.CONFIG.get("bootstrap:trusted", scope=current_scope) or []
+        trusted = ctx.config.get("bootstrap:trusted", scope=current_scope) or []
         if args.name in trusted:
             trusted.pop(args.name)
-            spack.config.CONFIG.set("bootstrap:trusted", trusted, scope=current_scope)
+            ctx.config.set("bootstrap:trusted", trusted, scope=current_scope)
             msg = 'Deleting information on "{0}" from list of trusted sources'
             spack.util.tty.msg(msg.format(args.name))
 
 
-def _mirror(args):
+def _mirror(args, ctx):
     mirror_dir = spack.config.canonicalize_path(os.path.join(args.root_dir, LOCAL_MIRROR_DIR))
 
     # TODO: Here we are adding gnuconfig manually, but this can be fixed
@@ -409,7 +410,7 @@ def _mirror(args):
         for node in spec.traverse():
             if node.external:
                 continue
-            spack.cmd.mirror.create(mirror_dir, [node])
+            spack.cmd.mirror.create(mirror_dir, [node], ctx.repo)
         spack.util.tty.set_msg_enabled(True)
 
     if args.binary_packages:
@@ -417,7 +418,7 @@ def _mirror(args):
         spack.util.tty.msg(msg.format(BINARY_TARBALL, mirror_dir))
         spack.util.tty.set_msg_enabled(False)
         stage = spack.stage.stage_from_config(
-            BINARY_TARBALL, path=tempfile.mkdtemp(), config=spack.config.CONFIG
+            BINARY_TARBALL, path=tempfile.mkdtemp(), config=ctx.config
         )
         stage.create()
         stage.fetch()
@@ -452,14 +453,14 @@ def _mirror(args):
     print(instructions)
 
 
-def _now(args):
+def _now(args, ctx):
     with spack.bootstrap.ensure_bootstrap_configuration():
         spack.bootstrap.ensure_core_dependencies()
         if args.dev:
             spack.bootstrap.ensure_environment_dependencies()
 
 
-def bootstrap(parser, args):
+def bootstrap(parser, args, ctx):
     callbacks = {
         "status": _status,
         "enable": _enable_or_disable,
@@ -472,4 +473,4 @@ def bootstrap(parser, args):
         "mirror": _mirror,
         "now": _now,
     }
-    callbacks[args.subcommand](args)
+    callbacks[args.subcommand](args, ctx)

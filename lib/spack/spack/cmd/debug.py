@@ -32,10 +32,10 @@ def _format_repo_info(source, commit):
     return f"{source} ({commit[:7]})"
 
 
-def _get_builtin_repo_info() -> Optional[str]:
+def _get_builtin_repo_info(config: spack.config.Configuration) -> Optional[str]:
     """Get the builtin package repository git commit sha."""
     # Get builtin from config
-    descriptors = spack.repo.RepoDescriptors.from_config(spack.config.CONFIG)
+    descriptors = spack.repo.RepoDescriptors.from_config(config)
     if "builtin" not in descriptors:
         return None
 
@@ -75,17 +75,17 @@ def _get_spack_repo_info() -> str:
     return f"{spack.spack_version} ({repo_info})"
 
 
-def report(args):
+def report(args, ctx):
     host_platform = spack.platforms.host()
     host_os = host_platform.default_operating_system()
     host_target = host_platform.default_target()
     architecture = spack.spec.ArchSpec((str(host_platform), str(host_os), str(host_target)))
     print("* **Spack:**", _get_spack_repo_info())
-    print("* **Builtin repo:**", _get_builtin_repo_info() or "not available")
+    print("* **Builtin repo:**", _get_builtin_repo_info(ctx.config) or "not available")
     print("* **Python:**", platform.python_version())
     print("* **Platform:**", architecture)
 
 
-def debug(parser, args):
+def debug(parser, args, ctx):
     if args.debug_command == "report":
-        report(args)
+        report(args, ctx)

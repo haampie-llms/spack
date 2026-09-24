@@ -27,6 +27,7 @@ import spack.util.gpg
 import spack.util.url as url_util
 from spack.cmd import buildcache
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.installer import PackageInstaller
 from spack.paths import mock_gpg_keys_path
 from spack.relocate import _macho_find_paths, relocate_links, relocate_text
@@ -37,7 +38,7 @@ pytestmark = pytest.mark.not_on_windows("does not run on windows")
 
 
 @pytest.mark.usefixtures("install_mockery", "mock_gnupghome", "mock_fetch")
-def test_buildcache(tmp_path: pathlib.Path, mutable_config: Configuration):
+def test_buildcache(tmp_path: pathlib.Path, mutable_config: Configuration, ctx: SpackContext):
     # Install a test package
     spec = spack.concretize.concretize_one("trivial-install-test-package")
     PackageInstaller([spec.package], explicit=True).install()
@@ -53,7 +54,7 @@ def test_buildcache(tmp_path: pathlib.Path, mutable_config: Configuration):
 
     # Create the build cache and put it directly into the mirror
     mirror_path = str(tmp_path / "test-mirror")
-    spack.cmd.mirror.create(mirror_path, specs=[])
+    spack.cmd.mirror.create(mirror_path, specs=[], repo=ctx.repo)
 
     # register mirror with spack config
     mirrors = {"spack-mirror-test": url_util.path_to_file_url(mirror_path)}
@@ -75,9 +76,9 @@ def test_buildcache(tmp_path: pathlib.Path, mutable_config: Configuration):
         )
 
         args = parser.parse_args(create_args)
-        buildcache.buildcache(parser, args)
+        buildcache.buildcache(parser, args, ctx)
         # trigger overwrite warning
-        buildcache.buildcache(parser, args)
+        buildcache.buildcache(parser, args, ctx)
 
         # Uninstall the package
         spec.package.do_uninstall(force=True)
@@ -85,7 +86,7 @@ def test_buildcache(tmp_path: pathlib.Path, mutable_config: Configuration):
         install_args = ["install", "-f", pkghash]
         args = parser.parse_args(install_args)
         # Test install
-        buildcache.buildcache(parser, args)
+        buildcache.buildcache(parser, args, ctx)
 
         files = os.listdir(spec.prefix)
 
@@ -98,28 +99,28 @@ def test_buildcache(tmp_path: pathlib.Path, mutable_config: Configuration):
         assert buildinfo["relocate_links"] == ["link_to_dummy.txt"]
 
         args = parser.parse_args(["keys"])
-        buildcache.buildcache(parser, args)
+        buildcache.buildcache(parser, args, ctx)
 
         args = parser.parse_args(["list"])
-        buildcache.buildcache(parser, args)
+        buildcache.buildcache(parser, args, ctx)
 
         args = parser.parse_args(["list"])
-        buildcache.buildcache(parser, args)
+        buildcache.buildcache(parser, args, ctx)
 
         args = parser.parse_args(["list", "trivial"])
-        buildcache.buildcache(parser, args)
+        buildcache.buildcache(parser, args, ctx)
 
         # Copy a key to the mirror to have something to download
         shutil.copyfile(mock_gpg_keys_path + "/external.key", mirror_path + "/external.key")
 
         args = parser.parse_args(["keys"])
-        buildcache.buildcache(parser, args)
+        buildcache.buildcache(parser, args, ctx)
 
         args = parser.parse_args(["keys", "-f"])
-        buildcache.buildcache(parser, args)
+        buildcache.buildcache(parser, args, ctx)
 
         args = parser.parse_args(["keys", "-y", "-i", "-t"])
-        buildcache.buildcache(parser, args)
+        buildcache.buildcache(parser, args, ctx)
 
 
 def test_relocate_text(tmp_path: pathlib.Path):

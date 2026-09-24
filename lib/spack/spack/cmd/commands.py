@@ -13,6 +13,7 @@ from typing import IO, Any, Callable, Dict, List, Optional, Sequence, Set, Union
 
 import spack.cmd
 import spack.config
+import spack.context
 import spack.main
 import spack.paths
 import spack.platforms
@@ -34,7 +35,7 @@ level = "long"
 
 
 #: list of command formatters
-formatters: Dict[str, Callable[[Namespace, IO], None]] = {}
+formatters: Dict[str, Callable[[Namespace, IO, spack.config.Configuration], None]] = {}
 
 
 #: standard arguments for updating completion scripts
@@ -55,7 +56,9 @@ update_completion_args: Dict[str, Dict[str, Any]] = {
 }
 
 
-def formatter(func: Callable[[Namespace, IO], None]) -> Callable[[Namespace, IO], None]:
+def formatter(
+    func: Callable[[Namespace, IO, spack.config.Configuration], None],
+) -> Callable[[Namespace, IO, spack.config.Configuration], None]:
     """Decorator used to register formatters.
 
     Args:
@@ -683,12 +686,13 @@ class FishCompletionWriter(ArgparseWriter):
 
 
 @formatter
-def subcommands(args: Namespace, out: IO) -> None:
+def subcommands(args: Namespace, out: IO, config: spack.config.Configuration) -> None:
     """Hierarchical tree of subcommands.
 
     args:
         args: Command-line arguments.
         out: File object to write to.
+        config: Configuration of the command.
     """
     parser = get_all_spack_commands(out)
     writer = SubcommandWriter(parser.prog, out, args.aliases)
@@ -728,12 +732,13 @@ def rst_index(out: IO) -> None:
 
 
 @formatter
-def rst(args: Namespace, out: IO) -> None:
+def rst(args: Namespace, out: IO, config: spack.config.Configuration) -> None:
     """ReStructuredText documentation of subcommands.
 
     args:
         args: Command-line arguments.
         out: File object to write to.
+        config: Configuration of the command.
     """
     # create a parser with all commands
     parser = get_all_spack_commands(out)
@@ -757,17 +762,18 @@ def rst(args: Namespace, out: IO) -> None:
 
 
 @formatter
-def names(args: Namespace, out: IO) -> None:
+def names(args: Namespace, out: IO, config: spack.config.Configuration) -> None:
     """Simple list of top-level commands.
 
     args:
         args: Command-line arguments.
         out: File object to write to.
+        config: Configuration of the command.
     """
     commands = copy.copy(spack.cmd.all_commands())
 
     if args.aliases:
-        aliases = spack.config.CONFIG.get("config:aliases")
+        aliases = config.get("config:aliases")
         if aliases:
             commands.extend(aliases.keys())
 
@@ -789,15 +795,16 @@ def get_all_spack_commands(out: IO) -> SpackArgumentParser:
 
 
 @formatter
-def bash(args: Namespace, out: IO) -> None:
+def bash(args: Namespace, out: IO, config: spack.config.Configuration) -> None:
     """Bash tab-completion script.
 
     args:
         args: Command-line arguments.
         out: File object to write to.
+        config: Configuration of the command.
     """
     parser = get_all_spack_commands(out)
-    aliases_config = spack.config.CONFIG.get("config:aliases")
+    aliases_config = config.get("config:aliases")
     if aliases_config:
         aliases = ";".join(f"{key}:{val}" for key, val in aliases_config.items())
         out.write(f'SPACK_ALIASES="{aliases}"\n\n')
@@ -807,7 +814,7 @@ def bash(args: Namespace, out: IO) -> None:
 
 
 @formatter
-def fish(args, out):
+def fish(args, out, config):
     parser = get_all_spack_commands(out)
     writer = FishCompletionWriter(parser.prog, out, args.aliases)
     writer.write(parser)
@@ -827,7 +834,7 @@ def prepend_header(args: Namespace, out: IO) -> None:
         out.write(header.read())
 
 
-def _commands(parser: ArgumentParser, args: Namespace) -> None:
+def _commands(parser: ArgumentParser, args: Namespace, config: spack.config.Configuration) -> None:
     """This is the 'regular' command, which can be called multiple times.
 
     See ``commands()`` below for ``--update-completion`` handling.
@@ -835,6 +842,7 @@ def _commands(parser: ArgumentParser, args: Namespace) -> None:
     Args:
         parser: Argument parser.
         args: Command-line arguments.
+        config: Configuration of the command.
     """
     formatter = formatters[args.format]
 
@@ -846,14 +854,16 @@ def _commands(parser: ArgumentParser, args: Namespace) -> None:
         tty.msg(f"Updating file: {args.update}")
         with open(args.update, "w", encoding="utf-8") as f:
             prepend_header(args, f)
-            formatter(args, f)
+            formatter(args, f, config)
 
     else:
         prepend_header(args, sys.stdout)
-        formatter(args, sys.stdout)
+        formatter(args, sys.stdout, config)
 
 
-def update_completion(parser: ArgumentParser, args: Namespace) -> None:
+def update_completion(
+    parser: ArgumentParser, args: Namespace, config: spack.config.Configuration
+) -> None:
     """Iterate through the shells and update the standard completion files.
 
     This is a convenience method to avoid calling this command many
@@ -862,27 +872,29 @@ def update_completion(parser: ArgumentParser, args: Namespace) -> None:
     Args:
         parser: Argument parser.
         args: Command-line arguments.
+        config: Configuration of the command.
     """
     for shell, shell_args in update_completion_args.items():
         for attr, value in shell_args.items():
             setattr(args, attr, value)
-        _commands(parser, args)
+        _commands(parser, args, config)
 
 
-def commands(parser: ArgumentParser, args: Namespace) -> None:
+def commands(parser: ArgumentParser, args: Namespace, ctx: spack.context.SpackContext) -> None:
     """Main function that calls formatter functions.
 
     Args:
         parser: Argument parser.
         args: Command-line arguments.
+        ctx: Context of the command.
     """
     if args.update_completion:
         if args.format != "names" or any([args.aliases, args.update, args.header]):
             args.subparser.error("--update-completion can only be specified alone")
 
         # this runs the command multiple times with different arguments
-        update_completion(parser, args)
+        update_completion(parser, args, ctx.config)
 
     else:
         # run commands normally
-        _commands(parser, args)
+        _commands(parser, args, ctx.config)

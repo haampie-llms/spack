@@ -14,5 +14,5 @@ level = "long"
 setup_parser = env_utility.setup_parser
 
 
-def test_env(parser, args):
-    env_utility.emulate_env_utility("test-env", Context.TEST, args)
+def test_env(parser, args, ctx):
+    env_utility.emulate_env_utility("test-env", Context.TEST, args, ctx)

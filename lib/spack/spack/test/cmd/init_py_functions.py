@@ -18,6 +18,7 @@ from spack.cmd import (
     require_python_name,
 )
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.database import Database
 from spack.solver import asp
 
@@ -64,6 +65,7 @@ def test_special_cases_concretization_parse_specs(
     mutable_config: Configuration,
     mutable_database: Database,
     tmp_path: pathlib.Path,
+    ctx: SpackContext,
 ):
     """Test that special cases in parse_specs(concretize=True) bypass solver"""
 
@@ -79,17 +81,17 @@ def test_special_cases_concretization_parse_specs(
     if len(args) > 1:
         # We convert the last one to a specfile input
         filename = tmp_path / "spec.json"
-        spec = parse_specs(args[-1], concretize=True)[0]
+        spec = parse_specs(args[-1], ctx, concretize=True)[0]
         with open(filename, "w", encoding="utf-8") as f:
             spec.to_json(f)
         args[-1] = str(filename)
 
     if error:
         with pytest.raises(error):
-            parse_specs(args, concretize=True)
+            parse_specs(args, ctx, concretize=True)
     else:
         # assertion error from monkeypatch above if test fails
-        parse_specs(args, concretize=True)
+        parse_specs(args, ctx, concretize=True)
 
 
 @pytest.mark.parametrize(
@@ -113,6 +115,7 @@ def test_special_cases_concretization_matching_specs_from_env(
     mutable_database: Database,
     tmp_path: pathlib.Path,
     mutable_mock_env_path,
+    ctx: SpackContext,
 ):
     """Test that special cases in parse_specs(concretize=True) bypass solver"""
 
@@ -131,16 +134,16 @@ def test_special_cases_concretization_matching_specs_from_env(
     if len(args) > 1:
         # We convert the last one to a specfile input
         filename = tmp_path / "spec.json"
-        spec = parse_specs(args[-1], concretize=True)[0]
+        spec = parse_specs(args[-1], ctx, concretize=True)[0]
         with open(filename, "w", encoding="utf-8") as f:
             spec.to_json(f)
         args[-1] = str(filename)
 
     with env:
-        specs = parse_specs(args, concretize=False)
+        specs = parse_specs(args, ctx, concretize=False)
         if error:
             with pytest.raises(error):
-                matching_specs_from_env(specs)
+                matching_specs_from_env(specs, ctx)
         else:
             # assertion error from monkeypatch above if test fails
-            matching_specs_from_env(specs)
+            matching_specs_from_env(specs, ctx)

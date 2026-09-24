@@ -18,8 +18,6 @@ import argparse
 import spack.cmd
 import spack.concretize
 import spack.old_installer
-import spack.store
-from spack.active_environment import active_environment
 from spack.cmd.common import arguments
 from spack.util import tty
 from spack.util.filesystem import symlink
@@ -80,10 +78,10 @@ def setup_parser(sp: argparse.ArgumentParser) -> None:
     )
 
 
-def deprecate(parser, args):
+def deprecate(parser, args, ctx):
     """Deprecate one spec in favor of another"""
-    env = active_environment()
-    specs = spack.cmd.parse_specs(args.specs)
+    env = ctx.environment
+    specs = spack.cmd.parse_specs(args.specs, ctx)
 
     if len(specs) != 2:
         args.subparser.error("requires exactly two specs")
@@ -91,6 +89,7 @@ def deprecate(parser, args):
     deprecate = spack.cmd.disambiguate_spec(
         specs[0],
         env,
+        store=ctx.store,
         local=True,
         installed=(InstallRecordStatus.INSTALLED | InstallRecordStatus.DEPRECATED),
     )
@@ -98,7 +97,7 @@ def deprecate(parser, args):
     if args.install:
         deprecator = spack.concretize.concretize_one(specs[1])
     else:
-        deprecator = spack.cmd.disambiguate_spec(specs[1], env, local=True)
+        deprecator = spack.cmd.disambiguate_spec(specs[1], env, store=ctx.store, local=True)
 
     # calculate all deprecation pairs for errors and warning message
     all_deprecate = []
@@ -125,7 +124,7 @@ def deprecate(parser, args):
         already_deprecated = []
         already_deprecated_for = []
         for spec in all_deprecate:
-            deprecated_for = spack.store.STORE.db.deprecator(spec)
+            deprecated_for = ctx.store.db.deprecator(spec)
             if deprecated_for:
                 already_deprecated.append(spec)
                 already_deprecated_for.append(deprecated_for)
@@ -140,7 +139,7 @@ def deprecate(parser, args):
             tty.die("Will not deprecate any packages.")
 
     # Fail before touching the store if the database cannot be modified.
-    spack.store.STORE.db.ensure_latest_db_version()
+    ctx.store.db.ensure_latest_db_version()
 
     for dcate, dcator in zip(all_deprecate, all_deprecators):
         spack.old_installer.deprecate(dcate, dcator, symlink)

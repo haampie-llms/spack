@@ -24,5 +24,5 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     )
 
 
-def compilers(parser, args):
-    compiler_list(args)
+def compilers(parser, args, ctx):
+    compiler_list(args, ctx)

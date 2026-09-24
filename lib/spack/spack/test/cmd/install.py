@@ -28,6 +28,7 @@ import spack.package_base
 import spack.reporters.cdash
 import spack.util.filesystem as fs
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.error import SpackError, SpecSyntaxError
 from spack.installer import PackageInstaller
 from spack.main import SpackCommand
@@ -1090,14 +1091,14 @@ def test_padded_install_runtests_root(install_mockery, mock_fetch, mutable_confi
 
 
 @pytest.mark.regression("35337")
-def test_report_filename_for_cdash(install_mockery, mock_fetch):
+def test_report_filename_for_cdash(install_mockery, mock_fetch, ctx: SpackContext):
     """Test that the temporary file used to write the XML for CDash is not the upload URL"""
     parser = argparse.ArgumentParser()
     spack.cmd.install.setup_parser(parser)
     args = parser.parse_args(
         ["--cdash-upload-url", "https://blahblah/submit.php?project=debugging", "pkg-a"]
     )
-    specs = spack.cmd.install.concrete_specs_from_cli(args, {})
+    specs = spack.cmd.install.concrete_specs_from_cli(args, {}, ctx)
     filename = spack.cmd.install.report_filename(args, specs)
     assert filename != "https://blahblah/submit.php?project=debugging"
 

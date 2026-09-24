@@ -5,10 +5,7 @@
 import argparse
 
 import spack.cmd
-import spack.config
-import spack.store
 import spack.traverse
-from spack.active_environment import active_environment
 from spack.cmd.common import arguments
 
 description = "fetch archives for packages"
@@ -35,19 +32,19 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     )
 
 
-def fetch(parser, args):
+def fetch(parser, args, ctx):
     if args.no_checksum:
-        spack.config.CONFIG.set("config:checksum", False, scope="command_line")
+        ctx.config.set("config:checksum", False, scope="command_line")
 
     if args.specs:
-        specs = spack.cmd.parse_specs(args.specs, concretize=True)
+        specs = spack.cmd.parse_specs(args.specs, ctx, concretize=True)
     else:
         # No specs were given explicitly, check if we are in an
         # environment. If yes, check the missing argument, if yes
         # fetch all uninstalled specs from it otherwise fetch all.
         # If we are also not in an environment, complain to the
         # user that we don't know what to do.
-        env = active_environment()
+        env = ctx.environment
         if env:
             if args.missing:
                 specs = env.uninstalled_specs()
@@ -66,7 +63,7 @@ def fetch(parser, args):
         to_be_fetched = specs
 
     for spec in to_be_fetched:
-        if args.missing and spack.store.STORE.db.installed(spec):
+        if args.missing and ctx.store.db.installed(spec):
             continue
 
         pkg = spec.package

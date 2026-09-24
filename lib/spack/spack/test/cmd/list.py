@@ -200,13 +200,13 @@ def test_list_github_url_fails(repo_builder: RepoBuilder, monkeypatch):
         try:
             # Check that a repository with no python path has no URL
             monkeypatch.setattr(repo, "python_path", None)
-            assert spack.cmd.list.github_url(pkg) is None, (
+            assert spack.cmd.list.github_url(pkg, spack.repo.PATH) is None, (
                 "Expected no python path means unable to determine the repo URL"
             )
 
             # Check that a repository path that doesn't exist has no URL
             monkeypatch.setattr(repo, "python_path", "/repo/root/does/not/exists")
-            assert spack.cmd.list.github_url(pkg) is None, (
+            assert spack.cmd.list.github_url(pkg, spack.repo.PATH) is None, (
                 "Expected bad repo path means unable to determine the repo URL"
             )
         finally:
@@ -214,7 +214,7 @@ def test_list_github_url_fails(repo_builder: RepoBuilder, monkeypatch):
 
         # A repository without a configured git url (remote_info is None) yields a file URI
         assert repo.remote_info is None
-        filepath = spack.cmd.list.github_url(pkg)
+        filepath = spack.cmd.list.github_url(pkg, spack.repo.PATH)
         assert filepath and filepath.startswith("file://"), (
             "Expected a path-configured repo results in a file URI"
         )

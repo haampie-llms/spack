@@ -2105,7 +2105,7 @@ def test_ci_validate_standard_versions_valid(
     pkg = mock_packages.get_pkg_class(spec.name)(spec)
     version_list = [spack.version.Version(v) for v in versions]
 
-    assert spack.cmd.ci.validate_standard_versions(pkg, version_list)
+    assert spack.cmd.ci.validate_standard_versions(pkg, version_list, spack.config.CONFIG)
 
     out, err = capfd.readouterr()
     for version in versions:
@@ -2120,7 +2120,7 @@ def test_ci_validate_standard_versions_invalid(
     pkg = mock_packages.get_pkg_class(spec.name)(spec)
     version_list = [spack.version.Version(v) for v in versions]
 
-    assert spack.cmd.ci.validate_standard_versions(pkg, version_list) is False
+    assert spack.cmd.ci.validate_standard_versions(pkg, version_list, spack.config.CONFIG) is False
 
     out, err = capfd.readouterr()
     for version in versions:
@@ -2135,7 +2135,7 @@ def test_ci_validate_standard_versions_invalid_url(
     pkg = spack.repo.PATH.get_pkg_class(spec.name)(spec)
     version_list = [spack.version.Version(v) for v in versions]
 
-    assert spack.cmd.ci.validate_standard_versions(pkg, version_list) is False
+    assert spack.cmd.ci.validate_standard_versions(pkg, version_list, spack.config.CONFIG) is False
 
     out, err = capfd.readouterr()
     assert "No valid URLs found for diff-test@2.1.4" in err
@@ -2152,7 +2152,7 @@ def test_ci_validate_standard_versions_invalid_both(
     versions = ["2.1.4", "2.1.5"]
     version_list = [spack.version.Version(v) for v in versions]
 
-    assert spack.cmd.ci.validate_standard_versions(pkg, version_list) is False
+    assert spack.cmd.ci.validate_standard_versions(pkg, version_list, spack.config.CONFIG) is False
 
     out, err = capfd.readouterr()
     assert "No valid URLs found for diff-test@2.1.4" in err
@@ -2176,7 +2176,7 @@ def test_ci_validate_git_versions_valid(
     monkeypatch.setattr(pkg_class, "git", repo_path)
     monkeypatch.setattr(pkg_class, "versions", version_commit_dict)
 
-    assert spack.cmd.ci.validate_git_versions(pkg, version_list)
+    assert spack.cmd.ci.validate_git_versions(pkg, version_list, spack.config.CONFIG)
 
     out, err = capfd.readouterr()
     for version in version_list:
@@ -2200,7 +2200,7 @@ def test_ci_validate_git_versions_bad_tag(
     monkeypatch.setattr(pkg_class, "git", repo_path)
     monkeypatch.setattr(pkg_class, "versions", version_commit_dict)
 
-    assert spack.cmd.ci.validate_git_versions(pkg, version_list) is False
+    assert spack.cmd.ci.validate_git_versions(pkg, version_list, spack.config.CONFIG) is False
 
     out, err = capfd.readouterr()
     for version in version_list:
@@ -2228,7 +2228,7 @@ def test_ci_validate_git_versions_invalid(
     monkeypatch.setattr(pkg_class, "git", repo_path)
     monkeypatch.setattr(pkg_class, "versions", version_commit_dict)
 
-    assert spack.cmd.ci.validate_git_versions(pkg, version_list) is False
+    assert spack.cmd.ci.validate_git_versions(pkg, version_list, spack.config.CONFIG) is False
 
     out, err = capfd.readouterr()
     for version in version_list:
@@ -2244,7 +2244,7 @@ def mock_packages_path(path):
 
 @pytest.fixture
 def verify_standard_versions_valid(monkeypatch):
-    def validate_standard_versions(pkg, versions):
+    def validate_standard_versions(pkg, versions, config):
         for version in versions:
             print(f"Validated {pkg.name}@{version}")
         return True
@@ -2254,7 +2254,7 @@ def verify_standard_versions_valid(monkeypatch):
 
 @pytest.fixture
 def verify_git_versions_valid(monkeypatch):
-    def validate_git_versions(pkg, versions):
+    def validate_git_versions(pkg, versions, config):
         for version in versions:
             print(f"Validated {pkg.name}@{version}")
         return True
@@ -2264,7 +2264,7 @@ def verify_git_versions_valid(monkeypatch):
 
 @pytest.fixture
 def verify_standard_versions_invalid(monkeypatch):
-    def validate_standard_versions(pkg, versions):
+    def validate_standard_versions(pkg, versions, config):
         for version in versions:
             print(f"Invalid checksum found {pkg.name}@{version}")
         return False
@@ -2274,7 +2274,7 @@ def verify_standard_versions_invalid(monkeypatch):
 
 @pytest.fixture
 def verify_standard_versions_invalid_duplicates(monkeypatch):
-    def validate_standard_versions(pkg, versions):
+    def validate_standard_versions(pkg, versions, config):
         for version in versions:
             if str(version) == "2.1.7":
                 print(f"Validated {pkg.name}@{version}")
@@ -2287,7 +2287,7 @@ def verify_standard_versions_invalid_duplicates(monkeypatch):
 
 @pytest.fixture
 def verify_git_versions_invalid(monkeypatch):
-    def validate_git_versions(pkg, versions):
+    def validate_git_versions(pkg, versions, config):
         for version in versions:
             print(f"Invalid commit for {pkg.name}@{version}")
         return False
@@ -2304,7 +2304,7 @@ def test_ci_verify_versions_valid(
 ):
     repo, _, commits = mock_git_package_changes
     with spack.repo.use_repositories(repo):
-        monkeypatch.setattr(spack.repo, "builtin_repo", lambda: repo)
+        monkeypatch.setattr(spack.repo, "builtin_repo", lambda repos: repo)
 
         out = ci_cmd("verify-versions", commits[-2], commits[-4])
         assert "Validated diff-test@2.1.5" in out
@@ -2321,7 +2321,7 @@ def test_ci_verify_versions_invalid(
 ):
     repo, _, commits = mock_git_package_changes
     with spack.repo.use_repositories(repo):
-        monkeypatch.setattr(spack.repo, "builtin_repo", lambda: repo)
+        monkeypatch.setattr(spack.repo, "builtin_repo", lambda repos: repo)
 
         out = ci_cmd("verify-versions", commits[-2], commits[-4], fail_on_error=False)
         assert "Invalid checksum found diff-test@2.1.5" in out
@@ -2337,7 +2337,7 @@ def test_ci_verify_versions_standard_duplicates(
 ):
     repo, _, commits = mock_git_package_changes
     with spack.repo.use_repositories(repo):
-        monkeypatch.setattr(spack.repo, "builtin_repo", lambda: repo)
+        monkeypatch.setattr(spack.repo, "builtin_repo", lambda repos: repo)
 
         out = ci_cmd("verify-versions", commits[-4], commits[-5], fail_on_error=False)
         assert "Validated diff-test@2.1.5" not in out
@@ -2349,7 +2349,7 @@ def test_ci_verify_versions_standard_duplicates(
 def test_ci_verify_versions_manual_package(monkeypatch, mock_packages, mock_git_package_changes):
     repo, _, commits = mock_git_package_changes
     with spack.repo.use_repositories(repo) as repos:
-        monkeypatch.setattr(spack.repo, "builtin_repo", lambda: repo)
+        monkeypatch.setattr(spack.repo, "builtin_repo", lambda repos: repo)
 
         pkg_class = repos.get_pkg_class("diff-test")
         monkeypatch.setattr(pkg_class, "manual_download", True)

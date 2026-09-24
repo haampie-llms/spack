@@ -38,6 +38,7 @@ from spack.active_environment import active_environment
 from spack.cmd.env import _env_create
 from spack.concretize_ui import SolveKind
 from spack.config import Configuration, substitute_path_variables
+from spack.context import SpackContext
 from spack.environment import depfile
 from spack.installer import PackageInstaller
 from spack.main import SpackCommand, SpackCommandError
@@ -3829,13 +3830,15 @@ def test_query_develop_specs(tmp_path: pathlib.Path):
 @pytest.mark.parametrize(
     "env,no_env,env_dir", [("b", False, None), (None, True, None), (None, False, "path/")]
 )
-def test_activation_and_deactivation_ambiguities(method, env, no_env, env_dir, capfd):
+def test_activation_and_deactivation_ambiguities(
+    method, env, no_env, env_dir, capfd, ctx: SpackContext
+):
     """spack [-e x | -E | -D x/]  env [activate | deactivate] y are ambiguous"""
     args = Namespace(
         shell="sh", env_name="a", env=env, no_env=no_env, env_dir=env_dir, keep_relative=False
     )
     with pytest.raises(SystemExit):
-        method(args)
+        method(args, ctx)
     _, err = capfd.readouterr()
     assert "is ambiguous" in err
 

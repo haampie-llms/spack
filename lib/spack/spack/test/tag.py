@@ -9,6 +9,7 @@ import pytest
 
 import spack.cmd.tags
 import spack.tag
+from spack.context import SpackContext
 from spack.main import SpackCommand
 from spack.repo import RepoPath
 
@@ -40,9 +41,9 @@ more_tags_json = """
     """
 
 
-def test_tag_get_all_available(mock_packages):
+def test_tag_get_all_available(mock_packages, ctx: SpackContext):
     for skip in [False, True]:
-        all_pkgs = spack.cmd.tags.packages_with_tags(["tag1", "tag2", "tag3"], False, skip)
+        all_pkgs = spack.cmd.tags.packages_with_tags(["tag1", "tag2", "tag3"], False, skip, ctx)
         assert sorted(all_pkgs["tag1"]) == ["mpich", "mpich2"]
         assert all_pkgs["tag2"] == ["mpich"]
         assert all_pkgs["tag3"] == ["mpich2"]
@@ -66,24 +67,26 @@ def ensure_tags_results_equal(results, expected):
         (["nosuchpackage"], {"nosuchpackage": {}}),
     ],
 )
-def test_tag_get_available(tags, expected, mock_packages):
+def test_tag_get_available(tags, expected, mock_packages, ctx: SpackContext):
     # Ensure results for all tags
-    all_tag_pkgs = spack.cmd.tags.packages_with_tags(tags, False, False)
+    all_tag_pkgs = spack.cmd.tags.packages_with_tags(tags, False, False, ctx)
     ensure_tags_results_equal(all_tag_pkgs, expected)
 
     # Ensure results for tags expecting results since skipping otherwise
-    only_pkgs = spack.cmd.tags.packages_with_tags(tags, False, True)
+    only_pkgs = spack.cmd.tags.packages_with_tags(tags, False, True, ctx)
     if expected[tags[0]]:
         ensure_tags_results_equal(only_pkgs, expected)
     else:
         assert not only_pkgs
 
 
-def test_tag_get_installed_packages(mock_packages, mock_archive, mock_fetch, install_mockery):
+def test_tag_get_installed_packages(
+    mock_packages, mock_archive, mock_fetch, install_mockery, ctx: SpackContext
+):
     install("--fake", "mpich")
 
     for skip in [False, True]:
-        all_pkgs = spack.cmd.tags.packages_with_tags(["tag1", "tag2", "tag3"], True, skip)
+        all_pkgs = spack.cmd.tags.packages_with_tags(["tag1", "tag2", "tag3"], True, skip, ctx)
         assert sorted(all_pkgs["tag1"]) == ["mpich"]
         assert all_pkgs["tag2"] == ["mpich"]
         assert skip or all_pkgs["tag3"] == []

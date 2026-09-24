@@ -199,16 +199,6 @@ lockfile_include_key = "include_concrete"
 manifest_include_name = "include"
 
 
-def installed_specs():
-    """
-    Returns the specs of packages installed in the active environment or None
-    if no packages are installed.
-    """
-    env = active_environment()
-    hashes = env.all_hashes() if env else None
-    return spack.store.STORE.db.query(hashes=hashes)
-
-
 def valid_env_name(name):
     return re.match(valid_environment_name_re, name)
 

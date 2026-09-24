@@ -16,10 +16,10 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     arguments.add_common_arguments(subparser, ["specs"])
 
 
-def restage(parser, args):
+def restage(parser, args, ctx):
     if not args.specs:
         args.subparser.error("requires at least one package spec")
 
-    specs = spack.cmd.parse_specs(args.specs, concretize=True)
+    specs = spack.cmd.parse_specs(args.specs, ctx, concretize=True)
     for spec in specs:
         spec.package.do_restage()
