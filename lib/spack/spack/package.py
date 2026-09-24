@@ -12,13 +12,11 @@ from typing import Dict, Iterable, List, Optional, Tuple
 from spack.vendor.macholib.MachO import LC_ID_DYLIB, MachO
 
 import spack.builder
-import spack.config
 import spack.util.tty as _tty
 from spack.archspec import microarchitecture_flags, microarchitecture_flags_from_target
 from spack.build_environment import (
     MakeExecutable,
     ModuleChangePropagator,
-    environment_modifications_for_specs,
     get_cmake_prefix_path,
     get_effective_jobs,
     shared_library_suffix,
@@ -36,7 +34,7 @@ from spack.builder import (
 )
 from spack.compilers.libraries import CompilerPropertyDetector as _CompilerPropertyDetector
 from spack.compilers.libraries import compiler_spec
-from spack.config import get_user
+from spack.config import determine_number_of_jobs, get_user
 from spack.deptypes import ALL_TYPES as all_deptypes
 from spack.directives import (
     build_system,
@@ -64,6 +62,7 @@ from spack.error import (
     SpackAPIWarning,
     SpackError,
 )
+from spack.hooks.sbang import filter_shebang, sbang_install_path, sbang_shebang_line
 from spack.install_test import (
     SkipTest,
     cache_extra_test_sources,
@@ -89,6 +88,7 @@ from spack.phase_callbacks import run_after, run_before
 from spack.platforms import host as host_platform
 from spack.spec import Spec
 from spack.url import substitute_version as substitute_version_in_url
+from spack.user_environment import environment_modifications_for_specs
 from spack.util.elf import delete_needed_from_elf, delete_rpath, get_elf_compat, parse_elf
 from spack.util.environment import EnvironmentModifications, set_env
 from spack.util.environment import filter_system_paths as _filter_system_paths
@@ -194,14 +194,20 @@ MachO = MachO
 LC_ID_DYLIB = LC_ID_DYLIB
 
 
+class _PackageAPIError(SpackError):
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"spack.package.{name} is available to package code only, "
+            "while Spack sets up or detects a package"
+        )
+
+
 class CompilerPropertyDetector(_CompilerPropertyDetector):
     """Detects compiler properties of a given compiler spec. Useful for compiler wrappers."""
 
     def __init__(self, compiler_spec: Spec) -> None:
         # Recipes construct detectors from the spec alone
-        import spack.context
-
-        ctx = spack.context.default()
+        ctx = compiler_spec.package.context
         super().__init__(compiler_spec, repo=ctx.repo, cache=ctx.compiler_cache)
 
 
@@ -235,52 +241,6 @@ def filter_system_paths(paths: Iterable[str]) -> List[str]:
     return _filter_system_paths(paths)
 
 
-def sbang_install_path() -> str:
-    """Location sbang is installed within the install tree."""
-    # Local imports to avoid polluting the package API
-    import spack.context
-    import spack.hooks.sbang
-
-    return spack.hooks.sbang.sbang_install_path_for(spack.context.default().store)
-
-
-def sbang_shebang_line() -> str:
-    """Full shebang line that should be prepended to files to use sbang."""
-    # Local imports to avoid polluting the package API
-    import spack.context
-    import spack.hooks.sbang
-
-    return spack.hooks.sbang.sbang_shebang_line_for(spack.context.default().store)
-
-
-def filter_shebang(path: str) -> bool:
-    """Adds a second shebang line, using sbang, at the beginning of a file, if necessary."""
-    # Local imports to avoid polluting the package API
-    import spack.context
-    import spack.hooks.sbang
-
-    return spack.hooks.sbang.filter_shebang_for(path, spack.context.default().store)
-
-
-def determine_number_of_jobs(
-    *,
-    parallel: bool = False,
-    max_cpus: Optional[int] = None,
-    config: Optional["spack.config.Configuration"] = None,
-) -> int:
-    """Number of jobs for a build: 1 when ``parallel`` is false, otherwise ``config:build_jobs``
-    capped to ``max_cpus`` (default: the available CPUs). Without a configuration, the one of the
-    process is used."""
-    # Local import to avoid polluting the package API
-    import spack.context
-
-    return spack.config.determine_number_of_jobs(
-        parallel=parallel,
-        max_cpus=spack.config.cpus_available() if max_cpus is None else max_cpus,
-        config=config if config is not None else spack.context.default().config,
-    )
-
-
 def find_compilers(path_hints: Optional[List[str]] = None) -> List[Spec]:
     """Searches for compilers in the paths given as argument, and adds the new ones to the
     configuration. Returns the list of new compilers.
@@ -289,12 +249,7 @@ def find_compilers(path_hints: Optional[List[str]] = None) -> List[Spec]:
         path_hints: list of path hints where to look for. A sensible default based on the ``PATH``
             environment variable will be used if the value is None
     """
-    # Local imports to avoid polluting the package API
-    import spack.context
-    from spack.detection import find_compilers as _find_compilers
-
-    ctx = spack.context.default()
-    return _find_compilers(path_hints, config=ctx.config, repo=ctx.repo)
+    raise _PackageAPIError("find_compilers")
 
 
 #: Assigning this to :attr:`spack.package_base.PackageBase.flag_handler` means that compiler flags

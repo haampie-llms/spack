@@ -2403,30 +2403,6 @@ class Spec:
         """Returns whether this Spec is being deployed as built i.e. whether it has been spliced"""
         return self.build_spec is not self
 
-    @property
-    def installed(self):
-        """Whether the spec is installed, locally or in an upstream."""
-        if not self.concrete:
-            return False
-
-        try:
-            # If the spec is in the DB, check the installed
-            # attribute of the record
-            return self.package.context.store.db.get_record(self).installed
-        except KeyError:
-            # If the spec is not in the DB, the method
-            #  above raises a Key error
-            return False
-
-    @property
-    def installed_upstream(self):
-        """Whether the spec is installed in an upstream database."""
-        if not self.concrete:
-            return False
-
-        upstream, record = self.package.context.store.db.query_by_spec_hash(self.dag_hash())
-        return upstream and record and record.installed
-
     @overload
     def traverse(
         self,
@@ -3612,22 +3588,11 @@ class Spec:
         changed |= self.propagated_variants.constrain(other.propagated_variants)
         return changed
 
-    @property  # type: ignore[misc] # decorated prop not supported in mypy
-    def patches(self):
-        """Return patch objects for any patch sha256 sums on this Spec.
-
-        This is for use after concretization to iterate over any patches
-        associated with this spec.
-
-        TODO: this only checks in the package; it doesn't resurrect old
-        patches from install directories, but it probably should.
-        """
-        return self.patches_from(self.package.context.repo)
-
     def patches_from(self, repo: "spack.repo.RepoPath") -> List["spack.patch.Patch"]:
-        """Return the patch objects for this spec, looked up in ``repo``.
+        """Return patch objects for any patch sha256 sums on this Spec, looked up in ``repo``.
 
-        The result is memoized on first call, so a later call with a different repository
+        This is for use after concretization to iterate over any patches associated with this
+        spec. The result is memoized on first call, so a later call with a different repository
         returns the patches found by the first one.
         """
         if not hasattr(self, "_patches"):

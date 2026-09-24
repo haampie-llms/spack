@@ -17,7 +17,6 @@ import uuid
 from typing import Any, Dict, Generator, Optional, Union
 
 import spack.config
-import spack.context
 import spack.main
 import spack.platforms
 import spack.repo
@@ -36,11 +35,9 @@ def current() -> SpackContext:
 
 
 def set_current(ctx: Optional[SpackContext]) -> None:
-    """Make ``ctx`` the context of the running test, or unset it with ``None``. It is the context
-    of the process too, which the package API reads outside of package code (transitional)."""
+    """Make ``ctx`` the context of the running test, or unset it with ``None``."""
     global _CONTEXT
     _CONTEXT = ctx
-    spack.context.set_default(ctx)
 
 
 def set_store(

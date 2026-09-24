@@ -720,9 +720,10 @@ def _specs_to_mirror(args, ctx: spack.context.SpackContext):
     return mirror_specs
 
 
-def create_mirror_for_one_spec(candidate, mirror_cache, ctx: spack.context.SpackContext):
+def create_mirror_for_one_spec(ctx: spack.context.SpackContext, candidate, mirror_cache):
     pkg_cls = ctx.repo.get_pkg_class(candidate.name)
     pkg_obj = pkg_cls(spack.spec.Spec(candidate))
+    pkg_obj.context = ctx
     mirror_stats = spack.mirrors.utils.MirrorStatsForOneSpec(candidate)
     spack.mirrors.utils.create_mirror_from_package_object(
         pkg_obj, mirror_cache, mirror_stats, config=ctx.config
@@ -738,10 +739,10 @@ def create_mirror_for_all_specs(
         path, skip_unstable_versions=skip_unstable_versions
     )
     mirror_stats = spack.mirrors.utils.MirrorStatsForAllSpecs()
-    with spack.util.parallel.make_concurrent_executor(jobs=workers, context=ctx) as executor:
+    with spack.util.parallel.make_concurrent_executor(jobs=workers, shared=ctx) as executor:
         # Submit tasks to the process pool
         futures = [
-            executor.submit(create_mirror_for_one_spec, candidate, mirror_cache, ctx)
+            executor.submit_shared(create_mirror_for_one_spec, candidate, mirror_cache)
             for candidate in mirror_specs
         ]
         for mirror_future in as_completed(futures):

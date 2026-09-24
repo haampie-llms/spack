@@ -35,7 +35,6 @@ import spack.config
 import spack.context
 import spack.environment as ev
 import spack.error
-import spack.package_base
 import spack.paths
 import spack.platforms
 import spack.solver.asp
@@ -56,9 +55,6 @@ stat_names = pstats.Stats.sort_arg_dict_default
 levels = ["short", "long"]
 
 #: intro text for help at different levels
-# Packages created without a context read the process globals (transitional)
-spack.package_base.default_context = spack.context.default
-
 intro_by_level = {"short": "Common spack commands:", "long": "Commands:"}
 
 #: control top-level spack options shown in basic vs. advanced help
@@ -669,7 +665,7 @@ class SpackCommand:
     def __call__(
         self,
         *argv: str,
-        ctx: Optional[spack.context.SpackContext] = None,
+        ctx: spack.context.SpackContext,
         capture: bool = True,
         fail_on_error: bool = True,
     ) -> str:
@@ -679,7 +675,7 @@ class SpackCommand:
             argv: command line arguments.
 
         Keyword Args:
-            ctx: context to run the command in, by default that of the process (transitional)
+            ctx: context to run the command in
             capture: Capture output from the command
             fail_on_error: Don't raise an exception on error
 
@@ -692,7 +688,6 @@ class SpackCommand:
 
         try:
             with self.capture_output(enable=capture):
-                ctx = ctx or spack.context.default()
                 self.parser.config = ctx.config
                 command = self.parser.add_command(self.command_name)
                 args, unknown = self.parser.parse_known_args([self.command_name, *argv])
@@ -983,8 +978,6 @@ def _main(argv=None):
     config = spack.config.create()
     parser.config = config
     ctx = spack.context.SpackContext(config)
-    # Library code without a context of its own reads this one (transitional)
-    spack.context.set_default(ctx)
 
     if (
         sys.platform == "darwin"

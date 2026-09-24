@@ -87,6 +87,7 @@ def checksum(parser, args, ctx):
 
     # Get the package we're going to generate checksums for
     pkg: PackageBase = ctx.repo.get_pkg_class(spec.name)(spec)
+    pkg.context = ctx
 
     # Skip manually downloaded packages
     if pkg.manual_download:

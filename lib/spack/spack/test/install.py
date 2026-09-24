@@ -624,13 +624,17 @@ def test_archive_build_metadata(install_mockery, monkeypatch, ctx: SpackContext)
     shutil.rmtree(log_dir)
 
 
-def test_unconcretized_install(install_mockery, mock_fetch, mock_packages: RepoPath):
+def test_unconcretized_install(
+    install_mockery, mock_fetch, mock_packages: RepoPath, ctx: SpackContext
+):
     """Test attempts to perform install phases with unconcretized spec."""
     spec = Spec("trivial-install-test-package")
     pkg_cls = mock_packages.get_pkg_class(spec.name)
 
+    pkg = pkg_cls(spec)
+    pkg.context = ctx
     with pytest.raises(ValueError, match="must be concrete"):
-        PackageInstaller([pkg_cls(spec)], explicit=True).install()
+        PackageInstaller([pkg], explicit=True).install()
 
     with pytest.raises(ValueError, match="only patch concrete packages"):
         pkg_cls(spec).do_patch()
@@ -876,7 +880,7 @@ def test_installer_blocks_already_installed_deprecated_dependency(
         spec = spack.concretize.concretize_one("deprecated-client ^deprecated-versions@1.1.0", ctx)
 
     # The deprecated dependency is already installed, so it is not part of the build set
-    assert spec["deprecated-versions"].installed
+    assert ctx.store.db.installed(spec["deprecated-versions"])
 
     with pytest.raises(spack.error.InstallError, match="deprecated"):
         spack.installer_dispatch.create_installer([spec.package]).install()
@@ -902,7 +906,7 @@ def test_deprecated_build_only_dependency_is_not_blocked(
     # This must not raise: the deprecated node is build-transitive, outside the runtime closure of
     # the requested root.
     spack.installer_dispatch.create_installer([spec.package]).install()
-    assert spec.installed
+    assert ctx.store.db.installed(spec)
 
 
 def test_installer_scope_all_gates_build_transitive_deprecation(

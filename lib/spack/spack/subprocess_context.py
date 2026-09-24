@@ -18,35 +18,23 @@ import multiprocessing
 import multiprocessing.context
 import pickle
 from types import ModuleType
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Union
 
 import spack.paths
 import spack.platforms
-import spack.repo
 
 if TYPE_CHECKING:
-    import spack.context
     import spack.package_base
 
 #: Used in tests to track monkeypatches that need to be restored in child processes
 MONKEYPATCHES: list = []
 
 
-def serialize(pkg: "spack.package_base.PackageBase") -> io.BytesIO:
-    serialized_pkg = io.BytesIO()
-    pickle.dump(pkg, serialized_pkg)
-    serialized_pkg.seek(0)
-    return serialized_pkg
-
-
-def deserialize(serialized_pkg: io.BytesIO) -> "spack.package_base.PackageBase":
-    pkg = pickle.load(serialized_pkg)
-    pkg.spec._package = pkg
-    # ensure overwritten package class attributes get applied
-    pkg.context.repo.get_pkg_class(pkg.spec.name)
-    # The dependencies come without packages, which setting up the build environment reads
-    spack.repo.attach_packages([pkg.spec], pkg.context)
-    return pkg
+def serialize(obj) -> io.BytesIO:
+    serialized_obj = io.BytesIO()
+    pickle.dump(obj, serialized_obj)
+    serialized_obj.seek(0)
+    return serialized_obj
 
 
 class PackageInstallContext:
@@ -60,29 +48,41 @@ class PackageInstallContext:
         ctx: Optional[multiprocessing.context.BaseContext] = None,
     ):
         ctx = ctx or multiprocessing.get_context()
-        self.global_state = GlobalStateMarshaler(ctx=ctx, context=pkg.context)
-        self.pkg = pkg if ctx.get_start_method() == "fork" else serialize(pkg)
-        self.spack_working_dir = spack.paths.spack_working_dir
+        self.global_state = GlobalStateMarshaler(ctx=ctx)
+        self.pkg: Union["spack.package_base.PackageBase", io.BytesIO] = pkg
+        if ctx.get_start_method() != "fork":
+            # The context goes first: its repositories import the package class on unpickling.
+            # One pickler, so that the package refers to the same context.
+            stream = io.BytesIO()
+            pickler = pickle.Pickler(stream)
+            pickler.dump(pkg.context)
+            pickler.dump(pkg)
+            stream.seek(0)
+            self.pkg = stream
 
     def restore(self) -> "spack.package_base.PackageBase":
-        spack.paths.spack_working_dir = self.spack_working_dir
         self.global_state.restore()
-        return deserialize(self.pkg) if isinstance(self.pkg, io.BytesIO) else self.pkg
+        if not isinstance(self.pkg, io.BytesIO):
+            return self.pkg
+        import spack.repo
+
+        unpickler = pickle.Unpickler(self.pkg)
+        ctx = unpickler.load()
+        ctx.repo  # enable the repositories before the package is unpickled
+        pkg = unpickler.load()
+        pkg.spec._package = pkg
+        # The dependencies come without packages, which setting up the build environment reads
+        spack.repo.attach_packages([pkg.spec], ctx)
+        return pkg
 
 
 class GlobalStateMarshaler:
     """Class to serialize and restore the process state that child processes need, and that is
     not part of the context they receive: the platform, the working directory and, in tests,
-    monkeypatches. The ``context`` passed in becomes the context of the child process
-    (transitional).
+    monkeypatches.
     """
 
-    def __init__(
-        self,
-        *,
-        ctx: Optional[Optional[multiprocessing.context.BaseContext]] = None,
-        context: Optional["spack.context.SpackContext"] = None,
-    ) -> None:
+    def __init__(self, *, ctx: Optional[multiprocessing.context.BaseContext] = None) -> None:
         ctx = ctx or multiprocessing.get_context()
         self.is_forked = ctx.get_start_method() == "fork"
         if self.is_forked:
@@ -91,7 +91,6 @@ class GlobalStateMarshaler:
         self.platform = spack.platforms.host
         self.test_patches = TestPatches.create()
         self.spack_working_dir = spack.paths.spack_working_dir
-        self.context = context
 
     def restore(self):
         if self.is_forked:
@@ -99,10 +98,6 @@ class GlobalStateMarshaler:
         spack.platforms.host = self.platform
         spack.paths.spack_working_dir = self.spack_working_dir
         self.test_patches.restore()
-        if self.context is not None:
-            self.context.make_default()
-            # Enable its repositories, to import package modules
-            _ = self.context.repo
 
 
 class TestPatches:

@@ -849,7 +849,7 @@ def test_push_to_build_cache(
     mirror_dir = scratch / "mirror"
     mirror_url = mirror_dir.as_uri()
 
-    ci.import_signing_key(_signing_key())
+    ci.import_signing_key(_signing_key(), ctx)
 
     with working_dir(tmp_path):
         with open("spack.yaml", "w", encoding="utf-8") as f:
@@ -2139,6 +2139,7 @@ def test_ci_validate_standard_versions_valid(
 ):
     spec = spack.spec.Spec("diff-test")
     pkg = mock_packages.get_pkg_class(spec.name)(spec)
+    pkg.context = ctx
     version_list = [spack.version.StandardVersion.from_string(v) for v in versions]
 
     assert spack.cmd.ci.validate_standard_versions(
@@ -2156,6 +2157,7 @@ def test_ci_validate_standard_versions_invalid(
 ):
     spec = spack.spec.Spec("diff-test")
     pkg = mock_packages.get_pkg_class(spec.name)(spec)
+    pkg.context = ctx
     version_list = [spack.version.StandardVersion.from_string(v) for v in versions]
 
     assert (
@@ -2174,6 +2176,7 @@ def test_ci_validate_standard_versions_invalid_url(
 ):
     spec = spack.spec.Spec("diff-test")
     pkg = ctx.repo.get_pkg_class(spec.name)(spec)
+    pkg.context = ctx
     version_list = [spack.version.StandardVersion.from_string(v) for v in versions]
 
     assert (
@@ -2193,6 +2196,7 @@ def test_ci_validate_standard_versions_invalid_both(
 ):
     spec = spack.spec.Spec("diff-test")
     pkg = ctx.repo.get_pkg_class(spec.name)(spec)
+    pkg.context = ctx
     versions = ["2.1.4", "2.1.5"]
     version_list = [spack.version.StandardVersion.from_string(v) for v in versions]
 

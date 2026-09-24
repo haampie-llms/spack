@@ -4,7 +4,8 @@
 """The resources an operation reads, built from one configuration.
 
 A :class:`SpackContext` holds a configuration and builds everything derived from it on first
-access, so an operation only pays for what it reads.
+access, so an operation only pays for what it reads. Command entry points receive one from
+``spack.main``, and pass the instances their callees need.
 
 This module imports nothing at runtime, so it can be imported from anywhere.
 """
@@ -187,10 +188,6 @@ class SpackContext:
 
         spack.bootstrap.ensure_winsdk_external_or_raise(self)
 
-    def make_default(self) -> None:
-        """Make this the context of the process (transitional)."""
-        set_default(self)
-
     def share(self, other: "SpackContext", *members: str) -> None:
         """Use the given members of ``other`` instead of building them from ``config``."""
         for member in members:
@@ -257,25 +254,3 @@ class SpackContext:
             (self._config,),
             {"is_bootstrap": self.is_bootstrap, "gpg_home": self.gpg_home},
         )
-
-
-#: The context of the process (transitional)
-_DEFAULT: Optional[SpackContext] = None
-
-
-def default() -> SpackContext:
-    """Return the context of the process (transitional): the one ``spack.main`` runs the command
-    in, or else one with the configuration of ``spack.config.create()``."""
-    global _DEFAULT
-    if _DEFAULT is None:
-        import spack.config
-
-        _DEFAULT = SpackContext(spack.config.create())
-    return _DEFAULT
-
-
-def set_default(ctx: Optional[SpackContext]) -> Optional[SpackContext]:
-    """Make ``ctx`` the context of the process, and return the previous one (transitional)."""
-    global _DEFAULT
-    previous, _DEFAULT = _DEFAULT, ctx
-    return previous

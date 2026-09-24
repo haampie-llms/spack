@@ -7,10 +7,8 @@ import pytest
 
 import spack.compilers.config
 import spack.compilers.libraries
-import spack.context
 import spack.detection
 import spack.spec
-from spack.test.utilities import UnusableGlobal
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Cannot execute bash script on Windows")
@@ -32,53 +30,41 @@ done
     )
     prefix = gcc_path.parent.parent
     arch = spack.spec.ArchSpec.default_arch()
-    # The repository indexes are built lazily through a cache created from the process context
-    mock_packages.packages_with_tags("compiler")
+    new_compilers = spack.detection.find_compilers(
+        [str(prefix)], config=mutable_config, repo=mock_packages, scope="site", max_workers=1
+    )
+    assert [x.format("{name}@{version}") for x in new_compilers] == ["gcc@4.5.3"]
 
-    with monkeypatch.context() as m:
-        for module, attribute in [(spack.context, "_DEFAULT")]:
-            m.setattr(module, attribute, UnusableGlobal(f"{module.__name__}.{attribute}"))
+    all_compilers = spack.compilers.config.all_compilers(
+        mutable_config, repo=mock_packages, init_config=False
+    )
+    gcc = [x for x in all_compilers if x.satisfies("gcc@=4.5.3")]
+    assert len(gcc) == 1
+    assert gcc[0].external_path == str(prefix)
 
-        with monkeypatch.context():
-            new_compilers = spack.detection.find_compilers(
-                [str(prefix)],
-                config=mutable_config,
-                repo=mock_packages,
-                scope="site",
-                max_workers=1,
-            )
-            assert [x.format("{name}@{version}") for x in new_compilers] == ["gcc@4.5.3"]
+    assert gcc[0] in spack.compilers.config.compilers_for_arch(
+        arch, config=mutable_config, repo=mock_packages
+    )
+    assert not spack.compilers.config.select_new_compilers(
+        gcc, config=mutable_config, repo=mock_packages
+    )
+    assert mutable_config.get_config_filename(
+        "site", "packages"
+    ) in spack.compilers.config.compiler_config_files(mutable_config, repo=mock_packages)
 
-        all_compilers = spack.compilers.config.all_compilers(
+    detector = spack.compilers.libraries.CompilerPropertyDetector(
+        gcc[0], repo=mock_packages, cache=spack.compilers.libraries.CompilerCache()
+    )
+    assert detector.implicit_rpaths() == []
+
+    remover = spack.compilers.config.CompilerRemover(mutable_config, repo=mock_packages)
+    removed = remover.mark_compilers(match="gcc@4.5.3", scope="site")
+    assert [x.format("{name}@{version}") for x in removed] == ["gcc@4.5.3"]
+    remover.flush()
+
+    assert not any(
+        x.satisfies("gcc@=4.5.3")
+        for x in spack.compilers.config.all_compilers(
             mutable_config, repo=mock_packages, init_config=False
         )
-        gcc = [x for x in all_compilers if x.satisfies("gcc@=4.5.3")]
-        assert len(gcc) == 1
-        assert gcc[0].external_path == str(prefix)
-
-        assert gcc[0] in spack.compilers.config.compilers_for_arch(
-            arch, config=mutable_config, repo=mock_packages
-        )
-        assert not spack.compilers.config.select_new_compilers(
-            gcc, config=mutable_config, repo=mock_packages
-        )
-        assert mutable_config.get_config_filename(
-            "site", "packages"
-        ) in spack.compilers.config.compiler_config_files(mutable_config, repo=mock_packages)
-
-        detector = spack.compilers.libraries.CompilerPropertyDetector(
-            gcc[0], repo=mock_packages, cache=spack.compilers.libraries.CompilerCache()
-        )
-        assert detector.implicit_rpaths() == []
-
-        remover = spack.compilers.config.CompilerRemover(mutable_config, repo=mock_packages)
-        removed = remover.mark_compilers(match="gcc@4.5.3", scope="site")
-        assert [x.format("{name}@{version}") for x in removed] == ["gcc@4.5.3"]
-        remover.flush()
-
-        assert not any(
-            x.satisfies("gcc@=4.5.3")
-            for x in spack.compilers.config.all_compilers(
-                mutable_config, repo=mock_packages, init_config=False
-            )
-        )
+    )

@@ -613,7 +613,7 @@ def generate_pipeline(env: ev.Environment, args, ctx: "spack.context.SpackContex
         tty.warn("Unable to populate buildgroup without CDash credentials")
 
 
-def import_signing_key(base64_signing_key: str) -> None:
+def import_signing_key(base64_signing_key: str, ctx: "spack.context.SpackContext") -> None:
     """Given Base64-encoded gpg key, decode and import it to use for signing packages.
 
     Arguments:
@@ -630,7 +630,7 @@ def import_signing_key(base64_signing_key: str) -> None:
 
     # This command has the side-effect of creating the directory referred
     # to as GNUPGHOME in setup_environment()
-    list_output = spack_gpg("list")
+    list_output = spack_gpg("list", ctx=ctx)
 
     tty.debug("spack gpg list:")
     tty.debug(list_output)
@@ -642,13 +642,13 @@ def import_signing_key(base64_signing_key: str) -> None:
         with open(sign_key_path, "w", encoding="utf-8") as fd:
             fd.write(decoded_key)
 
-        key_import_output = spack_gpg("trust", "-y", sign_key_path)
+        key_import_output = spack_gpg("trust", "-y", sign_key_path, ctx=ctx)
         tty.debug(f"spack gpg trust {sign_key_path}")
         tty.debug(key_import_output)
 
     # Now print the keys we have for verifying and signing
-    trusted_keys_output = spack_gpg("list", "--trusted")
-    signing_keys_output = spack_gpg("list", "--signing")
+    trusted_keys_output = spack_gpg("list", "--trusted", ctx=ctx)
+    signing_keys_output = spack_gpg("list", "--signing", ctx=ctx)
 
     tty.debug("spack gpg list --trusted")
     tty.debug(trusted_keys_output)

@@ -7,6 +7,7 @@ import sys
 from typing import TYPE_CHECKING
 
 import spack.config
+import spack.error
 import spack.spec
 from spack.util import environment
 
@@ -82,3 +83,18 @@ def project_env_mods(
     for mod in env.env_modifications:
         if isinstance(mod, environment.NameValueModifier):
             mod.value = prefix_regex.sub(lambda m: prefix_to_prefix[m.group(0)], mod.value)
+
+
+def environment_modifications_for_specs(
+    *specs: spack.spec.Spec, view=None, set_package_py_globals: bool = True
+):
+    """Same as :func:`spack.build_environment.modifications_for_specs`, with the configuration of
+    the package.
+
+    This is part of the package API, and is bound to the package's configuration in its module.
+    Library code calls :func:`modifications_for_specs`.
+    """
+    raise spack.error.SpackError(
+        "spack.package.environment_modifications_for_specs is available to package code only, "
+        "while Spack sets up a package"
+    )
