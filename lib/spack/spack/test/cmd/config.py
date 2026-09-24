@@ -16,13 +16,14 @@ import spack.database
 import spack.environment as ev
 import spack.main
 import spack.schema.config
+import spack.test.harness
 import spack.util.filesystem as fs
 import spack.util.spack_yaml as syaml
 from spack.config import Configuration
 from spack.store import Store
 
-config = spack.main.SpackCommand("config")
-env = spack.main.SpackCommand("env")
+config = spack.test.harness.SpackCommand("config")
+env = spack.test.harness.SpackCommand("env")
 
 pytestmark = pytest.mark.usefixtures("mock_packages")
 
@@ -40,7 +41,7 @@ scope_path_re = r"\(([^\)]+)\)"
     ],
 )
 def test_config_scopes(path, types, mutable_mock_env_path):
-    ev.create("test")
+    ev.create("test", ctx=spack.test.harness.current())
     scopes_cmd = ["scopes"]
     if path:
         scopes_cmd.append("-p")
@@ -214,7 +215,7 @@ def test_config_edit(mutable_config, working_env):
 
 
 def test_config_get_gets_spack_yaml(mutable_mock_env_path):
-    with ev.create("test") as env:
+    with ev.create("test", ctx=spack.test.harness.current()) as env:
         assert "mpileaks" not in config("get")
         env.add("mpileaks")
         env.write()
@@ -222,14 +223,14 @@ def test_config_get_gets_spack_yaml(mutable_mock_env_path):
 
 
 def test_config_edit_edits_spack_yaml(mutable_mock_env_path):
-    env = ev.create("test")
+    env = ev.create("test", ctx=spack.test.harness.current())
     with env:
         assert config("edit", "--print-file").strip() == env.manifest_path
 
 
 def test_config_add_with_scope_adds_to_scope(mutable_config: Configuration, mutable_mock_env_path):
     """Test adding to non-env config scope with an active environment"""
-    env = ev.create("test")
+    env = ev.create("test", ctx=spack.test.harness.current())
     with env:
         config("--scope=user", "add", "config:install_tree:root:/usr")
     assert mutable_config.get("config:install_tree:root", scope="user") == "/usr"
@@ -577,7 +578,7 @@ def test_remove_list(mutable_empty_config):
 
 def test_config_add_to_env(mutable_empty_config, mutable_mock_env_path):
     env("create", "test")
-    with ev.read("test"):
+    with ev.read("test", ctx=spack.test.harness.current()):
         config("add", "config:dirty:true")
         output = config("get")
 
@@ -606,7 +607,7 @@ spack:  # comment
 """
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(manifest)
-    env = ev.Environment(str(tmp_path))
+    env = ev.Environment(str(tmp_path), ctx=spack.test.harness.current())
     with env:
         config("add", "config:dirty:true")
         output = config("get")
@@ -617,12 +618,12 @@ spack:  # comment
 
 def test_config_remove_from_env(mutable_empty_config, mutable_mock_env_path):
     env("create", "test")
-    with ev.read("test"):
+    with ev.read("test", ctx=spack.test.harness.current()):
         config("add", "config:dirty:true")
         output = config("get")
     assert "dirty: true" in output
 
-    with ev.read("test"):
+    with ev.read("test", ctx=spack.test.harness.current()):
         config("rm", "config:dirty")
         output = config("get")
     assert "dirty: true" not in output
@@ -660,7 +661,7 @@ def test_config_prefer_upstream(
     prepared_db = spack.database.Database(mock_db_root, layout=gen_mock_layout("a"))
 
     for spec in ["hdf5 +mpi", "hdf5 ~mpi", "boost+debug~icu+graph", "dependency-install", "patch"]:
-        dep = spack.concretize.concretize_one(spec)
+        dep = spack.concretize.concretize_one(spec, spack.test.harness.current())
         prepared_db.add(dep)
 
     downstream_db_root = str(tmp_path_factory.mktemp("mock_downstream_db_root"))
@@ -692,16 +693,16 @@ spack:
 """
         )
 
-    def update_config(data):
+    def update_config(data, config):
         data["config"]["ccache"] = False
         return True
 
     monkeypatch.setattr(spack.schema.config, "update", update_config)
 
-    with ev.Environment(str(tmp_path)):
+    with ev.Environment(str(tmp_path), ctx=spack.test.harness.current()):
         config("update", "-y", "config")
 
-    with ev.Environment(str(tmp_path)) as e:
+    with ev.Environment(str(tmp_path), ctx=spack.test.harness.current()) as e:
         assert not e.manifest.yaml_content["spack"]["config"]["ccache"]
 
 
@@ -725,7 +726,7 @@ def test_config_with_group_shows_override_packages(cmd_str, tmp_path, mutable_co
     """
     (tmp_path / "spack.yaml").write_text(_GROUP_OVERRIDE_SPACK_YAML)
 
-    with ev.Environment(str(tmp_path)):
+    with ev.Environment(str(tmp_path), ctx=spack.test.harness.current()):
         output = config(cmd_str, "packages")
         assert "1.2.13" not in output
         if cmd_str == "blame":
@@ -748,7 +749,7 @@ def test_config_with_group_requires_active_environment(cmd_str, mutable_config):
 def test_config_with_unknown_group_gives_clear_error(cmd_str, tmp_path, mutable_config):
     """Tests that using a non-existing group gives a clear error."""
     (tmp_path / "spack.yaml").write_text("spack:\n  specs:\n  - zlib\n")
-    with ev.Environment(str(tmp_path)):
+    with ev.Environment(str(tmp_path), ctx=spack.test.harness.current()):
         output = config(cmd_str, "--group=nonexistent", "packages", fail_on_error=False)
     assert config.returncode == 1
     assert "'nonexistent' not found in" in output

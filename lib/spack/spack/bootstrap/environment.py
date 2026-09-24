@@ -8,7 +8,7 @@ import os
 import pathlib
 import shutil
 import sys
-from typing import Iterable, List
+from typing import TYPE_CHECKING, Iterable, List
 
 import spack.vendor.archspec.cpu
 
@@ -16,6 +16,7 @@ import spack.config
 import spack.environment
 import spack.error
 import spack.paths
+import spack.repo
 import spack.spec
 import spack.stage
 import spack.tengine
@@ -25,14 +26,22 @@ from spack.util import tty
 from .config import root_path, spec_for_current_python, store_path
 from .core import _add_externals_if_missing
 
+if TYPE_CHECKING:
+    import spack.context
+
 
 class BootstrapEnvironment(spack.environment.Environment):
     """Environment to install dependencies of Spack for a given interpreter and architecture"""
 
-    def __init__(self) -> None:
-        if not self.spack_yaml().exists():
-            self._write_spack_yaml_file()
-        super().__init__(self.environment_root())
+    def __init__(self, ctx: "spack.context.SpackContext") -> None:
+        """
+        Args:
+            ctx: bootstrap context the environment is read and installed in
+        """
+        root = self.environment_root(ctx.config)
+        if not (root / "spack.yaml").exists():
+            self._write_spack_yaml_file(root, ctx.config)
+        super().__init__(root, ctx=ctx)
 
         # Remove python package roots created before python-venv was introduced
         for s in self.concrete_roots():
@@ -45,42 +54,32 @@ class BootstrapEnvironment(spack.environment.Environment):
         return [pytest_root_spec(), ruff_root_spec(), mypy_root_spec()]
 
     @classmethod
-    def environment_root(cls) -> pathlib.Path:
+    def environment_root(cls, config: spack.config.Configuration) -> pathlib.Path:
         """Environment root directory"""
-        bootstrap_root_path = root_path()
+        bootstrap_root_path = root_path(config)
         python_part = spec_for_current_python().replace("@", "")
         arch_part = spack.vendor.archspec.cpu.host().family
         interpreter_part = hashlib.md5(sys.exec_prefix.encode()).hexdigest()[:5]
         environment_dir = f"{python_part}-{arch_part}-{interpreter_part}"
         return pathlib.Path(
             spack.config.canonicalize_path(
-                os.path.join(bootstrap_root_path, "environments", environment_dir)
+                os.path.join(bootstrap_root_path, "environments", environment_dir), config=config
             )
         )
 
-    @classmethod
-    def bootstrap_gpg_home(cls) -> pathlib.Path:
-        """Location of the GPG home directory used for bootstrapping"""
-        return pathlib.Path(root_path()).joinpath(".bootstrap_gpg_home")
-
-    @classmethod
-    def view_root(cls) -> pathlib.Path:
+    def view_root(self) -> pathlib.Path:
         """Location of the view"""
-        return cls.environment_root().joinpath("view")
+        return pathlib.Path(self.path).joinpath("view")
 
-    @classmethod
-    def bin_dir(cls) -> pathlib.Path:
+    def bin_dir(self) -> pathlib.Path:
         """Paths to be added to PATH"""
-        return cls.view_root().joinpath("bin")
+        return self.view_root().joinpath("bin")
 
     def python_dirs(self) -> Iterable[pathlib.Path]:
-        python = next(s for s in self.all_specs_generator() if s.name == "python-venv").package
+        venv = next(s for s in self.all_specs_generator() if s.name == "python-venv")
+        spack.repo.attach_packages([venv], self.ctx)
+        python = venv.package
         return {self.view_root().joinpath(p) for p in (python.platlib, python.purelib)}
-
-    @classmethod
-    def spack_yaml(cls) -> pathlib.Path:
-        """Environment spack.yaml file"""
-        return cls.environment_root().joinpath("spack.yaml")
 
     def update_installations(self) -> None:
         """Update the installations of this environment."""
@@ -95,24 +94,22 @@ class BootstrapEnvironment(spack.environment.Environment):
             tty.msg(f"[BOOTSTRAPPING] Installing dependencies ({', '.join(colorized_specs)})")
             self.write(regenerate=False)
             with tty.SuppressOutput(msg_enabled=log_enabled, warn_enabled=log_enabled):
-                with spack.util.gpg.gnupghome_override(str(self.bootstrap_gpg_home())):
-                    download_and_trust_key()
-                    fetch_policy = (
-                        "cache_only"
-                        if not spack.config.CONFIG.get("bootstrap:dev:enable_source", False)
-                        else "auto"
+                # The bootstrap context has its own GnuPG home
+                download_and_trust_key(self.ctx)
+                fetch_policy = (
+                    "cache_only"
+                    if not self.ctx.config.get("bootstrap:dev:enable_source", False)
+                    else "auto"
+                )
+                try:
+                    self.install_all(
+                        fail_fast=True, root_policy=fetch_policy, dependencies_policy=fetch_policy
                     )
-                    try:
-                        self.install_all(
-                            fail_fast=True,
-                            root_policy=fetch_policy,
-                            dependencies_policy=fetch_policy,
-                        )
-                    except BaseException:
-                        # catch any exception as we always want to clean up
-                        shutil.rmtree(self.environment_root())
-                        raise
-                    self.write(regenerate=True)
+                except BaseException:
+                    # catch any exception as we always want to clean up
+                    shutil.rmtree(self.path)
+                    raise
+                self.write(regenerate=True)
 
     def load(self) -> None:
         """Update PATH and sys.path."""
@@ -122,23 +119,26 @@ class BootstrapEnvironment(spack.environment.Environment):
         # Spack itself imports pytest
         sys.path.extend(str(p) for p in self.python_dirs())
 
-    def _write_spack_yaml_file(self) -> None:
+    @classmethod
+    def _write_spack_yaml_file(
+        cls, root: pathlib.Path, config: spack.config.Configuration
+    ) -> None:
         tty.msg(
             "[BOOTSTRAPPING] Spack has missing dependencies, creating a bootstrapping environment"
         )
-        env = spack.tengine.make_environment()
+        env = spack.tengine.make_environment(config)
         template = env.get_template("bootstrap/spack.yaml")
         context = {
             "python_spec": f"{spec_for_current_python()}+ctypes",
             "python_prefix": pathlib.Path(sys.exec_prefix).as_posix(),
             "architecture": spack.vendor.archspec.cpu.host().family,
-            "environment_path": self.environment_root().as_posix(),
-            "environment_specs": self.spack_dev_requirements(),
-            "store_path": pathlib.Path(store_path()).as_posix(),
+            "environment_path": root.as_posix(),
+            "environment_specs": cls.spack_dev_requirements(),
+            "store_path": pathlib.Path(store_path(config)).as_posix(),
             "bootstrap_mirrors": dev_bootstrap_mirror_names(),
         }
-        self.environment_root().mkdir(parents=True, exist_ok=True)
-        self.spack_yaml().write_text(template.render(context), encoding="utf-8")
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "spack.yaml").write_text(template.render(context), encoding="utf-8")
 
 
 def mypy_root_spec() -> str:
@@ -166,7 +166,7 @@ def dev_bootstrap_mirror_names() -> List[str]:
     ]
 
 
-def download_and_trust_key():
+def download_and_trust_key(ctx: "spack.context.SpackContext"):
     """Fetches and verifies the validity of Spack's public key"""
     fingerprint_file = (
         pathlib.Path(spack.paths.share_path) / "bootstrap" / "fingerprints" / "public.txt"
@@ -174,17 +174,20 @@ def download_and_trust_key():
     with open(fingerprint_file, "r", encoding="utf-8") as f:
         fingerprint, key_endpoint = f.readline().strip("\n").split(";")
     fingerprint = fingerprint.strip().upper()
-    with spack.stage.stage_from_config(key_endpoint, config=spack.config.CONFIG) as stage:
+    with spack.stage.stage_from_config(
+        key_endpoint, config=ctx.config, client=ctx.network
+    ) as stage:
         try:
             stage.fetch()
         except spack.error.FetchError as e:
             raise RuntimeError("Cannot fetch Spack Public key for binary cache validation") from e
-        spack.util.gpg.trust(stage.save_filename, fprs=[fingerprint])
+        spack.util.gpg.trust(ctx.gpg, stage.save_filename, fprs=[fingerprint])
 
 
-def ensure_environment_dependencies() -> None:
+def ensure_environment_dependencies(ctx: "spack.context.SpackContext") -> None:
     """Ensure Spack dependencies from the bootstrap environment are installed and ready to use"""
-    _add_externals_if_missing()
-    with BootstrapEnvironment() as env:
+    bootstrap = ctx.bootstrap
+    _add_externals_if_missing(bootstrap)
+    with BootstrapEnvironment(bootstrap) as env:
         env.update_installations()
         env.load()

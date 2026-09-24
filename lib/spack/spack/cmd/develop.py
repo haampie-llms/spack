@@ -8,6 +8,7 @@ from typing import Optional
 
 import spack.cmd
 import spack.config
+import spack.context
 import spack.environment
 import spack.fetch_strategy
 import spack.repo
@@ -74,15 +75,18 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     arguments.add_common_arguments(subparser, ["spec"])
 
 
-def _retrieve_develop_source(spec: spack.spec.Spec, abspath: str) -> None:
+def _retrieve_develop_source(
+    spec: spack.spec.Spec, abspath: str, ctx: spack.context.SpackContext
+) -> None:
     # "steal" the source code via staging API. We ask for a stage
     # to be created, then copy it afterwards somewhere else. It would be
     # better if we can create the `source_path` directly into its final
     # destination.
-    pkg_cls = spack.repo.PATH.get_pkg_class(spec.name)
+    pkg_cls = ctx.repo.get_pkg_class(spec.name)
     # We construct a package class ourselves, rather than asking for
     # Spec.package, since Spec only allows this when it is concrete
     package = pkg_cls(spec)
+    package.context = ctx
     source_stage: spack.stage.Stage = package.stage[0]
     if isinstance(source_stage.fetcher, spack.fetch_strategy.GitFetchStrategy):
         source_stage.fetcher.get_full_repo = True
@@ -95,7 +99,9 @@ def _retrieve_develop_source(spec: spack.spec.Spec, abspath: str) -> None:
     package.stage.steal_source(abspath)
 
 
-def assure_concrete_spec(env: spack.environment.Environment, spec: spack.spec.Spec):
+def assure_concrete_spec(
+    env: spack.environment.Environment, spec: spack.spec.Spec, repo: spack.repo.RepoPath
+):
     version = spec.versions.concrete_range_as_version
     if not version:
         # first check environment for a matching concrete spec
@@ -116,19 +122,25 @@ def assure_concrete_spec(env: spack.environment.Environment, spec: spack.spec.Sp
                     )
         else:
             # look up the maximum version so infintiy versions are preferred for develop
-            version = max(spack.repo.PATH.get_pkg_class(spec.fullname).versions.keys())
+            version = max(repo.get_pkg_class(spec.fullname).versions.keys())
             tty.msg(f"Defaulting to highest version: {spec.name}@{version}")
     spec.versions = spack.version.VersionList([version])
 
 
-def setup_src_code(spec: spack.spec.Spec, src_path: str, clone: bool = True, force: bool = False):
+def setup_src_code(
+    spec: spack.spec.Spec,
+    src_path: str,
+    ctx: spack.context.SpackContext,
+    clone: bool = True,
+    force: bool = False,
+):
     """
     Handle checking, cloning or overwriting source code
     """
     assert spec.versions
 
     if clone:
-        _clone(spec, src_path, force)
+        _clone(spec, src_path, ctx, force)
 
     if not clone and not os.path.exists(src_path):
         raise SpackError(f"Provided path {src_path} does not exist")
@@ -136,12 +148,12 @@ def setup_src_code(spec: spack.spec.Spec, src_path: str, clone: bool = True, for
     version = spec.versions.concrete_range_as_version
     if not version:
         # look up the maximum version so infintiy versions are preferred for develop
-        version = max(spack.repo.PATH.get_pkg_class(spec.fullname).versions.keys())
+        version = max(ctx.repo.get_pkg_class(spec.fullname).versions.keys())
         tty.msg(f"Defaulting to highest version: {spec.name}@{version}")
     spec.versions = spack.version.VersionList([version])
 
 
-def _update_config(spec, path):
+def _update_config(config: spack.config.Configuration, spec, path):
     find_fn = lambda section: spec.name in section
 
     entry = {"spec": str(spec)}
@@ -151,12 +163,13 @@ def _update_config(spec, path):
     def change_fn(section):
         section[spec.name] = entry
 
-    spack.config.CONFIG.change_or_add("develop", find_fn, change_fn)
+    config.change_or_add("develop", find_fn, change_fn)
 
 
 def update_env(
     env: spack.environment.Environment,
     spec: spack.spec.Spec,
+    config: spack.config.Configuration,
     specified_path: Optional[str] = None,
     build_dir: Optional[str] = None,
     apply_changes: bool = True,
@@ -173,19 +186,21 @@ def update_env(
 
     with env.write_transaction():
         if build_dir is not None:
-            spack.config.CONFIG.add(
+            config.add(
                 f"packages:{spec.name}:package_attributes:build_directory:{build_dir}",
                 env.scope_name,
             )
         # add develop spec and update path
-        _update_config(spec, specified_path)
+        _update_config(config, spec, specified_path)
 
         # If we are automatically mutating the concrete specs for dev provenance, do so
         if apply_changes:
-            env.apply_develop([spec], [_abs_code_path(env, spec, specified_path)])
+            env.apply_develop([spec], [_abs_code_path(env, spec, specified_path, config)])
 
 
-def _clone(spec: spack.spec.Spec, abspath: str, force: bool = False):
+def _clone(
+    spec: spack.spec.Spec, abspath: str, ctx: spack.context.SpackContext, force: bool = False
+):
     if os.path.exists(abspath):
         if force:
             shutil.rmtree(abspath)
@@ -197,17 +212,20 @@ def _clone(spec: spack.spec.Spec, abspath: str, force: bool = False):
 
     # cloning can take a while and it's nice to get a message for the longer clones
     tty.msg(f"Cloning source code for {spec}")
-    _retrieve_develop_source(spec, abspath)
+    _retrieve_develop_source(spec, abspath, ctx)
 
 
 def _abs_code_path(
-    env: spack.environment.Environment, spec: spack.spec.Spec, path: Optional[str] = None
+    env: spack.environment.Environment,
+    spec: spack.spec.Spec,
+    path: Optional[str],
+    config: spack.config.Configuration,
 ):
     src_path = path if path else spec.name
-    return spack.config.canonicalize_path(src_path, default_wd=env.path)
+    return spack.config.canonicalize_path(src_path, default_wd=env.path, config=config)
 
 
-def _dev_spec_generator(args, env):
+def _dev_spec_generator(args, env, ctx):
     """
     Generator function to loop over all the develop specs based on how the command is called
     If no specs are supplied then loop over the develop specs listed in the environment.
@@ -218,13 +236,13 @@ def _dev_spec_generator(args, env):
 
         for name, entry in env.dev_specs.items():
             path = entry.get("path", name)
-            abspath = spack.config.canonicalize_path(path, default_wd=env.path)
+            abspath = spack.config.canonicalize_path(path, default_wd=env.path, config=ctx.config)
             # Both old syntax `spack develop pkg@x` and new syntax `spack develop pkg@=x`
             # are currently supported.
             spec = spack.spec.parse_with_version_concrete(entry["spec"])
             yield spec, abspath
     else:
-        specs = spack.cmd.parse_specs(args.spec)
+        specs = spack.cmd.parse_specs(args.spec, ctx)
         if (args.path or args.build_directory) and len(specs) > 1:
             args.subparser.error(
                 "requires at most one named spec when using the --path or --build-directory "
@@ -245,15 +263,15 @@ def _dev_spec_generator(args, env):
                         for node_spec in s.traverse(direction="parents", root=True):
                             tty.debug(f"Recursive develop for {node_spec.name}")
                             dev_spec = spack.spec.Spec(node_spec.format("{name}@{versions}"))
-                            yield dev_spec, _abs_code_path(env, node_spec, args.path)
+                            yield dev_spec, _abs_code_path(env, node_spec, args.path, ctx.config)
             else:
-                yield spec, _abs_code_path(env, spec, args.path)
+                yield spec, _abs_code_path(env, spec, args.path, ctx.config)
 
 
-def develop(parser, args):
-    env = spack.cmd.require_active_env(args.subparser)
+def develop(parser, args, ctx):
+    env = spack.cmd.require_active_env(args.subparser, ctx.environment)
 
-    for spec, abspath in _dev_spec_generator(args, env):
-        assure_concrete_spec(env, spec)
-        setup_src_code(spec, abspath, clone=args.clone, force=args.force)
-        update_env(env, spec, args.path, args.build_directory, args.apply_changes)
+    for spec, abspath in _dev_spec_generator(args, env, ctx):
+        assure_concrete_spec(env, spec, ctx.repo)
+        setup_src_code(spec, abspath, ctx, clone=args.clone, force=args.force)
+        update_env(env, spec, ctx.config, args.path, args.build_directory, args.apply_changes)

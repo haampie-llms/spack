@@ -7,7 +7,9 @@ import pathlib
 import pytest
 
 import spack.reporters.extract
+import spack.test.harness
 import spack.util.filesystem as fs
+import spack.util.web
 from spack.install_test import TestStatus
 from spack.reporters import CDash, CDashConfiguration
 from spack.util import tty
@@ -28,6 +30,12 @@ fake_install_test_root = fs.join_path(fake_install_prefix, ".spack", "test")
 fake_test_cache = fs.join_path(
     "usr", "spack", ".spack", "test", "abcdefg", "fake-1.0-abcdefg", "cache", "fake"
 )
+
+
+def _client() -> spack.util.web.NetworkClient:
+    return spack.util.web.NetworkClient(
+        verify_ssl=True, connect_timeout=10, ssl_certs=None, fetch_method="urllib", mirrors=[]
+    )
 
 
 def test_reporters_extract_basics():
@@ -167,7 +175,11 @@ def test_reporters_report_for_package_no_stdout(tmp_path: pathlib.Path, monkeypa
     )
     monkeypatch.setattr(tty, "_debug", 1)
 
-    reporter = MockCDash(configuration=configuration)
+    reporter = MockCDash(
+        configuration=configuration,
+        urlopen=_client().urlopen,
+        config=spack.test.harness.current().config,
+    )
     pkg_data = {"name": "fake-package"}
     reporter.test_report_for_package(str(tmp_path), pkg_data, 0)
     err = capfd.readouterr()[1]
@@ -187,7 +199,11 @@ def test_cdash_reporter_truncates_build_name_if_too_long():
         track="fake-track",
     )
 
-    reporter = CDash(configuration=configuration)
+    reporter = CDash(
+        configuration=configuration,
+        urlopen=_client().urlopen,
+        config=spack.test.harness.current().config,
+    )
     new_build_name = reporter.report_build_name("fake-package")
 
     assert new_build_name != extra_long_build_name

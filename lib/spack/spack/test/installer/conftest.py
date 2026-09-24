@@ -9,7 +9,9 @@ import socket
 from typing import Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
 
 import spack.deptypes as dt
+import spack.repo
 import spack.spec
+import spack.test.harness
 from spack.installer.base import BuildChannels, ExitCode, JobServerBase, ProcessExitNotifier
 from spack.installer.build import BuildRequest, ChildInfo, create_build_channels
 from spack.installer.core import PackageInstaller, write_connection
@@ -196,6 +198,7 @@ def _make_concrete(
     for dep in deps:
         spec._add_dependency(dep, depflag=depflag, virtuals=())
     spec._mark_concrete()
+    spack.repo.attach_packages([spec], spack.test.harness.current())
     return spec
 
 

@@ -14,9 +14,11 @@ import spack.concretize
 import spack.environment as ev
 import spack.error
 import spack.spec
+import spack.test.harness
 from spack.config import Configuration
-from spack.main import SpackCommand, SpackCommandError
+from spack.main import SpackCommandError
 from spack.store import Store
+from spack.test.harness import SpackCommand
 
 buildcache = SpackCommand("buildcache")
 install = SpackCommand("install")
@@ -163,7 +165,7 @@ def test_spec_parse_error():
 
 
 def test_env_aware_spec(mutable_mock_env_path):
-    env = ev.create("test")
+    env = ev.create("test", ctx=spack.test.harness.current())
     env.add("mpileaks")
 
     with env:
@@ -245,13 +247,13 @@ def test_buildcache_status_fn_marks_absent_spec(
     temporary_store: Store, install_mockery, mock_packages
 ):
     """Tests the basic semantics of build_cache_status_fn."""
-    s = spack.concretize.concretize_one("mpileaks")
+    s = spack.concretize.concretize_one("mpileaks", spack.test.harness.current())
     assert temporary_store.db.install_status(s) == spack.spec.InstallStatus.absent
 
-    status_fn = spack.cmd.buildcache_status_fn({s.dag_hash()})
+    status_fn = spack.cmd.buildcache_status_fn({s.dag_hash()}, store=temporary_store)
     assert status_fn(s) == spack.spec.InstallStatus.buildcache
 
-    status_fn = spack.cmd.buildcache_status_fn(set())
+    status_fn = spack.cmd.buildcache_status_fn(set(), store=temporary_store)
     assert status_fn(s) == spack.spec.InstallStatus.absent
 
 
@@ -260,7 +262,9 @@ def test_buildcache_status_fn_installed_not_overridden(mutable_database):
     s = mutable_database.query_one("mpileaks^mpich")
     assert mutable_database.install_status(s) == spack.spec.InstallStatus.installed
 
-    status_fn = spack.cmd.buildcache_status_fn({s.dag_hash()})
+    status_fn = spack.cmd.buildcache_status_fn(
+        {s.dag_hash()}, store=spack.test.harness.current().store
+    )
     assert status_fn(s) == spack.spec.InstallStatus.installed
 
 
@@ -285,7 +289,7 @@ spack:
   specs: []
 """
     )
-    with ev.Environment(tmp_path):
+    with ev.Environment(tmp_path, ctx=spack.test.harness.current()):
         assert _root_names() == []
 
 
@@ -323,7 +327,7 @@ spack:
 def test_spec_env_with_groups_only(unify, tmp_path: pathlib.Path, spack_yaml, expected):
     """Tests that `spack spec` uses the root specs of every group, not just the default one."""
     (tmp_path / ev.manifest_name).write_text(spack_yaml.format(unify=unify))
-    with ev.Environment(tmp_path):
+    with ev.Environment(tmp_path, ctx=spack.test.harness.current()):
         assert _root_names() == expected
 
 
@@ -342,7 +346,7 @@ spack:
     - libelf
 """
     )
-    with ev.Environment(tmp_path):
+    with ev.Environment(tmp_path, ctx=spack.test.harness.current()):
         roots = _roots()
 
     assert len(roots) == 1
@@ -371,7 +375,7 @@ spack:
     - mpileaks
 """
     )
-    with ev.Environment(tmp_path) as env:
+    with ev.Environment(tmp_path, ctx=spack.test.harness.current()) as env:
         # Ground truth: this is what `spack install` would build
         env.concretize()
         _, gcc = next(iter(env.concretized_specs_by(group="compiler")))
@@ -379,7 +383,7 @@ spack:
         assert mpileaks["c"].dag_hash() == gcc.dag_hash()
 
     # The environment on disk is still not concretized, so `spack spec` has to solve it
-    with ev.Environment(tmp_path):
+    with ev.Environment(tmp_path, ctx=spack.test.harness.current()):
         reported = _roots()
 
     # Concrete specs compare by DAG hash, so this checks the whole sub-DAG of each root
@@ -396,13 +400,13 @@ spack:
 """
     )
     mutable_config.set("packages:libelf:require", "@0.8.12")
-    with ev.Environment(tmp_path) as env:
+    with ev.Environment(tmp_path, ctx=spack.test.harness.current()) as env:
         env.concretize()
         env.write()
 
     # Configuration drifts after the environment has been concretized
     mutable_config.set("packages:libelf:require", "@0.8.13")
-    with ev.Environment(tmp_path):
+    with ev.Environment(tmp_path, ctx=spack.test.harness.current()):
         roots = _roots()
 
     assert len(roots) == 1
@@ -420,7 +424,7 @@ spack:
   - libelf
 """
     )
-    included = ev.Environment(include_dir)
+    included = ev.Environment(include_dir, ctx=spack.test.harness.current())
     included.concretize()
     included.write()
 
@@ -435,7 +439,7 @@ spack:
   - mpich
 """
     )
-    with ev.Environment(root_dir):
+    with ev.Environment(root_dir, ctx=spack.test.harness.current()):
         assert _root_names() == ["mpich", "libelf"]
 
 

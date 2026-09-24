@@ -14,6 +14,7 @@ import spack.error
 import spack.fetch_strategy
 import spack.package_base
 import spack.platforms
+import spack.test.harness
 import spack.util.git
 from spack.config import Configuration
 from spack.fetch_strategy import GitFetchStrategy
@@ -22,6 +23,7 @@ from spack.repo import RepoPath
 from spack.spec import Spec
 from spack.stage import stage_from_config
 from spack.util.filesystem import mkdirp, touch, working_dir
+from spack.util.web import NetworkClient
 from spack.variant import SingleValuedVariant
 from spack.version import Version
 
@@ -74,7 +76,9 @@ def test_bad_git(tmp_path: pathlib.Path, mock_bad_git, config):
 
     with pytest.raises(spack.error.SpackError):
         fetcher = GitFetchStrategy(git="file:///not-a-real-git-repo")
-        with stage_from_config(fetcher, path=testpath, config=config):
+        with stage_from_config(
+            fetcher, path=testpath, config=config, client=NetworkClient.from_config(config)
+        ):
             fetcher.fetch()
 
 
@@ -109,7 +113,7 @@ def test_fetch(
     monkeypatch.delattr(pkg_class, "git")
 
     # Construct the package under test
-    s = spack.concretize.concretize_one("git-test")
+    s = spack.concretize.concretize_one("git-test", spack.test.harness.current())
     monkeypatch.setitem(s.package.versions, Version("git"), t.args)
 
     if type_of_test == "commit":
@@ -159,7 +163,7 @@ def test_fetch_pkg_attr_submodule_init(
     monkeypatch.setattr(pkg_class, "git", mock_git_repository.url)
 
     # Construct the package under test
-    s = spack.concretize.concretize_one("git-test")
+    s = spack.concretize.concretize_one("git-test", spack.test.harness.current())
     monkeypatch.setitem(s.package.versions, Version("git"), t.args)
 
     s.package.do_stage()
@@ -195,7 +199,8 @@ def test_adhoc_version_submodules(
     monkeypatch.setattr(pkg_class, "git", mock_git_repository.url, raising=False)
 
     spec = spack.concretize.concretize_one(
-        Spec("git-test@{0}".format(mock_git_repository.unversioned_commit))
+        Spec("git-test@{0}".format(mock_git_repository.unversioned_commit)),
+        spack.test.harness.current(),
     )
     spec.package.do_stage()
     collected_fnames = set()
@@ -214,7 +219,7 @@ def test_debug_fetch(
     t = mock_git_repository.checks[type_of_test]
 
     # Construct the package under test
-    s = spack.concretize.concretize_one("git-test")
+    s = spack.concretize.concretize_one("git-test", spack.test.harness.current())
     monkeypatch.setitem(s.package.versions, Version("git"), t.args)
 
     # Fetch then ensure source path exists
@@ -229,7 +234,9 @@ def test_git_extra_fetch(git, tmp_path: pathlib.Path, config):
     testpath = str(tmp_path)
 
     fetcher = GitFetchStrategy(git="file:///not-a-real-git-repo")
-    with stage_from_config(fetcher, path=testpath, config=config) as stage:
+    with stage_from_config(
+        fetcher, path=testpath, config=config, client=NetworkClient.from_config(config)
+    ) as stage:
         mkdirp(stage.source_path)
         fetcher.fetch()  # Use fetcher to fetch for code coverage
         shutil.rmtree(stage.source_path)
@@ -270,7 +277,7 @@ def test_get_full_repo(
 
     spec_string = "git-test"
 
-    s = spack.concretize.concretize_one(spec_string)
+    s = spack.concretize.concretize_one(spec_string, spack.test.harness.current())
 
     args = copy.copy(t.args)
     args["get_full_repo"] = get_full_repo
@@ -339,7 +346,7 @@ def test_gitsubmodule(submodules, mock_git_repository, config, mutable_mock_repo
     t = mock_git_repository.checks[type_of_test]
 
     # Construct the package under test
-    s = spack.concretize.concretize_one("git-test")
+    s = spack.concretize.concretize_one("git-test", spack.test.harness.current())
     args = copy.copy(t.args)
     args["submodules"] = submodules
     monkeypatch.setitem(s.package.versions, Version("git"), args)
@@ -371,7 +378,7 @@ def test_gitsubmodules_callable(mock_git_repository, config, mutable_mock_repo, 
     t = mock_git_repository.checks[type_of_test]
 
     # Construct the package under test
-    s = spack.concretize.concretize_one("git-test")
+    s = spack.concretize.concretize_one("git-test", spack.test.harness.current())
     args = copy.copy(t.args)
     args["submodules"] = submodules_callback
     monkeypatch.setitem(s.package.versions, Version("git"), args)
@@ -392,7 +399,7 @@ def test_gitsubmodules_delete(mock_git_repository, config, mutable_mock_repo, mo
     t = mock_git_repository.checks[type_of_test]
 
     # Construct the package under test
-    s = spack.concretize.concretize_one("git-test")
+    s = spack.concretize.concretize_one("git-test", spack.test.harness.current())
     args = copy.copy(t.args)
     args["submodules"] = True
     args["submodules_delete"] = ["third_party/submodule0", "third_party/submodule1"]
@@ -419,7 +426,7 @@ def test_gitsubmodules_falsey(mock_git_repository, config, mutable_mock_repo, mo
     t = mock_git_repository.checks[type_of_test]
 
     # Construct the package under test
-    s = spack.concretize.concretize_one("git-test")
+    s = spack.concretize.concretize_one("git-test", spack.test.harness.current())
     args = copy.copy(t.args)
     args["submodules"] = submodules_callback
     monkeypatch.setitem(s.package.versions, Version("git"), args)
@@ -444,7 +451,7 @@ def test_git_sparse_paths_partial_clone(
     t = mock_git_repository.checks[type_of_test]
     args = copy.copy(t.args)
     args["git_sparse_paths"] = sparse_paths
-    s = spack.concretize.concretize_one("git-test")
+    s = spack.concretize.concretize_one("git-test", spack.test.harness.current())
     monkeypatch.setitem(s.package.versions, Version("git"), args)
     s.package.do_stage()
     with working_dir(s.package.stage.source_path):
@@ -480,8 +487,12 @@ def test_git_sparse_path_have_unique_mirror_projections(
         spack.package_base.PackageBase, "git", pathlib.Path(repo_path).as_uri(), raising=False
     )
     gold_commit = git("-C", repo_path, "rev-parse", "many_dirs", output=str).strip()
-    s_a = spack.concretize.concretize_one(f"git-sparse-a commit={gold_commit}")
-    s_b = spack.concretize.concretize_one(f"git-sparse-b commit={gold_commit}")
+    s_a = spack.concretize.concretize_one(
+        f"git-sparse-a commit={gold_commit}", spack.test.harness.current()
+    )
+    s_b = spack.concretize.concretize_one(
+        f"git-sparse-b commit={gold_commit}", spack.test.harness.current()
+    )
     assert s_a.package.stage[0].mirror_layout.path != s_b.package.stage[0].mirror_layout.path
 
 
@@ -490,7 +501,7 @@ def test_commit_variant_clone(git, config, mutable_mock_repo, mock_git_version_i
 
     repo_path, filename, commits = mock_git_version_info
     test_commit = commits[-2]
-    s = spack.concretize.concretize_one("git-test")
+    s = spack.concretize.concretize_one("git-test", spack.test.harness.current())
     args = {"git": pathlib.Path(repo_path).as_uri()}
     monkeypatch.setitem(s.package.versions, Version("git"), args)
     s.variants["commit"] = SingleValuedVariant("commit", test_commit)

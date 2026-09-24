@@ -40,9 +40,10 @@ import tempfile
 import warnings
 from collections import defaultdict
 from itertools import chain
-from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple, Union, cast
+from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple, Union
 
 from spack.vendor import jsonschema
+from spack.vendor.typing_extensions import Protocol
 
 import spack
 import spack.error
@@ -156,13 +157,17 @@ class ConfigScope:
 
     @property
     def included_scopes(self) -> List["ConfigScope"]:
+        """Included scopes, in the order they appear in this scope, once resolved."""
+        return self._included_scopes or []
+
+    def resolve_includes(self, config: "Configuration") -> List["ConfigScope"]:
         """Memoized list of included scopes, in the order they appear in this scope."""
         if self._included_scopes is None:
             self._included_scopes = []
 
             includes = self.get_section("include")
             if includes:
-                include_paths = [included_path(data) for data in includes["include"]]
+                include_paths = [included_path(data, config) for data in includes["include"]]
                 included_scopes = chain(*[include.scopes(self) for include in include_paths])
 
                 # Do not include duplicate scopes
@@ -545,7 +550,7 @@ class Configuration:
         # TODO: at the highest level is reflected in the value of an option that
         # TODO: is set in multiple included files.
         # before pushing the scope itself, push included scopes recursively, at the same priority
-        for included_scope in reversed(scope.included_scopes):
+        for included_scope in reversed(scope.resolve_includes(self)):
             if _depth + 1 > MAX_RECURSIVE_INCLUDES:  # make sure we're not recursing endlessly
                 mark = ""
                 if hasattr(included_scope, "path") and syaml.marked(included_scope.path):
@@ -863,7 +868,7 @@ class Configuration:
 
             # If configuration is in an old format, transform it and keep track of the scope that
             # may need to be written out to disk.
-            if _update_in_memory(data, section):
+            if _update_in_memory(data, section, self):
                 updated_scopes.append(config_scope)
 
             merged_section = spack.schema.merge_yaml(merged_section, data)
@@ -880,11 +885,11 @@ class Configuration:
         Accepts a path syntax that allows us to grab nested config map
         entries.  Getting the ``config`` section would look like::
 
-            spack.config.CONFIG.get("config")
+            config.get("config")
 
         and the ``dirty`` section in the ``config`` scope would be::
 
-            spack.config.CONFIG.get("config:dirty")
+            config.get("config:dirty")
 
         We use ``:`` as the separator, like YAML objects.
         """
@@ -1183,7 +1188,8 @@ class OptionalInclude:
     remote: bool
     _scopes: List[ConfigScope]
 
-    def __init__(self, entry: dict):
+    def __init__(self, entry: dict, config: "Configuration"):
+        self.config = config
         self.name = entry.get("name", "")
         self.when = entry.get("when", "")
         self.optional = entry.get("optional", False)
@@ -1294,7 +1300,7 @@ class OptionalInclude:
         # But ensure that name is unique if there are multiple paths.
         if not self.name or len(getattr(self, "paths", [])) > 1:
             parent_path = pathlib.Path(getattr(parent_scope, "path", ""))
-            real_path = pathlib.Path(substitute_path_variables(path))
+            real_path = pathlib.Path(substitute_path_variables(path, self.config))
 
             try:
                 included_name = real_path.relative_to(parent_path)
@@ -1395,16 +1401,14 @@ class IncludePath(OptionalInclude):
     sha256: str
     destination: Optional[str]
 
-    def __init__(self, entry: dict):
-        # circular dependencies
-
-        super().__init__(entry)
+    def __init__(self, entry: dict, config: "Configuration"):
+        super().__init__(entry, config)
         path_override_env_var = entry.get("path_override_env_var", "")
         if path_override_env_var and path_override_env_var in os.environ:
             path = os.environ[path_override_env_var]
         else:
             path = entry.get("path", "")
-        self.path = substitute_path_variables(path)
+        self.path = substitute_path_variables(path, config)
 
         self.sha256 = entry.get("sha256", "")
         self.remote = "sha256" in entry
@@ -1449,8 +1453,8 @@ class IncludePath(OptionalInclude):
         # path for a local (or remote) file.
         tty.debug(f"Local base directory for {self.path} is {base}")
 
-        canonical_path = canonicalize_path(self.path, base)
-        config_path = rfc_util.local_path(canonical_path, self.sha256, base)
+        canonical_path = canonicalize_path(self.path, base, config=self.config)
+        config_path = rfc_util.local_path(canonical_path, self.sha256, base, config=self.config)
         assert config_path
         self.destination = config_path
 
@@ -1475,16 +1479,14 @@ class GitIncludePaths(OptionalInclude):
     _paths: List[str]
     destination: Optional[str]
 
-    def __init__(self, entry: dict):
-        # circular dependencies
-
-        super().__init__(entry)
-        self.git = substitute_path_variables(entry.get("git", ""))
+    def __init__(self, entry: dict, config: "Configuration"):
+        super().__init__(entry, config)
+        self.git = substitute_path_variables(entry.get("git", ""), config)
 
         self.branch = entry.get("branch", "")
         self.commit = entry.get("commit", "")
         self.tag = entry.get("tag", "")
-        self._paths = [substitute_path_variables(path) for path in entry.get("paths", [])]
+        self._paths = [substitute_path_variables(p, config) for p in entry.get("paths", [])]
         self.destination = None
         self.remote = True
 
@@ -1616,35 +1618,39 @@ class GitIncludePaths(OptionalInclude):
         return self._paths
 
 
-def included_path(entry: Union[str, pathlib.Path, dict]) -> Union[IncludePath, GitIncludePaths]:
+def included_path(
+    entry: Union[str, pathlib.Path, dict], config: "Configuration"
+) -> Union[IncludePath, GitIncludePaths]:
     """Convert the included paths entry into the appropriate optional include.
 
     Args:
         entry: include configuration entry
+        config: configuration used for path substitution and fetching
 
     Returns: converted entry, where an empty ``when`` means the path is not conditionally included
     """
     if isinstance(entry, (str, pathlib.Path)):
-        return IncludePath({"path": str(entry)})
+        return IncludePath({"path": str(entry)}, config)
 
     if entry.get("path", ""):
-        return IncludePath(entry)
+        return IncludePath(entry, config)
 
-    return GitIncludePaths(entry)
+    return GitIncludePaths(entry, config)
 
 
-def paths_from_includes(includes: List[Union[str, dict]]) -> List[str]:
+def paths_from_includes(includes: List[Union[str, dict]], config: "Configuration") -> List[str]:
     """The path(s) from the configured includes.
 
     Args:
         includes: include configuration information
+        config: configuration used for path substitution
 
     Returns: list of path or an empty list if there are none
     """
 
     paths = []
     for entry in includes:
-        include = included_path(entry)
+        include = included_path(entry, config)
         paths.extend(include.paths)
     return paths
 
@@ -1718,27 +1724,16 @@ def create() -> Configuration:
     return list(create_incremental())[-1]
 
 
-#: This is the singleton configuration instance for Spack.
-CONFIG = cast(Configuration, lang.Singleton(create_incremental))
-
-#: Many cached config values depend on the current platform, so drop them when it changes.
-spack.platforms.on_host_changed.append(lambda: CONFIG.clear_caches())
-
-
-def writable_scopes() -> List[ConfigScope]:
-    """Return list of writable scopes. Higher-priority scopes come first in the list."""
-    scopes = [x for x in CONFIG.scopes.values() if x.writable]
-    scopes.reverse()
-    return scopes
-
-
-def flattened_configuration(manifest: Optional[YamlConfigDict] = None) -> YamlConfigDict:
+def flattened_configuration(
+    config: Configuration, manifest: Optional[YamlConfigDict] = None
+) -> YamlConfigDict:
     """Return every configuration section, merged across scopes, as a single document.
 
     The sections are written under the top level key of an environment manifest, so that the
     result can be read back by the same code that reads a ``spack.yaml``.
 
     Args:
+        config: configuration to flatten
         manifest: content of an environment manifest to merge the sections into. Its other
             keys, like ``specs`` and ``view``, are kept as they are. Passing the manifest of
             the active environment is what makes the result describe that environment.
@@ -1752,7 +1747,7 @@ def flattened_configuration(manifest: Optional[YamlConfigDict] = None) -> YamlCo
         flattened[top_level_key] = syaml.syaml_dict()
 
     for section in SECTION_SCHEMAS:
-        flattened[top_level_key][section] = CONFIG.get(section)
+        flattened[top_level_key][section] = config.get(section)
 
     return flattened
 
@@ -2096,7 +2091,7 @@ def process_config_path(path: str) -> List[str]:
     return ConfigPath.process(path)
 
 
-def _update_in_memory(data: YamlConfigDict, section: str) -> bool:
+def _update_in_memory(data: YamlConfigDict, section: str, config: "Configuration") -> bool:
     """Update the format of the configuration data in memory.
 
     This function assumes the section is valid (i.e. validation
@@ -2105,15 +2100,17 @@ def _update_in_memory(data: YamlConfigDict, section: str) -> bool:
     Args:
         data: configuration data
         section: section of the configuration to update
+        config: configuration the data is part of
 
     Returns:
         True if the data was changed, False otherwise
     """
-    return ensure_latest_format_fn(section)(data)
+    return ensure_latest_format_fn(section)(data, config)
 
 
-def ensure_latest_format_fn(section: str) -> Callable[[YamlConfigDict], bool]:
-    """Return a function that takes a config dictionary and update it to the latest format.
+def ensure_latest_format_fn(section: str) -> Callable[[YamlConfigDict, "Configuration"], bool]:
+    """Return a function that takes a config dictionary and the configuration it is part of, and
+    updates the dictionary to the latest format.
 
     The function returns True iff there was any update.
 
@@ -2121,35 +2118,7 @@ def ensure_latest_format_fn(section: str) -> Callable[[YamlConfigDict], bool]:
         section: section of the configuration e.g. "packages", "config", etc.
     """
     # Every module we need is already imported at the top level, so getattr should not raise
-    return getattr(getattr(spack.schema, section), "update", lambda _: False)
-
-
-@contextlib.contextmanager
-def use_configuration(
-    *scopes_or_paths: Union[ScopeWithOptionalPriority, str],
-) -> Generator[Configuration, None, None]:
-    """Use the configuration scopes passed as arguments within the context manager.
-
-    This function invalidates caches, and is therefore very slow.
-
-    Args:
-        *scopes_or_paths: scope objects or paths to be used
-
-    Returns:
-        Configuration object associated with the scopes passed as arguments
-    """
-    global CONFIG
-
-    # Normalize input and construct a Configuration object
-    configuration = create_from(*scopes_or_paths)
-    CONFIG.clear_caches(), configuration.clear_caches()
-
-    saved_config, CONFIG = CONFIG, configuration
-
-    try:
-        yield configuration
-    finally:
-        CONFIG = saved_config
+    return getattr(getattr(spack.schema, section), "update", lambda data, config: False)
 
 
 def _normalize_input(entry: Union[ScopeWithOptionalPriority, str]) -> ScopeWithPriority:
@@ -2193,10 +2162,7 @@ def create_from(*scopes_or_paths: Union[ScopeWithOptionalPriority, str]) -> Conf
 
 
 def determine_number_of_jobs(
-    *,
-    parallel: bool = False,
-    max_cpus: int = cpus_available(),
-    config: Optional[Configuration] = None,
+    *, parallel: bool = False, max_cpus: int = cpus_available(), config: Configuration
 ) -> int:
     """
     Packages that require sequential builds need 1 job. Otherwise we use the
@@ -2207,22 +2173,20 @@ def determine_number_of_jobs(
     Parameters:
         parallel: true when package supports parallel builds
         max_cpus: maximum number of CPUs to use (defaults to cpus_available())
-        config: configuration object (defaults to global config)
+        config: configuration object
     """
     if not parallel:
         return 1
 
-    cfg = config or CONFIG
-
     # Command line overrides all
     try:
-        command_line = cfg.get("config:build_jobs", default=None, scope="command_line")
+        command_line = config.get("config:build_jobs", default=None, scope="command_line")
         if command_line is not None:
             return command_line
     except ValueError:
         pass
 
-    return min(max_cpus, cfg.get("config:build_jobs", 16))
+    return min(max_cpus, config.get("config:build_jobs", 16))
 
 
 def architecture():
@@ -2255,7 +2219,14 @@ NOMATCH = object()
 
 
 # Substitutions to perform
-def replacements(config: Optional["Configuration"] = None):
+class HasEnvPath(Protocol):
+    """What path substitution reads from a configuration: the root of its environment."""
+
+    @property
+    def env_path(self) -> Optional[str]: ...
+
+
+def replacements(config: HasEnvPath):
     arch = architecture()
 
     return {
@@ -2272,12 +2243,12 @@ def replacements(config: Optional["Configuration"] = None):
         "target": lambda: arch.target,
         "target_family": lambda: arch.target.family,
         "date": lambda: __import__("datetime").date.today().strftime("%Y-%m-%d"),
-        "env": lambda: (config if config is not None else CONFIG).env_path or NOMATCH,
+        "env": lambda: config.env_path or NOMATCH,
         "spack_short_version": lambda: spack.get_short_version(),
     }
 
 
-def substitute_config_variables(path, config: Optional["Configuration"] = None):
+def substitute_config_variables(path, config: HasEnvPath):
     """Substitute placeholders into paths.
 
     Spack allows paths in configs to have some placeholders, as follows:
@@ -2316,7 +2287,7 @@ def substitute_config_variables(path, config: Optional["Configuration"] = None):
     return re.sub(r"(\$\w+\b|\$\{\w+\})", repl, path)
 
 
-def substitute_path_variables(path, config: Optional["Configuration"] = None):
+def substitute_path_variables(path, config: HasEnvPath):
     """Substitute config vars, expand environment vars, expand user home."""
     path = substitute_config_variables(path, config)
     path = os.path.expandvars(path)
@@ -2324,9 +2295,7 @@ def substitute_path_variables(path, config: Optional["Configuration"] = None):
     return path
 
 
-def canonicalize_path(
-    path: str, default_wd: Optional[str] = None, *, config: Optional["Configuration"] = None
-) -> str:
+def canonicalize_path(path: str, default_wd: Optional[str] = None, *, config: HasEnvPath) -> str:
     """Same as substitute_path_variables, but also take absolute path.
 
     If the string is a yaml object with file annotations, make absolute paths
@@ -2336,6 +2305,7 @@ def canonicalize_path(
     Arguments:
         path: path being converted as needed
         default_wd: optional working directory/root for non-yaml string paths
+        config: configuration providing ``$env``
 
     Returns: An absolute path or non-file URL with path variable substitution
     """

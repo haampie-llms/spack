@@ -24,7 +24,7 @@ from .url_buildcache import BuildcacheComponent, URLBuildcacheEntry, get_entries
 
 
 def _fetch_manifests(
-    mirror: Mirror,
+    mirror: Mirror, *, config: spack.config.Configuration, client: web_util.NetworkClient
 ) -> Tuple[Dict[str, float], Callable[[str], URLBuildcacheEntry], List[str]]:
     """
     Fetch all manifests from the buildcache for a given mirror.
@@ -38,13 +38,13 @@ def _fetch_manifests(
              callable to read each manifest, and a list of blobs in the mirror.
     """
     manifest_file_to_mtime_mapping, read_fn = get_entries_from_cache(
-        mirror.fetch_url, BuildcacheComponent.MANIFEST
+        mirror.fetch_url, BuildcacheComponent.MANIFEST, config=config, client=client
     )
     url_to_list = url_util.join(
         mirror.fetch_url, spack.binary_distribution.buildcache_relative_blobs_path()
     )
     tty.debug(f"Listing blobs in {url_to_list}")
-    blobs = web_util.list_url(url_to_list, recursive=True) or []
+    blobs = web_util.list_url(url_to_list, recursive=True, client=client) or []
     if not blobs:
         tty.warn(f"Unable to list blobs in {url_to_list}")
     blobs = [
@@ -58,7 +58,11 @@ def _fetch_manifests(
 
 
 def _delete_entries_from_cache(
-    manifests_to_delete: Set[str], blobs_to_delete: Set[str], dry_run: bool
+    manifests_to_delete: Set[str],
+    blobs_to_delete: Set[str],
+    dry_run: bool,
+    *,
+    client: web_util.NetworkClient,
 ) -> int:
     urls_to_delete = blobs_to_delete.union(manifests_to_delete)
     pruned_objects = 0
@@ -66,7 +70,7 @@ def _delete_entries_from_cache(
 
     with spack.util.parallel.make_concurrent_executor() as executor:
         for url in urls_to_delete:
-            futures.append(executor.submit(_delete_object, url, dry_run))
+            futures.append(executor.submit(_delete_object, url, dry_run, client))
 
         for manifest_or_blob_future in as_completed(futures):
             pruned_objects += manifest_or_blob_future.result()
@@ -74,12 +78,12 @@ def _delete_entries_from_cache(
     return pruned_objects
 
 
-def _delete_object(url: str, dry_run: bool) -> int:
+def _delete_object(url: str, dry_run: bool, client: web_util.NetworkClient) -> int:
     try:
         if dry_run:
             tty.info(f"Would have removed object {url}")
         else:
-            web_util.remove_url(url=url)
+            web_util.remove_url(url=url, client=client)
             tty.info(f"Removed object {url}")
         return 1
     except Exception as e:
@@ -87,13 +91,15 @@ def _delete_object(url: str, dry_run: bool) -> int:
         return 0
 
 
-def _object_has_prunable_mtime(url: str, pruning_started_at: float) -> Tuple[str, bool]:
+def _object_has_prunable_mtime(
+    url: str, pruning_started_at: float, client: web_util.NetworkClient
+) -> Tuple[str, bool]:
     """Check if an object's modification time makes it eligible for pruning.
 
     Objects modified after pruning started should not be pruned to avoid
     race conditions with concurrent uploads.
     """
-    stat_result = web_util.stat_url(url)
+    stat_result = web_util.stat_url(url, client=client)
     assert stat_result is not None
     if stat_result[1] > pruning_started_at:
         tty.info(f"Skipping deletion of {url} because it was modified after pruning started")
@@ -101,7 +107,9 @@ def _object_has_prunable_mtime(url: str, pruning_started_at: float) -> Tuple[str
     return url, True
 
 
-def _filter_new_specs(urls: Iterable[str], pruning_started_at: float) -> Iterator[str]:
+def _filter_new_specs(
+    urls: Iterable[str], pruning_started_at: float, *, client: web_util.NetworkClient
+) -> Iterator[str]:
     """Filter out URLs that were modified after pruning started.
 
     Runs parallel modification time checks on all URLs and yields only
@@ -110,7 +118,9 @@ def _filter_new_specs(urls: Iterable[str], pruning_started_at: float) -> Iterato
     with spack.util.parallel.make_concurrent_executor() as executor:
         futures = []
         for url in urls:
-            futures.append(executor.submit(_object_has_prunable_mtime, url, pruning_started_at))
+            futures.append(
+                executor.submit(_object_has_prunable_mtime, url, pruning_started_at, client)
+            )
 
         for manifest_or_blob_future in as_completed(futures):
             url, has_prunable_mtime = manifest_or_blob_future.result()
@@ -125,6 +135,8 @@ def _prune_orphans(
     blobs: List[str],
     pruning_started_at: float,
     dry_run: bool,
+    *,
+    client: web_util.NetworkClient,
 ) -> int:
     """
     Prune orphaned manifests and blobs from the buildcache.
@@ -191,8 +203,10 @@ def _prune_orphans(
         return 0
 
     # Filter out any new specs that have been uploaded since the pruning started
-    orphaned_blobs = set(_filter_new_specs(orphaned_blobs, pruning_started_at))
-    orphaned_manifests = set(_filter_new_specs(orphaned_manifests, pruning_started_at))
+    orphaned_blobs = set(_filter_new_specs(orphaned_blobs, pruning_started_at, client=client))
+    orphaned_manifests = set(
+        _filter_new_specs(orphaned_manifests, pruning_started_at, client=client)
+    )
 
     if orphaned_blobs:
         tty.info(f"Found {len(orphaned_blobs)} blob(s) with no manifest")
@@ -200,7 +214,10 @@ def _prune_orphans(
         tty.info(f"Found {len(orphaned_manifests)} manifest(s) that are missing blobs")
 
     pruned_object_count = _delete_entries_from_cache(
-        manifests_to_delete=orphaned_manifests, blobs_to_delete=orphaned_blobs, dry_run=dry_run
+        manifests_to_delete=orphaned_manifests,
+        blobs_to_delete=orphaned_blobs,
+        dry_run=dry_run,
+        client=client,
     )
 
     for manifest in orphaned_manifests:
@@ -219,6 +236,8 @@ def prune_direct(
     blob_list: List[str],
     pruning_started_at: float,
     dry_run: bool,
+    *,
+    client: web_util.NetworkClient,
 ) -> None:
     """
     Execute direct pruning for a given mirror using a keeplist file.
@@ -288,12 +307,17 @@ def prune_direct(
         tty.info("No specs to prune - all specs are in the keeplist")
         return
 
-    manifests_to_delete = set(_filter_new_specs(manifests_to_prune, pruning_started_at))
+    manifests_to_delete = set(
+        _filter_new_specs(manifests_to_prune, pruning_started_at, client=client)
+    )
 
     tty.info(f"Found {len(manifests_to_delete)} spec(s) to prune")
 
     total_pruned = _delete_entries_from_cache(
-        manifests_to_delete=manifests_to_delete, blobs_to_delete=set(), dry_run=dry_run
+        manifests_to_delete=manifests_to_delete,
+        blobs_to_delete=set(),
+        dry_run=dry_run,
+        client=client,
     )
 
     # Remove pruned specs from manifest_to_mtime_mapping.
@@ -318,6 +342,8 @@ def prune_orphan(
     blob_list: List[str],
     pruning_started_at: float,
     dry_run: bool,
+    *,
+    client: web_util.NetworkClient,
 ) -> None:
     """
     Execute the pruning process for a given mirror.
@@ -339,6 +365,7 @@ def prune_orphan(
             blobs=blob_list,
             pruning_started_at=pruning_started_at,
             dry_run=dry_run,
+            client=client,
         )
         if pruned == 0:
             break
@@ -359,7 +386,9 @@ def prune_orphan(
             tty.info("Run `spack buildcache update-index` to update the index for this mirror.")
 
 
-def get_buildcache_normalized_time(mirror: Mirror) -> float:
+def get_buildcache_normalized_time(
+    mirror: Mirror, *, config: spack.config.Configuration, client: web_util.NetworkClient
+) -> float:
     """
     Get the current time as reported by the buildcache.
 
@@ -368,26 +397,36 @@ def get_buildcache_normalized_time(mirror: Mirror) -> float:
     on it, and then deletes it. This guarantees that the time used for the beginning
     of the pruning is consistent across all buildcache implementations.
     """
-    with tempfile.TemporaryDirectory(dir=spack.stage.stage_root(spack.config.CONFIG)) as f:
+    with tempfile.TemporaryDirectory(dir=spack.stage.stage_root(config)) as f:
         tmpdir = Path(f)
         touch_file = tmpdir / f".spack-prune-marker-{uuid.uuid4()}"
         touch_file.touch()
         remote_path = url_util.join(mirror.push_url, touch_file.name)
 
         web_util.push_to_url(
-            local_file_path=str(touch_file), remote_path=remote_path, keep_original=True
+            local_file_path=str(touch_file),
+            remote_path=remote_path,
+            keep_original=True,
+            client=client,
         )
 
-        stat_info = web_util.stat_url(remote_path)
+        stat_info = web_util.stat_url(remote_path, client=client)
         assert stat_info is not None
         start_time = stat_info[1]
 
-        web_util.remove_url(remote_path)
+        web_util.remove_url(remote_path, client=client)
 
         return start_time
 
 
-def prune_buildcache(mirror: Mirror, keeplist: Optional[str] = None, dry_run: bool = False):
+def prune_buildcache(
+    mirror: Mirror,
+    keeplist: Optional[str] = None,
+    dry_run: bool = False,
+    *,
+    config: spack.config.Configuration,
+    client: web_util.NetworkClient,
+):
     """
     Runs buildcache pruning for a given mirror.
 
@@ -395,19 +434,23 @@ def prune_buildcache(mirror: Mirror, keeplist: Optional[str] = None, dry_run: bo
         mirror: Mirror to prune
         keeplist_file: Path to file containing newline-delimited hashes to keep
         dry_run: Whether to perform a dry run without actually deleting
+        config: configuration for temporary files and stages
+        client: network client used to access the mirror
     """
     # Determine the time to use as the "started at" time for pruning.
     # If a cache index exists, use that time. Otherwise, use the current time (normalized
     # to the buildcache's time zone).
     cache_index_url = URLBuildcacheEntry.get_index_url(mirror_url=mirror.fetch_url)
-    stat_result = web_util.stat_url(cache_index_url)
+    stat_result = web_util.stat_url(cache_index_url, client=client)
     if stat_result is not None:
         started_at = stat_result[1]
     else:
-        started_at = get_buildcache_normalized_time(mirror)
+        started_at = get_buildcache_normalized_time(mirror, config=config, client=client)
 
     try:
-        manifest_to_mtime_mapping, read_fn, blob_list = _fetch_manifests(mirror)
+        manifest_to_mtime_mapping, read_fn, blob_list = _fetch_manifests(
+            mirror, config=config, client=client
+        )
     except Exception as e:
         raise BuildcachePruningException("Error getting entries from buildcache") from e
 
@@ -420,9 +463,12 @@ def prune_buildcache(mirror: Mirror, keeplist: Optional[str] = None, dry_run: bo
             blob_list,
             started_at,
             dry_run,
+            client=client,
         )
 
-    prune_orphan(mirror, manifest_to_mtime_mapping, read_fn, blob_list, started_at, dry_run)
+    prune_orphan(
+        mirror, manifest_to_mtime_mapping, read_fn, blob_list, started_at, dry_run, client=client
+    )
 
 
 class BuildcachePruningException(spack.error.SpackError):

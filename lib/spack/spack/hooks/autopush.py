@@ -20,16 +20,21 @@ def post_install(spec, explicit):
         return
 
     # Push the package to all autopush mirrors
-    for mirror in spack.mirrors.mirror.MirrorCollection(binary=True, autopush=True).values():
+    ctx = pkg.context
+    for mirror in spack.mirrors.mirror.MirrorCollection.from_config(
+        ctx.config, binary=True, autopush=True
+    ).values():
         if not mirror.matches_binary(spec, direction="push"):
             tty.debug(
                 f"{spec.name}: Skipped push to '{mirror.name}' due to include/exclude filters"
             )
             continue
 
-        signing_key = spack.binary_distribution.select_signing_key() if mirror.signed else None
+        signing_key = (
+            spack.binary_distribution.select_signing_key(ctx.gpg) if mirror.signed else None
+        )
         with spack.binary_distribution.make_uploader(
-            mirror=mirror, force=True, signing_key=signing_key
+            mirror=mirror, force=True, signing_key=signing_key, ctx=ctx
         ) as uploader:
             uploader.push_or_raise([spec])
         tty.msg(f"{spec.name}: Pushed to build cache: '{mirror.name}'")

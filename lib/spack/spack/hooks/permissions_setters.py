@@ -13,9 +13,10 @@ def post_install(spec, explicit=None):
         return
 
     # Pre-calculate config variables (expensive to lookup for each file)
-    dir_perms = pp.get_package_dir_permissions(spec)
-    file_perms = pp.get_package_permissions(spec)
-    group = pp.get_package_group(spec)
+    config = spec.package.context.config
+    dir_perms = pp.get_package_dir_permissions(spec, config=config)
+    file_perms = pp.get_package_permissions(spec, config=config)
+    group = pp.get_package_group(spec, config=config)
 
     # Set permissions on installation prefix
     fp.set_permissions(spec.prefix, dir_perms, group)

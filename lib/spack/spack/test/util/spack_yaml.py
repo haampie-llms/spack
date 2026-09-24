@@ -5,7 +5,7 @@
 import re
 
 from spack.config import Configuration
-from spack.main import SpackCommand
+from spack.test.harness import SpackCommand
 
 config_cmd = SpackCommand("config")
 

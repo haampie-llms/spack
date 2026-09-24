@@ -10,10 +10,9 @@ import pytest
 import spack.detection
 import spack.detection.common
 import spack.detection.path
-import spack.repo
 import spack.spec
+import spack.test.harness
 from spack.config import Configuration
-from spack.test.utilities import UnusableGlobal
 
 
 def test_detection_update_config(mutable_config: Configuration):
@@ -86,7 +85,10 @@ def test_detect_specs_deduplicates_across_prefixes(tmp_path, monkeypatch, mock_p
 
     finder = spack.detection.path.ExecutablesFinder()
     detected = finder.detect_specs(
-        pkg=cmake_cls, paths=[str(exe_a), str(exe_b)], repo_path=mock_packages
+        pkg=cmake_cls,
+        paths=[str(exe_a), str(exe_b)],
+        repo_path=mock_packages,
+        config=spack.test.harness.current().config,
     )
 
     # Both prefixes produce cmake@3.17.1; only the first should be kept.
@@ -168,13 +170,12 @@ def test_detect_specs_validates_variants_with_injected_repo(tmp_path, monkeypatc
 
     monkeypatch.setattr(gcc_cls, "determine_spec_details", _determine_spec_details)
 
-    with monkeypatch.context() as m:
-        m.setattr(spack.repo, "PATH", UnusableGlobal("spack.repo.PATH"))
-        detected = spack.detection.path.ExecutablesFinder().detect_specs(
-            pkg=gcc_cls,
-            paths=[str(p / "bin" / "gcc") for p in prefixes.values()],
-            repo_path=mock_packages,
-        )
+    detected = spack.detection.path.ExecutablesFinder().detect_specs(
+        pkg=gcc_cls,
+        paths=[str(p / "bin" / "gcc") for p in prefixes.values()],
+        repo_path=mock_packages,
+        config=spack.test.harness.current().config,
+    )
 
     assert len(detected) == 1
     assert detected[0].external_path == str(prefixes["valid"] / "bin")

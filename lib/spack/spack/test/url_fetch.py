@@ -15,6 +15,7 @@ import spack.concretize
 import spack.error
 import spack.fetch_strategy as fs
 import spack.package_base
+import spack.test.harness
 import spack.url
 import spack.util.web as web_util
 import spack.version
@@ -27,7 +28,7 @@ from spack.util.filesystem import is_exe, working_dir
 
 @pytest.fixture
 def missing_curl(monkeypatch):
-    def require_curl():
+    def require_curl(*, client):
         raise spack.error.FetchError("curl is required but not found")
 
     monkeypatch.setattr(web_util, "require_curl", require_curl)
@@ -81,7 +82,12 @@ def test_urlfetchstrategy_bad_url(tmp_path: pathlib.Path, mutable_config, method
     mutable_config.set("config:url_fetch_method", method)
     fetcher = fs.URLFetchStrategy(url=(tmp_path / "does-not-exist").as_uri())
 
-    with stage_from_config(fetcher, path=str(tmp_path / "stage"), config=mutable_config):
+    with stage_from_config(
+        fetcher,
+        path=str(tmp_path / "stage"),
+        config=mutable_config,
+        client=web_util.NetworkClient.from_config(mutable_config),
+    ):
         with pytest.raises(fs.FailedDownloadError) as exc:
             fetcher.fetch()
 
@@ -102,7 +108,12 @@ def test_fetch_options(mutable_config: Configuration, tmp_path: pathlib.Path, mo
             url=mock_archive.url, fetch_options={"cookie": "True", "timeout": 10}
         )
 
-        with stage_from_config(fetcher, path=str(tmp_path), config=mutable_config):
+        with stage_from_config(
+            fetcher,
+            path=str(tmp_path),
+            config=mutable_config,
+            client=web_util.NetworkClient.from_config(mutable_config),
+        ):
             assert fetcher.archive_file is None
             fetcher.fetch()
             archive_file = fetcher.archive_file
@@ -124,9 +135,13 @@ def test_fetch_curl_options(
             assert args[1:3] == ("-k", "-q")
             raise StopIteration
 
-        monkeypatch.setattr(type(fetcher.curl), "__call__", check_args)
-
-        with stage_from_config(fetcher, path=str(tmp_path), config=mutable_config):
+        with stage_from_config(
+            fetcher,
+            path=str(tmp_path),
+            config=mutable_config,
+            client=web_util.NetworkClient.from_config(mutable_config),
+        ):
+            monkeypatch.setattr(type(fetcher.curl), "__call__", check_args)
             assert fetcher.archive_file is None
             with pytest.raises(StopIteration):
                 fetcher.fetch()
@@ -139,7 +154,12 @@ def test_archive_file_errors(
     """Ensure FetchStrategy commands may only be used as intended"""
     with mutable_config.override("config:url_fetch_method", _fetch_method):
         fetcher = fs.URLFetchStrategy(url=mock_archive.url)
-        with stage_from_config(fetcher, path=str(tmp_path), config=mutable_config) as stage:
+        with stage_from_config(
+            fetcher,
+            path=str(tmp_path),
+            config=mutable_config,
+            client=web_util.NetworkClient.from_config(mutable_config),
+        ) as stage:
             assert fetcher.archive_file is None
             with pytest.raises(fs.NoArchiveFileError):
                 fetcher.archive(str(tmp_path))
@@ -181,7 +201,7 @@ def test_fetch(
     # Get a spec and tweak the test package with new checksum params. versions is a class-level
     # dict shared across instances and cached with the package module, so add the version via
     # monkeypatch to restore it after the test instead of leaking it into later tests.
-    s = spack.concretize.concretize_one("url-test")
+    s = spack.concretize.concretize_one("url-test", spack.test.harness.current())
     s.package.url = mock_archive.url
     monkeypatch.setitem(
         s.package.versions,
@@ -189,11 +209,15 @@ def test_fetch(
         {checksum_type: checksum, "url": s.package.url},
     )
 
+    # The stage reads the network settings when it is created
+    with config.override("config:verify_ssl", secure), config.override(
+        "config:url_fetch_method", _fetch_method
+    ):
+        stage = s.package.stage
+
     # Enter the stage directory and check some properties
-    with s.package.stage:
-        with config.override("config:verify_ssl", secure):
-            with config.override("config:url_fetch_method", _fetch_method):
-                s.package.do_stage()
+    with stage:
+        s.package.do_stage()
         with working_dir(s.package.stage.source_path):
             assert os.path.exists("configure")
             assert is_exe("configure")
@@ -223,7 +247,7 @@ def test_from_list_url(mock_packages, config: Configuration, spec, url, digest, 
     have checksums in the package.
     """
     with config.override("config:url_fetch_method", _fetch_method):
-        s = spack.concretize.concretize_one(spec)
+        s = spack.concretize.concretize_one(spec, spack.test.harness.current())
         fetch_strategy = fs.from_list_url(s.package)
         assert isinstance(fetch_strategy, fs.URLFetchStrategy)
         assert os.path.basename(fetch_strategy.url) == url
@@ -249,7 +273,9 @@ def test_new_version_from_list_url(
 ):
     """Test non-specific URLs from the url-list-test package."""
     with config.override("config:url_fetch_method", _fetch_method):
-        s = spack.concretize.concretize_one(f"url-list-test @{requested_version}")
+        s = spack.concretize.concretize_one(
+            f"url-list-test @{requested_version}", spack.test.harness.current()
+        )
         fetch_strategy = fs.from_list_url(s.package)
 
         assert isinstance(fetch_strategy, fs.URLFetchStrategy)
@@ -263,7 +289,7 @@ def test_new_version_from_list_url(
 
 def test_nosource_from_list_url(mock_packages, config):
     """This test confirms BundlePackages do not have list url."""
-    s = spack.concretize.concretize_one("nosource")
+    s = spack.concretize.concretize_one("nosource", spack.test.harness.current())
     fetch_strategy = fs.from_list_url(s.package)
     assert fetch_strategy is None
 
@@ -295,7 +321,12 @@ def test_url_with_status_bar(
     monkeypatch.setattr(tty, "msg_enabled", is_true)
     with mutable_config.override("config:url_fetch_method", "curl"):
         fetcher = fs.URLFetchStrategy(url=mock_archive.url)
-        with stage_from_config(fetcher, path=testpath, config=mutable_config) as stage:
+        with stage_from_config(
+            fetcher,
+            path=testpath,
+            config=mutable_config,
+            client=web_util.NetworkClient.from_config(mutable_config),
+        ) as stage:
             assert fetcher.archive_file is None
             stage.fetch()
 
@@ -308,7 +339,12 @@ def test_url_extra_fetch(tmp_path: pathlib.Path, mutable_config, mock_archive, _
     """Ensure a fetch after downloading is effectively a no-op."""
     mutable_config.set("config:url_fetch_method", _fetch_method)
     fetcher = fs.URLFetchStrategy(url=mock_archive.url)
-    with stage_from_config(fetcher, path=str(tmp_path), config=mutable_config) as stage:
+    with stage_from_config(
+        fetcher,
+        path=str(tmp_path),
+        config=mutable_config,
+        client=web_util.NetworkClient.from_config(mutable_config),
+    ) as stage:
         assert fetcher.archive_file is None
         stage.fetch()
         archive_file = fetcher.archive_file
@@ -357,20 +393,26 @@ def test_missing_curl(tmp_path: pathlib.Path, missing_curl, mutable_config, monk
     mutable_config.set("config:url_fetch_method", "curl")
     fetcher = fs.URLFetchStrategy(url="http://example.com/file.tar.gz")
     with pytest.raises(spack.error.FetchError, match="curl is required but not found"):
-        with stage_from_config(fetcher, path=str(tmp_path), config=mutable_config) as stage:
+        with stage_from_config(
+            fetcher,
+            path=str(tmp_path),
+            config=mutable_config,
+            client=web_util.NetworkClient.from_config(mutable_config),
+        ) as stage:
             stage.fetch()
 
 
-def test_url_fetch_text_without_url():
+def test_url_fetch_text_without_url(config):
     with pytest.raises(spack.error.FetchError, match="URL is required"):
-        web_util.fetch_url_text(None)
+        web_util.fetch_url_text(None, client=web_util.NetworkClient.from_config(config))
 
 
 def test_url_fetch_text_curl_failures(mutable_config, missing_curl, monkeypatch):
     """Check fetch_url_text if URL's curl is missing."""
     mutable_config.set("config:url_fetch_method", "curl")
     with pytest.raises(spack.error.FetchError, match="curl is required but not found"):
-        web_util.fetch_url_text("https://example.com/")
+        client = web_util.NetworkClient.from_config(mutable_config)
+        web_util.fetch_url_text("https://example.com/", client=client)
 
 
 def test_url_check_curl_errors():
@@ -388,7 +430,8 @@ def test_url_missing_curl(mutable_config, missing_curl, monkeypatch):
     """Check url_exists failures if URL's curl is missing."""
     mutable_config.set("config:url_fetch_method", "curl")
     with pytest.raises(spack.error.FetchError, match="curl is required but not found"):
-        web_util.url_exists("https://example.com/")
+        client = web_util.NetworkClient.from_config(mutable_config)
+        web_util.url_exists("https://example.com/", client=client)
 
 
 def test_url_fetch_text_urllib_web_error(mutable_config, monkeypatch):
@@ -399,4 +442,18 @@ def test_url_fetch_text_urllib_web_error(mutable_config, monkeypatch):
     mutable_config.set("config:url_fetch_method", "urllib")
 
     with pytest.raises(spack.error.FetchError, match="fetch failed"):
-        web_util.fetch_url_text("https://example.com/")
+        client = web_util.NetworkClient.from_config(mutable_config)
+        web_util.fetch_url_text("https://example.com/", client=client)
+
+
+def test_url_exists_uses_given_fetch_method(
+    mutable_config: Configuration, inactive_config, missing_curl
+):
+    """Tests that the fetch method is read from the configuration passed as an argument, and not
+    from the global one."""
+    mutable_config.set("config:url_fetch_method", "urllib")
+    with_curl = inactive_config({"config": {"url_fetch_method": "curl"}})
+
+    with pytest.raises(spack.error.FetchError, match="curl is required but not found"):
+        client = web_util.NetworkClient.from_config(with_curl)
+        web_util.url_exists("https://example.com/", client=client)

@@ -100,7 +100,6 @@ spack = ["spack"]
 "var/spack/*/package.py" = ["F403", "F405", "F811", "F821"]
 "*-ci-package.py" = ["F403", "F405", "F821"]
 
-
 [tool.mypy]
 files = ["lib/spack/spack/**/*.py"]
 exclude = "lib/spack/spack/vendor"

@@ -9,12 +9,13 @@ import pytest
 import spack.database
 import spack.environment as ev
 import spack.package_base
-import spack.store
+import spack.test.harness
 import spack.traverse
 from spack.cmd.stage import StageFilter
 from spack.config import Configuration
-from spack.main import SpackCommand, SpackCommandError
+from spack.main import SpackCommandError
 from spack.spec import Spec
+from spack.test.harness import SpackCommand
 from spack.version import Version
 
 stage = SpackCommand("stage")
@@ -72,7 +73,7 @@ def test_stage_with_env_outside_env(mutable_mock_env_path, monkeypatch):
 
     monkeypatch.setattr(spack.package_base.PackageBase, "do_stage", fake_stage)
 
-    e = ev.create("test")
+    e = ev.create("test", ctx=spack.test.harness.current())
     e.add("mpileaks")
     e.concretize()
 
@@ -90,7 +91,7 @@ def test_stage_with_env_inside_env(mutable_mock_env_path, monkeypatch):
 
     monkeypatch.setattr(spack.package_base.PackageBase, "do_stage", fake_stage)
 
-    e = ev.create("test")
+    e = ev.create("test", ctx=spack.test.harness.current())
     e.add("mpileaks@=100.100")
     e.concretize()
 
@@ -102,7 +103,7 @@ def test_stage_with_env_inside_env(mutable_mock_env_path, monkeypatch):
 def test_stage_full_env(mutable_mock_env_path, monkeypatch):
     """Verify that stage filters specs in environment."""
 
-    e = ev.create("test")
+    e = ev.create("test", ctx=spack.test.harness.current())
     e.add("mpileaks@=100.100")
     e.concretize()
 
@@ -151,7 +152,7 @@ def test_stage_spec_filters(
     exclusions,
     monkeypatch,
 ):
-    e = ev.create("test")
+    e = ev.create("test", ctx=spack.test.harness.current())
     e.add("mpileaks@=100.100")
     e.concretize()
     all_specs = e.all_specs()
@@ -171,13 +172,15 @@ def test_stage_spec_filters(
                 should_be_filtered.append(spec)
         for ins in installed:
             if skip_installed and spec.satisfies(Spec(ins)):
-                assert spack.store.STORE.db.installed(spec)
+                assert spack.test.harness.current().store.db.installed(spec)
                 should_be_filtered.append(spec)
         for exc in exclusions:
             if spec.satisfies(Spec(exc)):
                 should_be_filtered.append(spec)
 
-    filter = StageFilter(exclusions, skip_installed=skip_installed)
+    filter = StageFilter(
+        exclusions, skip_installed=skip_installed, store=spack.test.harness.current().store
+    )
     specs_to_stage = [s for s in all_specs if not filter(s)]
     specs_were_filtered = [skip not in specs_to_stage for skip in should_be_filtered]
 

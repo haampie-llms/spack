@@ -4,14 +4,16 @@
 """Query the status of bootstrapping on this machine"""
 
 import sys
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import TYPE_CHECKING, List, Optional, Sequence, Tuple, Union
 
 import spack.util.executable
 
 from ._common import _executables_in_store, _python_import, _try_import_from_store
-from .config import ensure_bootstrap_configuration
 from .core import clingo_root_spec, gnupg_root_spec, patchelf_root_spec
 from .environment import BootstrapEnvironment, mypy_root_spec, pytest_root_spec, ruff_root_spec
+
+if TYPE_CHECKING:
+    import spack.context
 
 ExecutablesType = Union[str, Sequence[str]]
 RequiredResponseType = Tuple[bool, Optional[str]]
@@ -28,21 +30,23 @@ def _required_system_executable(exes: ExecutablesType, msg: str) -> RequiredResp
 
 
 def _required_executable(
-    exes: ExecutablesType, query_spec: SpecLike, msg: str
+    exes: ExecutablesType, query_spec: SpecLike, msg: str, ctx: "spack.context.SpackContext"
 ) -> RequiredResponseType:
     """Search for an executable in the system path or in the bootstrap store."""
     if isinstance(exes, str):
         exes = (exes,)
-    if spack.util.executable.which_string(*exes) or _executables_in_store(exes, query_spec):
+    if spack.util.executable.which_string(*exes) or _executables_in_store(exes, query_spec, ctx):
         return True, None
     return False, msg
 
 
-def _required_python_module(module: str, query_spec: SpecLike, msg: str) -> RequiredResponseType:
+def _required_python_module(
+    module: str, query_spec: SpecLike, msg: str, ctx: "spack.context.SpackContext"
+) -> RequiredResponseType:
     """Check if a Python module is available in the current interpreter or
     if it can be loaded from the bootstrap store
     """
-    if _python_import(module) or _try_import_from_store(module, query_spec):
+    if _python_import(module) or _try_import_from_store(module, query_spec, ctx):
         return True, None
     return False, msg
 
@@ -55,7 +59,7 @@ def _missing(name: str, purpose: str, system_only: bool = True) -> str:
     return msg.format(name, purpose, "@*y{{-}}")
 
 
-def _core_requirements() -> List[RequiredResponseType]:
+def _core_requirements(ctx: "spack.context.SpackContext") -> List[RequiredResponseType]:
     _core_system_exes = {
         "patch": _missing("patch", "required to patch source code before building"),
         "tar": _missing("tar", "required to manage code archives"),
@@ -72,13 +76,16 @@ def _core_requirements() -> List[RequiredResponseType]:
     # Python modules
     result.append(
         _required_python_module(
-            "clingo", clingo_root_spec(), _missing("clingo", "required to concretize specs", False)
+            "clingo",
+            clingo_root_spec(),
+            _missing("clingo", "required to concretize specs", False),
+            ctx,
         )
     )
     return result
 
 
-def _buildcache_requirements() -> List[RequiredResponseType]:
+def _buildcache_requirements(ctx: "spack.context.SpackContext") -> List[RequiredResponseType]:
     # Add bootstrappable executables (these can be in PATH or bootstrapped)
     # GPG/GPG2 - used for signing and verifying buildcaches
     result = [
@@ -86,6 +93,7 @@ def _buildcache_requirements() -> List[RequiredResponseType]:
             ("gpg2", "gpg"),
             gnupg_root_spec(),
             _missing("gpg2", "required to sign/verify buildcaches", False),
+            ctx,
         )
     ]
 
@@ -96,13 +104,14 @@ def _buildcache_requirements() -> List[RequiredResponseType]:
                 "patchelf",
                 patchelf_root_spec(),
                 _missing("patchelf", "required to relocate binaries", False),
+                ctx,
             )
         )
 
     return result
 
 
-def _optional_requirements() -> List[RequiredResponseType]:
+def _optional_requirements(ctx: "spack.context.SpackContext") -> List[RequiredResponseType]:
     _optional_exes = {
         "zstd": _missing("zstd", "required to compress/decompress code archives"),
         "svn": _missing("svn", "required to manage subversion repositories"),
@@ -113,34 +122,39 @@ def _optional_requirements() -> List[RequiredResponseType]:
     return result
 
 
-def _development_requirements() -> List[RequiredResponseType]:
+def _development_requirements(ctx: "spack.context.SpackContext") -> List[RequiredResponseType]:
     # Ensure we trigger environment modifications if we have an environment
-    if BootstrapEnvironment.spack_yaml().exists():
-        with BootstrapEnvironment() as env:
+    if (BootstrapEnvironment.environment_root(ctx.config) / "spack.yaml").exists():
+        with BootstrapEnvironment(ctx) as env:
             env.load()
 
     return [
         _required_python_module(
-            "pytest", pytest_root_spec(), _missing("pytest", "required to run unit-test", False)
+            "pytest",
+            pytest_root_spec(),
+            _missing("pytest", "required to run unit-test", False),
+            ctx,
         ),
         _required_executable(
             "ruff",
             ruff_root_spec(),
             _missing("ruff", "required for code checking/formatting", False),
+            ctx,
         ),
         _required_executable(
-            "mypy", mypy_root_spec(), _missing("mypy", "required for type checks", False)
+            "mypy", mypy_root_spec(), _missing("mypy", "required for type checks", False), ctx
         ),
     ]
 
 
-def status_message(section) -> Tuple[str, bool]:
+def status_message(section, ctx: "spack.context.SpackContext") -> Tuple[str, bool]:
     """Return a status message to be printed to screen that refers to the
     section passed as argument and a bool which is True if there are missing
     dependencies.
 
     Args:
         section (str): either 'core' or 'buildcache' or 'optional' or 'develop'
+        ctx: context whose bootstrap store is searched
     """
     pass_token, fail_token = "@*g{[PASS]}", "@*r{[FAIL]}"
 
@@ -153,12 +167,11 @@ def status_message(section) -> Tuple[str, bool]:
     }
     msg, required_software = spack_sections[section]
 
-    with ensure_bootstrap_configuration():
-        missing_software = False
-        for found, err_msg in required_software():
-            if not found and err_msg:
-                missing_software = True
-                msg += "\n  " + err_msg
-        msg += "\n"
-        msg = msg.format(pass_token if not missing_software else fail_token)
+    missing_software = False
+    for found, err_msg in required_software(ctx.bootstrap):
+        if not found and err_msg:
+            missing_software = True
+            msg += "\n  " + err_msg
+    msg += "\n"
+    msg = msg.format(pass_token if not missing_software else fail_token)
     return msg, missing_software

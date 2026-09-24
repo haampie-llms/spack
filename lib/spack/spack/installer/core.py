@@ -22,9 +22,9 @@ import spack.deprecation
 import spack.error
 import spack.mirrors.mirror
 import spack.report
+import spack.sandbox
 import spack.spec
 import spack.stage
-import spack.store
 import spack.traverse
 import spack.url_buildcache
 import spack.util.filesystem as fs
@@ -199,21 +199,29 @@ class PackageInstaller:
         create_reports: bool = False,
         ui: Optional[InstallerUI] = None,
         launcher: Callable[[BuildRequest, JobServerBase], ChildInfo] = start_build,
-        store: Optional[spack.store.Store] = None,
     ) -> None:
         assert install_package or install_deps, "Must install package, dependencies or both"
+        assert packages, "Must install at least one package"
 
         self.install_source = install_source
         self.stop_at = stop_at
         self.stop_before = stop_before
         self.tests: Union[bool, List[str], Set[str]] = tests
 
-        self.store = store or spack.store.STORE
+        #: Resources of the packages to install
+        self.ctx = packages[0].context
+        self.store = self.ctx.store
+
+        if self.ctx.config.get("config:sandbox:enable", False):
+            # Probe sandbox support now so builds don't fail later inside a subprocess.
+            spack.sandbox.get_sandbox()
 
         specs = [pkg.spec for pkg in packages]
 
         self.roots = specs
-        self.has_mirrors = bool(spack.mirrors.mirror.MirrorCollection(binary=True))
+        self.has_mirrors = bool(
+            spack.mirrors.mirror.MirrorCollection.from_config(self.ctx.config, binary=True)
+        )
         self.root_policy: InstallPolicy = root_policy
         self.dependencies_policy: InstallPolicy = dependencies_policy
         self.include_build_deps = include_build_deps
@@ -276,12 +284,13 @@ class PackageInstaller:
             verbose=verbose,
             filter_padding=self.store.has_padding(),
             show_log_on_error=show_log_on_error,
+            term_title=self.ctx.config.get("config:install_status", True),
         )
         self.ui.on_total_increased(len(self.build_graph.nodes))
-        self.jobs = spack.config.determine_number_of_jobs(parallel=True)
+        self.jobs = spack.config.determine_number_of_jobs(parallel=True, config=self.ctx.config)
         self.ui.on_jobs_changed(self.jobs, self.jobs)
         if concurrent_packages is None:
-            concurrent_packages_config = spack.config.CONFIG.get("config:concurrent_packages", 0)
+            concurrent_packages_config = self.ctx.config.get("config:concurrent_packages", 0)
             # The value 0 in config means no limit (other than self.jobs)
             if concurrent_packages_config == 0:
                 self.capacity = sys.maxsize
@@ -290,7 +299,7 @@ class PackageInstaller:
         else:
             self.capacity = concurrent_packages
 
-        # The reports property is what the old installer has and used as public interface.
+        # The reports property is the public interface used by the reporters.
         if create_reports:
             self.reports = {spec.dag_hash(): spack.report.RequestRecord(spec) for spec in specs}
             self.report_data = ReportData(specs)
@@ -303,25 +312,26 @@ class PackageInstaller:
     def install(self) -> None:
         # Refuse disallowed deprecations before updating any index, so an install that cannot
         # succeed does no work first
-        spack.deprecation.check_deprecations(self.roots)
+        spack.deprecation.check_deprecations(
+            self.roots,
+            policy=spack.deprecation.Policy.from_config(self.ctx.config, repo=self.ctx.repo),
+        )
 
         # check what specs we could fetch from binaries (checks against cache, not remotely)
         try:
-            spack.binary_distribution.BINARY_INDEX.update(config=spack.config.CONFIG)
+            self.ctx.binary_index.update(config=self.ctx.config)
         except spack.binary_distribution.FetchCacheError:
             pass
 
         self.binary_cache_for_spec = {
-            s.dag_hash(): spack.binary_distribution.BINARY_INDEX.find_by_hash(
-                s.build_spec.dag_hash()
-            )
+            s.dag_hash(): self.ctx.binary_index.find_by_hash(s.build_spec.dag_hash())
             for s in self.build_graph.nodes.values()
         }
 
         self._run_event_loop()
 
     def _run_event_loop(self) -> None:
-        self.store.install_sbang()
+        self.store.install_sbang(self.ctx.config)
         jobserver = JobServer(self.jobs, os.environ.get("MAKEFLAGS", ""))
         selector = selectors.DefaultSelector()
 
@@ -625,9 +635,7 @@ class PackageInstaller:
                 self.pending_expansions, self.pending_builds, db, dep_policy
             )
             for h in newly_added:
-                self.binary_cache_for_spec[h] = (
-                    spack.binary_distribution.BINARY_INDEX.find_by_hash(h)
-                )
+                self.binary_cache_for_spec[h] = self.ctx.binary_index.find_by_hash(h)
             self.ui.on_total_increased(len(newly_added))
             self.pending_expansions.clear()
 
@@ -760,7 +768,7 @@ class PackageInstaller:
                     f"spack-stage-{spec.name}-{spec.version}-{spec.dag_hash()}-"
                 )
                 log_fd, log_path = tempfile.mkstemp(
-                    prefix=prefix, suffix=".log", dir=spack.stage.stage_root(spack.config.CONFIG)
+                    prefix=prefix, suffix=".log", dir=spack.stage.stage_root(self.ctx.config)
                 )
                 os.close(log_fd)
                 self.log_paths[dag_hash] = log_path
@@ -783,6 +791,7 @@ class PackageInstaller:
             log_path=self.log_paths[dag_hash],
             stop_before=self.stop_before if is_root else None,
             stop_at=self.stop_at if is_root else None,
+            ctx=self.ctx,
         )
         child_info = self.launcher(request, jobserver)
         child_info.prefix_lock = prefix_lock

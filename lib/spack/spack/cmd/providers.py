@@ -7,7 +7,6 @@ import io
 import sys
 
 import spack.cmd
-import spack.repo
 from spack.util.tty import colify
 
 description = "list packages that provide a particular virtual package"
@@ -22,8 +21,8 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     )
 
 
-def providers(parser, args):
-    valid_virtuals = sorted(spack.repo.PATH.provider_index.providers.keys())
+def providers(parser, args, ctx):
+    valid_virtuals = sorted(ctx.repo.provider_index.providers.keys())
 
     buffer = io.StringIO()
     isatty = sys.stdout.isatty()
@@ -38,13 +37,11 @@ def providers(parser, args):
         return
 
     # Otherwise, parse the specs from command line
-    specs = spack.cmd.parse_specs(args.virtual_package)
+    specs = spack.cmd.parse_specs(args.virtual_package, ctx)
 
     # Check prerequisites
     non_virtual = [
-        str(s)
-        for s in specs
-        if not spack.repo.PATH.is_virtual(s.name) or s.name not in valid_virtuals
+        str(s) for s in specs if not ctx.repo.is_virtual(s.name) or s.name not in valid_virtuals
     ]
     if non_virtual:
         msg = "non-virtual specs cannot be part of the query "
@@ -56,5 +53,5 @@ def providers(parser, args):
     for spec in specs:
         if sys.stdout.isatty():
             print("{0}:".format(spec))
-        spack.cmd.display_specs(sorted(spack.repo.PATH.providers_for(spec)))
+        spack.cmd.display_specs(sorted(ctx.repo.providers_for(spec)))
         print("")

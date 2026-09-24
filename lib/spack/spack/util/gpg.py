@@ -5,13 +5,12 @@ import contextlib
 import datetime
 import enum
 import errno
-import functools
 import os
 import pathlib
 import re
 import sys
 import warnings
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 
 import spack.error
 import spack.paths
@@ -22,17 +21,11 @@ import spack.version
 from spack.util import tty
 from spack.util.executable import Executable
 
+if TYPE_CHECKING:
+    import spack.context
+
 GPG_NAMES = ("gpg", "gpg2")
 GPGCONF_NAMES = ("gpgconf", "gpg2conf", "gpgconf2")
-
-#: Executable instance for "gpg", initialized lazily
-GPG: Optional["Gpg"] = None
-#: Executable instance for "gpgconf", initialized lazily
-GPGCONF: Optional[Executable] = None
-#: Socket directory required if a non default home directory is used
-SOCKET_DIR = None
-#: GNUPGHOME environment variable in the context of this Python module
-GNUPGHOME = None
 
 #: Regular expression to pull spec contents out of clearsigned signature
 #: file.
@@ -480,7 +473,13 @@ class GpgKey:
 class Gpg:
     """Wrapper for GPG"""
 
-    def __init__(self, gnupghome: Optional[str] = None):
+    def __init__(self, gnupghome: Optional[str], ctx: "spack.context.SpackContext"):
+        """
+        Args:
+            gnupghome: GnuPG home directory. Defaults to ``SPACK_GNUPGHOME``, or Spack's own.
+            ctx: context GnuPG is bootstrapped from, when it is not in the ``PATH``
+        """
+        self._ctx = ctx
         if sys.platform == "win32":
             self.home = Gpg._init_gnupghome_dir(gnupghome)
         else:
@@ -526,11 +525,8 @@ class Gpg:
         self, finder: Callable[..., Optional[Tuple[Executable, spack.version.VersionType]]]
     ) -> Optional[Executable]:
         """Create a GPG function wrapper"""
-        import spack.bootstrap
-
-        with spack.bootstrap.ensure_bootstrap_configuration():
-            spack.bootstrap.ensure_gpg_in_path_or_raise()
-            result = finder()
+        self._ctx.ensure_gpg()
+        result = finder()
 
         if result is None:
             return None
@@ -559,6 +555,13 @@ class Gpg:
 
     def __call__(self, *args, **kwargs):
         return self.gpg(*args, **kwargs)
+
+    def __getstate__(self):
+        # Find the executables first, so that child processes need no context to bootstrap them
+        _ = self.gpg
+        state = self.__dict__.copy()
+        state["_ctx"] = None
+        return state
 
     @property
     def conf(self) -> Optional[Executable]:
@@ -786,68 +789,6 @@ class Gpg:
         self.gpg(*args, *fprs)
 
 
-def clear():
-    """Reset the global state to uninitialized."""
-    global GPG, GPGCONF, SOCKET_DIR, GNUPGHOME
-    GPG, GPGCONF, SOCKET_DIR, GNUPGHOME = None, None, None, None
-
-
-def init(gnupghome: Optional[str] = None, force: bool = False):
-    """Initialize the global state for Gpg."""
-    global GPG, GPGCONF, SOCKET_DIR, GNUPGHOME
-
-    if force:
-        clear()
-
-    if GPG and GNUPGHOME:
-        return
-
-    GPG = Gpg(gnupghome)
-    GNUPGHOME, GPGCONF, SOCKET_DIR = GPG.home, GPG.conf, GPG.socket_dir
-
-
-def _autoinit(func: Callable[..., Any]):
-    """Decorator to ensure that global variables have been initialized before
-    running the decorated function.
-
-    Args:
-        func: decorated function
-    """
-
-    @functools.wraps(func)
-    def _wrapped(*args, **kwargs):
-        init()
-        return func(*args, **kwargs)
-
-    return _wrapped
-
-
-@contextlib.contextmanager
-def gnupghome_override(dir: str):
-    """Set the GNUPGHOME to a new location for this context.
-
-    Args:
-        dir: new value for GNUPGHOME
-    """
-    global GPG, GPGCONF, SOCKET_DIR, GNUPGHOME
-
-    # Store backup values
-    _GPG = GPG
-
-    # Reset global state
-    clear()
-    GPG = Gpg(gnupghome=dir)
-    GNUPGHOME, GPGCONF, SOCKET_DIR = GPG.home, GPG.conf, GPG.socket_dir
-
-    yield
-
-    # Restore previous state
-    clear()
-    GPG = _GPG
-    if GPG:
-        GNUPGHOME, GPGCONF, SOCKET_DIR = GPG.home, GPG.conf, GPG.socket_dir
-
-
 def _parse_gpg_fields(karray: List[str]):
     """Parse gpg line into a dict"""
     data = {}
@@ -919,12 +860,11 @@ class SpackGPGError(spack.error.SpackError):
     """Class raised when GPG errors are detected."""
 
 
-@_autoinit
-def create(**kwargs):
+def create(gpg: Gpg, **kwargs):
     """Create a new key pair."""
-    r, w = os.pipe()
-    with contextlib.closing(os.fdopen(r, "r")) as r:
-        with contextlib.closing(os.fdopen(w, "w")) as w:
+    rfd, wfd = os.pipe()
+    with contextlib.closing(os.fdopen(rfd, "r")) as r:
+        with contextlib.closing(os.fdopen(wfd, "w")) as w:
             w.write(
                 """
 Key-Type: rsa
@@ -939,25 +879,20 @@ Expire-Date: %(expires)s
 """
                 % kwargs
             )
-        GPG("--gen-key", "--batch", input=r)
+        gpg("--gen-key", "--batch", input=r)
 
 
-@_autoinit
-def signing_keys(*args) -> List[GpgKey]:
+def signing_keys(gpg: Gpg, *args) -> List[GpgKey]:
     """Return the keys that can be used to sign binaries."""
-    assert GPG
-    return GPG.keys(*args, ktype=GpgKeyType.SECRET)
+    return gpg.keys(*args, ktype=GpgKeyType.SECRET)
 
 
-@_autoinit
-def public_keys(*args) -> List[GpgKey]:
+def public_keys(gpg: Gpg, *args) -> List[GpgKey]:
     """Return a list of fingerprints"""
-    assert GPG
-    return GPG.keys(*args, ktype=GpgKeyType.PUBLIC)
+    return gpg.keys(*args, ktype=GpgKeyType.PUBLIC)
 
 
-@_autoinit
-def export_keys(location: str, keys: List[GpgKey], secret: bool = False):
+def export_keys(gpg: Gpg, location: str, keys: List[GpgKey], secret: bool = False):
     """Export public keys to a location passed as argument.
 
     Args:
@@ -965,24 +900,20 @@ def export_keys(location: str, keys: List[GpgKey], secret: bool = False):
         keys: keys to be exported
         secret: whether to export secret keys or not
     """
-    assert GPG
     ktype = GpgKeyType.SECRET if secret else GpgKeyType.PUBLIC
-    GPG.export_keys(location, keys, ktype=ktype)
+    gpg.export_keys(location, keys, ktype=ktype)
 
 
-@_autoinit
-def extract_public_keys(keyfile: str):
+def extract_public_keys(gpg: Gpg, keyfile: str):
     """Extract the key ids from a file
 
     Args:
         keyfile: file with the public key
     """
-    assert GPG
-    return GPG.list_keyfile(keyfile, ktype=GpgKeyType.PUBLIC)
+    return gpg.list_keyfile(keyfile, ktype=GpgKeyType.PUBLIC)
 
 
-@_autoinit
-def trust(keyfile: str, *, fprs: Optional[List[str]] = None, yes_to_all: bool = False):
+def trust(gpg: Gpg, keyfile: str, *, fprs: Optional[List[str]] = None, yes_to_all: bool = False):
     """Import a public key from a file and trust it.
 
     Args:
@@ -991,28 +922,24 @@ def trust(keyfile: str, *, fprs: Optional[List[str]] = None, yes_to_all: bool = 
         yes_to_all: trust all keys in the file if True, otherwise ask for each key.
                     Ignored if fprs is provided.
     """
-    assert GPG
-    GPG.trust(keyfile, fprs=fprs, ownertrust=GpgKeyTrust.ULTIMATE, yes_to_all=yes_to_all)
+    gpg.trust(keyfile, fprs=fprs, ownertrust=GpgKeyTrust.ULTIMATE, yes_to_all=yes_to_all)
 
 
-@_autoinit
-def untrust(signing: bool, *keys):
+def untrust(gpg: Gpg, signing: bool, *keys):
     """Delete known keys.
 
     Args:
         signing: if True deletes the secret keys
         *keys: keys to be deleted
     """
-    assert GPG
     if signing:
-        GPG.untrust(GPG.keys(*keys, ktype=GpgKeyType.SECRET))
+        gpg.untrust(gpg.keys(*keys, ktype=GpgKeyType.SECRET))
 
-    untrust_keys = GPG.keys(*keys, ktype=GpgKeyType.PUBLIC)
-    GPG.untrust(untrust_keys)
+    untrust_keys = gpg.keys(*keys, ktype=GpgKeyType.PUBLIC)
+    gpg.untrust(untrust_keys)
 
 
-@_autoinit
-def sign(key: str, file: str, output: str, clearsign: bool = False):
+def sign(gpg: Gpg, key: str, file: str, output: str, clearsign: bool = False):
     """Sign a file with a key.
 
     Args:
@@ -1023,12 +950,10 @@ def sign(key: str, file: str, output: str, clearsign: bool = False):
         clearsign: if True wraps the document in an ASCII-armored
             signature, if False creates a detached signature
     """
-    assert GPG
-    GPG.sign(file, output, key, clearsign=clearsign)
+    gpg.sign(file, output, key, clearsign=clearsign)
 
 
-@_autoinit
-def verify(signature: str, file: Optional[str] = None, suppress_warnings: bool = False):
+def verify(gpg: Gpg, signature: str, file: Optional[str] = None, suppress_warnings: bool = False):
     """Verify the signature on a file.
 
     Args:
@@ -1038,14 +963,12 @@ def verify(signature: str, file: Optional[str] = None, suppress_warnings: bool =
         suppress_warnings: whether or not to suppress warnings
             from GnuPG
     """
-    assert GPG
     if not file:
         file = signature
-    GPG.verify(signature, file, suppress_warnings=suppress_warnings)
+    gpg.verify(signature, file, suppress_warnings=suppress_warnings)
 
 
-@_autoinit
-def glist(trusted: bool, signing: bool, fmt: str = "default"):
+def glist(gpg: Gpg, trusted: bool, signing: bool, fmt: str = "default"):
     """List known keys.
 
     Args:
@@ -1053,15 +976,13 @@ def glist(trusted: bool, signing: bool, fmt: str = "default"):
         signing: if True list private keys
         fmt: Key formatting string (default, colons, short, fpr)
     """
-    assert GPG
-
     if trusted:
         tty.msg("Trusted keys")
-        print(GPG.list_keys(ktype=GpgKeyType.PUBLIC, fmt=fmt))
+        print(gpg.list_keys(ktype=GpgKeyType.PUBLIC, fmt=fmt))
 
     if signing:
         tty.msg("Signing keys")
-        print(GPG.list_keys(ktype=GpgKeyType.SECRET, fmt=fmt))
+        print(gpg.list_keys(ktype=GpgKeyType.SECRET, fmt=fmt))
 
 
 def _verify_exe_or_raise(exe) -> spack.version.VersionType:

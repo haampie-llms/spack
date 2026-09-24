@@ -5,7 +5,6 @@
 import argparse
 import sys
 
-import spack.repo
 import spack.spec
 from spack.cmd.common import arguments
 from spack.util import tty
@@ -34,10 +33,11 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     arguments.add_common_arguments(subparser, ["package", "jobs"])
 
 
-def versions(parser, args):
+def versions(parser, args, ctx):
     spec = spack.spec.Spec(args.package)
-    pkg_cls = spack.repo.PATH.get_pkg_class(spec.name)
+    pkg_cls = ctx.repo.get_pkg_class(spec.name)
     pkg = pkg_cls(spec)
+    pkg.context = ctx
 
     safe_versions = pkg.versions
 

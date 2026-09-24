@@ -63,8 +63,8 @@ def _isolate_config_config(new_user_path):
         syaml.dump(config_yaml, f)
 
 
-def _isolate_repos_config(new_user_path):
-    current_repos_config = spack.config.CONFIG.get("repos")
+def _isolate_repos_config(new_user_path, config):
+    current_repos_config = config.get("repos")
     new_repos_config = {}
     for key, value in current_repos_config.items():
         if isinstance(value, str):
@@ -78,7 +78,7 @@ def _isolate_repos_config(new_user_path):
         syaml.dump({"repos": new_repos_config}, f)
 
 
-def _setup_isolate_scope(new_user_path, overwrite: bool):
+def _setup_isolate_scope(new_user_path, overwrite: bool, config: spack.config.Configuration):
     # Bypass overwriting/pre-existing when using --self
     if os.path.exists(ISOLATE_SCOPE_PATH):
         if os.path.samefile(new_user_path, ISOLATE_SCOPE_PATH):
@@ -95,7 +95,7 @@ def _setup_isolate_scope(new_user_path, overwrite: bool):
     isolate_dict["path"] = ISOLATE_SCOPE_PATH
     _isolate_bootstrap_config(new_user_path)
     _isolate_config_config(new_user_path)
-    _isolate_repos_config(new_user_path)
+    _isolate_repos_config(new_user_path, config)
     return isolate_dict
 
 
@@ -147,10 +147,10 @@ def setup_parser(subparser: ArgumentParser):
     )
 
 
-def _do_isolate(args):
+def _do_isolate(args, config):
     destination = _ensure_destination_setup(args.path, args.overwrite)
     include_config: list = _preserve_and_extract_include()
-    isolate_scope = _setup_isolate_scope(destination, args.overwrite)
+    isolate_scope = _setup_isolate_scope(destination, args.overwrite, config)
     user_index, site_index, system_index, old_isolate_index = _get_scope_indices(include_config)
     # No need for a separate isolation scope when using --self
     if not os.path.samefile(destination, ISOLATE_SCOPE_PATH):
@@ -185,7 +185,7 @@ def _undo_isolate():
     shutil.copy(PRESERVED_INCLUDE_PATH, INCLUDE_PATH)
 
 
-def isolate(parser, args):
+def isolate(parser, args, ctx):
     if args.undo:
         _undo_isolate()
         sys.exit(0)
@@ -196,7 +196,7 @@ def isolate(parser, args):
             args.path = ISOLATE_SCOPE_PATH
     elif args.path is None:
         tty.die("Must provide one of --path, --self, or --undo")
-    _do_isolate(args)
+    _do_isolate(args, ctx.config)
     tty.warn(
         "\n".join(
             textwrap.wrap(

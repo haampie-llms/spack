@@ -5,6 +5,7 @@ import argparse
 import warnings
 
 import spack.audit
+import spack.context
 import spack.repo
 import spack.util.tty.colify
 import spack.util.tty.color as cl
@@ -52,42 +53,53 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     sp.add_parser("list", help="list available checks and exits")
 
 
-def configs(parser, args):
+def configs(parser, args, ctx):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        reports = spack.audit.run_group(args.subcommand)
+        reports = spack.audit.run_group(args.subcommand, repo=ctx.repo, config=ctx.config)
         _process_reports(reports)
 
 
-def packages(parser, args):
-    pkgs = args.name or spack.repo.PATH.all_package_names()
-    reports = spack.audit.run_group(args.subcommand, pkgs=pkgs)
+def _ensure_repos_are_valid(ctx: spack.context.SpackContext) -> None:
+    """Exit with an error if any configured package repository cannot be constructed."""
+    descriptors = spack.repo.RepoDescriptors.from_config(ctx.config)
+    _, errors = descriptors.construct(cache=ctx.misc_cache)
+    if errors:
+        details = "\n".join(f"  {path}: {error}" for path, error in errors.items())
+        tty.die(f"cannot audit packages, some repositories could not be constructed:\n{details}")
+
+
+def packages(parser, args, ctx):
+    pkgs = args.name or ctx.repo.all_package_names()
+    reports = spack.audit.run_group(args.subcommand, pkgs=pkgs, repo=ctx.repo, config=ctx.config)
     _process_reports(reports)
 
 
-def packages_https(parser, args):
+def packages_https(parser, args, ctx):
     # Since packages takes a long time, --all is required without name
     if not args.check_all and not args.name:
         args.subparser.error("please specify one or more packages to audit, or --all")
 
-    pkgs = args.name or spack.repo.PATH.all_package_names()
-    reports = spack.audit.run_group(args.subcommand, pkgs=pkgs)
+    pkgs = args.name or ctx.repo.all_package_names()
+    reports = spack.audit.run_group(args.subcommand, pkgs=pkgs, repo=ctx.repo, config=ctx.config)
     _process_reports(reports)
 
 
-def externals(parser, args):
+def externals(parser, args, ctx):
     if args.list_externals:
         msg = "@*{The following packages have detection tests:}"
         tty.msg(cl.colorize(msg))
-        spack.util.tty.colify.colify(spack.audit.packages_with_detection_tests(), indent=2)
+        spack.util.tty.colify.colify(spack.audit.packages_with_detection_tests(ctx.repo), indent=2)
         return
 
-    pkgs = args.name or spack.repo.PATH.all_package_names()
-    reports = spack.audit.run_group(args.subcommand, pkgs=pkgs, debug_log=tty.debug)
+    pkgs = args.name or ctx.repo.all_package_names()
+    reports = spack.audit.run_group(
+        args.subcommand, pkgs=pkgs, debug_log=tty.debug, repo=ctx.repo, config=ctx.config
+    )
     _process_reports(reports)
 
 
-def list(parser, args):
+def list(parser, args, ctx):
     for subcommand, check_tags in spack.audit.GROUPS.items():
         print(cl.colorize("@*b{" + subcommand + "}:"))
         for tag in check_tags:
@@ -100,7 +112,7 @@ def list(parser, args):
         print()
 
 
-def audit(parser, args):
+def audit(parser, args, ctx):
     subcommands = {
         "configs": configs,
         "externals": externals,
@@ -108,7 +120,9 @@ def audit(parser, args):
         "packages-https": packages_https,
         "list": list,
     }
-    subcommands[args.subcommand](parser, args)
+    if args.subcommand not in ("configs", "list"):
+        _ensure_repos_are_valid(ctx)
+    subcommands[args.subcommand](parser, args, ctx)
 
 
 def _process_reports(reports):

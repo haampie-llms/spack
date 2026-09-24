@@ -8,9 +8,11 @@ import pathlib
 import pytest
 
 import spack.concretize
+import spack.repo
+import spack.test.harness
 from spack.directory_layout import DirectoryLayout
 from spack.filesystem_view import SimpleFilesystemView, YamlFilesystemView
-from spack.old_installer import PackageInstaller
+from spack.installer import PackageInstaller
 from spack.spec import Spec
 from spack.test.conftest import FsTree
 
@@ -19,12 +21,14 @@ def test_remove_extensions_ordered(install_mockery, mock_fetch, tmp_path: pathli
     view_dir = str(tmp_path / "view")
     layout = DirectoryLayout(view_dir)
     view = YamlFilesystemView(view_dir, layout)
-    e2 = spack.concretize.concretize_one("extension2")
+    e2 = spack.concretize.concretize_one("extension2", spack.test.harness.current())
     PackageInstaller([e2.package], explicit=True).install()
     view.add_specs(e2)
 
     e1 = e2["extension1"]
-    view.remove_specs(e1, e2)
+    all_specs = view.get_all_specs()
+    spack.repo.attach_packages(all_specs, spack.test.harness.current())
+    view.remove_specs(e1, e2, all_specs=set(all_specs))
 
 
 @pytest.mark.regression("32456")
@@ -40,7 +44,9 @@ def test_view_with_spec_not_contributing_files(mock_packages, tmp_path: pathlib.
     a.set_prefix(str(tmp_path / "a"))
     b.set_prefix(str(tmp_path / "b"))
     a._mark_concrete()
+    spack.repo.attach_packages([a], spack.test.harness.current())
     b._mark_concrete()
+    spack.repo.attach_packages([b], spack.test.harness.current())
 
     # Create directory structure for a and b, and view
     os.makedirs(a.prefix.subdir)
@@ -83,7 +89,9 @@ def test_view_unique_subdir_becomes_dir_symlink(mock_packages, tmp_path: pathlib
     a.set_prefix(str(tmp_path / "a"))
     b.set_prefix(str(tmp_path / "b"))
     a._mark_concrete()
+    spack.repo.attach_packages([a], spack.test.harness.current())
     b._mark_concrete()
+    spack.repo.attach_packages([b], spack.test.harness.current())
 
     FsTree(
         tmp_path,
@@ -139,6 +147,7 @@ def test_view_no_dir_symlinks(mock_packages, tmp_path: pathlib.Path):
     a = Spec("pkg-a")
     a.set_prefix(str(tmp_path / "a"))
     a._mark_concrete()
+    spack.repo.attach_packages([a], spack.test.harness.current())
 
     FsTree(tmp_path, {"a/.spack": FsTree.dir(), "a/include/a/a.h": FsTree.file("header")})
 

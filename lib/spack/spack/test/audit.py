@@ -43,8 +43,8 @@ from spack.config import Configuration
         (["unconstrainable-conflict"], None),
     ],
 )
-def test_package_audits(packages, expected_errors, mock_packages):
-    reports = spack.audit.run_group("packages", pkgs=packages)
+def test_package_audits(packages, expected_errors, config, mock_packages):
+    reports = spack.audit.run_group("packages", pkgs=packages, repo=mock_packages, config=config)
 
     # Check that errors were reported only for the expected failure
     actual_errors = [check for check, errors in reports if errors]
@@ -78,13 +78,15 @@ def test_config_audits(
     mutable_config: Configuration, config_section, data, failing_check, mock_packages
 ):
     with mutable_config.override(config_section, data):
-        reports = spack.audit.run_group("configs")
+        reports = spack.audit.run_group("configs", repo=mock_packages, config=mutable_config)
         assert any((check == failing_check) and errors for check, errors in reports)
 
 
-def test_when_combined_with_phase_callbacks(mock_packages):
+def test_when_combined_with_phase_callbacks(config, mock_packages):
     """Ensure @when on a method decorated with @run_before or @run_after is reported"""
-    errors = spack.audit.run_check("PKG-PROPERTIES", pkgs=["fail-test-audit-when-callback"])
+    errors = spack.audit.run_check(
+        "PKG-PROPERTIES", pkgs=["fail-test-audit-when-callback"], repo=mock_packages, config=config
+    )
     details = [d for e in errors for d in e.details]
     assert any(
         "'callback_outside' is decorated with both @when and @run_before" in d for d in details

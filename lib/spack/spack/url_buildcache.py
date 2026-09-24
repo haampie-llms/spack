@@ -29,7 +29,6 @@ import spack.util.filesystem as fsys
 import spack.util.gpg
 import spack.util.url as url_util
 import spack.util.web as web_util
-from spack import config
 from spack.mirrors.mirror import BINARY_MEDIA_TYPE_VERSION
 from spack.schema.url_buildcache_manifest import schema as buildcache_manifest_schema
 from spack.util import tty
@@ -213,12 +212,22 @@ class URLBuildcacheEntry:
     }
 
     def __init__(
-        self, mirror_url: str, spec: Optional[spack.spec.Spec] = None, allow_unsigned: bool = False
+        self,
+        mirror_url: str,
+        spec: Optional[spack.spec.Spec] = None,
+        allow_unsigned: bool = False,
+        *,
+        config: spack.config.Configuration,
+        client: web_util.NetworkClient,
+        gpg: Optional[spack.util.gpg.Gpg] = None,
     ):
-        """Lazily initialize the object"""
+        """Lazily initialize the object. ``gpg`` is required to verify or sign."""
         self.mirror_url: str = mirror_url
         self.spec: Optional[spack.spec.Spec] = spec
         self.allow_unsigned: bool = allow_unsigned
+        self.config = config
+        self.client = client
+        self.gpg = gpg
         self.manifest: Optional[BuildcacheManifest] = None
         self.remote_manifest_url: str = ""
         self.stages: Dict[BlobRecord, spack.stage.Stage] = {}
@@ -229,30 +238,34 @@ class URLBuildcacheEntry:
         return cls.LAYOUT_VERSION
 
     @classmethod
-    def check_layout_json_exists(cls, mirror_url: str) -> bool:
+    def check_layout_json_exists(cls, mirror_url: str, *, client: web_util.NetworkClient) -> bool:
         """Return True if layout.json exists in the expected location, False otherwise"""
         layout_json_url = url_util.join(
             mirror_url, *cls.get_relative_path_components(BuildcacheComponent.LAYOUT_JSON)
         )
-        return web_util.url_exists(layout_json_url)
+        return web_util.url_exists(layout_json_url, client=client)
 
     @classmethod
-    def maybe_push_layout_json(cls, mirror_url: str) -> None:
+    def maybe_push_layout_json(
+        cls, mirror_url: str, *, config: spack.config.Configuration, client: web_util.NetworkClient
+    ) -> None:
         """This function does nothing if layout.json already exists, otherwise it
         pushes layout.json to the expected location in the mirror"""
-        if cls.check_layout_json_exists(mirror_url):
+        if cls.check_layout_json_exists(mirror_url, client=client):
             return
 
         layout_contents = {"signing": "gpg"}
 
-        with TemporaryDirectory(dir=spack.stage.stage_root(spack.config.CONFIG)) as tmpdir:
+        with TemporaryDirectory(dir=spack.stage.stage_root(config)) as tmpdir:
             local_layout_path = os.path.join(tmpdir, "layout.json")
             with open(local_layout_path, "w", encoding="utf-8") as fd:
                 json.dump(layout_contents, fd)
             remote_layout_url = url_util.join(
                 mirror_url, *cls.get_relative_path_components(BuildcacheComponent.LAYOUT_JSON)
             )
-            web_util.push_to_url(local_layout_path, remote_layout_url, keep_original=False)
+            web_util.push_to_url(
+                local_layout_path, remote_layout_url, keep_original=False, client=client
+            )
 
     @classmethod
     def get_base_url(cls, manifest_url: str) -> str:
@@ -370,7 +383,7 @@ class URLBuildcacheEntry:
     def check_blob_exists(self, record: BlobRecord) -> bool:
         """Return True if the blob given by record exists on the mirror, False otherwise"""
         blob_url = self.get_blob_url(self.mirror_url, record)
-        return web_util.url_exists(blob_url)
+        return web_util.url_exists(blob_url, client=self.client)
 
     @classmethod
     def get_blob_path_components(cls, record: BlobRecord) -> List[str]:
@@ -395,7 +408,9 @@ class URLBuildcacheEntry:
         """
         if record not in self.stages:
             blob_url = self.get_blob_url(self.mirror_url, record)
-            blob_stage = spack.stage.stage_from_config(blob_url, config=spack.config.CONFIG)
+            blob_stage = spack.stage.stage_from_config(
+                blob_url, config=self.config, client=self.client
+            )
 
             # Fetch the blob, or else cleanup and exit early
             try:
@@ -447,16 +462,23 @@ class URLBuildcacheEntry:
         return True
 
     @classmethod
-    def verify_and_extract_manifest(cls, manifest_contents: str, verify: bool = False) -> dict:
+    def verify_and_extract_manifest(
+        cls,
+        manifest_contents: str,
+        verify: bool = False,
+        *,
+        config: spack.config.Configuration,
+        gpg: Optional[spack.util.gpg.Gpg] = None,
+    ) -> dict:
         """Possibly verify clearsig, then extract contents and return as json"""
         if spack.util.gpg.is_clearsig(manifest_contents):
             if verify:
                 # Try to verify and raise if we fail
-                with TemporaryDirectory(dir=spack.stage.stage_root(spack.config.CONFIG)) as tmpdir:
+                with TemporaryDirectory(dir=spack.stage.stage_root(config)) as tmpdir:
                     manifest_path = os.path.join(tmpdir, "manifest.json.sig")
                     with open(manifest_path, "w", encoding="utf-8") as fd:
                         fd.write(manifest_contents)
-                    if not try_verify(manifest_path):
+                    if not try_verify(manifest_path, config=config, gpg=gpg):
                         raise NoVerifyException("Signature could not be verified")
 
             return spack.util.gpg.extract_json_from_clearsig(manifest_contents)
@@ -490,7 +512,7 @@ class URLBuildcacheEntry:
         manifest_contents = ""
 
         try:
-            manifest_contents = web_util.read_text(manifest_url)
+            manifest_contents = web_util.read_text(manifest_url, client=self.client)
         except (web_util.SpackWebError, OSError) as e:
             raise BuildcacheEntryError(f"Error reading manifest at {manifest_url}") from e
 
@@ -498,7 +520,7 @@ class URLBuildcacheEntry:
             raise BuildcacheEntryError("Unable to read manifest or manifest empty")
 
         manifest_contents = self.verify_and_extract_manifest(
-            manifest_contents, verify=not self.allow_unsigned
+            manifest_contents, verify=not self.allow_unsigned, config=self.config, gpg=self.gpg
         )
 
         self.manifest = BuildcacheManifest.from_dict(manifest_contents)
@@ -540,9 +562,10 @@ class URLBuildcacheEntry:
     def remove(self):
         """Remove a binary package (spec file and tarball) and the associated
         manifest from the mirror."""
+        client = self.client
         if self.manifest:
             try:
-                web_util.remove_url(self.remote_manifest_url)
+                web_util.remove_url(self.remote_manifest_url, client=client)
             except Exception as e:
                 tty.debug(f"Failed to remove previous manfifest: {e}")
 
@@ -550,7 +573,8 @@ class URLBuildcacheEntry:
                 web_util.remove_url(
                     self.get_blob_url(
                         self.mirror_url, self.get_blob_record(BuildcacheComponent.TARBALL)
-                    )
+                    ),
+                    client=client,
                 )
             except Exception as e:
                 tty.debug(f"Failed to remove previous archive: {e}")
@@ -559,7 +583,8 @@ class URLBuildcacheEntry:
                 web_util.remove_url(
                     self.get_blob_url(
                         self.mirror_url, self.get_blob_record(BuildcacheComponent.SPEC)
-                    )
+                    ),
+                    client=client,
                 )
             except Exception as e:
                 tty.debug(f"Failed to remove previous metadata: {e}")
@@ -567,11 +592,13 @@ class URLBuildcacheEntry:
             self.manifest = None
 
     @classmethod
-    def push_blob(cls, mirror_url: str, blob_path: str, record: BlobRecord) -> None:
+    def push_blob(
+        cls, mirror_url: str, blob_path: str, record: BlobRecord, *, client: web_util.NetworkClient
+    ) -> None:
         """Push the blob_path file to mirror as a blob represented by the given
         record"""
         blob_destination_url = cls.get_blob_url(mirror_url, record)
-        web_util.push_to_url(blob_path, blob_destination_url, keep_original=False)
+        web_util.push_to_url(blob_path, blob_destination_url, keep_original=False, client=client)
 
     @classmethod
     def push_manifest(
@@ -582,6 +609,9 @@ class URLBuildcacheEntry:
         tmpdir: str,
         component_type: BuildcacheComponent = BuildcacheComponent.SPEC,
         signing_key: Optional[str] = None,
+        *,
+        client: web_util.NetworkClient,
+        gpg: Optional[spack.util.gpg.Gpg] = None,
     ) -> None:
         """Given a BuildcacheManifest, push it to the mirror using the given manifest
         name.  The component_type is used to indicate what type of thing the manifest
@@ -600,13 +630,15 @@ class URLBuildcacheEntry:
             # line length.
 
         if signing_key:
-            manifest_path = sign_file(signing_key, manifest_path)
+            manifest_path = sign_file(signing_key, manifest_path, gpg)
 
         manifest_destination_url = url_util.join(
             mirror_url, *cls.get_relative_path_components(component_type), manifest_file_name
         )
 
-        web_util.push_to_url(manifest_path, manifest_destination_url, keep_original=False)
+        web_util.push_to_url(
+            manifest_path, manifest_destination_url, keep_original=False, client=client
+        )
 
     @classmethod
     def push_blob_from_file(
@@ -615,11 +647,14 @@ class URLBuildcacheEntry:
         mirror_url: str,
         component_type: BuildcacheComponent,
         compression: str = "none",
+        *,
+        config: spack.config.Configuration,
+        client: web_util.NetworkClient,
     ) -> BlobRecord:
         """Push a local file as a blob of the given component type and return its record"""
         checksum_algo = "sha256"
 
-        with TemporaryDirectory(dir=spack.stage.stage_root(spack.config.CONFIG)) as tmpdir:
+        with TemporaryDirectory(dir=spack.stage.stage_root(config)) as tmpdir:
             blob_to_push = os.path.join(tmpdir, os.path.basename(local_file_path))
 
             with compression_writer(blob_to_push, compression, checksum_algo) as (
@@ -635,7 +670,7 @@ class URLBuildcacheEntry:
                 checksum_algo,
                 checker.hexdigest(),
             )
-            cls.push_blob(mirror_url, blob_to_push, record)
+            cls.push_blob(mirror_url, blob_to_push, record, client=client)
 
         return record
 
@@ -647,15 +682,25 @@ class URLBuildcacheEntry:
         manifest_name: str,
         component_type: BuildcacheComponent,
         compression: str = "none",
+        *,
+        config: spack.config.Configuration,
+        client: web_util.NetworkClient,
     ) -> None:
         """Push a local file as a blob and a manifest with just that blob"""
-        record = cls.push_blob_from_file(local_file_path, mirror_url, component_type, compression)
+        record = cls.push_blob_from_file(
+            local_file_path, mirror_url, component_type, compression, config=config, client=client
+        )
         manifest = BuildcacheManifest(
             layout_version=CURRENT_BUILD_CACHE_LAYOUT_VERSION, data=[record]
         )
-        with TemporaryDirectory(dir=spack.stage.stage_root(spack.config.CONFIG)) as tmpdir:
+        with TemporaryDirectory(dir=spack.stage.stage_root(config)) as tmpdir:
             cls.push_manifest(
-                mirror_url, manifest_name, manifest, tmpdir, component_type=component_type
+                mirror_url,
+                manifest_name,
+                manifest,
+                tmpdir,
+                component_type=component_type,
+                client=client,
             )
 
     def push_binary_package(
@@ -674,6 +719,7 @@ class URLBuildcacheEntry:
         found.  Thus, any pre-existing files are first removed.
         """
 
+        client = self.client
         spec_dict = spec.to_dict()
         # TODO: Remove this key once oci buildcache no longer uses it
         spec_dict["buildcache_layout_version"] = 2
@@ -696,7 +742,7 @@ class URLBuildcacheEntry:
         )
 
         # push the archive/tarball blob to the remote
-        web_util.push_to_url(tarball_path, remote_archive_url, keep_original=False)
+        web_util.push_to_url(tarball_path, remote_archive_url, keep_original=False, client=client)
 
         # Clear out the previous data, then add a record for the new blob
         blobs: List[BlobRecord] = []
@@ -726,7 +772,7 @@ class URLBuildcacheEntry:
         )
 
         # push the metadata/spec blob to the remote
-        web_util.push_to_url(specfile, remote_spec_url, keep_original=False)
+        web_util.push_to_url(specfile, remote_spec_url, keep_original=False, client=client)
 
         blobs.append(
             BlobRecord(
@@ -755,12 +801,14 @@ class URLBuildcacheEntry:
 
         # possibly sign the manifest
         if signing_key:
-            manifest_path = sign_file(signing_key, manifest_path)
+            manifest_path = sign_file(signing_key, manifest_path, self.gpg)
 
         # Push the manifest file to the remote. The remote manifest url for
         # a given concrete spec is fixed, so we don't have to recompute it,
         # even if we deleted the pre-existing one.
-        web_util.push_to_url(manifest_path, self.remote_manifest_url, keep_original=False)
+        web_util.push_to_url(
+            manifest_path, self.remote_manifest_url, keep_original=False, client=client
+        )
 
     def destroy(self):
         """Destroy any existing stages"""
@@ -797,11 +845,18 @@ class URLBuildcacheEntryV2(URLBuildcacheEntry):
         push_url_base: str,
         spec: Optional[spack.spec.Spec] = None,
         allow_unsigned: bool = False,
+        *,
+        config: spack.config.Configuration,
+        client: web_util.NetworkClient,
+        gpg: Optional[spack.util.gpg.Gpg] = None,
     ):
-        """Lazily initialize the object"""
+        """Lazily initialize the object. ``gpg`` is required to verify."""
         self.mirror_url: str = push_url_base
         self.spec: Optional[spack.spec.Spec] = spec
         self.allow_unsigned: bool = allow_unsigned
+        self.config = config
+        self.client = client
+        self.gpg = gpg
 
         self.has_metadata: bool = False
         self.has_tarball: bool = False
@@ -827,7 +882,9 @@ class URLBuildcacheEntryV2(URLBuildcacheEntry):
         return cls.LAYOUT_VERSION
 
     @classmethod
-    def maybe_push_layout_json(cls, mirror_url: str) -> None:
+    def maybe_push_layout_json(
+        cls, mirror_url: str, *, config: spack.config.Configuration, client: web_util.NetworkClient
+    ) -> None:
         raise BuildcacheEntryError("spack can no longer write to v2 buildcaches")
 
     def _get_spec_url(
@@ -855,19 +912,20 @@ class URLBuildcacheEntryV2(URLBuildcacheEntry):
         )
 
     def _check_metadata_exists(self):
+        client = self.client
         if not self.spec:
             return
 
         if not self._checked_signed:
             signed_url = self._get_spec_url(self.spec, self.mirror_url, ext=".spec.json.sig")
-            if web_util.url_exists(signed_url):
+            if web_util.url_exists(signed_url, client=client):
                 self.remote_spec_url = signed_url
                 self.has_signed = True
             self._checked_signed = True
 
         if not self.has_signed and not self._checked_unsigned:
             unsigned_url = self._get_spec_url(self.spec, self.mirror_url, ext=".spec.json")
-            if web_util.url_exists(unsigned_url):
+            if web_util.url_exists(unsigned_url, client=client):
                 self.remote_spec_url = unsigned_url
                 self.has_unsigned = True
             self._checked_unsigned = True
@@ -887,7 +945,9 @@ class URLBuildcacheEntryV2(URLBuildcacheEntry):
         if not self.has_signed and not self.has_unsigned:
             return False
 
-        if not web_util.url_exists(self._get_tarball_url(self.spec, self.mirror_url)):
+        if not web_util.url_exists(
+            self._get_tarball_url(self.spec, self.mirror_url), client=self.client
+        ):
             return False
 
         return True
@@ -909,7 +969,7 @@ class URLBuildcacheEntryV2(URLBuildcacheEntry):
             )
 
         self.spec_stage = spack.stage.stage_from_config(
-            self.remote_spec_url, config=spack.config.CONFIG
+            self.remote_spec_url, config=self.config, client=self.client
         )
 
         # Fetch the spec file, or else cleanup and exit early
@@ -924,7 +984,9 @@ class URLBuildcacheEntryV2(URLBuildcacheEntry):
 
         self.local_specfile_path = self.spec_stage.save_filename
 
-        if not self.allow_unsigned and not try_verify(self.local_specfile_path):
+        if not self.allow_unsigned and not try_verify(
+            self.local_specfile_path, config=self.config, gpg=self.gpg
+        ):
             raise NoVerifyException(f"Signature on {self.remote_spec_url} could not be verified")
 
         # Check spec file for validity and read it, or else cleanup and exit early
@@ -970,7 +1032,7 @@ class URLBuildcacheEntryV2(URLBuildcacheEntry):
             self.spec_stage = None
 
         self.archive_stage = spack.stage.stage_from_config(
-            self.remote_archive_url, config=spack.config.CONFIG
+            self.remote_archive_url, config=self.config, client=self.client
         )
 
         # Fetch the archive file, or else cleanup and exit early
@@ -1038,11 +1100,20 @@ class URLBuildcacheEntryV2(URLBuildcacheEntry):
         raise BuildcacheEntryError("v2 buildcache layout is unaware of manifests and blobs")
 
     @classmethod
-    def verify_and_extract_manifest(cls, manifest_contents: str, verify: bool = False) -> dict:
+    def verify_and_extract_manifest(
+        cls,
+        manifest_contents: str,
+        verify: bool = False,
+        *,
+        config: spack.config.Configuration,
+        gpg: Optional[spack.util.gpg.Gpg] = None,
+    ) -> dict:
         raise BuildcacheEntryError("v2 buildcache entries do not have a manifest file")
 
     @classmethod
-    def push_blob(cls, mirror_url: str, blob_path: str, record: BlobRecord) -> None:
+    def push_blob(
+        cls, mirror_url: str, blob_path: str, record: BlobRecord, *, client: web_util.NetworkClient
+    ) -> None:
         raise BuildcacheEntryError("v2 buildcache layout is unaware of manifests and blobs")
 
     @classmethod
@@ -1054,6 +1125,9 @@ class URLBuildcacheEntryV2(URLBuildcacheEntry):
         tmpdir: str,
         component_type: BuildcacheComponent = BuildcacheComponent.SPEC,
         signing_key: Optional[str] = None,
+        *,
+        client: web_util.NetworkClient,
+        gpg: Optional[spack.util.gpg.Gpg] = None,
     ) -> None:
         raise BuildcacheEntryError("v2 buildcache layout is unaware of manifests and blobs")
 
@@ -1065,6 +1139,9 @@ class URLBuildcacheEntryV2(URLBuildcacheEntry):
         manifest_name: str,
         component_type: BuildcacheComponent,
         compression: str = "none",
+        *,
+        config: spack.config.Configuration,
+        client: web_util.NetworkClient,
     ) -> None:
         raise BuildcacheEntryError("v2 buildcache layout is unaware of manifests and blobs")
 
@@ -1103,10 +1180,12 @@ def get_url_buildcache_class(
         )
 
 
-def check_mirror_for_layout(mirror: spack.mirrors.mirror.Mirror):
+def check_mirror_for_layout(
+    mirror: spack.mirrors.mirror.Mirror, *, client: web_util.NetworkClient
+):
     """Check specified mirror, and warn if missing layout.json"""
     cache_class = get_url_buildcache_class()
-    if not cache_class.check_layout_json_exists(mirror.fetch_url):
+    if not cache_class.check_layout_json_exists(mirror.fetch_url, client=client):
         msg = (
             f"Configured mirror {mirror.name} is missing layout.json and has either \n"
             "    never been pushed or is of an old layout version. If it's the latter, \n"
@@ -1116,12 +1195,20 @@ def check_mirror_for_layout(mirror: spack.mirrors.mirror.Mirror):
         tty.warn(msg)
 
 
-def _entries_from_cache_aws_cli(url: str, component_type: BuildcacheComponent):
+def _entries_from_cache_aws_cli(
+    url: str,
+    component_type: BuildcacheComponent,
+    *,
+    config: spack.config.Configuration,
+    client: web_util.NetworkClient,
+):
     """Use aws cli to list manifests for a component type.
 
     Args:
         url: prefix of the build cache on s3
         component_type: type of buildcache component to sync (spec, index, key, etc.)
+        config: configuration of the returned entries
+        client: network client of the returned entries
 
     Return:
         A tuple where the first item is a list of local file paths pointing
@@ -1139,7 +1226,9 @@ def _entries_from_cache_aws_cli(url: str, component_type: BuildcacheComponent):
         return file_list, read_fn
 
     def file_read_method(manifest_path: str) -> URLBuildcacheEntry:
-        cache_entry = cache_class(mirror_url=url, allow_unsigned=True)
+        cache_entry = cache_class(
+            mirror_url=url, allow_unsigned=True, config=config, client=client
+        )
         cache_entry.read_manifest(manifest_url=manifest_path)
         return cache_entry
 
@@ -1178,12 +1267,20 @@ def _entries_from_cache_aws_cli(url: str, component_type: BuildcacheComponent):
     return filename_to_mtime, read_fn
 
 
-def _entries_from_cache_fallback(url: str, component_type: BuildcacheComponent):
+def _entries_from_cache_fallback(
+    url: str,
+    component_type: BuildcacheComponent,
+    *,
+    config: spack.config.Configuration,
+    client: web_util.NetworkClient,
+):
     """Use spack.util.web module to get a list of all the manifests at the remote url.
 
     Args:
         url: Base url of mirror (location of manifest files)
         component_type: type of buildcache component to sync (spec, index, key, etc.)
+        config: configuration of the returned entries
+        client: network client used to list the mirror, and of the returned entries
 
     Return:
         A tuple where the first item is a list of absolute file paths or
@@ -1197,7 +1294,9 @@ def _entries_from_cache_fallback(url: str, component_type: BuildcacheComponent):
     cache_class = get_url_buildcache_class(layout_version=CURRENT_BUILD_CACHE_LAYOUT_VERSION)
 
     def url_read_method(manifest_url: str) -> URLBuildcacheEntry:
-        cache_entry = cache_class(mirror_url=url, allow_unsigned=True)
+        cache_entry = cache_class(
+            mirror_url=url, allow_unsigned=True, config=config, client=client
+        )
         cache_entry.read_manifest(manifest_url)
         return cache_entry
 
@@ -1206,10 +1305,10 @@ def _entries_from_cache_fallback(url: str, component_type: BuildcacheComponent):
         component_path_parts = cache_class.get_relative_path_components(component_type)
         component_prefix: str = url_util.join(url, *component_path_parts)
         component_pattern = cache_class.get_buildcache_component_include_pattern(component_type)
-        for entry in web_util.list_url(component_prefix, recursive=True):
+        for entry in web_util.list_url(component_prefix, recursive=True, client=client):
             if fnmatch.fnmatch(entry, component_pattern):
                 entry_url = url_util.join(component_prefix, entry)
-                stat_result = web_util.stat_url(entry_url)
+                stat_result = web_util.stat_url(entry_url, client=client)
                 if stat_result is not None:
                     filename_to_mtime[entry_url] = stat_result[1]  # mtime is second element
         read_fn = url_read_method
@@ -1220,12 +1319,20 @@ def _entries_from_cache_fallback(url: str, component_type: BuildcacheComponent):
     return filename_to_mtime, read_fn
 
 
-def get_entries_from_cache(url: str, component_type: BuildcacheComponent):
+def get_entries_from_cache(
+    url: str,
+    component_type: BuildcacheComponent,
+    *,
+    config: spack.config.Configuration,
+    client: web_util.NetworkClient,
+):
     """Get a list of all the manifests in the mirror and a function to read them.
 
     Args:
         url: Base url of mirror (location of spec files)
         component_type: type of buildcache component to sync (spec, index, key, etc.)
+        config: configuration of the returned entries
+        client: network client used to list the mirror, and of the returned entries
 
     Return:
         A tuple where the first item is a list of absolute file paths or
@@ -1242,7 +1349,9 @@ def get_entries_from_cache(url: str, component_type: BuildcacheComponent):
     last_error = None
     for specs_from_cache_fn in callbacks:
         try:
-            file_to_mtime_mapping, read_fn = specs_from_cache_fn(url, component_type)
+            file_to_mtime_mapping, read_fn = specs_from_cache_fn(
+                url, component_type, config=config, client=client
+            )
             if file_to_mtime_mapping:
                 return file_to_mtime_mapping, read_fn
         except ListMirrorSpecsError as e:
@@ -1346,27 +1455,35 @@ def get_valid_spec_file(path: str, max_supported_layout: int) -> Tuple[Dict, int
     return spec_dict, layout_version
 
 
-def sign_file(key: str, file_path: str) -> str:
+def sign_file(key: str, file_path: str, gpg: Optional[spack.util.gpg.Gpg]) -> str:
     """sign and return the path to the signed file"""
+    if gpg is None:
+        raise BuildcacheEntryError(f"cannot sign {file_path} without GnuPG")
     signed_file_path = f"{file_path}.sig"
-    spack.util.gpg.sign(key, file_path, signed_file_path, clearsign=True)
+    spack.util.gpg.sign(gpg, key, file_path, signed_file_path, clearsign=True)
     return signed_file_path
 
 
-def try_verify(specfile_path):
+def try_verify(
+    specfile_path, *, config: spack.config.Configuration, gpg: Optional[spack.util.gpg.Gpg]
+):
     """Utility function to attempt to verify a local file.  Assumes the
     file is a clearsigned signature file.
 
     Args:
         specfile_path (str): Path to file to be verified.
+        config: configuration with the GPG warning settings
+        gpg: GnuPG to verify with. Without it, nothing is verified.
 
     Returns:
         ``True`` if the signature could be verified, ``False`` otherwise.
     """
-    suppress = config.CONFIG.get("config:suppress_gpg_warnings", False)
+    if gpg is None:
+        return False
+    suppress = config.get("config:suppress_gpg_warnings", False)
 
     try:
-        spack.util.gpg.verify(specfile_path, suppress_warnings=suppress)
+        spack.util.gpg.verify(gpg, specfile_path, suppress_warnings=suppress)
     except Exception:
         return False
 

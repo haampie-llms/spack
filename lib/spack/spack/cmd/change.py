@@ -6,6 +6,7 @@ import argparse
 import warnings
 
 import spack.cmd
+import spack.context
 import spack.environment
 import spack.spec
 from spack.cmd.common import arguments
@@ -51,18 +52,18 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     arguments.add_common_arguments(subparser, ["specs"])
 
 
-def change(parser, args):
+def change(parser, args, ctx: spack.context.SpackContext):
     if args.all and args.concrete_only:
         warnings.warn("'spack change --all' argument is ignored with '--concrete-only'")
     if args.list_name != "specs" and args.concrete_only:
         warnings.warn("'spack change --list-name' argument is ignored with '--concrete-only'")
 
-    env = spack.cmd.require_active_env(args.subparser)
+    env = spack.cmd.require_active_env(args.subparser, ctx.environment)
 
     match_spec = None
     if args.match_spec:
-        match_spec = spack.cmd.parse_specs([args.match_spec])[0]
-    specs = spack.cmd.parse_specs(args.specs)
+        match_spec = spack.cmd.parse_specs([args.match_spec], ctx)[0]
+    specs = spack.cmd.parse_specs(args.specs, ctx)
 
     with env.write_transaction():
         if not args.concrete_only:
@@ -73,6 +74,7 @@ def change(parser, args):
                         list_name=args.list_name,
                         match_spec=match_spec,
                         allow_changing_multiple_specs=args.all,
+                        repo=ctx.repo,
                     )
             except (ValueError, spack.environment.SpackEnvironmentError) as e:
                 msg = "Cannot change abstract specs."

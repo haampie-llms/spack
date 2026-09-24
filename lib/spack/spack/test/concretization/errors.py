@@ -21,6 +21,7 @@ import spack.error
 import spack.main
 import spack.solver.asp
 import spack.spec
+import spack.test.harness
 from spack.config import Configuration
 
 version_error_messages = [
@@ -65,7 +66,7 @@ def test_error_messages(
         mutable_config.set(path, conf)
 
     with pytest.raises(spack.solver.asp.UnsatisfiableSpecError) as e:
-        _ = spack.concretize.concretize_one(spec)
+        _ = spack.concretize.concretize_one(spec, spack.test.harness.current())
 
     for em in error_messages:
         assert em in str(e.value), str(e.value)
@@ -76,10 +77,10 @@ def test_error_messages(
 )
 def test_deprecated_version_error(spec, mock_packages, mutable_config: Configuration):
     with pytest.raises(spack.solver.asp.UnsatisfiableSpecError, match="deprecated"):
-        _ = spack.concretize.concretize_one(spec)
+        _ = spack.concretize.concretize_one(spec, spack.test.harness.current())
 
     mutable_config.set("packages:all:deprecation:allow", [{"severity": "critical"}])
-    spack.concretize.concretize_one(spec)
+    spack.concretize.concretize_one(spec, spack.test.harness.current())
 
 
 @pytest.mark.parametrize(
@@ -87,7 +88,7 @@ def test_deprecated_version_error(spec, mock_packages, mutable_config: Configura
 )
 def test_nonexistent_version_error(spec, mock_packages, mutable_config):
     with pytest.raises(spack.solver.asp.InvalidVersionError, match="deprecated-versions@99.9"):
-        _ = spack.concretize.concretize_one(spec)
+        _ = spack.concretize.concretize_one(spec, spack.test.harness.current())
 
 
 @pytest.mark.parametrize(
@@ -106,7 +107,7 @@ def test_virtual_constrained_beyond_versions_error(spec, mock_packages, mutable_
         spack.solver.asp.UnsatisfiableSpecError,
         match="the virtual package 'mpi' supports only version constraints",
     ) as e:
-        _ = spack.concretize.concretize_one(spec)
+        _ = spack.concretize.concretize_one(spec, spack.test.harness.current())
 
     assert "cannot concretize" in str(e.value)
 
@@ -225,7 +226,7 @@ def test_input_spec_driven_errors(
     affected package and the specific token (variant, version, flag, dep) the user supplied.
     """
     with pytest.raises(spack.error.SpackError) as exc_info:
-        spack.concretize.concretize_one(input_spec)
+        spack.concretize.concretize_one(input_spec, spack.test.harness.current())
     assert_actionable_error(exc_info, *expected_parts)
 
 
@@ -235,7 +236,7 @@ def test_target_not_compatible_with_host_error(mock_packages, mutable_config: Co
     """
     mutable_config.set("concretizer:targets:host_compatible", True)
     with pytest.raises(spack.error.SpackError) as exc_info:
-        spack.concretize.concretize_one("libelf target=ppc64le")
+        spack.concretize.concretize_one("libelf target=ppc64le", spack.test.harness.current())
     assert_actionable_error(
         exc_info, "'libelf target=ppc64le' is not compatible with this machine"
     )
@@ -312,7 +313,7 @@ def test_config_driven_errors(
         mutable_config.set(path, conf)
 
     with pytest.raises(spack.error.SpackError) as exc_info:
-        spack.concretize.concretize_one(input_spec)
+        spack.concretize.concretize_one(input_spec, spack.test.harness.current())
     assert_actionable_error(exc_info, *expected_parts)
 
 
@@ -339,5 +340,5 @@ def test_package_py_driven_errors(
     package whose directive caused the failure.
     """
     with pytest.raises(spack.error.SpackError) as exc_info:
-        spack.concretize.concretize_one(input_spec)
+        spack.concretize.concretize_one(input_spec, spack.test.harness.current())
     assert_actionable_error(exc_info, *expected_handles)

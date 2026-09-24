@@ -6,6 +6,7 @@
 
 from typing import List, Tuple
 
+import spack.test.harness
 from spack.concretize_ui import ConcretizerUI, SolveKind
 from spack.main import make_argument_parser
 from spack.spec import Spec
@@ -29,6 +30,7 @@ class SpackCommandArgs:
         self.command_name = command_name
 
     def __call__(self, *argv, **kwargs):
+        self.parser.config = spack.test.harness.current().config
         self.parser.add_command(self.command_name)
         args, unknown = self.parser.parse_known_args([self.command_name] + list(argv))
         return args
@@ -73,18 +75,3 @@ class RecordingUI(ConcretizerUI):
         self, abstract: Spec, *, concrete: Spec, count: int, duration: float
     ) -> None:
         self.concretized.append((abstract, concrete, count, duration))
-
-
-class UnusableGlobal:
-    """Stands in for a process global that the code under test must not reach for."""
-
-    def __init__(self, name: str) -> None:
-        self._name = name
-
-    def __getattr__(self, item):
-        # pickle looks up optional dunder methods, and on load it does so before _name is set
-        if item.startswith("__") and item.endswith("__"):
-            raise AttributeError(item)
-        raise AssertionError(
-            f"{self._name} was read instead of the injected context (attribute {item!r})"
-        )

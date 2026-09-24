@@ -11,11 +11,8 @@ import sys
 from collections import Counter
 
 import spack.cmd
-import spack.config
 import spack.install_test
 import spack.repo
-import spack.store
-from spack.active_environment import active_environment
 from spack.cmd.common import arguments
 from spack.util import tty
 from spack.util.tty import colify
@@ -146,7 +143,7 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     )
 
 
-def test_run(args):
+def test_run(args, ctx):
     """\
     run tests for the specified installed packages
 
@@ -154,7 +151,7 @@ def test_run(args):
     environment or all installed packages if there is no active environment
     """
     if args.alias:
-        suites = spack.install_test.get_named_test_suites(args.alias)
+        suites = spack.install_test.get_named_test_suites(args.alias, ctx.config)
         if suites:
             tty.die('Test suite "{0}" already exists. Try another alias.'.format(args.alias))
 
@@ -167,19 +164,19 @@ def test_run(args):
 
     # set config option for fail-fast
     if args.fail_fast:
-        spack.config.CONFIG.set("config:fail_fast", True, scope="command_line")
+        ctx.config.set("config:fail_fast", True, scope="command_line")
 
     explicit = args.explicit or None
     explicit_str = "explicitly " if args.explicit else ""
 
     # Get specs to test
-    env = active_environment()
+    env = ctx.environment
     hashes = env.all_hashes() if env else None
 
-    specs = spack.cmd.parse_specs(args.specs) if args.specs else [None]
+    specs = spack.cmd.parse_specs(args.specs, ctx) if args.specs else [None]
     specs_to_test = []
     for spec in specs:
-        matching = spack.store.STORE.db.query_local(spec, hashes=hashes, explicit=explicit)
+        matching = ctx.store.db.query_local(spec, hashes=hashes, explicit=explicit)
         if spec and not matching:
             tty.warn(f"No {explicit_str}installed packages match spec {spec}")
 
@@ -194,17 +191,19 @@ def test_run(args):
 
         specs_to_test.extend(matching)
 
-    # test_stage_dir
-    test_suite = spack.install_test.TestSuite(specs_to_test, args.alias)
+    spack.repo.attach_packages(specs_to_test, ctx)
+    test_suite = spack.install_test.TestSuite(
+        specs_to_test, args.alias, stage_root=spack.install_test.get_test_stage_dir(ctx.config)
+    )
     test_suite.ensure_stage()
     tty.msg(f"Spack test {test_suite.name}")
 
     # Set up reporter
-    reporter = args.reporter() if args.log_format else None
+    reporter = args.reporter(ctx) if args.log_format else None
     try:
         test_suite(
             remove_directory=not args.keep_stage,
-            dirty=args.dirty,
+            dirty=args.dirty if args.dirty is not None else ctx.config.get("config:dirty"),
             fail_first=args.fail_first,
             externals=args.externals,
             timeout=args.timeout,
@@ -219,9 +218,9 @@ def report_filename(args, test_suite):
     return os.path.abspath(args.log_file or "test-{}".format(test_suite.name))
 
 
-def test_list(args):
+def test_list(args, ctx):
     """list installed packages with available tests"""
-    tagged = spack.repo.PATH.packages_with_tags(*args.tag) if args.tag else set()
+    tagged = ctx.repo.packages_with_tags(*args.tag) if args.tag else set()
 
     def has_test_and_tags(pkg_class):
         tests = spack.install_test.test_functions(pkg_class)
@@ -230,7 +229,7 @@ def test_list(args):
     if args.list_all:
         report_packages = [
             pkg_class.name
-            for pkg_class in spack.repo.PATH.all_package_classes()
+            for pkg_class in ctx.repo.all_package_classes()
             if has_test_and_tags(pkg_class)
         ]
 
@@ -242,24 +241,22 @@ def test_list(args):
 
     # TODO: This can be extended to have all of the output formatting options
     # from `spack find`.
-    env = active_environment()
+    env = ctx.environment
     hashes = env.all_hashes() if env else None
 
-    specs = spack.store.STORE.db.query(hashes=hashes)
-    specs = list(
-        filter(lambda s: has_test_and_tags(spack.repo.PATH.get_pkg_class(s.fullname)), specs)
-    )
+    specs = ctx.store.db.query(hashes=hashes)
+    specs = list(filter(lambda s: has_test_and_tags(ctx.repo.get_pkg_class(s.fullname)), specs))
 
     spack.cmd.display_specs(specs, long=True)
 
 
-def test_find(args):  # TODO: merge with status (noargs)
+def test_find(args, ctx):  # TODO: merge with status (noargs)
     """\
     find tests that are running or have available results
 
     displays aliases for tests that have them, otherwise test suite content hashes
     """
-    test_suites = spack.install_test.get_all_test_suites()
+    test_suites = spack.install_test.get_all_test_suites(ctx.config)
 
     # Filter tests by filter argument
     if args.filter:
@@ -293,18 +290,18 @@ def test_find(args):  # TODO: merge with status (noargs)
         tty.msg(msg)
 
 
-def test_status(args):
+def test_status(args, ctx):
     """get the current status for the specified Spack test suite(s)"""
     if args.names:
         test_suites = []
         for name in args.names:
-            test_suite = spack.install_test.get_test_suite(name)
+            test_suite = spack.install_test.get_test_suite(name, ctx.config)
             if test_suite:
                 test_suites.append(test_suite)
             else:
                 tty.msg("No test suite %s found in test stage" % name)
     else:
-        test_suites = spack.install_test.get_all_test_suites()
+        test_suites = spack.install_test.get_all_test_suites(ctx.config)
         if not test_suites:
             tty.msg("No test suites with status to report")
 
@@ -314,7 +311,7 @@ def test_status(args):
         tty.msg("Test suite %s completed" % test_suite.name)
 
 
-def _report_suite_results(test_suite, args, constraints):
+def _report_suite_results(test_suite, args, constraints, ctx):
     """Report the relevant test suite results."""
 
     # TODO: Make this handle capability tests too
@@ -322,10 +319,10 @@ def _report_suite_results(test_suite, args, constraints):
 
     if constraints:
         # TBD: Should I be refactoring or re-using ConstraintAction?
-        qspecs = spack.cmd.parse_specs(constraints)
+        qspecs = spack.cmd.parse_specs(constraints, ctx)
         specs = {}
         for spec in qspecs:
-            for s in spack.store.STORE.db.query(spec, installed=True):
+            for s in ctx.store.db.query(spec, installed=True):
                 specs[s.dag_hash()] = s
         specs = sorted(specs.values())
         test_specs = {test_suite.test_pkg_id(s): s for s in test_suite.specs if s in specs}
@@ -378,7 +375,7 @@ def _report_suite_results(test_suite, args, constraints):
         tty.msg(msg)
 
 
-def test_results(args):
+def test_results(args, ctx):
     """get the results from Spack test suite(s) (default all)"""
     if args.names:
         try:
@@ -392,20 +389,20 @@ def test_results(args):
         names, constraints = None, None
 
     if names:
-        test_suites = [spack.install_test.get_test_suite(name) for name in names]
+        test_suites = [spack.install_test.get_test_suite(name, ctx.config) for name in names]
         test_suites = list(filter(lambda ts: ts is not None, test_suites))
         if not test_suites:
             tty.msg("No test suite(s) found in test stage: {0}".format(", ".join(names)))
     else:
-        test_suites = spack.install_test.get_all_test_suites()
+        test_suites = spack.install_test.get_all_test_suites(ctx.config)
         if not test_suites:
             tty.msg("No test suites with results to report")
 
     for test_suite in test_suites:
-        _report_suite_results(test_suite, args, constraints)
+        _report_suite_results(test_suite, args, constraints, ctx)
 
 
-def test_remove(args):
+def test_remove(args, ctx):
     """\
     remove results from Spack test suite(s) (default all)
 
@@ -417,13 +414,13 @@ def test_remove(args):
     if args.names:
         test_suites = []
         for name in args.names:
-            test_suite = spack.install_test.get_test_suite(name)
+            test_suite = spack.install_test.get_test_suite(name, ctx.config)
             if test_suite:
                 test_suites.append(test_suite)
             else:
                 tty.msg("No test suite %s found in test stage" % name)
     else:
-        test_suites = spack.install_test.get_all_test_suites()
+        test_suites = spack.install_test.get_all_test_suites(ctx.config)
 
     if not test_suites:
         tty.msg("No test suites to remove")
@@ -442,5 +439,5 @@ def test_remove(args):
         shutil.rmtree(test_suite.stage)
 
 
-def test(parser, args):
-    globals()["test_%s" % args.test_command](args)
+def test(parser, args, ctx):
+    globals()["test_%s" % args.test_command](args, ctx)

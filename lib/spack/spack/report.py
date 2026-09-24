@@ -11,7 +11,6 @@ import traceback
 from typing import Optional
 
 import spack.error
-import spack.store
 
 reporter = None
 report_file = None
@@ -62,16 +61,6 @@ class RequestRecord(Record):
             # Property("compiler", spec.compiler),
         ]
         self.packages = []
-
-    def skip_installed(self):
-        """Insert records for all nodes in the DAG that are no-ops for this request"""
-        with spack.store.STORE.db.read_transaction():
-            for dep in filter(
-                lambda x: spack.store.STORE.db.installed(x) or x.external, self._spec.traverse()
-            ):
-                record = InstallRecord(dep)
-                record.skip(msg="Spec external or already installed")
-                self.packages.append(record)
 
     def append_record(self, record):
         self.packages.append(record)

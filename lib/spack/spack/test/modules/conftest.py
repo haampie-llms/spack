@@ -8,6 +8,7 @@ import pytest
 import spack.concretize
 import spack.modules.common
 import spack.spec
+import spack.test.harness
 
 
 @pytest.fixture()
@@ -18,8 +19,10 @@ def modulefile_content(request):
     def _impl(spec_like, module_set_name="default", explicit=True):
         if isinstance(spec_like, str):
             spec_like = spack.spec.Spec(spec_like)
-        spec = spack.concretize.concretize_one(spec_like)
-        generator = writer_cls.from_spec(spec, module_set_name, explicit)
+        spec = spack.concretize.concretize_one(spec_like, spack.test.harness.current())
+        generator = writer_cls.from_spec(
+            spec, module_set_name, explicit, ctx=spack.test.harness.current()
+        )
         generator.write(overwrite=True)
         written_module = pathlib.Path(generator.layout.filename)
         content = written_module.read_text(encoding="utf-8").splitlines()
@@ -35,8 +38,10 @@ def factory(request, mock_modules_root):
     writer_cls = getattr(request.module, "writer_cls")
 
     def _mock(spec_string, module_set_name="default", explicit=True):
-        spec = spack.concretize.concretize_one(spec_string)
-        return writer_cls.from_spec(spec, module_set_name, explicit), spec
+        spec = spack.concretize.concretize_one(spec_string, spack.test.harness.current())
+        return writer_cls.from_spec(
+            spec, module_set_name, explicit, ctx=spack.test.harness.current()
+        ), spec
 
     return _mock
 

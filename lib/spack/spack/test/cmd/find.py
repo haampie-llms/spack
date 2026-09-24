@@ -16,12 +16,12 @@ import spack.concretize
 import spack.environment as ev
 import spack.package_base
 import spack.paths
-import spack.repo
 import spack.spec
+import spack.test.harness
 import spack.user_environment as uenv
 from spack.database import Database
 from spack.enums import InstallRecordStatus
-from spack.main import SpackCommand
+from spack.test.harness import SpackCommand
 from spack.test.utilities import SpackCommandArgs
 from spack.util.filesystem import working_dir
 from spack.util.pattern import Bunch
@@ -75,7 +75,7 @@ def test_query_arguments():
         install_tree="all",
     )
 
-    q_args = query_arguments(args)
+    q_args = query_arguments(args, spack.test.harness.current())
     assert "installed" in q_args
     assert "predicate_fn" in q_args
     assert "explicit" in q_args
@@ -88,12 +88,12 @@ def test_query_arguments():
 
     # Check that explicit works correctly
     args.explicit = True
-    q_args = query_arguments(args)
+    q_args = query_arguments(args, spack.test.harness.current())
     assert q_args["explicit"] is True
 
     args.explicit = False
     args.implicit = True
-    q_args = query_arguments(args)
+    q_args = query_arguments(args, spack.test.harness.current())
     assert q_args["explicit"] is False
 
 
@@ -101,7 +101,7 @@ def test_query_arguments():
 @pytest.mark.usefixtures("database", "mock_display")
 def test_tag1(parser, specs):
     args = parser.parse_args(["--tag", "tag1"])
-    spack.cmd.find.find(parser, args)
+    spack.cmd.find.find(parser, args, spack.test.harness.current())
 
     assert len(specs) == 2
     assert "mpich" in [x.name for x in specs]
@@ -112,7 +112,7 @@ def test_tag1(parser, specs):
 @pytest.mark.usefixtures("database", "mock_display")
 def test_tag2(parser, specs):
     args = parser.parse_args(["--tag", "tag2"])
-    spack.cmd.find.find(parser, args)
+    spack.cmd.find.find(parser, args, spack.test.harness.current())
 
     assert len(specs) == 1
     assert "mpich" in [x.name for x in specs]
@@ -122,7 +122,7 @@ def test_tag2(parser, specs):
 @pytest.mark.usefixtures("database", "mock_display")
 def test_tag2_tag3(parser, specs):
     args = parser.parse_args(["--tag", "tag2", "--tag", "tag3"])
-    spack.cmd.find.find(parser, args)
+    spack.cmd.find.find(parser, args, spack.test.harness.current())
 
     assert len(specs) == 0
 
@@ -189,7 +189,7 @@ def test_find_json_deps(database):
 @pytest.mark.db
 def test_display_json(database, capfd):
     specs = [
-        spack.concretize.concretize_one(s)
+        spack.concretize.concretize_one(s, spack.test.harness.current())
         for s in ["mpileaks ^zmpi", "mpileaks ^mpich", "mpileaks ^mpich2"]
     ]
 
@@ -205,7 +205,7 @@ def test_display_json(database, capfd):
 @pytest.mark.db
 def test_display_json_deps(database, capfd):
     specs = [
-        spack.concretize.concretize_one(s)
+        spack.concretize.concretize_one(s, spack.test.harness.current())
         for s in ["mpileaks ^zmpi", "mpileaks ^mpich", "mpileaks ^mpich2"]
     ]
 
@@ -278,7 +278,7 @@ mpileaks-2.3
 @pytest.mark.db
 def test_find_format_deps_paths(database, config):
     output = find("-dp", "--format", "{name}-{version}", "mpileaks", "^zmpi")
-    mpileaks = spack.concretize.concretize_one("mpileaks ^zmpi")
+    mpileaks = spack.concretize.concretize_one("mpileaks ^zmpi", spack.test.harness.current())
     assert (
         output
         == f"""\
@@ -302,7 +302,7 @@ def test_find_very_long(database, config):
     output = find("-L", "--no-groups", "mpileaks")
 
     specs = [
-        spack.concretize.concretize_one(s)
+        spack.concretize.concretize_one(s, spack.test.harness.current())
         for s in ["mpileaks ^zmpi", "mpileaks ^mpich", "mpileaks ^mpich2"]
     ]
 
@@ -340,7 +340,7 @@ def test_find_prefix_in_env(
 ):
     """Test `find` formats requiring concrete specs work in environments."""
     env("create", "test")
-    with ev.read("test"):
+    with ev.read("test", ctx=spack.test.harness.current()):
         install("--fake", "--add", "mpileaks")
         find("-p")
         find("-l")
@@ -364,7 +364,7 @@ spack:
             )
         env("create", "test1", "spack.yaml")
 
-    test1 = ev.read("test1")
+    test1 = ev.read("test1", ctx=spack.test.harness.current())
     test1.concretize()
     test1.write()
 
@@ -379,13 +379,13 @@ spack:
             )
         env("create", "test2", "spack.yaml")
 
-    test2 = ev.read("test2")
+    test2 = ev.read("test2", ctx=spack.test.harness.current())
     test2.concretize()
     test2.write()
 
     env("create", "--include-concrete", "test1", "--include-concrete", "test2", "combined_env")
 
-    with ev.read("combined_env"):
+    with ev.read("combined_env", ctx=spack.test.harness.current()):
         output = find()
 
     assert "no root specs" in output
@@ -410,19 +410,19 @@ spack:
             )
         env("create", "test1", "spack.yaml")
 
-    test1 = ev.read("test1")
+    test1 = ev.read("test1", ctx=spack.test.harness.current())
     test1.concretize()
     test1.write()
 
     env("create", "--include-concrete", "test1", "test2")
-    test2 = ev.read("test2")
+    test2 = ev.read("test2", ctx=spack.test.harness.current())
     test2.add("libelf")
     test2.concretize()
     test2.write()
 
     env("create", "--include-concrete", "test2", "test3")
 
-    with ev.read("test3"):
+    with ev.read("test3", ctx=spack.test.harness.current()):
         output = find()
 
     assert "no root specs" in output
@@ -451,7 +451,7 @@ def test_environment_with_version_range_in_compiler_doesnt_fail(
     by a version range (i.e. @X.Y rather the single version than @=X.Y) doesn't result in an error
     when invoking "spack find".
     """
-    test_environment = ev.create_in_dir(tmp_path)
+    test_environment = ev.create_in_dir(tmp_path, ctx=spack.test.harness.current())
     test_environment.add("zlib %gcc@12.1.0")
     test_environment.write()
 
@@ -467,7 +467,7 @@ def test_environment_with_version_range_in_compiler_doesnt_fail(
 
 @pytest.fixture
 def test_repo(mock_stage):
-    with spack.repo.use_repositories(
+    with spack.test.harness.use_repositories(
         os.path.join(spack.paths.test_repos_path, "spack_repo", "find")
     ) as mock_packages_repo:
         yield mock_packages_repo
@@ -487,18 +487,20 @@ def test_find_concretized_not_installed(
     concretize = SpackCommand("concretize")
     uninstall = SpackCommand("uninstall")
 
-    def _query(_e, *args):
-        return spack.cmd.find._find_query(SpackCommandArgs("find")(*args), _e)
+    def _query(*args):
+        return spack.cmd.find._find_query(
+            SpackCommandArgs("find")(*args), spack.test.harness.current()
+        )
 
     def _nresults(_qresult):
         return len(_qresult[0]), len(_qresult[1])
 
     env("create", "test")
-    with ev.read("test") as e:
+    with ev.read("test", ctx=spack.test.harness.current()):
         install("--fake", "--add", "a0")
 
-        assert _nresults(_query(e)) == (3, 0)
-        assert _nresults(_query(e, "--explicit")) == (1, 0)
+        assert _nresults(_query()) == (3, 0)
+        assert _nresults(_query("--explicit")) == (1, 0)
 
         add("d0")
         concretize("--reuse")
@@ -509,29 +511,29 @@ def test_find_concretized_not_installed(
         # --explicit, --deprecated, --start-date, etc. are all
         # filters on records, and therefore don't apply to
         # concretized-but-not-installed results
-        assert _nresults(_query(e, "--explicit")) == (1, 2)
+        assert _nresults(_query("--explicit")) == (1, 2)
 
-        assert _nresults(_query(e)) == (3, 2)
-        assert _nresults(_query(e, "-c", "d0")) == (0, 1)
+        assert _nresults(_query()) == (3, 2)
+        assert _nresults(_query("-c", "d0")) == (0, 1)
 
         uninstall("-f", "-y", "b0")
 
         # b0 is now missing (it is not installed, but has an
         # installed parent)
 
-        assert _nresults(_query(e)) == (2, 3)
+        assert _nresults(_query()) == (2, 3)
         # b0 is "double-counted" here: it meets the --missing
         # criteria, and also now qualifies as a
         # concretized-but-not-installed spec
-        assert _nresults(_query(e, "--missing")) == (3, 3)
-        assert _nresults(_query(e, "--only-missing")) == (1, 3)
+        assert _nresults(_query("--missing")) == (3, 3)
+        assert _nresults(_query("--only-missing")) == (1, 3)
 
         # Tags are not attached to install records, so they
         # can modify the concretized-but-not-installed results
 
-        assert _nresults(_query(e, "--tag=tag0")) == (1, 0)
-        assert _nresults(_query(e, "--tag=tag1")) == (1, 1)
-        assert _nresults(_query(e, "--tag=tag2")) == (0, 1)
+        assert _nresults(_query("--tag=tag0")) == (1, 0)
+        assert _nresults(_query("--tag=tag1")) == (1, 1)
+        assert _nresults(_query("--tag=tag2")) == (0, 1)
 
 
 @pytest.mark.usefixtures("install_mockery", "mock_fetch")
@@ -546,11 +548,15 @@ def test_find_based_on_commit_sha(mock_git_version_info, monkeypatch):
     assert "git-test-commit" in output
 
 
+def _git_ref_is_1_2(self, ref):
+    return ("1.2", 0)
+
+
 @pytest.mark.usefixtures("install_mockery", "mock_fetch")
 def test_find_based_on_git_ref(monkeypatch):
     """A bare git ref query matches the installed spec built from that ref, whatever Spack
     version was assigned to it, without a repository lookup."""
-    monkeypatch.setattr(GitRefLookup, "get", lambda self, ref: ("1.2", 0))
+    monkeypatch.setattr(GitRefLookup, "get", _git_ref_is_1_2)
     install("--fake", "git-test-commit@git.1.x")
     monkeypatch.setattr(
         GitRefLookup, "get", lambda self, ref: pytest.fail(f"unexpected git ref lookup of '{ref}'")
@@ -601,7 +607,7 @@ def test_find_env_with_groups(spack_yaml, expected, not_expected, tmp_path: path
     environment with groups.
     """
     (tmp_path / "spack.yaml").write_text(spack_yaml)
-    with ev.Environment(tmp_path):
+    with ev.Environment(tmp_path, ctx=spack.test.harness.current()):
         output = find()
 
     assert all(x in output for x in expected)

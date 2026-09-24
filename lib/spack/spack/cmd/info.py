@@ -5,6 +5,7 @@
 
 import argparse
 import collections
+import functools
 import shutil
 import sys
 import textwrap
@@ -13,6 +14,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, TextIO, Tuple
 
 import spack.builder
 import spack.cmd
+import spack.context
 import spack.dependency
 import spack.deptypes as dt
 import spack.fetch_strategy as fs
@@ -242,10 +244,10 @@ def print_maintainers(pkg: PackageBase, args: Namespace) -> None:
         color.cprint(section_title("Maintainers: ") + mnt)
 
 
-def print_namespace(pkg: PackageBase, args: Namespace) -> None:
+def print_namespace(pkg: PackageBase, args: Namespace, *, repo_path: spack.repo.RepoPath) -> None:
     """output package namespace"""
 
-    repo = spack.repo.PATH.get_repo(pkg.namespace)
+    repo = repo_path.get_repo(pkg.namespace)
     color.cprint("")
     color.cprint(section_title("Namespace:"))
     color.cprint(f"    @c{{{repo.namespace}}} at {repo.root}")
@@ -625,17 +627,20 @@ def print_virtuals(pkg: PackageBase, args: Namespace) -> None:
         color.cprint("    None")
 
 
-def info(parser: argparse.ArgumentParser, args: Namespace) -> None:
-    specs = spack.cmd.parse_specs(args.spec)
+def info(
+    parser: argparse.ArgumentParser, args: Namespace, ctx: spack.context.SpackContext
+) -> None:
+    specs = spack.cmd.parse_specs(args.spec, ctx)
     if len(specs) > 1:
         args.subparser.error(f"requires exactly one spec, got {len(specs)}")
     if len(specs) == 0:
         args.subparser.error("requires a spec")
 
     spec = specs[0]
-    pkg_cls = spack.repo.PATH.get_pkg_class(spec.fullname)
+    pkg_cls = ctx.repo.get_pkg_class(spec.fullname)
     pkg_cls.validate_variant_names(spec)
     pkg = pkg_cls(spec)
+    pkg.context = ctx
 
     # Output core package information
     header = section_title("{0}:   ").format(pkg.build_system_class) + pkg.name
@@ -652,9 +657,9 @@ def info(parser: argparse.ArgumentParser, args: Namespace) -> None:
         color.cprint(section_title("Homepage: ") + str(pkg.homepage))
 
     # Now output optional information in expected order
-    sections = [
+    sections: List[Tuple[bool, Callable[[PackageBase, Namespace], None]]] = [
         (args.all or args.maintainers, print_maintainers),
-        (args.all or args.namespace, print_namespace),
+        (args.all or args.namespace, functools.partial(print_namespace, repo_path=ctx.repo)),
         (args.all or args.detectable, print_detectable),
         (args.all or args.tags, print_tags),
         (args.all or not args.no_versions, print_versions),

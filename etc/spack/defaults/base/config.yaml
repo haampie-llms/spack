@@ -160,15 +160,10 @@ config:
   build_jobs: 16
 
   # The maximum number of concurrent package builds a single Spack process
-  # will perform. The default value of 0 means no package parallelism when using
-  # the old installer, and unlimited package parallelism (other than the limit
-  # set by build_jobs) when using the new installer. Setting this to 1 will
-  # disable package parallelism in both installers. This option is ignored on
-  # Windows.
+  # will perform. The default value of 0 means unlimited package parallelism
+  # (other than the limit set by build_jobs). Setting this to 1 disables package
+  # parallelism. This option is ignored on Windows.
   concurrent_packages: 0
-
-  # Which installer to use: "old" or "new".
-  installer: new
 
   # Restrict filesystem and network access during builds. The stage directory,
   # install prefix, and system temp directory are always writable.

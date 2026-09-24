@@ -1,8 +1,7 @@
 # Copyright Spack Project Developers. See COPYRIGHT file for details.
 #
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
-import contextlib
-from typing import Callable, List
+from typing import Callable
 
 from ._functions import _host, by_name, platforms, reset
 from ._platform import Platform
@@ -30,14 +29,8 @@ __all__ = [
 #: by any method and is here as a convenient way to refer to the host platform.
 real_host = _host
 
-#: The current platform used by Spack. May be swapped by the use_platform
-#: context manager.
+#: The current platform used by Spack. Tests replace it with a mock platform.
 host: Callable[[], Platform] = _host
-
-#: Callbacks invoked when the current platform changes through the use_platform context manager.
-#: Higher-level modules that cache host-dependent state (e.g. spack.config) register a callback
-#: here to invalidate it.
-on_host_changed: List[Callable[[], None]] = []
 
 
 class _PickleableCallable:
@@ -56,23 +49,3 @@ class _PickleableCallable:
 def using_libc_compatibility() -> bool:
     """Returns True if we are using libc compatibility on this platform."""
     return host().name == "linux"
-
-
-@contextlib.contextmanager
-def use_platform(new_platform):
-    global host
-
-    assert isinstance(new_platform, Platform), f'"{new_platform}" must be an instance of Platform'
-
-    original_host_fn = host
-
-    try:
-        host = _PickleableCallable(new_platform)
-        for callback in on_host_changed:
-            callback()
-        yield new_platform
-
-    finally:
-        host = original_host_fn
-        for callback in on_host_changed:
-            callback()

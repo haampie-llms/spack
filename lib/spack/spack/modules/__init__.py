@@ -7,20 +7,22 @@ include Tcl or Lua modules, and others.
 """
 
 import os
-from typing import Dict, Optional, Type
+from typing import TYPE_CHECKING, Dict, Optional, Type
 
 import spack.repo
 import spack.spec
-import spack.store
 from spack.util import tty
 
 from . import common
-from .common import BaseModuleFileWriter, disable_modules
+from .common import BaseModuleFileWriter
 from .error import ModuleNotFoundError
 from .lmod import LmodModulefileWriter
 from .tcl import TclModulefileWriter
 
-__all__ = ["TclModulefileWriter", "LmodModulefileWriter", "disable_modules"]
+if TYPE_CHECKING:
+    import spack.context
+
+__all__ = ["TclModulefileWriter", "LmodModulefileWriter"]
 
 module_types: Dict[str, Type[BaseModuleFileWriter]] = {
     "tcl": TclModulefileWriter,
@@ -35,6 +37,8 @@ def get_module(
     module_set_name: str = "default",
     required: bool = True,
     *,
+    ctx: "spack.context.SpackContext",
+    upstream_index: common.UpstreamModuleIndex,
     cache: Optional[common.ModuleConfigurationCache] = None,
 ) -> Optional[str]:
     """Retrieve the module file for a given spec and module type.
@@ -54,6 +58,8 @@ def get_module(
             Otherwise, this returns the module name.
         module_set_name: the named module configuration set from modules.yaml
             for which to retrieve the module.
+        ctx: context providing the store, configuration and environment
+        upstream_index: module index of the upstream Spack installations
         cache: optional per-operation configuration cache, shared across a batch of specs to
             avoid recomputing configuration objects for shared dependencies.
 
@@ -62,11 +68,11 @@ def get_module(
         available.
     """
     try:
-        upstream = spack.store.STORE.db.installed_upstream(spec)
+        upstream = ctx.store.db.installed_upstream(spec)
     except spack.repo.UnknownPackageError:
-        upstream, record = spack.store.STORE.db.query_by_spec_hash(spec.dag_hash())
+        upstream, record = ctx.store.db.query_by_spec_hash(spec.dag_hash())
     if upstream:
-        module = common.upstream_module_index.upstream_module(spec, module_type)
+        module = upstream_index.upstream_module(spec, module_type)
         if not module:
             return None
 
@@ -75,7 +81,7 @@ def get_module(
         else:
             return module.use_name
     else:
-        writer = module_types[module_type].from_spec(spec, module_set_name, cache=cache)
+        writer = module_types[module_type].from_spec(spec, module_set_name, ctx=ctx, cache=cache)
         if not os.path.isfile(writer.layout.filename):
             fmt_str = "{name}{@version}{/hash:7}"
             if not writer.conf.excluded:

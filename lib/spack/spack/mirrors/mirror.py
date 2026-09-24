@@ -12,6 +12,7 @@ from typing import (
     Iterator,
     List,
     Mapping,
+    NamedTuple,
     Optional,
     Tuple,
     Union,
@@ -51,7 +52,11 @@ def _spec_matches_filters(spec: "spack.spec.Spec", include: List[str], exclude: 
     return True
 
 
-def _url_or_path_to_url(url_or_path: str) -> str:
+class _EnvPath(NamedTuple):
+    env_path: Optional[str]
+
+
+def _url_or_path_to_url(url_or_path: str, env_path: Optional[str]) -> str:
     """For simplicity we allow mirror URLs in config files to be local, relative paths.
     This helper function takes care of distinguishing between URLs and paths, and
     canonicalizes paths before transforming them into file:// URLs."""
@@ -61,7 +66,8 @@ def _url_or_path_to_url(url_or_path: str) -> str:
         return url_or_path
 
     # Otherwise we interpret it as path, and we should promote it to file:// URL.
-    return url_util.path_to_file_url(spack.config.canonicalize_path(url_or_path))
+    path = spack.config.canonicalize_path(url_or_path, config=_EnvPath(env_path))
+    return url_util.path_to_file_url(path)
 
 
 class Mirror:
@@ -73,9 +79,13 @@ class Mirror:
     to them. These two URLs are usually the same.
     """
 
-    def __init__(self, data: Union[str, dict], name: Optional[str] = None) -> None:
+    def __init__(
+        self, data: Union[str, dict], name: Optional[str] = None, *, env_path: Optional[str] = None
+    ) -> None:
         self._data = data
         self._name = name
+        #: Environment of the configuration the mirror is read from, for ``$env`` in paths
+        self._env_path = env_path
 
     @staticmethod
     def from_yaml(stream: Union[str, IO[str]], name: Optional[str] = None) -> "Mirror":
@@ -352,7 +362,7 @@ class Mirror:
 
         # Whole mirror config is just a url.
         if isinstance(self._data, str):
-            return _url_or_path_to_url(self._data)
+            return _url_or_path_to_url(self._data, self._env_path)
 
         # Default value
         url = self._data.get("url")
@@ -369,7 +379,7 @@ class Mirror:
         if not url:
             raise ValueError(f"Mirror {self.name} has no URL configured")
 
-        return _url_or_path_to_url(url)
+        return _url_or_path_to_url(url, self._env_path)
 
     def get_credentials(self, direction: str) -> Dict[str, Any]:
         """Get the mirror credentials from the mirror config
@@ -427,19 +437,17 @@ class MirrorCollection(Mapping[str, Mirror]):
 
     def __init__(
         self,
-        mirrors: Optional[Mapping[str, Any]] = None,
-        scope: Optional[str] = None,
+        mirrors: Mapping[str, Any],
+        *,
         binary: Optional[bool] = None,
         source: Optional[bool] = None,
         autopush: Optional[bool] = None,
-        *,
-        config: Optional[spack.config.Configuration] = None,
+        env_path: Optional[str] = None,
     ):
         """Initialize a mirror collection.
 
         Args:
             mirrors: A name-to-mirror mapping to initialize the collection with.
-            scope: The scope to use when looking up mirrors from the config.
             binary: If True, only include binary mirrors.
                     If False, omit binary mirrors.
                     If None, do not filter on binary mirrors.
@@ -449,16 +457,7 @@ class MirrorCollection(Mapping[str, Mirror]):
             autopush: If True, only include mirrors that have autopush enabled.
                       If False, omit mirrors that have autopush enabled.
                       If None, do not filter on autopush.
-            config: configuration to look up mirrors from when ``mirrors`` is None. If None, the
-                    global ``spack.config.CONFIG`` is used."""
-        if config is None:
-            config = spack.config.CONFIG
-        mirrors_data = (
-            mirrors.items()
-            if mirrors is not None
-            else config.get_config("mirrors", scope=scope).items()
-        )
-        mirrors = (Mirror(data=mirror, name=name) for name, mirror in mirrors_data)
+            env_path: Environment of the configuration the mirrors are read from."""
 
         def _filter(m: Mirror):
             if source is not None and m.source != source:
@@ -469,7 +468,31 @@ class MirrorCollection(Mapping[str, Mirror]):
                 return False
             return True
 
-        self._mirrors = {m.name: m for m in mirrors if _filter(m)}
+        all_mirrors = (
+            Mirror(data=mirror, name=name, env_path=env_path) for name, mirror in mirrors.items()
+        )
+        self._mirrors = {m.name: m for m in all_mirrors if _filter(m)}
+
+    @staticmethod
+    def from_config(
+        config: spack.config.Configuration,
+        *,
+        scope: Optional[str] = None,
+        binary: Optional[bool] = None,
+        source: Optional[bool] = None,
+        autopush: Optional[bool] = None,
+    ) -> "MirrorCollection":
+        """Returns the mirrors in ``config``, or in one of its scopes if ``scope`` is given.
+
+        The ``binary``, ``source`` and ``autopush`` filters are those of the constructor.
+        """
+        return MirrorCollection(
+            config.get_config("mirrors", scope=scope),
+            binary=binary,
+            source=source,
+            autopush=autopush,
+            env_path=config.env_path,
+        )
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, MirrorCollection):

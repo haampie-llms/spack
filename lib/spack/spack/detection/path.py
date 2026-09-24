@@ -7,15 +7,19 @@ and running executables.
 
 import collections
 import concurrent.futures
+import functools
+import inspect
 import os
 import pathlib
 import re
 import sys
 import traceback
 import warnings
-from typing import Dict, Iterable, List, Optional, Set, Tuple, Type
+from typing import Dict, Iterable, List, NamedTuple, Optional, Set, Tuple, Type
 
+import spack.config
 import spack.error
+import spack.operating_systems.windows_os
 import spack.repo
 import spack.spec
 import spack.util.elf as elf_utils
@@ -37,6 +41,7 @@ from .common import (
     find_win32_additional_install_paths,
     library_prefix,
     path_to_dict,
+    update_configuration,
 )
 
 #: Timeout used for package detection (seconds)
@@ -45,7 +50,7 @@ if sys.platform == "win32":
     DETECTION_TIMEOUT = 120
 
 
-def common_windows_package_paths(pkg_cls=None) -> List[str]:
+def common_windows_package_paths(pkg_cls=None, *, additional_search_paths: List[str]) -> List[str]:
     """Get the paths for common package installation location on Windows
     that are outside the PATH
     Returns [] on unix
@@ -53,7 +58,7 @@ def common_windows_package_paths(pkg_cls=None) -> List[str]:
     if sys.platform != "win32":
         return []
     paths = WindowsCompilerExternalPaths.find_windows_compiler_bundled_packages()
-    paths.extend(find_win32_additional_install_paths())
+    paths.extend(find_win32_additional_install_paths(additional_search_paths))
     paths.extend(WindowsKitExternalPaths.find_windows_kit_bin_paths())
     paths.extend(WindowsKitExternalPaths.find_windows_kit_reg_installed_roots_paths())
     paths.extend(WindowsKitExternalPaths.find_windows_kit_reg_sdk_paths())
@@ -253,14 +258,23 @@ class Finder:
         raise NotImplementedError("must be implemented by derived classes")
 
     def detect_specs(
-        self, *, pkg: Type["spack.package_base.PackageBase"], paths: Iterable[str], repo_path
+        self,
+        *,
+        pkg: Type["spack.package_base.PackageBase"],
+        paths: Iterable[str],
+        repo_path,
+        config: spack.config.Configuration,
     ) -> List["spack.spec.Spec"]:
         """Given a list of files matching the search patterns, returns a list of detected specs.
 
         Args:
             pkg: package being detected
             paths: files matching the package search patterns
+            repo_path: repositories providing the packages
+            config: configuration of the detection
         """
+        _bind_package_api(pkg, repo=repo_path, config=config)
+
         if not hasattr(pkg, "determine_spec_details"):
             warnings.warn(
                 f"{pkg.name} must define 'determine_spec_details' in order"
@@ -340,15 +354,23 @@ class Finder:
         return result
 
     def find(
-        self, *, pkg_name: str, repository, initial_guess: Optional[List[str]] = None
+        self,
+        *,
+        pkg_name: str,
+        repository,
+        config: spack.config.Configuration,
+        initial_guess: Optional[List[str]] = None,
+        additional_search_paths: List[str],
     ) -> List["spack.spec.Spec"]:
         """For a given package, returns a list of detected specs.
 
         Args:
             pkg_name: package being detected
             repository: repository to retrieve the package
+            config: configuration of the detection
             initial_guess: initial list of paths to search from the caller if None, default paths
                 are searched. If this is an empty list, nothing will be searched.
+            additional_search_paths: extra paths searched on Windows, with the default ones
         """
         pkg_cls = repository.get_pkg_class(pkg_name)
         patterns = self.search_patterns(pkg=pkg_cls)
@@ -356,9 +378,15 @@ class Finder:
             return []
         if initial_guess is None:
             initial_guess = self.default_path_hints()
-            initial_guess.extend(common_windows_package_paths(pkg_cls))
+            initial_guess.extend(
+                common_windows_package_paths(
+                    pkg_cls, additional_search_paths=additional_search_paths
+                )
+            )
         candidates = self.candidate_files(patterns=patterns, paths=initial_guess)
-        return self.detect_specs(pkg=pkg_cls, paths=candidates, repo_path=repository)
+        return self.detect_specs(
+            pkg=pkg_cls, paths=candidates, repo_path=repository, config=config
+        )
 
 
 class ExecutablesFinder(Finder):
@@ -419,10 +447,49 @@ class LibrariesFinder(Finder):
         return result
 
 
+class _Resources(NamedTuple):
+    repo: spack.repo.RepoPath
+    config: spack.config.Configuration
+
+
+def _find(
+    resources: _Resources,
+    finder: Finder,
+    pkg_name: str,
+    initial_guess: Optional[List[str]],
+    additional_search_paths: List[str],
+) -> List["spack.spec.Spec"]:
+    return finder.find(
+        pkg_name=pkg_name,
+        repository=resources.repo,
+        config=resources.config,
+        initial_guess=initial_guess,
+        additional_search_paths=additional_search_paths,
+    )
+
+
+def _bind_package_api(
+    pkg: Type["spack.package_base.PackageBase"],
+    *,
+    repo: spack.repo.RepoPath,
+    config: spack.config.Configuration,
+) -> None:
+    """Binds the package API functions that take no package to the detection resources, in the
+    modules of the package class and its bases."""
+    bound_find_compilers = functools.partial(find_compilers, config=config, repo=repo)
+    for cls in inspect.getmro(pkg):
+        module = sys.modules.get(cls.__module__)
+        if module is None or cls.__module__.startswith("spack."):
+            continue
+        if hasattr(module, "find_compilers"):
+            module.find_compilers = bound_find_compilers  # type: ignore[attr-defined]
+
+
 def by_path(
     packages_to_search: Iterable[str],
     *,
     repo: spack.repo.RepoPath,
+    config: spack.config.Configuration,
     path_hints: Optional[List[str]] = None,
     max_workers: Optional[int] = None,
 ) -> Dict[str, List["spack.spec.Spec"]]:
@@ -433,6 +500,7 @@ def by_path(
         packages_to_search: list of packages to be detected. Each package can be either unqualified
             of fully qualified
         repo: repository used to retrieve the package classes
+        config: configuration with the additional search paths
         path_hints: initial list of paths to be searched
         max_workers: maximum number of workers to search for packages in parallel
     """
@@ -443,25 +511,20 @@ def by_path(
 
     result = collections.defaultdict(list)
     repository = spack.util.lang.ensure_unwrapped(repo)
+    additional_search_paths = config.get("config:additional_external_search_paths", default=[])
 
-    executor: concurrent.futures.Executor
+    resources = _Resources(repository, config)
     if max_workers == 1:
-        executor = spack.util.parallel.SequentialExecutor()
+        executor = spack.util.parallel.SequentialExecutor(resources)
     else:
-        executor = spack.util.parallel.make_concurrent_executor(max_workers)
+        executor = spack.util.parallel.make_concurrent_executor(max_workers, shared=resources)
     with executor:
         for pkg in packages_to_search:
-            executable_future = executor.submit(
-                executables_finder.find,
-                pkg_name=pkg,
-                initial_guess=path_hints,
-                repository=repository,
+            executable_future = executor.submit_shared(
+                _find, executables_finder, pkg, path_hints, additional_search_paths
             )
-            library_future = executor.submit(
-                libraries_finder.find,
-                pkg_name=pkg,
-                initial_guess=path_hints,
-                repository=repository,
+            library_future = executor.submit_shared(
+                _find, libraries_finder, pkg, path_hints, additional_search_paths
             )
             detected_specs_by_package[pkg] = executable_future, library_future
 
@@ -482,3 +545,43 @@ def by_path(
                     )
 
     return result
+
+
+#: Tag of the compiler packages
+COMPILER_TAG = "compiler"
+
+
+def find_compilers(
+    path_hints: Optional[List[str]] = None,
+    *,
+    config: spack.config.Configuration,
+    repo: spack.repo.RepoPath,
+    scope: Optional[str] = None,
+    max_workers: Optional[int] = None,
+) -> List[spack.spec.Spec]:
+    """Searches for compiler in the paths given as argument. If any new compiler is found, the
+    configuration is updated, and the list of new compiler objects is returned.
+
+    Args:
+        path_hints: list of path hints where to look for. A sensible default based on the ``PATH``
+            environment variable will be used if the value is None
+        config: configuration to be updated with the new compilers
+        repo: package repository used to detect compilers
+        scope: configuration scope to modify
+        max_workers: number of processes used to search for compilers
+    """
+    if path_hints is None:
+        path_hints = spack.util.environment.get_path("PATH")
+    default_paths = spack.util.filesystem.search_paths_for_executables(*path_hints)
+    if sys.platform == "win32":
+        default_paths.extend(spack.operating_systems.windows_os.WindowsOs().compiler_search_paths)
+    compiler_pkgs = repo.packages_with_tags(COMPILER_TAG, full=True)
+
+    detected_packages = by_path(
+        compiler_pkgs, repo=repo, config=config, path_hints=default_paths, max_workers=max_workers
+    )
+
+    new_compilers = update_configuration(
+        detected_packages, config=config, buildable=True, scope=scope
+    )
+    return new_compilers

@@ -17,6 +17,7 @@ import spack.mirrors.mirror
 import spack.oci.opener
 import spack.stage
 import spack.util.url
+import spack.util.web
 from spack.util import tty
 
 from .image import Digest, ImageReference
@@ -50,16 +51,15 @@ def with_query_param(url: str, param: str, value: str) -> str:
     )
 
 
-def list_tags(ref: ImageReference, _urlopen: spack.oci.opener.MaybeOpen = None) -> List[str]:
+def list_tags(ref: ImageReference, *, urlopen: spack.oci.opener.OpenType) -> List[str]:
     """Retrieves the list of tags associated with an image, handling pagination."""
-    _urlopen = _urlopen or spack.oci.opener.urlopen
     tags = set()
     fetch_url = ref.tags_url()
 
     while True:
         # Fetch tags
         request = Request(url=fetch_url)
-        with _urlopen(request) as response:
+        with urlopen(request) as response:
             spack.oci.opener.ensure_status(request, response, 200)
             tags.update(json.load(response)["tags"])
 
@@ -92,7 +92,8 @@ def upload_blob(
     digest: Digest,
     force: bool = False,
     small_file_size: int = 0,
-    _urlopen: spack.oci.opener.MaybeOpen = None,
+    *,
+    urlopen: spack.oci.opener.OpenType,
 ) -> bool:
     """Uploads a blob to an OCI registry
 
@@ -111,14 +112,13 @@ def upload_blob(
             Some registries do no support single requests, and others
             do not specify what size they support in single POST.
             For now this feature is disabled by default (0KB)
+        urlopen: function used to open URLs
 
     Returns:
         True if the blob was uploaded, False if it already existed.
     """
-    _urlopen = _urlopen or spack.oci.opener.urlopen
-
     # Test if the blob already exists, if so, early exit.
-    if not force and blob_exists(ref, digest, _urlopen):
+    if not force and blob_exists(ref, digest, urlopen=urlopen):
         return False
 
     with open(file, "rb") as f:
@@ -141,7 +141,7 @@ def upload_blob(
                 url=ref.uploads_url(), method="POST", headers={"Content-Length": "0"}
             )
 
-        with _urlopen(request) as response:
+        with urlopen(request) as response:
             # Created the blob in one go.
             if response.status == 201:
                 return True
@@ -164,17 +164,14 @@ def upload_blob(
             headers={"Content-Type": "application/octet-stream", "Content-Length": str(file_size)},
         )
 
-        with _urlopen(request) as response:
+        with urlopen(request) as response:
             spack.oci.opener.ensure_status(request, response, 201)
 
     return True
 
 
 def upload_manifest(
-    ref: ImageReference,
-    manifest: dict,
-    tag: bool = True,
-    _urlopen: spack.oci.opener.MaybeOpen = None,
+    ref: ImageReference, manifest: dict, tag: bool = True, *, urlopen: spack.oci.opener.OpenType
 ):
     """Uploads a manifest/index to a registry
 
@@ -184,12 +181,11 @@ def upload_manifest(
         tag: When true, use the tag, otherwise use the digest,
             this is relevant for multi-arch images, where the
             tag is an index, referencing the manifests by digest.
+        urlopen: function used to open URLs
 
     Returns:
         The digest and size of the uploaded manifest.
     """
-    _urlopen = _urlopen or spack.oci.opener.urlopen
-
     data = json.dumps(manifest, separators=(",", ":")).encode()
     digest = Digest.from_sha256(hashlib.sha256(data).hexdigest())
     size = len(data)
@@ -204,7 +200,7 @@ def upload_manifest(
         headers={"Content-Type": manifest["mediaType"]},
     )
 
-    with _urlopen(request) as response:
+    with urlopen(request) as response:
         spack.oci.opener.ensure_status(request, response, 201)
     return digest, size
 
@@ -215,12 +211,11 @@ def image_from_mirror(mirror: spack.mirrors.mirror.Mirror) -> ImageReference:
 
 
 def blob_exists(
-    ref: ImageReference, digest: Digest, _urlopen: spack.oci.opener.MaybeOpen = None
+    ref: ImageReference, digest: Digest, *, urlopen: spack.oci.opener.OpenType
 ) -> bool:
     """Checks if a blob exists in an OCI registry"""
     try:
-        _urlopen = _urlopen or spack.oci.opener.urlopen
-        with _urlopen(Request(url=ref.blob_url(digest), method="HEAD")) as response:
+        with urlopen(Request(url=ref.blob_url(digest), method="HEAD")) as response:
             return response.status == 200
     except urllib.error.HTTPError as e:
         if e.getcode() == 404:
@@ -232,7 +227,10 @@ def copy_missing_layers(
     src: ImageReference,
     dst: ImageReference,
     architecture: str,
-    _urlopen: spack.oci.opener.MaybeOpen = None,
+    *,
+    urlopen: spack.oci.opener.OpenType,
+    config: spack.config.Configuration,
+    client: spack.util.web.NetworkClient,
 ) -> Tuple[dict, dict]:
     """Copy image layers from src to dst for given architecture.
 
@@ -240,27 +238,33 @@ def copy_missing_layers(
         src: The source image reference.
         dst: The destination image reference.
         architecture: The architecture (when referencing an index)
+        urlopen: function used to open URLs
+        config: configuration for the stages blobs are fetched into
+        client: network client of those stages
 
     Returns:
         Tuple of manifest and config of the base image.
     """
-    _urlopen = _urlopen or spack.oci.opener.urlopen
-    manifest, config = get_manifest_and_config(src, architecture, _urlopen=_urlopen)
+    manifest, image_config = get_manifest_and_config(
+        src, architecture, urlopen=urlopen, config=config, client=client
+    )
 
     # Get layer digests
     digests = [Digest.from_string(layer["digest"]) for layer in manifest["layers"]]
 
     # Filter digests that are don't exist in the registry
     missing_digests = [
-        digest for digest in digests if not blob_exists(dst, digest, _urlopen=_urlopen)
+        digest for digest in digests if not blob_exists(dst, digest, urlopen=urlopen)
     ]
 
     if not missing_digests:
-        return manifest, config
+        return manifest, image_config
 
     # Pull missing blobs, push them to the registry
     with spack.stage.StageComposite.from_iterable(
-        make_stage(url=src.blob_url(digest), digest=digest, _urlopen=_urlopen)
+        make_stage(
+            url=src.blob_url(digest), digest=digest, urlopen=urlopen, config=config, client=client
+        )
         for digest in missing_digests
     ) as stages:
         stages.fetch()
@@ -269,11 +273,9 @@ def copy_missing_layers(
 
         for stage, digest in zip(stages, missing_digests):
             # No need to check existence again, force=True.
-            upload_blob(
-                dst, file=stage.save_filename, force=True, digest=digest, _urlopen=_urlopen
-            )
+            upload_blob(dst, file=stage.save_filename, force=True, digest=digest, urlopen=urlopen)
 
-    return manifest, config
+    return manifest, image_config
 
 
 #: OCI manifest content types (including docker type)
@@ -296,7 +298,10 @@ def get_manifest_and_config(
     ref: ImageReference,
     architecture="amd64",
     recurse=3,
-    _urlopen: spack.oci.opener.MaybeOpen = None,
+    *,
+    urlopen: spack.oci.opener.OpenType,
+    config: spack.config.Configuration,
+    client: spack.util.web.NetworkClient,
 ) -> Tuple[dict, dict]:
     """Recursively fetch manifest and config for a given image reference
     with a given architecture.
@@ -305,14 +310,15 @@ def get_manifest_and_config(
         ref: The image reference.
         architecture: The architecture (when referencing an index)
         recurse: How many levels of index to recurse into.
+        urlopen: function used to open URLs
+        config: configuration for the stage the image config is fetched into
+        client: network client of that stage
 
     Returns:
         A tuple of (manifest, config)"""
 
-    _urlopen = _urlopen or spack.oci.opener.urlopen
-
     # Get manifest
-    with _urlopen(
+    with urlopen(
         Request(url=ref.manifest_url(), headers={"Accept": ", ".join(all_content_type)})
     ) as response:
         # Recurse when we find an index
@@ -331,7 +337,9 @@ def get_manifest_and_config(
                 ref.with_digest(manifest_meta["digest"]),
                 architecture=architecture,
                 recurse=recurse - 1,
-                _urlopen=_urlopen,
+                urlopen=urlopen,
+                config=config,
+                client=client,
             )
 
         # Otherwise, require a manifest
@@ -342,14 +350,16 @@ def get_manifest_and_config(
 
     # Download, verify and cache config file
     config_digest = Digest.from_string(manifest["config"]["digest"])
-    with make_stage(ref.blob_url(config_digest), config_digest, _urlopen=_urlopen) as stage:
+    with make_stage(
+        ref.blob_url(config_digest), config_digest, urlopen=urlopen, config=config, client=client
+    ) as stage:
         stage.fetch()
         stage.check()
         stage.cache_local()
         with open(stage.save_filename, "rb") as f:
-            config = json.load(f)
+            image_config = json.load(f)
 
-    return manifest, config
+    return manifest, image_config
 
 
 #: Same as upload_manifest, but with retry wrapper
@@ -366,11 +376,16 @@ copy_missing_layers_with_retry = spack.oci.opener.default_retry(copy_missing_lay
 
 
 def make_stage(
-    url: str, digest: Digest, keep: bool = False, _urlopen: spack.oci.opener.MaybeOpen = None
+    url: str,
+    digest: Digest,
+    keep: bool = False,
+    *,
+    urlopen: spack.oci.opener.OpenType,
+    config: spack.config.Configuration,
+    client: spack.util.web.NetworkClient,
 ) -> spack.stage.Stage:
-    _urlopen = _urlopen or spack.oci.opener.urlopen
     fetch_strategy = spack.fetch_strategy.OCIRegistryFetchStrategy(
-        url=url, checksum=digest.digest, _urlopen=_urlopen
+        url=url, checksum=digest.digest, _urlopen=urlopen
     )
     # Use blobs/<alg>/<encoded> as the cache path, which follows
     # the OCI Image Layout Specification. What's missing though,
@@ -381,5 +396,6 @@ def make_stage(
         mirror_paths=spack.mirrors.layout.OCILayout(digest),
         name=digest.digest,
         keep=keep,
-        config=spack.config.CONFIG,
+        config=config,
+        client=client,
     )

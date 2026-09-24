@@ -4,8 +4,8 @@
 import pytest
 
 import spack.enums
-import spack.repo
 import spack.spec
+import spack.test.harness
 import spack.util.spack_yaml as syaml
 from spack.concretize import concretize_one
 from spack.solver.asp import UnsatisfiableSpecError
@@ -25,15 +25,17 @@ def test_config_deprecated_with_old_style_version_deprecation(mock_packages, mut
     config:deprecated:false blocks them.
     """
     with mutable_config.override("config:deprecated", True):
-        assert concretize_one("deprecated-old-style@1.0").satisfies("@1.0")
+        assert concretize_one("deprecated-old-style@1.0", spack.test.harness.current()).satisfies(
+            "@1.0"
+        )
 
     with pytest.raises(UnsatisfiableSpecError, match="unspecified"):
-        concretize_one("deprecated-old-style@1.0")
+        concretize_one("deprecated-old-style@1.0", spack.test.harness.current())
 
 
 def test_version_deprecated_true_prefers_non_deprecated(config, mock_packages):
     """Solver picks @0.9 (non-deprecated) over @1.0 (deprecated) by default."""
-    spec = concretize_one("deprecated-old-style")
+    spec = concretize_one("deprecated-old-style", spack.test.harness.current())
     assert spec.satisfies("@0.9")
 
 
@@ -41,7 +43,7 @@ def test_version_deprecated_true_registers_in_deprecations(mock_packages):
     """Tests that version(..., deprecated=True) populates pkg.deprecations with
     reason=unspecified, severity=critical, and the label marking where it comes from.
     """
-    pkg_cls = spack.repo.PATH.get_pkg_class("deprecated-old-style")
+    pkg_cls = spack.test.harness.current().repo.get_pkg_class("deprecated-old-style")
     all_entries = [x for entries in pkg_cls.deprecations.values() for x in entries]
     assert all(
         x
@@ -65,7 +67,7 @@ packages:
       allow:
       - severity: critical
 """)
-    spec = concretize_one("deprecated-with-reason@2.0")
+    spec = concretize_one("deprecated-with-reason@2.0", spack.test.harness.current())
     assert spec.satisfies("@2.0")
     assert not any(
         "deprecat" in str(w.message).lower() or "vuln" in str(w.message).lower()
@@ -85,7 +87,7 @@ packages:
       - severity: medium
 """)
     with pytest.raises(UnsatisfiableSpecError, match="deprecated"):
-        concretize_one("deprecated-with-reason@2.0")
+        concretize_one("deprecated-with-reason@2.0", spack.test.harness.current())
 
 
 def test_selector_under_all_blocks_a_higher_severity(
@@ -102,18 +104,20 @@ packages:
       - severity: low
 """)
     with pytest.raises(UnsatisfiableSpecError, match="deprecated"):
-        concretize_one("deprecated-with-reason@2.0")
+        concretize_one("deprecated-with-reason@2.0", spack.test.harness.current())
 
 
 def test_coexistence_old_and_new_deprecation(mock_packages, mutable_config):
     """Tests that version(..., deprecated=True) and deprecated() on the same version coexist."""
     # The solver avoids the deprecated @1.0 and picks @2.0 by default.
-    spec = concretize_one("deprecated-dual")
+    spec = concretize_one("deprecated-dual", spack.test.harness.current())
     assert spec.satisfies("@2.0")
 
     # With deprecations allowed, @1.0 concretizes without error.
     with mutable_config.override("packages:all:deprecation:allow", [{"severity": "critical"}]):
-        assert concretize_one("deprecated-dual@1.0").satisfies("@1.0")
+        assert concretize_one("deprecated-dual@1.0", spack.test.harness.current()).satisfies(
+            "@1.0"
+        )
 
 
 def test_deprecation_scope_runtime_gates_deps_that_would_be_built(
@@ -132,7 +136,7 @@ packages:
     # the deprecated node is only reachable through a build edge, and it is pinned, so there is
     # no alternative version the solver could pick instead
     with pytest.raises(UnsatisfiableSpecError, match="deprecated spec"):
-        concretize_one("deprecated-buildtool-client")
+        concretize_one("deprecated-buildtool-client", spack.test.harness.current())
 
 
 def test_deprecation_scope_all_gates_build_only_dep(
@@ -148,14 +152,14 @@ packages:
       scope: all
 """)
     with pytest.raises(UnsatisfiableSpecError, match="deprecated"):
-        concretize_one("deprecated-buildtool-client")
+        concretize_one("deprecated-buildtool-client", spack.test.harness.current())
 
 
 def test_old_style_deprecation_uses_exact_version(mock_packages):
     """Tests that version(..., deprecated=True) must map to an exact '@=X.Y' constraint, so that
     the range '@X.Y' does not spuriously match a sub-version such as 'X.Y.Z'.
     """
-    pkg_cls = spack.repo.PATH.get_pkg_class("deprecated-old-style")
+    pkg_cls = spack.test.harness.current().repo.get_pkg_class("deprecated-old-style")
     (constraint,) = pkg_cls.deprecations  # only @1.0 is deprecated
     assert spack.spec.Spec("deprecated-old-style@=1.0").satisfies(constraint)
     assert not spack.spec.Spec("deprecated-old-style@=1.0.1").satisfies(constraint)
@@ -172,7 +176,9 @@ packages:
       allow:
       - labels: [CVE-2026-0001]
 """)
-    assert concretize_one("deprecated-with-labels@3.0").satisfies("@3.0")
+    assert concretize_one("deprecated-with-labels@3.0", spack.test.harness.current()).satisfies(
+        "@3.0"
+    )
 
 
 def test_partially_listed_labels_do_not_skip_deprecation(
@@ -187,7 +193,7 @@ packages:
       - labels: [CVE-2026-0002]
 """)
     with pytest.raises(UnsatisfiableSpecError, match="deprecated"):
-        concretize_one("deprecated-with-labels@2.0")
+        concretize_one("deprecated-with-labels@2.0", spack.test.harness.current())
 
     packages_yaml_write("""
 packages:
@@ -196,7 +202,9 @@ packages:
       allow:
       - labels: [CVE-2026-0002, GHSA-aaaa-bbbb-cccc]
 """)
-    assert concretize_one("deprecated-with-labels@2.0").satisfies("@2.0")
+    assert concretize_one("deprecated-with-labels@2.0", spack.test.harness.current()).satisfies(
+        "@2.0"
+    )
 
     # Labels can be allowed on different entries
     packages_yaml_write("""
@@ -207,7 +215,9 @@ packages:
       - labels: [CVE-2026-0002]
       - labels: [GHSA-aaaa-bbbb-cccc]
 """)
-    assert concretize_one("deprecated-with-labels@2.0").satisfies("@2.0")
+    assert concretize_one("deprecated-with-labels@2.0", spack.test.harness.current()).satisfies(
+        "@2.0"
+    )
 
 
 def test_per_package_label_selector_replaces_the_one_under_all(
@@ -228,10 +238,12 @@ packages:
       - labels: [CVE-2026-0002, GHSA-aaaa-bbbb-cccc]
 """)
     # @2.0 deprecation is skipped by the per-package list
-    assert concretize_one("deprecated-with-labels@2.0").satisfies("@2.0")
+    assert concretize_one("deprecated-with-labels@2.0", spack.test.harness.current()).satisfies(
+        "@2.0"
+    )
     # @3.0 is not, because 'all' is no longer consulted
     with pytest.raises(UnsatisfiableSpecError, match="deprecated"):
-        concretize_one("deprecated-with-labels@3.0")
+        concretize_one("deprecated-with-labels@3.0", spack.test.harness.current())
 
 
 def test_reason_list_allows_only_the_reasons_it_names(
@@ -250,10 +262,12 @@ packages:
 """)
     # @2.0 is deprecated with reason=vuln, which the selector omits
     with pytest.raises(UnsatisfiableSpecError, match="deprecated"):
-        concretize_one("deprecated-with-reason@2.0")
+        concretize_one("deprecated-with-reason@2.0", spack.test.harness.current())
 
     # @1.0 is deprecated with reason=rename, which the selector names
-    assert concretize_one("deprecated-with-reason@1.0").satisfies("@1.0")
+    assert concretize_one("deprecated-with-reason@1.0", spack.test.harness.current()).satisfies(
+        "@1.0"
+    )
 
 
 def test_a_selector_naming_a_reason_allows_no_other(
@@ -269,11 +283,13 @@ packages:
         severity: critical
 """)
     # reason=vuln is allowed up to critical
-    assert concretize_one("deprecated-with-reason@2.0").satisfies("@2.0")
+    assert concretize_one("deprecated-with-reason@2.0", spack.test.harness.current()).satisfies(
+        "@2.0"
+    )
 
     # reason=rename is matched by no selector, so it stays disallowed
     with pytest.raises(UnsatisfiableSpecError, match="deprecated"):
-        concretize_one("deprecated-with-reason@1.0")
+        concretize_one("deprecated-with-reason@1.0", spack.test.harness.current())
 
 
 def test_per_package_allow_replaces_the_one_under_all(
@@ -296,11 +312,13 @@ packages:
       - severity: critical
 """)
     # the package with its own list is not bound by the reasons the global one names
-    assert concretize_one("deprecated-with-reason@2.0").satisfies("@2.0")
+    assert concretize_one("deprecated-with-reason@2.0", spack.test.harness.current()).satisfies(
+        "@2.0"
+    )
 
     # a package without one is still blocked by it, so the override is scoped to the one package
     with pytest.raises(UnsatisfiableSpecError, match="deprecated"):
-        concretize_one("deprecated-with-labels@3.0")
+        concretize_one("deprecated-with-labels@3.0", spack.test.harness.current())
 
 
 def test_selector_without_a_reason_matches_every_reason(
@@ -315,8 +333,12 @@ packages:
       - severity: critical
 """)
     # @2.0 is deprecated with reason=vuln, @1.0 with reason=rename
-    assert concretize_one("deprecated-with-reason@2.0").satisfies("@2.0")
-    assert concretize_one("deprecated-with-reason@1.0").satisfies("@1.0")
+    assert concretize_one("deprecated-with-reason@2.0", spack.test.harness.current()).satisfies(
+        "@2.0"
+    )
+    assert concretize_one("deprecated-with-reason@1.0", spack.test.harness.current()).satisfies(
+        "@1.0"
+    )
 
 
 def test_old_and_new_deprecation_are_checked_independently(
@@ -337,7 +359,7 @@ packages:
         severity: critical
 """)
     with pytest.raises(UnsatisfiableSpecError, match="deprecated"):
-        concretize_one("deprecated-dual@1.0")
+        concretize_one("deprecated-dual@1.0", spack.test.harness.current())
 
     # Symmetrically, allowing only vuln leaves the keyword deprecation in force.
     packages_yaml_write("""
@@ -349,7 +371,7 @@ packages:
         severity: critical
 """)
     with pytest.raises(UnsatisfiableSpecError, match="deprecated"):
-        concretize_one("deprecated-dual@1.0")
+        concretize_one("deprecated-dual@1.0", spack.test.harness.current())
 
     # A selector for each of them is what it takes.
     packages_yaml_write("""
@@ -362,14 +384,16 @@ packages:
       - reason: vuln
         severity: high
 """)
-    assert concretize_one("deprecated-dual@1.0").satisfies("@1.0")
+    assert concretize_one("deprecated-dual@1.0", spack.test.harness.current()).satisfies("@1.0")
 
 
 def test_legacy_config_deprecated_flag_warns(mock_packages, mutable_config):
     """Tests that the legacy config:deprecated fallback still relaxes the policy, and warns."""
     with mutable_config.override("config:deprecated", True):
         with pytest.warns(UserWarning, match="config:deprecated is deprecated"):
-            assert concretize_one("deprecated-old-style@1.0").satisfies("@1.0")
+            assert concretize_one(
+                "deprecated-old-style@1.0", spack.test.harness.current()
+            ).satisfies("@1.0")
 
 
 @pytest.fixture
@@ -379,10 +403,12 @@ def lib_built_with_deprecated_tool(mutable_config, temporary_store):
     Models a library installed back when the tool it was built with was still allowed.
     """
     with mutable_config.override("packages:all:deprecation:allow", [{"severity": "critical"}]):
-        spec = concretize_one("deprecated-tool-lib ^deprecated-tool@1.0")
+        spec = concretize_one(
+            "deprecated-tool-lib ^deprecated-tool@1.0", spack.test.harness.current()
+        )
     assert spec["deprecated-tool"].satisfies("@1.0")
     for node in spec.traverse():
-        temporary_store.layout.create_install_directory(node)
+        temporary_store.layout.create_install_directory(node, spack.test.harness.current().config)
         temporary_store.db.add(node, explicit=node.name == spec.name)
     return spec
 
@@ -397,7 +423,7 @@ def test_runtime_scope_does_not_build_with_a_deprecated_tool(
     mutable_config.set("packages:all:deprecation:scope", "runtime")
     mutable_config.set("concretizer:reuse", True)
 
-    client = concretize_one("deprecated-tool-client")
+    client = concretize_one("deprecated-tool-client", spack.test.harness.current())
 
     # the installed library is reused, its build provenance is not inspected
     assert client["deprecated-tool-lib"].dag_hash() == lib_built_with_deprecated_tool.dag_hash()
@@ -414,7 +440,7 @@ def test_all_scope_rebuilds_a_library_built_with_a_deprecated_tool(
     mutable_config.set("packages:all:deprecation:scope", "all")
     mutable_config.set("concretizer:reuse", True)
 
-    client = concretize_one("deprecated-tool-client")
+    client = concretize_one("deprecated-tool-client", spack.test.harness.current())
 
     # the installed library was built with the deprecated tool, so it is not reused
     assert client["deprecated-tool-lib"].dag_hash() != lib_built_with_deprecated_tool.dag_hash()
@@ -439,7 +465,9 @@ packages:
     prefer: ["@1.0"]
 """)
     # with the deprecation allowed, the preference decides
-    assert concretize_one("deprecated-tool-client")["deprecated-tool"].satisfies("@1.0")
+    assert concretize_one("deprecated-tool-client", spack.test.harness.current())[
+        "deprecated-tool"
+    ].satisfies("@1.0")
 
     packages_yaml_write("""
 packages:
@@ -451,7 +479,9 @@ packages:
     prefer: ["@1.0"]
 """)
     # with it disallowed, the gate outranks the preference, which is soft, and @2.0 is selected
-    assert concretize_one("deprecated-tool-client")["deprecated-tool"].satisfies("@2.0")
+    assert concretize_one("deprecated-tool-client", spack.test.harness.current())[
+        "deprecated-tool"
+    ].satisfies("@2.0")
 
 
 def test_runtime_scope_errors_on_forced_deprecated_build_dep(
@@ -467,7 +497,7 @@ packages:
       scope: runtime
 """)
     with pytest.raises(UnsatisfiableSpecError, match="deprecated spec"):
-        concretize_one("deprecated-tool-client %deprecated-tool@1.0")
+        concretize_one("deprecated-tool-client %deprecated-tool@1.0", spack.test.harness.current())
 
     packages_yaml_write("""
 packages:
@@ -478,13 +508,13 @@ packages:
     require: "@1.0"
 """)
     with pytest.raises(UnsatisfiableSpecError, match="deprecated spec"):
-        concretize_one("deprecated-tool-client")
+        concretize_one("deprecated-tool-client", spack.test.harness.current())
 
 
 def test_directive_message_is_reported_on_refusal(mock_packages, mutable_config):
     """Tests that the guidance a recipe attaches with msg= reaches the concretization error."""
     with pytest.raises(UnsatisfiableSpecError, match="use @2.0, which is maintained"):
-        concretize_one("deprecated-with-message@1.0")
+        concretize_one("deprecated-with-message@1.0", spack.test.harness.current())
 
 
 def test_directive_without_message_reports_only_the_policy(mock_packages, mutable_config):
@@ -492,7 +522,7 @@ def test_directive_without_message_reports_only_the_policy(mock_packages, mutabl
     more.
     """
     with pytest.raises(UnsatisfiableSpecError) as exc_info:
-        concretize_one("deprecated-with-reason@2.0")
+        concretize_one("deprecated-with-reason@2.0", spack.test.harness.current())
 
     config_path = "'packages:deprecated-with-reason:deprecation:allow'"
     message = str(exc_info.value)
@@ -505,7 +535,7 @@ def test_every_message_behind_one_error_term_is_reported(mock_packages, mutable_
     their msg=, and that the error names the deprecated spec rather than only the package.
     """
     with pytest.raises(UnsatisfiableSpecError) as exc_info:
-        concretize_one("deprecated-with-message@0.9")
+        concretize_one("deprecated-with-message@0.9", spack.test.harness.current())
 
     message = str(exc_info.value)
     assert "'deprecated-with-message@=0.9'" in message
@@ -525,7 +555,9 @@ packages:
       allow:
       - labels: [CVE-2026-0001]
 """)
-    assert concretize_one("deprecated-with-labels@3.0").satisfies("@3.0")
+    assert concretize_one("deprecated-with-labels@3.0", spack.test.harness.current()).satisfies(
+        "@3.0"
+    )
 
     packages_yaml_write("""
 packages:
@@ -536,7 +568,7 @@ packages:
         severity: high
 """)
     with pytest.raises(UnsatisfiableSpecError, match="deprecated"):
-        concretize_one("deprecated-with-labels@3.0")
+        concretize_one("deprecated-with-labels@3.0", spack.test.harness.current())
 
     packages_yaml_write("""
 packages:
@@ -547,7 +579,7 @@ packages:
         reason: rename
 """)
     with pytest.raises(UnsatisfiableSpecError, match="deprecated"):
-        concretize_one("deprecated-with-labels@3.0")
+        concretize_one("deprecated-with-labels@3.0", spack.test.harness.current())
 
 
 def test_one_matching_selector_is_enough(mock_packages, concretize_scope, packages_yaml_write):
@@ -563,8 +595,12 @@ packages:
         severity: low
 """)
     # @2.0 is vuln/critical, @1.0 is rename/low, and each is matched by a different selector
-    assert concretize_one("deprecated-with-reason@2.0").satisfies("@2.0")
-    assert concretize_one("deprecated-with-reason@1.0").satisfies("@1.0")
+    assert concretize_one("deprecated-with-reason@2.0", spack.test.harness.current()).satisfies(
+        "@2.0"
+    )
+    assert concretize_one("deprecated-with-reason@1.0", spack.test.harness.current()).satisfies(
+        "@1.0"
+    )
 
 
 def test_legacy_deprecations_are_selectable_alone(
@@ -583,11 +619,13 @@ packages:
       - labels: [{spack.enums.LEGACY_DEPRECATION_LABEL}]
 """
     )
-    assert concretize_one("deprecated-old-style@1.0").satisfies("@1.0")
+    assert concretize_one("deprecated-old-style@1.0", spack.test.harness.current()).satisfies(
+        "@1.0"
+    )
 
     # deprecated-with-labels@1.0 is unspecified/critical too, but has no labels
     with pytest.raises(UnsatisfiableSpecError, match="deprecated"):
-        concretize_one("deprecated-with-labels@1.0")
+        concretize_one("deprecated-with-labels@1.0", spack.test.harness.current())
 
 
 def test_each_label_needs_a_selector_matching_every_attribute(
@@ -608,7 +646,7 @@ packages:
         severity: high
 """)
     with pytest.raises(UnsatisfiableSpecError, match="deprecated"):
-        concretize_one("deprecated-with-labels@2.0")
+        concretize_one("deprecated-with-labels@2.0", spack.test.harness.current())
 
 
 def test_refusal_reports_only_the_labels_not_allowed(
@@ -625,7 +663,7 @@ packages:
       - labels: [CVE-2026-0002]
 """)
     with pytest.raises(UnsatisfiableSpecError) as exc_info:
-        concretize_one("deprecated-with-labels@2.0")
+        concretize_one("deprecated-with-labels@2.0", spack.test.harness.current())
 
     message = str(exc_info.value)
     assert "GHSA-aaaa-bbbb-cccc" in message

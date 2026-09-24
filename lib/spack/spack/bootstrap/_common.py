@@ -11,19 +11,22 @@ import re
 import sys
 import sysconfig
 import warnings
-from typing import NamedTuple, Optional, Sequence, Union
+from typing import TYPE_CHECKING, NamedTuple, Optional, Sequence, Union
 
 import spack.vendor.archspec.cpu
 
 import spack.platforms
+import spack.repo
 import spack.spec
-import spack.store
 import spack.util.environment
 import spack.util.executable
 import spack.util.filesystem as fs
 from spack.util import tty
 
 from .config import spec_for_current_python
+
+if TYPE_CHECKING:
+    import spack.context
 
 
 class ExecutableInfo(NamedTuple):
@@ -41,20 +44,24 @@ def _python_import(module: str) -> bool:
     return True
 
 
-def _try_import_from_store(module: str, query_spec: Union[str, "spack.spec.Spec"]) -> bool:
+def _try_import_from_store(
+    module: str, query_spec: Union[str, "spack.spec.Spec"], ctx: "spack.context.SpackContext"
+) -> bool:
     """Return True if the module can be imported from an already
     installed spec, False otherwise.
 
     Args:
         module: Python module to be imported
         query_spec: spec that may provide the module
+        ctx: bootstrap context, whose store is searched
     """
     # If it is a string assume it's one of the root specs by this module
     if isinstance(query_spec, str):
         # We have to run as part of this python interpreter
         query_spec += " ^" + spec_for_current_python()
 
-    installed_specs = spack.store.STORE.db.query(query_spec, installed=True)
+    db = ctx.store.db
+    installed_specs = db.query(query_spec, installed=True)
 
     for candidate_spec in installed_specs:
         # previously bootstrapped specs may not have a python-venv dependency.
@@ -64,7 +71,8 @@ def _try_import_from_store(module: str, query_spec: Union[str, "spack.spec.Spec"
             python, *_ = candidate_spec.dependencies("python")
 
         # if python is installed, ask it for the layout
-        if spack.store.STORE.db.installed(python):
+        if db.installed(python):
+            spack.repo.attach_packages([python], ctx)
             module_paths = [
                 os.path.join(candidate_spec.prefix, python.package.purelib),
                 os.path.join(candidate_spec.prefix, python.package.platlib),
@@ -178,7 +186,9 @@ def _fix_ext_suffix(candidate_spec: "spack.spec.Spec"):
 
 
 def _executables_in_store(
-    executables: Sequence[str], query_spec: Union["spack.spec.Spec", str]
+    executables: Sequence[str],
+    query_spec: Union["spack.spec.Spec", str],
+    ctx: "spack.context.SpackContext",
 ) -> Optional[ExecutableInfo]:
     """Return the first of the executables that can be retrieved from a spec in the
     store, together with the spec providing it, or None if there is no such spec.
@@ -189,11 +199,12 @@ def _executables_in_store(
     Args:
         executables: list of executables to be searched
         query_spec: spec that may provide the executable
+        ctx: bootstrap context, whose store is searched
     """
     executables_str = ", ".join(executables)
     msg = "[BOOTSTRAP EXECUTABLES {0}] Try installed specs with query '{1}'"
     tty.debug(msg.format(executables_str, query_spec))
-    for concrete_spec in spack.store.STORE.db.query(query_spec, installed=True):
+    for concrete_spec in ctx.store.db.query(query_spec, installed=True):
         bin_dir = concrete_spec.prefix.bin
         command = spack.util.executable.which(*executables, path=bin_dir)
         if command is None:

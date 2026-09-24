@@ -5,7 +5,8 @@ import pathlib
 
 import spack.concretize
 import spack.environment as ev
-from spack.main import SpackCommand
+import spack.test.harness
+from spack.test.harness import SpackCommand
 from spack.util.filesystem import working_dir
 
 undevelop = SpackCommand("undevelop")
@@ -33,10 +34,10 @@ spack:
             )
 
         env("create", "test", "./spack.yaml")
-        with ev.read("test"):
-            before = spack.concretize.concretize_one("mpich")
+        with ev.read("test", ctx=spack.test.harness.current()):
+            before = spack.concretize.concretize_one("mpich", spack.test.harness.current())
             undevelop("mpich")
-            after = spack.concretize.concretize_one("mpich")
+            after = spack.concretize.concretize_one("mpich", spack.test.harness.current())
 
     # Removing dev spec from environment changes concretization
     assert before.satisfies("dev_path=*")
@@ -65,10 +66,10 @@ spack:
             )
 
         env("create", "test", "./spack.yaml")
-        with ev.read("test"):
-            before = spack.concretize.concretize_one("mpich")
+        with ev.read("test", ctx=spack.test.harness.current()):
+            before = spack.concretize.concretize_one("mpich", spack.test.harness.current())
             undevelop("--all")
-            after = spack.concretize.concretize_one("mpich")
+            after = spack.concretize.concretize_one("mpich", spack.test.harness.current())
 
     # Removing dev spec from environment changes concretization
     assert before.satisfies("dev_path=*")
@@ -97,7 +98,7 @@ spack:
             )
 
         env("create", "test", "./spack.yaml")
-        with ev.read("test") as e:
+        with ev.read("test", ctx=spack.test.harness.current()) as e:
             concretize()
             before = e.specs_by_hash
             undevelop("package-not-in-develop")  # does nothing

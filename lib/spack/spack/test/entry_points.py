@@ -10,6 +10,7 @@ import pytest
 
 import spack.config
 import spack.extensions
+import spack.test.harness
 import spack.util.lang
 
 
@@ -86,7 +87,8 @@ def test_spack_entry_point_config(tmp_path: pathlib.Path, mock_get_entry_points)
 def test_spack_entry_point_extension(tmp_path: pathlib.Path, mock_get_entry_points):
     """Test config scope entry point"""
     my_ext = tmp_path / "spack/spack-myext"
-    extensions = spack.extensions.get_extension_paths()
+    config = spack.test.harness.current().config
+    extensions = spack.extensions.get_extension_paths(config)
     found = bool([ext for ext in extensions if os.path.samefile(ext, my_ext)])
     if not found:
         raise ValueError("Did not find extension in %s" % ", ".join(extensions))
@@ -94,9 +96,9 @@ def test_spack_entry_point_extension(tmp_path: pathlib.Path, mock_get_entry_poin
     found = bool([ext for ext in extensions if os.path.samefile(ext, my_ext)])
     if not found:
         raise ValueError("Did not find extension in %s" % ", ".join(extensions))
-    root = spack.extensions.load_extension("myext")
+    root = spack.extensions.load_extension("myext", config)
     assert os.path.samefile(root, my_ext)
-    module = spack.extensions.get_module("spam")
+    module = spack.extensions.get_module("spam", config)
     assert module is not None
 
 

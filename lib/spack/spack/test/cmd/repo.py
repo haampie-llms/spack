@@ -15,13 +15,14 @@ import spack.environment as ev
 import spack.main
 import spack.repo
 import spack.repo_migrate
+import spack.test.harness
 from spack.config import Configuration
 from spack.error import SpackError
 from spack.util.executable import Executable
 from spack.util.filesystem import working_dir
 
-repo = spack.main.SpackCommand("repo")
-env = spack.main.SpackCommand("env")
+repo = spack.test.harness.SpackCommand("repo")
+env = spack.test.harness.SpackCommand("env")
 
 
 def test_help_option():
@@ -112,7 +113,7 @@ spack:
         env("create", "test", "./spack.yaml")
         # check that repo path was correctly substituted with the environment variable
         current_dir = os.getcwd()
-        with ev.read("test") as newenv:
+        with ev.read("test", ctx=spack.test.harness.current()) as newenv:
             repos_specs = mutable_config.get("repos", default={}, scope=newenv.scope_name)
             assert current_dir in repos_specs.values()
 
@@ -203,7 +204,9 @@ class NonTrivialImport(Package):
 
 def test_repo_migrate(tmp_path: pathlib.Path, config):
     old_root, _ = spack.repo.create_repo(str(tmp_path), "org.repo", package_api=(1, 0))
-    pkgs_path = pathlib.Path(spack.repo.from_path(old_root).packages_path)
+    pkgs_path = pathlib.Path(
+        spack.repo.from_path(old_root, cache=spack.test.harness.current().misc_cache).packages_path
+    )
     new_root = pathlib.Path(old_root) / "spack_repo" / "org" / "repo"
 
     pkg_7zip_old = pkgs_path / "7zip" / "package.py"
@@ -328,7 +331,13 @@ def test_add_repo_name_already_exists(tmp_path: pathlib.Path):
     # Should raise error when name already exists
     with pytest.raises(SpackError, match="A repository with the name 'test_name' already exists"):
         spack.cmd.repo._add_repo(
-            str(tmp_path), name="test_name", scope=None, paths=[], destination=None, config=config
+            str(tmp_path),
+            name="test_name",
+            scope=None,
+            paths=[],
+            destination=None,
+            config=config,
+            cache=spack.test.harness.current().misc_cache,
         )
 
 
@@ -345,6 +354,7 @@ def test_add_repo_destination_with_local_path(tmp_path: pathlib.Path):
             paths=[],
             destination="/some/destination",
             config=make_repo_config(),
+            cache=spack.test.harness.current().misc_cache,
         )
     with pytest.raises(SpackError, match="The --paths flag is only valid for git repositories"):
         spack.cmd.repo._add_repo(
@@ -354,13 +364,14 @@ def test_add_repo_destination_with_local_path(tmp_path: pathlib.Path):
             paths=["path1", "path2"],
             destination=None,
             config=make_repo_config(),
+            cache=spack.test.harness.current().misc_cache,
         )
 
 
 def test_add_repo_computed_key_already_exists(tmp_path: pathlib.Path, monkeypatch):
     """Test _add_repo raises error when computed key already exists in config."""
 
-    def mock_parse_config_descriptor(name, entry, lock):
+    def mock_parse_config_descriptor(name, entry, lock, config):
         return MockDescriptor({str(tmp_path): MockRepo("test_repo")})
 
     monkeypatch.setattr(spack.repo, "parse_config_descriptor", mock_parse_config_descriptor)
@@ -374,6 +385,7 @@ def test_add_repo_computed_key_already_exists(tmp_path: pathlib.Path, monkeypatc
             paths=[],
             destination=None,
             config=make_repo_config({"test_repo": "/some/path"}),
+            cache=spack.test.harness.current().misc_cache,
         )
 
 
@@ -381,7 +393,7 @@ def test_add_repo_git_url_with_paths(monkeypatch):
     """Test _add_repo correctly handles git URL with multiple paths."""
     config = make_repo_config({"test_repo": "/some/path"})
 
-    def mock_parse_config_descriptor(name, entry, lock):
+    def mock_parse_config_descriptor(name, entry, lock, config):
         # Verify the entry has the expected git structure
         assert "git" in entry
         assert entry["git"] == "https://example.com/repo.git"
@@ -398,6 +410,7 @@ def test_add_repo_git_url_with_paths(monkeypatch):
         paths=["path1", "path2"],
         destination=None,
         config=config,
+        cache=spack.test.harness.current().misc_cache,
     )
 
     assert key == "git_test"
@@ -411,7 +424,7 @@ def test_add_repo_git_url_with_destination(monkeypatch):
     """Test _add_repo correctly handles git URL with destination."""
     config = make_repo_config({"test_repo": "/some/path"})
 
-    def mock_parse_config_descriptor(name, entry, lock):
+    def mock_parse_config_descriptor(name, entry, lock, config):
         # Verify the entry has the expected git structure
         assert "git" in entry
         assert entry["git"] == "https://example.com/repo.git"
@@ -428,6 +441,7 @@ def test_add_repo_git_url_with_destination(monkeypatch):
         paths=[],
         destination="/custom/destination",
         config=config,
+        cache=spack.test.harness.current().misc_cache,
     )
 
     assert key == "git_test"
@@ -441,7 +455,7 @@ def test_add_repo_ssh_git_url_detection(monkeypatch):
     """Test _add_repo correctly detects SSH git URLs."""
     config = make_repo_config({"test_repo": "/some/path"})
 
-    def mock_parse_config_descriptor(name, entry, lock):
+    def mock_parse_config_descriptor(name, entry, lock, config):
         # Verify the entry has the expected git structure
         assert "git" in entry
         assert entry["git"] == "git@github.com:user/repo.git"
@@ -457,6 +471,7 @@ def test_add_repo_ssh_git_url_detection(monkeypatch):
         paths=[],
         destination=None,
         config=config,
+        cache=spack.test.harness.current().misc_cache,
     )
 
     assert key == "ssh_git_test"
@@ -469,7 +484,7 @@ def test_add_repo_no_usable_repositories_error(monkeypatch):
     """Test that _add_repo raises SpackError when no usable repositories can be constructed."""
     config = make_repo_config()
 
-    def mock_parse_config_descriptor(name, entry, lock):
+    def mock_parse_config_descriptor(name, entry, lock, config):
         return MockDescriptor(
             {"/path1": Exception("Invalid repo"), "/path2": Exception("Another error")}
         )
@@ -486,6 +501,7 @@ def test_add_repo_no_usable_repositories_error(monkeypatch):
             paths=[],
             destination=None,
             config=config,
+            cache=spack.test.harness.current().misc_cache,
         )
 
 
@@ -493,7 +509,7 @@ def test_add_repo_multiple_repos_no_name_error(monkeypatch):
     """Test that _add_repo raises SpackError when multiple repositories found without
     specifying --name."""
 
-    def mock_parse_config_descriptor(name, entry, lock):
+    def mock_parse_config_descriptor(name, entry, lock, config):
         return MockDescriptor({"/path1": MockRepo("repo1"), "/path2": MockRepo("repo2")})
 
     monkeypatch.setattr(spack.repo, "parse_config_descriptor", mock_parse_config_descriptor)
@@ -508,6 +524,7 @@ def test_add_repo_multiple_repos_no_name_error(monkeypatch):
             paths=[],
             destination=None,
             config=make_repo_config(),
+            cache=spack.test.harness.current().misc_cache,
         )
 
 
@@ -515,7 +532,7 @@ def test_add_repo_git_url_basic_success(monkeypatch):
     """Test successful addition of a git repository."""
     config = make_repo_config()
 
-    def mock_parse_config_descriptor(name, entry, lock):
+    def mock_parse_config_descriptor(name, entry, lock, config):
         # Verify git entry structure
         assert isinstance(entry, dict)
         assert entry["git"] == "https://github.com/example/repo.git"
@@ -530,6 +547,7 @@ def test_add_repo_git_url_basic_success(monkeypatch):
         paths=[],
         destination=None,
         config=config,
+        cache=spack.test.harness.current().misc_cache,
     )
 
     assert key == "test_git_repo"
@@ -542,7 +560,7 @@ def test_add_repo_git_url_with_custom_destination(monkeypatch):
     """Test successful addition of a git repository with destination."""
     config = make_repo_config()
 
-    def mock_parse_config_descriptor(name, entry, lock):
+    def mock_parse_config_descriptor(name, entry, lock, config):
         # Verify git entry structure with destination
         assert isinstance(entry, dict)
         assert "git" in entry
@@ -559,6 +577,7 @@ def test_add_repo_git_url_with_custom_destination(monkeypatch):
         paths=[],
         destination="/custom/destination",
         config=config,
+        cache=spack.test.harness.current().misc_cache,
     )
 
     assert key == "test_git_repo"
@@ -568,7 +587,7 @@ def test_add_repo_git_url_with_single_repo_path_new(monkeypatch):
     """Test successful addition of a git repository with repo_path."""
     config = make_repo_config()
 
-    def mock_parse_config_descriptor(name, entry, lock):
+    def mock_parse_config_descriptor(name, entry, lock, config):
         # Verify git entry structure with repo_path
         assert isinstance(entry, dict)
         assert "git" in entry
@@ -585,6 +604,7 @@ def test_add_repo_git_url_with_single_repo_path_new(monkeypatch):
         paths=["subdirectory/repo"],
         destination=None,
         config=config,
+        cache=spack.test.harness.current().misc_cache,
     )
 
     assert key == "test_git_repo"
@@ -594,7 +614,7 @@ def test_add_repo_local_path_success(monkeypatch, tmp_path: pathlib.Path):
     """Test successful addition of a local repository."""
     config = make_repo_config()
 
-    def mock_parse_config_descriptor(name, entry, lock):
+    def mock_parse_config_descriptor(name, entry, lock, config):
         # Verify local path entry
         assert isinstance(entry, str)
         return MockDescriptor({str(tmp_path): MockRepo("test_repo")})
@@ -608,6 +628,7 @@ def test_add_repo_local_path_success(monkeypatch, tmp_path: pathlib.Path):
         paths=[],
         destination=None,
         config=config,
+        cache=spack.test.harness.current().misc_cache,
     )
 
     assert key == "test_local_repo"
@@ -621,7 +642,7 @@ def test_add_repo_auto_name_from_namespace(monkeypatch, tmp_path: pathlib.Path):
     """Test successful addition of a repository with auto-generated name from namespace."""
     config = make_repo_config()
 
-    def mock_parse_config_descriptor(name, entry, lock):
+    def mock_parse_config_descriptor(name, entry, lock, config):
         return MockDescriptor({str(tmp_path): MockRepo("auto_name_repo")})
 
     monkeypatch.setattr(spack.repo, "parse_config_descriptor", mock_parse_config_descriptor)
@@ -633,6 +654,7 @@ def test_add_repo_auto_name_from_namespace(monkeypatch, tmp_path: pathlib.Path):
         paths=[],
         destination=None,
         config=config,
+        cache=spack.test.harness.current().misc_cache,
     )
 
     assert key == "auto_name_repo"
@@ -646,7 +668,7 @@ def test_add_repo_partial_repo_construction_warning(monkeypatch, capfd):
     """Test that _add_repo issues warnings for repos that can't be constructed but
     succeeds if at least one can be."""
 
-    def mock_parse_config_descriptor(name, entry, lock):
+    def mock_parse_config_descriptor(name, entry, lock, config):
         return MockDescriptor(
             {
                 "/good/path": MockRepo("good_repo"),
@@ -663,6 +685,7 @@ def test_add_repo_partial_repo_construction_warning(monkeypatch, capfd):
         paths=[],
         destination=None,
         config=make_repo_config(),
+        cache=spack.test.harness.current().misc_cache,
     )
 
     assert key == "test_mixed_repo"
@@ -688,13 +711,19 @@ def test_add_repo_git_url_detection_edge_cases(monkeypatch, test_url, expected_t
     """Test edge cases for git URL detection."""
     config = make_repo_config()
 
-    def mock_parse_config_descriptor(name, entry, lock):
+    def mock_parse_config_descriptor(name, entry, lock, config):
         return MockDescriptor({"/path": MockRepo("test_repo")})
 
     monkeypatch.setattr(spack.repo, "parse_config_descriptor", mock_parse_config_descriptor)
 
     spack.cmd.repo._add_repo(
-        test_url, name=None, scope=None, paths=[], destination=None, config=config
+        test_url,
+        name=None,
+        scope=None,
+        paths=[],
+        destination=None,
+        config=config,
+        cache=spack.test.harness.current().misc_cache,
     )
 
     entry = config.get("repos").get("test_repo")
@@ -745,7 +774,7 @@ def test_add_repo_prepends_instead_of_appends(monkeypatch, tmp_path: pathlib.Pat
 
     config = make_repo_config({"existing_repo": existing_path})
 
-    def mock_parse_config_descriptor(name, entry, lock):
+    def mock_parse_config_descriptor(name, entry, lock, config):
         return MockDescriptor({new_path: MockRepo("new_repo")})
 
     monkeypatch.setattr(spack.repo, "parse_config_descriptor", mock_parse_config_descriptor)
@@ -758,6 +787,7 @@ def test_add_repo_prepends_instead_of_appends(monkeypatch, tmp_path: pathlib.Pat
         paths=[],
         destination=None,
         config=config,
+        cache=spack.test.harness.current().misc_cache,
     )
 
     assert key == "new_repo"
@@ -909,7 +939,7 @@ def test_repo_update_successful_flags(
 ):
     """Test repo update with flags."""
 
-    def mock_parse_config_descriptor(name, entry, lock):
+    def mock_parse_config_descriptor(name, entry, lock, config):
         return MockDescriptor({"/path": MockRepo("new_repo")})
 
     monkeypatch.setattr(spack.repo, "parse_config_descriptor", mock_parse_config_descriptor)
@@ -953,7 +983,7 @@ def test_repo_show_version_updates_no_changes(mock_git_package_changes):
     """Test that show-version-updates handles empty results gracefully"""
     test_repo, _, commits = mock_git_package_changes
 
-    with spack.repo.use_repositories(test_repo):
+    with spack.test.harness.use_repositories(test_repo):
         # Use the same commit for both refs - no changes
         output = repo("show-version-updates", test_repo.root, commits[-1], commits[-1])
 
@@ -968,7 +998,7 @@ def test_repo_show_version_updates_success(mock_git_package_changes):
     """Test that show-version-updates successfully outputs the correct specs"""
     test_repo, _, commits = mock_git_package_changes
 
-    with spack.repo.use_repositories(test_repo):
+    with spack.test.harness.use_repositories(test_repo):
         # commits are ordered from newest to oldest after reversal
         # commits[-3] = add v2.1.5, commits[-5] = add v2.1.7 and v2.1.8
         # Find versions added between these commits
@@ -994,9 +1024,9 @@ def test_repo_show_version_updates_excludes_manual_packages(monkeypatch, mock_gi
     """Test --no-manual-packages flag excludes packages with manual_download=True"""
     test_repo, _, commits = mock_git_package_changes
 
-    with spack.repo.use_repositories(test_repo):
+    with spack.test.harness.use_repositories(test_repo):
         # Set manual_download=True on the package
-        pkg_class = spack.repo.PATH.get_pkg_class("diff-test")
+        pkg_class = spack.test.harness.current().repo.get_pkg_class("diff-test")
         monkeypatch.setattr(pkg_class, "manual_download", True)
 
         # Run show-version-updates with --no-manual-packages flag
@@ -1019,9 +1049,9 @@ def test_repo_show_version_updates_excludes_non_redistributable(
     """Test --only-redistributable flag excludes packages if redistribute_source returns False"""
     test_repo, _, commits = mock_git_package_changes
 
-    with spack.repo.use_repositories(test_repo):
+    with spack.test.harness.use_repositories(test_repo):
         # Set redistribute_source to return False
-        pkg_class = spack.repo.PATH.get_pkg_class("diff-test")
+        pkg_class = spack.test.harness.current().repo.get_pkg_class("diff-test")
         monkeypatch.setattr(pkg_class, "redistribute_source", classmethod(lambda cls, spec: False))
 
         # Run show-version-updates with --only-redistributable flag
@@ -1042,7 +1072,7 @@ def test_repo_show_version_updates_excludes_git_versions(mock_git_package_change
     """Test --no-git-versions flag excludes versions from git (tag/commit)"""
     test_repo, _, commits = mock_git_package_changes
 
-    with spack.repo.use_repositories(test_repo):
+    with spack.test.harness.use_repositories(test_repo):
         # commits[-4] = add v2.1.6 (git version), commits[-5] = add v2.1.7 and v2.1.8 (sha256)
         # Without --no-git-versions, v2.1.6 would be included
         output = repo(
@@ -1062,9 +1092,9 @@ def test_repo_show_version_updates_excludes_deprecated(monkeypatch, mock_git_pac
     """Test --no-deprecated flag excludes versions marked with deprecated=True"""
     test_repo, _, commits = mock_git_package_changes
 
-    with spack.repo.use_repositories(test_repo):
+    with spack.test.harness.use_repositories(test_repo):
         # Mark version 2.1.7 as deprecated
-        pkg_class = spack.repo.PATH.get_pkg_class("diff-test")
+        pkg_class = spack.test.harness.current().repo.get_pkg_class("diff-test")
         for v in pkg_class.versions:
             if str(v) == "2.1.7":
                 pkg_class.versions[v]["deprecated"] = True

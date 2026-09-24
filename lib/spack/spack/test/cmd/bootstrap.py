@@ -11,11 +11,11 @@ import spack.bootstrap.core
 import spack.cmd.mirror
 import spack.concretize
 import spack.environment as ev
-import spack.main
 import spack.spec
+import spack.test.harness
 from spack.config import Configuration
 
-_bootstrap = spack.main.SpackCommand("bootstrap")
+_bootstrap = spack.test.harness.SpackCommand("bootstrap")
 
 
 @pytest.mark.parametrize("scope", [None, "site", "system", "user"])
@@ -59,9 +59,9 @@ def test_reset_in_file_scopes(mutable_config, scopes):
 
 
 def test_reset_in_environment(mutable_mock_env_path, mutable_config: Configuration):
-    env = spack.main.SpackCommand("env")
+    env = spack.test.harness.SpackCommand("env")
     env("create", "bootstrap-test")
-    current_environment = ev.read("bootstrap-test")
+    current_environment = ev.read("bootstrap-test", ctx=spack.test.harness.current())
 
     with current_environment:
         _bootstrap("disable")
@@ -157,17 +157,17 @@ def test_remove_failure_for_non_existing_names(mutable_config):
 
 def test_remove_and_add_a_source(mutable_config):
     # Check we start with a single bootstrapping source
-    sources = spack.bootstrap.core.bootstrapping_sources()
+    sources = spack.bootstrap.core.bootstrapping_sources(spack.test.harness.current().config)
     assert len(sources) == 1
 
     # Remove it and check the result
     _bootstrap("remove", "github-actions")
-    sources = spack.bootstrap.core.bootstrapping_sources()
+    sources = spack.bootstrap.core.bootstrapping_sources(spack.test.harness.current().config)
     assert not sources
 
     # Add it back and check we restored the initial state
     _bootstrap("add", "github-actions", "$spack/share/spack/bootstrap/github-actions-v2")
-    sources = spack.bootstrap.core.bootstrapping_sources()
+    sources = spack.bootstrap.core.bootstrapping_sources(spack.test.harness.current().config)
     assert len(sources) == 1
 
 
@@ -181,8 +181,8 @@ def test_bootstrap_mirror_metadata(
     expensive operation for a unit test.
     """
     old_create = spack.cmd.mirror.create
-    monkeypatch.setattr(spack.cmd.mirror, "create", lambda p, s: old_create(p, []))
-    monkeypatch.setattr(spack.concretize, "concretize_one", lambda p: spack.spec.Spec(p))
+    monkeypatch.setattr(spack.cmd.mirror, "create", lambda p, s, ctx: old_create(p, [], ctx))
+    monkeypatch.setattr(spack.concretize, "concretize_one", lambda p, ctx: spack.spec.Spec(p))
 
     # Create the mirror in a temporary folder
     _bootstrap("mirror", str(tmp_path))
@@ -192,4 +192,7 @@ def test_bootstrap_mirror_metadata(
     _bootstrap("add", "--trust", "test-mirror", str(metadata_dir))
 
     assert _bootstrap.returncode == 0
-    assert any(m["name"] == "test-mirror" for m in spack.bootstrap.core.bootstrapping_sources())
+    assert any(
+        m["name"] == "test-mirror"
+        for m in spack.bootstrap.core.bootstrapping_sources(spack.test.harness.current().config)
+    )

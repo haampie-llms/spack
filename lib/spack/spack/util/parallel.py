@@ -6,12 +6,25 @@ import multiprocessing
 import os
 import sys
 import traceback
-from typing import Optional
+from typing import Any, Callable, Optional
 
 from spack.util.cpus import cpus_available
 
 #: Used in tests to disable parallelism, as tests themselves are parallelized
 ENABLE_PARALLELISM = sys.platform != "win32"
+
+#: Object shared by the tasks of a worker process, set once by the pool initializer
+_SHARED: Any = None
+
+
+def _init_worker(marshaler, shared: Any) -> None:
+    global _SHARED
+    marshaler.restore()
+    _SHARED = shared
+
+
+def _call_with_shared(fn: Callable, *args, **kwargs):
+    return fn(_SHARED, *args, **kwargs)
 
 
 class ErrorFromWorker:
@@ -66,13 +79,14 @@ def imap_unordered(
     processes: int,
     maxtaskperchild: Optional[int] = None,
     debug=False,
-    serialize_env: bool = False,
+    shared: Any = None,
 ):
     """Wrapper around multiprocessing.Pool.imap_unordered.
 
     Args:
-        f: function to apply
+        f: function to apply, called as ``f(shared, args)``
         list_of_args: list of tuples of args for the task
+        shared: object sent once to each worker process, and passed to every task
         processes: maximum number of processes allowed
         debug: if False, raise an exception containing just the error messages
             from workers, if True an exception with complete stacktraces
@@ -84,23 +98,43 @@ def imap_unordered(
     """
 
     if not ENABLE_PARALLELISM or len(list_of_args) <= 1:
-        yield from map(f, list_of_args)
+        yield from (f(shared, args) for args in list_of_args)
         return
 
     from spack.subprocess_context import GlobalStateMarshaler
 
-    marshaler = GlobalStateMarshaler(serialize_env=serialize_env)
+    marshaler = GlobalStateMarshaler()
     with multiprocessing.Pool(
-        processes, initializer=marshaler.restore, maxtasksperchild=maxtaskperchild
+        processes,
+        initializer=_init_worker,
+        initargs=(marshaler, shared),
+        maxtasksperchild=maxtaskperchild,
     ) as p:
-        for result in p.imap_unordered(Task(f), list_of_args):
+        for result in p.imap_unordered(Task(_SharedTask(f)), list_of_args):
             if isinstance(result, ErrorFromWorker):
                 raise RuntimeError(result.stacktrace if debug else str(result))
             yield result
 
 
+class _SharedTask:
+    """Calls a function with the object shared by the worker process as first argument."""
+
+    def __init__(self, func):
+        self.func = func
+
+    def __call__(self, args):
+        return self.func(_SHARED, args)
+
+
 class SequentialExecutor(concurrent.futures.Executor):
     """Executor that runs tasks sequentially in the current thread."""
+
+    def __init__(self, shared: Any = None) -> None:
+        self.shared = shared
+
+    def submit_shared(self, fn, *args, **kwargs):
+        """Submit a function that receives the shared object as first argument."""
+        return self.submit(fn, self.shared, *args, **kwargs)
 
     def submit(self, fn, *args, **kwargs):
         """Submit a function to be executed."""
@@ -112,19 +146,25 @@ class SequentialExecutor(concurrent.futures.Executor):
         return future
 
 
-def make_concurrent_executor(
-    jobs: Optional[int] = None, *, serialize_env: bool = False
-) -> concurrent.futures.Executor:
+class _SharedProcessPoolExecutor(concurrent.futures.ProcessPoolExecutor):
+    def submit_shared(self, fn, *args, **kwargs):
+        """Submit a function that receives the shared object as first argument."""
+        return self.submit(_call_with_shared, fn, *args, **kwargs)
+
+
+def make_concurrent_executor(jobs: Optional[int] = None, *, shared: Any = None):
     """Create a concurrent executor.
 
-    If serialize_env is False (default), the active Spack environment is not transmitted to the
-    worker processes, which avoids the cost of pickling potentially large environment state."""
+    The ``shared`` object is sent once to each worker process, instead of with every task: tasks
+    submitted with ``submit_shared`` receive it as first argument."""
 
     if not ENABLE_PARALLELISM or sys.version_info[:2] == (3, 6):
-        return SequentialExecutor()
+        return SequentialExecutor(shared)
 
     from spack.subprocess_context import GlobalStateMarshaler
 
     jobs = jobs or min(cpus_available(), 16)
-    marshaler = GlobalStateMarshaler(serialize_env=serialize_env)
-    return concurrent.futures.ProcessPoolExecutor(jobs, initializer=marshaler.restore)  # novermin
+    marshaler = GlobalStateMarshaler()
+    return _SharedProcessPoolExecutor(  # novermin
+        jobs, initializer=_init_worker, initargs=(marshaler, shared)
+    )

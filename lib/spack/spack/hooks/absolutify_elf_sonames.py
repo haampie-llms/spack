@@ -4,8 +4,6 @@
 
 import os
 
-import spack.bootstrap
-import spack.config
 import spack.relocate
 from spack.util import tty
 from spack.util.elf import ElfParsingError, parse_elf
@@ -129,8 +127,9 @@ def find_and_patch_sonames(prefix, exclude_list, patchelf):
 
 
 def post_install(spec, explicit=None):
+    ctx = spec.package.context
     # Skip if disabled
-    if not spack.config.CONFIG.get("config:shared_linking:bind", False):
+    if not ctx.config.get("config:shared_linking:bind", False):
         return
 
     # Skip externals
@@ -142,11 +141,11 @@ def post_install(spec, explicit=None):
         return
 
     # Disable this hook when bootstrapping, to avoid recursion.
-    if spack.bootstrap.is_bootstrapping():
+    if ctx.is_bootstrap:
         return
 
     # Should failing to locate patchelf be a hard error?
-    patchelf = spack.relocate._patchelf()
+    patchelf = spack.relocate.patchelf_finder(ctx)()
     if not patchelf:
         return
 

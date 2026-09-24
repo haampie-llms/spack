@@ -7,12 +7,10 @@ import os
 
 import spack.builder
 import spack.cmd
-import spack.config
 import spack.environment as ev
 import spack.paths
 import spack.repo
 import spack.stage
-from spack.active_environment import active_environment
 from spack.cmd.common import arguments
 from spack.util import tty
 
@@ -103,7 +101,7 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     arguments.add_common_arguments(subparser, ["spec"])
 
 
-def location(parser, args):
+def location(parser, args, ctx):
     if args.module_dir:
         print(spack.paths.module_path)
         return
@@ -116,19 +114,18 @@ def location(parser, args):
     if args.location_env is not False:
         if args.location_env is None:
             # Get current environment path
-            spack.cmd.require_active_env(args.subparser)
-            path = active_environment().path
+            path = spack.cmd.require_active_env(args.subparser, ctx.environment).path
         else:
             # Get path of requested environment
-            if not ev.exists(args.location_env):
+            if not ev.exists(args.location_env, config=ctx.config):
                 tty.die("no such environment: '%s'" % args.location_env)
-            path = ev.root(args.location_env)
+            path = ev.root(args.location_env, config=ctx.config)
         print(path)
         return
 
     # no -v corresponds to False, -v without arg to None, -v name to the string name.
     if args.location_view is not False:
-        env = spack.cmd.require_active_env(args.subparser)
+        env = spack.cmd.require_active_env(args.subparser, ctx.environment)
         view_name = args.location_view
         if view_name is None:
             # get active view name
@@ -144,19 +141,19 @@ def location(parser, args):
 
     if args.repo is not False:
         if args.repo is None:
-            print(spack.repo.PATH.first_repo().root)
+            print(ctx.repo.first_repo().root)
             return
         try:
-            print(spack.repo.PATH.get_repo(args.repo).root)
+            print(ctx.repo.get_repo(args.repo).root)
         except spack.repo.UnknownNamespaceError:
             tty.die(f"no such repository: '{args.repo}'")
         return
 
     if args.stages:
-        print(spack.stage.stage_root(spack.config.CONFIG))
+        print(spack.stage.stage_root(ctx.config))
         return
 
-    specs = spack.cmd.parse_specs(args.spec)
+    specs = spack.cmd.parse_specs(args.spec, ctx)
 
     if not specs:
         args.subparser.error("requires a spec")
@@ -166,8 +163,9 @@ def location(parser, args):
 
     # install_dir command matches against installed specs.
     if args.install_dir:
-        env = active_environment()
-        spec = spack.cmd.disambiguate_spec(specs[0], env, first=args.find_first)
+        spec = spack.cmd.disambiguate_spec(
+            specs[0], ctx.environment, store=ctx.store, first=args.find_first
+        )
         print(spec.prefix)
         return
 
@@ -175,11 +173,11 @@ def location(parser, args):
 
     # Package dir just needs the spec name
     if args.package_dir:
-        print(spack.repo.PATH.dirname_for_package_name(spec.name))
+        print(ctx.repo.dirname_for_package_name(spec.name))
         return
 
     # Either concretize or filter from already concretized environment
-    spec = spack.cmd.matching_spec_from_env(spec)
+    spec = spack.cmd.matching_spec_from_env(spec, ctx)
     pkg = spec.package
     builder = spack.builder.create(pkg)
 

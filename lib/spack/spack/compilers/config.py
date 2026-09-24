@@ -5,7 +5,6 @@
 and configuring Spack to use multiple compilers.
 """
 
-import sys
 from typing import Any, Dict, List, Optional, Tuple
 
 import spack.detection
@@ -13,16 +12,12 @@ import spack.error
 import spack.platforms
 import spack.repo
 import spack.spec
-import spack.util.filesystem as fs
 import spack.util.lang
 from spack.config import Configuration
 from spack.externals import ExternalSpecsParser, external_spec, extract_dicts_from_configuration
-from spack.operating_systems import windows_os
 from spack.util import tty
-from spack.util.environment import get_path
 
 #: Tag used to identify packages providing a compiler
-COMPILER_TAG = "compiler"
 
 
 def compiler_config_files(config: Configuration, *, repo: spack.repo.RepoPath) -> List[str]:
@@ -53,42 +48,6 @@ def add_compiler_to_config(
     spack.detection.update_configuration(by_name, config=config, buildable=True, scope=scope)
 
 
-def find_compilers(
-    path_hints: Optional[List[str]] = None,
-    *,
-    config: Configuration,
-    repo: spack.repo.RepoPath,
-    scope: Optional[str] = None,
-    max_workers: Optional[int] = None,
-) -> List[spack.spec.Spec]:
-    """Searches for compiler in the paths given as argument. If any new compiler is found, the
-    configuration is updated, and the list of new compiler objects is returned.
-
-    Args:
-        path_hints: list of path hints where to look for. A sensible default based on the ``PATH``
-            environment variable will be used if the value is None
-        config: configuration to be updated with the new compilers
-        repo: package repository used to detect compilers
-        scope: configuration scope to modify
-        max_workers: number of processes used to search for compilers
-    """
-    if path_hints is None:
-        path_hints = get_path("PATH")
-    default_paths = fs.search_paths_for_executables(*path_hints)
-    if sys.platform == "win32":
-        default_paths.extend(windows_os.WindowsOs().compiler_search_paths)
-    compiler_pkgs = repo.packages_with_tags(COMPILER_TAG, full=True)
-
-    detected_packages = spack.detection.by_path(
-        compiler_pkgs, repo=repo, path_hints=default_paths, max_workers=max_workers
-    )
-
-    new_compilers = spack.detection.update_configuration(
-        detected_packages, config=config, buildable=True, scope=scope
-    )
-    return new_compilers
-
-
 def select_new_compilers(
     candidates: List[spack.spec.Spec],
     *,
@@ -109,7 +68,7 @@ def supported_compilers(*, repo: spack.repo.RepoPath) -> List[str]:
     Args:
         repo: package repository to query
     """
-    return sorted(repo.packages_with_tags(COMPILER_TAG))
+    return sorted(repo.packages_with_tags(spack.detection.COMPILER_TAG))
 
 
 def all_compilers(
@@ -140,7 +99,7 @@ def all_compilers(
 def _init_packages_yaml(
     config: Configuration, *, repo: spack.repo.RepoPath, scope: Optional[str]
 ) -> None:
-    new_compilers = find_compilers(config=config, repo=repo, scope=scope)
+    new_compilers = spack.detection.find_compilers(config=config, repo=repo, scope=scope)
     if new_compilers:
         tty.info("Compilers have been configured automatically from PATH inspection")
 

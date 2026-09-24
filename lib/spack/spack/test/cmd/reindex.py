@@ -6,8 +6,8 @@ import shutil
 
 from spack.database import Database
 from spack.enums import InstallRecordStatus
-from spack.main import SpackCommand
 from spack.store import Store
+from spack.test.harness import SpackCommand
 
 install = SpackCommand("install")
 deprecate = SpackCommand("deprecate")

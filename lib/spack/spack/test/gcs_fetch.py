@@ -6,6 +6,7 @@ import pathlib
 
 import spack.fetch_strategy
 import spack.stage
+import spack.util.web
 
 
 def test_gcsfetchstrategy_downloaded(tmp_path: pathlib.Path, config):
@@ -18,5 +19,10 @@ def test_gcsfetchstrategy_downloaded(tmp_path: pathlib.Path, config):
             return str(archive)
 
     fetcher = Archived_GCSFS(url="gs://example/gcs.tar.gz")
-    with spack.stage.stage_from_config(fetcher, path=str(tmp_path), config=config):
+    with spack.stage.stage_from_config(
+        fetcher,
+        path=str(tmp_path),
+        config=config,
+        client=spack.util.web.NetworkClient.from_config(config),
+    ):
         fetcher.fetch()

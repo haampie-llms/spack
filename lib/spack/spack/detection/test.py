@@ -9,6 +9,7 @@ import pathlib
 import tempfile
 from typing import Any, Deque, Dict, Generator, List, NamedTuple, Tuple
 
+import spack.config
 import spack.platforms
 import spack.repo
 import spack.spec
@@ -51,9 +52,16 @@ class DetectionTest(NamedTuple):
 class Runner:
     """Runs an external detection test"""
 
-    def __init__(self, *, test: DetectionTest, repository: spack.repo.RepoPath) -> None:
+    def __init__(
+        self,
+        *,
+        test: DetectionTest,
+        repository: spack.repo.RepoPath,
+        config: spack.config.Configuration,
+    ) -> None:
         self.test = test
         self.repository = repository
+        self.config = config
         self.tmpdir = tempfile.TemporaryDirectory()
 
     def execute(self) -> List[spack.spec.Spec]:
@@ -64,7 +72,12 @@ class Runner:
         have been detected.
         """
         with self._mock_layout() as path_hints:
-            entries = by_path([self.test.pkg_name], repo=self.repository, path_hints=path_hints)
+            entries = by_path(
+                [self.test.pkg_name],
+                repo=self.repository,
+                config=self.config,
+                path_hints=path_hints,
+            )
             _, unqualified_name = spack.repo.partition_package_name(self.test.pkg_name)
             specs = set(entries[unqualified_name])
         return list(specs)
@@ -111,7 +124,9 @@ class Runner:
         return result
 
 
-def detection_tests(pkg_name: str, repository: spack.repo.RepoPath) -> List[Runner]:
+def detection_tests(
+    pkg_name: str, repository: spack.repo.RepoPath, config: spack.config.Configuration
+) -> List[Runner]:
     """Returns a list of test runners for a given package.
 
     Currently, detection tests are specified in a YAML file, called ``detection_test.yaml``,
@@ -122,6 +137,7 @@ def detection_tests(pkg_name: str, repository: spack.repo.RepoPath) -> List[Runn
     Args:
         pkg_name: name of the package to test
         repository: repository where the package lives
+        config: configuration the detection reads
     """
     result = []
     detection_tests_content = read_detection_tests(pkg_name, repository)
@@ -148,7 +164,7 @@ def detection_tests(pkg_name: str, repository: spack.repo.RepoPath) -> List[Runn
         current_test = DetectionTest(
             pkg_name=pkg_name, layout=mock_executables, results=expected_results
         )
-        result.append(Runner(test=current_test, repository=repository))
+        result.append(Runner(test=current_test, repository=repository, config=config))
 
     return result
 

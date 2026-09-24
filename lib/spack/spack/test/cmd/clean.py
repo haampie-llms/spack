@@ -10,13 +10,12 @@ import pytest
 
 import spack.caches
 import spack.cmd.clean
-import spack.main
 import spack.package_base
 import spack.stage
-import spack.store
+import spack.test.harness
 import spack.util.filesystem as fs
 
-clean = spack.main.SpackCommand("clean")
+clean = spack.test.harness.SpackCommand("clean")
 
 
 @pytest.fixture()
@@ -35,8 +34,10 @@ def mock_calls_for_clean(monkeypatch):
     monkeypatch.setattr(spack.stage, "purge", Counter("stages"))
     downloads = types.SimpleNamespace(destroy=Counter("downloads"))
     monkeypatch.setattr(spack.caches, "fetch_cache", lambda config: downloads)
-    monkeypatch.setattr(spack.caches.MISC_CACHE, "destroy", Counter("caches"))
-    monkeypatch.setattr(spack.store.STORE.failure_tracker, "clear_all", Counter("failures"))
+    monkeypatch.setattr(spack.test.harness.current().misc_cache, "destroy", Counter("caches"))
+    monkeypatch.setattr(
+        spack.test.harness.current().store.failure_tracker, "clear_all", Counter("failures")
+    )
     monkeypatch.setattr(spack.cmd.clean, "remove_python_cache", Counter("python_cache"))
     monkeypatch.setattr(spack.cmd.clean, "remove_python_cache", Counter("python_cache"))
     monkeypatch.setattr(fs, "remove_directory_contents", Counter("bootstrap"))

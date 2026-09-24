@@ -66,7 +66,6 @@ import spack.variant as vt
 import spack.version as vn
 import spack.version.git_ref_lookup
 from spack import traverse
-from spack.active_environment import active_environment
 from spack.compilers.libraries import CompilerPropertyDetector, FileCompilerCache
 from spack.enums import DeprecationSeverity
 from spack.spec import EMPTY_SPEC
@@ -74,7 +73,13 @@ from spack.util import tty
 from spack.util.lang import elide_list
 
 from .clauses import SpecClauseGenerator
-from .compat import default_clingo_control, make_error_control, symbol_name, symbol_string
+from .compat import (
+    default_clingo_control,
+    load_clingo,
+    make_error_control,
+    symbol_name,
+    symbol_string,
+)
 from .core import (
     AspFunction,
     AspVar,
@@ -880,9 +885,7 @@ class PyclingoDriver:
         # needs to modify active config scope, so cannot be run within
         # bootstrap config scope
         if sys.platform == "win32":
-            from spack.bootstrap import ensure_winsdk_external_or_raise
-
-            ensure_winsdk_external_or_raise()
+            setup.context.ensure_windows_sdk()
 
         # assemble a list of the control files needed for this problem. Some are conditionally
         # included depending on what features we're using in the solve.
@@ -2508,7 +2511,7 @@ class SpackSolverSetup:
         # they will be used in addition to command line specs
         # in determining known versions/targets/os
         dev_specs: Tuple[spack.spec.Spec, ...] = ()
-        env = active_environment()
+        env = self.context.environment
         if env:
             dev_specs = tuple(
                 self._assign_git_versions(spack.spec.Spec(info["spec"])).constrained(
@@ -3351,10 +3354,10 @@ def post_process_concretization_result(
     for s in specs.values():
         # Add external paths to specs with just external modules
         _ensure_external_path_if_external(s, repo=context.repo)
-        _develop_specs_from_env(s, active_environment(), config=context.config)
+        _develop_specs_from_env(s, context.environment, config=context.config)
 
         # check for commits must happen after all version adaptations are complete
-        _specs_with_commits(s, repo=context.repo)
+        _specs_with_commits(s, ctx=context)
 
     # mark concrete and assign hashes to all specs in the solve
     spack.spec.assign_hashes(roots.values(), repo=context.repo)
@@ -3412,8 +3415,8 @@ def execute_explicit_splices(
     return new_specs
 
 
-def _specs_with_commits(spec, *, repo: spack.repo.RepoPath):
-    pkg_class = repo.get_pkg_class(spec.fullname)
+def _specs_with_commits(spec, *, ctx: "spack.context.SpackContext"):
+    pkg_class = ctx.repo.get_pkg_class(spec.fullname)
     if not pkg_class.needs_commit(spec.version):
         return
 
@@ -3421,7 +3424,7 @@ def _specs_with_commits(spec, *, repo: spack.repo.RepoPath):
         if "commit" not in spec.variants and spec.version.commit_sha:
             spec.variants.set(vt.SingleValuedVariant("commit", spec.version.commit_sha))
 
-    pkg_class._resolve_git_provenance(spec)
+    pkg_class._resolve_git_provenance(spec, ctx)
 
     if "commit" not in spec.variants:
         if not spec.is_develop:
@@ -3524,6 +3527,7 @@ class Solver:
         specs_factory: Optional[SpecFiltersFactory] = None,
     ):
         self.context = context
+        load_clingo(context)
 
         cache_root = self.context.config.get("concretizer:concretization_cache:url", None)
         if cache_root is None:

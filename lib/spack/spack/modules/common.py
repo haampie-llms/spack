@@ -14,7 +14,6 @@ To add a new module type, subclass ``BaseConfiguration`` and ``BaseModuleFileWri
 """
 
 import collections
-import contextlib
 import copy
 import datetime
 import itertools
@@ -25,10 +24,10 @@ import string
 import warnings
 from typing import (
     IO,
+    TYPE_CHECKING,
     Any,
     ClassVar,
     Dict,
-    Iterator,
     List,
     NamedTuple,
     Optional,
@@ -60,11 +59,10 @@ import spack.util.filesystem
 import spack.util.path
 import spack.util.spack_yaml as syaml
 from spack import tengine
-from spack.active_environment import active_environment
 from spack.aliases import BUILTIN_TO_LEGACY_COMPILER
 from spack.enums import Context
 from spack.util import tty
-from spack.util.lang import Singleton, dedupe
+from spack.util.lang import dedupe
 
 from .error import (
     CoreCompilersNotFoundError,
@@ -74,6 +72,9 @@ from .error import (
     ModulesError,
     ModulesTemplateNotFoundError,
 )
+
+if TYPE_CHECKING:
+    import spack.context
 
 EnvironmentModification = Tuple[
     str, Union[spack.util.environment.NameModifier, spack.util.environment.NameValueModifier]
@@ -168,13 +169,16 @@ def _has_system_driver(compiler: spack.spec.Spec) -> bool:
 
 
 def _store_core_compilers(
-    module_set: str, module_system: str, core_compilers: List[spack.spec.Spec]
+    module_set: str,
+    module_system: str,
+    core_compilers: List[spack.spec.Spec],
+    config: spack.config.Configuration,
 ) -> None:
     """Writes a list of core compilers to the modules.yaml configuration file."""
-    default_scope = spack.config.CONFIG.default_modify_scope()
-    modules_cfg = spack.config.CONFIG.get(f"modules:{module_set}", {}, scope=default_scope)
+    default_scope = config.default_modify_scope()
+    modules_cfg = config.get(f"modules:{module_set}", {}, scope=default_scope)
     modules_cfg.setdefault(module_system, {})["core_compilers"] = [str(x) for x in core_compilers]
-    spack.config.CONFIG.set(f"modules:{module_set}", modules_cfg, scope=default_scope)
+    config.set(f"modules:{module_set}", modules_cfg, scope=default_scope)
 
 
 def merge_config_rules(configuration: dict, spec: spack.spec.Spec) -> dict:
@@ -204,17 +208,18 @@ def merge_config_rules(configuration: dict, spec: spack.spec.Spec) -> dict:
     return spec_configuration
 
 
-def root_path(module_type: str, module_set: str) -> str:
+def root_path(module_type: str, module_set: str, config: spack.config.Configuration) -> str:
     """Returns the root folder for module file installation.
 
     Args:
         module_type: module type to be used
         module_set: name of the set of module configs to use
+        config: configuration to read the module roots from
     """
     dir_name = "modules" if module_type == "tcl" else module_type
     fallback = os.path.join(spack.paths.share_path, dir_name)
-    configured = spack.config.CONFIG.get(f"modules:{module_set}:roots", {})
-    return spack.config.canonicalize_path(configured.get(module_type, fallback))
+    configured = config.get(f"modules:{module_set}:roots", {})
+    return spack.config.canonicalize_path(configured.get(module_type, fallback), config=config)
 
 
 def generate_module_index(
@@ -234,12 +239,11 @@ def generate_module_index(
         syaml.dump({"module_index": entries}, default_flow_style=False, stream=index_file)
 
 
-def _generate_upstream_module_index() -> "UpstreamModuleIndex":
-    module_indices = read_module_indices()
-    return UpstreamModuleIndex(spack.store.STORE.db, module_indices)
-
-
-upstream_module_index = Singleton(_generate_upstream_module_index)
+def upstream_module_index(
+    config: spack.config.Configuration, store: spack.store.Store
+) -> "UpstreamModuleIndex":
+    """Returns the index of the modules of the upstreams of ``store``."""
+    return UpstreamModuleIndex(store.db, read_module_indices(config))
 
 
 class ModuleIndexEntry(NamedTuple):
@@ -266,8 +270,10 @@ def _read_module_index(str_or_file: IO[str]) -> Dict[str, ModuleIndexEntry]:
     }
 
 
-def read_module_indices() -> List[Dict[str, Dict[str, ModuleIndexEntry]]]:
-    other_spack_instances = spack.config.CONFIG.get("upstreams") or {}
+def read_module_indices(
+    config: spack.config.Configuration,
+) -> List[Dict[str, Dict[str, ModuleIndexEntry]]]:
+    other_spack_instances = config.get("upstreams") or {}
 
     module_indices = []
 
@@ -346,6 +352,7 @@ class BaseConfiguration:
         module_set_name: str,
         explicit: Optional[bool] = None,
         *,
+        ctx: "spack.context.SpackContext",
         cache: Optional[ModuleConfigurationCache] = None,
     ) -> "BaseConfiguration":
         """Returns the configuration object for spec, reusing ``cache`` if it already holds one.
@@ -359,14 +366,14 @@ class BaseConfiguration:
 
         if explicit is None:
             try:
-                explicit = bool(spack.store.STORE.db.get_record(spec).explicit)
+                explicit = bool(ctx.store.db.get_record(spec).explicit)
             except KeyError:
                 explicit = False
 
         key = (spec.dag_hash(), module_set_name, explicit)
         configuration = cache.get(key)
         if configuration is None:
-            configuration = cls(spec, module_set_name, explicit, cache=cache)
+            configuration = cls(spec, module_set_name, explicit, ctx=ctx, cache=cache)
             cache[key] = configuration
         return configuration
 
@@ -377,9 +384,12 @@ class BaseConfiguration:
         module_set_name: str,
         explicit: Optional[bool] = None,
         *,
+        ctx: "spack.context.SpackContext",
         cache: Optional[ModuleConfigurationCache] = None,
     ) -> "FileLayout":
-        return FileLayout(cls.make_configuration(spec, module_set_name, explicit, cache=cache))
+        return FileLayout(
+            cls.make_configuration(spec, module_set_name, explicit, ctx=ctx, cache=cache)
+        )
 
     def __init__(
         self,
@@ -387,19 +397,22 @@ class BaseConfiguration:
         module_set_name: str,
         explicit: bool,
         *,
+        ctx: "spack.context.SpackContext",
         cache: Optional[ModuleConfigurationCache] = None,
     ) -> None:
         self.spec = spec
         self.name = module_set_name
         self.explicit = explicit
+        self.ctx = ctx
+        spack.repo.attach_packages([spec], ctx, skip_unknown=True)
         self._configuration_cache = {} if cache is None else cache
         self._cache: Dict[str, Any] = {}
-        _modules_cfg = spack.config.CONFIG.get_config("modules")
+        _modules_cfg = ctx.config.get_config("modules")
         _set_cfg = _modules_cfg.get(module_set_name, {})
         self._config: dict = _set_cfg.get(self.module_system, {})
         self.hierarchical: bool = self._config.get("hierarchical", self._default_hierarchical)
         self.arch_folder: bool = _set_cfg.get("arch_folder", True)
-        self.root: str = root_path(self.module_system, module_set_name)
+        self.root: str = root_path(self.module_system, module_set_name, ctx.config)
         self.use_view: Union[bool, str] = _set_cfg.get("use_view", False)
         self.prefix_inspections: dict = syaml.syaml_dict()
         spack.schema.merge_yaml(
@@ -580,7 +593,7 @@ class BaseConfiguration:
             item
             for item in self.conf[what]
             if not self.make_configuration(
-                item, self.name, cache=self._configuration_cache
+                item, self.name, ctx=self.ctx, cache=self._configuration_cache
             ).excluded
         ]
 
@@ -606,11 +619,12 @@ class BaseConfiguration:
 
         if not compilers:
             all_compilers = spack.compilers.config.all_compilers(
-                spack.config.CONFIG, repo=spack.repo.PATH, init_config=False
+                self.ctx.config, repo=self.ctx.repo, init_config=False
             )
+            spack.repo.attach_packages(all_compilers, self.ctx)
             compilers = [c for c in all_compilers if _has_system_driver(c)]
             if compilers:
-                _store_core_compilers(self.name, self.module_system, compilers)
+                _store_core_compilers(self.name, self.module_system, compilers, self.ctx.config)
 
         if not compilers:
             msg = 'the key "core_compilers" must be set in modules.yaml'
@@ -704,7 +718,7 @@ class BaseConfiguration:
         # virtual dependencies in spack
 
         # If it is in the list of supported compilers family -> compiler
-        if self.spec.name in spack.compilers.config.supported_compilers(repo=spack.repo.PATH):
+        if self.spec.name in spack.compilers.config.supported_compilers(repo=self.ctx.repo):
             provides["compiler"] = spack.spec.Spec(self.spec.format("{name}{@versions}"))
         elif self.spec.name in BUILTIN_TO_LEGACY_COMPILER:
             # If it is the package for a supported compiler, but of a different name
@@ -766,7 +780,7 @@ class FileLayout:
     @property
     def use_name(self) -> str:
         """Returns the name used to load the module (e.g. with ``module load``)."""
-        projection = proj.get_projection(self.conf.projections, self.spec)
+        projection = proj.get_projection(self.conf.projections, self.spec, self.conf.ctx.config)
         if not projection:
             projection = self.conf.default_projections["all"]
 
@@ -1038,21 +1052,26 @@ class ModuleContext(tengine.Context):
         assert isinstance(use_view, (bool, str))
 
         if use_view:
-            spack_env = active_environment()
-            if not spack_env:
+            ctx = self.conf.ctx
+            # Build processes have the configuration of the environment, but not the environment
+            if ctx.environment is not None:
+                env_path, views = ctx.environment.path, ctx.environment.views
+            elif ctx.config.env_path is not None:
+                env_path = ctx.config.env_path
+                views = spack.environment.views_from_config(env_path, ctx.config)
+            else:
                 raise spack.environment.SpackEnvironmentViewError(
                     "Module generation with views requires active environment"
                 )
 
             view_name = spack.environment.default_view_name if use_view is True else use_view
 
-            if not spack_env.has_view(view_name):
+            if view_name not in views:
                 raise spack.environment.SpackEnvironmentViewError(
-                    f"View {view_name} not found in environment {spack_env.name}"
-                    " when generating modules"
+                    f"View {view_name} not found in environment {env_path} when generating modules"
                 )
 
-            view = spack_env.views[view_name]
+            view = views[view_name]
         else:
             view = None
 
@@ -1080,7 +1099,10 @@ class ModuleContext(tengine.Context):
         # Project the environment variables from prefix to view if needed
         if view and self.spec in view:
             spack.user_environment.project_env_mods(
-                *self.spec.traverse(deptype=dt.LINK | dt.RUN), view=view, env=env
+                *self.spec.traverse(deptype=dt.LINK | dt.RUN),
+                view=view,
+                env=env,
+                config=self.conf.ctx.config,
             )
 
         # Modifications required from modules.yaml
@@ -1122,7 +1144,7 @@ class ModuleContext(tengine.Context):
     def conflicts(self) -> List[str]:
         """List of conflicts for the module file."""
         fmts = []
-        projection = proj.get_projection(self.conf.projections, self.spec)
+        projection = proj.get_projection(self.conf.projections, self.spec, self.conf.ctx.config)
         for item in self.conf.conflicts:
             self._verify_conflict_naming_consistency_or_raise(item, projection)
             item = self.spec.format(item)
@@ -1161,7 +1183,8 @@ class ModuleContext(tengine.Context):
         name = self.conf.name
         cache = self.conf._configuration_cache
         return [
-            self.conf.make_layout(x, name, cache=cache).use_name for x in getattr(self.conf, what)
+            self.conf.make_layout(x, name, ctx=self.conf.ctx, cache=cache).use_name
+            for x in getattr(self.conf, what)
         ]
 
     @tengine.context_property
@@ -1261,10 +1284,11 @@ class BaseModuleFileWriter:
         module_set_name: str,
         explicit: Optional[bool] = None,
         *,
+        ctx: "spack.context.SpackContext",
         cache: Optional[ModuleConfigurationCache] = None,
     ) -> "BaseModuleFileWriter":
         conf = cls.configuration_class.make_configuration(
-            spec, module_set_name, explicit, cache=cache
+            spec, module_set_name, explicit, ctx=ctx, cache=cache
         )
         return cls(conf)
 
@@ -1319,7 +1343,7 @@ class BaseModuleFileWriter:
         template_name = self._get_template()
 
         try:
-            env = tengine.make_environment()
+            env = tengine.make_environment(self.conf.ctx.config)
             template = env.get_template(template_name)
         except spack.vendor.jinja2.TemplateNotFound:
             # If the template was not found raise an exception with a little
@@ -1353,7 +1377,7 @@ class BaseModuleFileWriter:
 
         # Set the file permissions of the module to match that of the package
         if os.path.exists(self.layout.filename):
-            fp.set_permissions_by_spec(self.layout.filename, self.spec)
+            fp.set_permissions_by_spec(self.layout.filename, self.spec, self.conf.ctx.config)
 
         # Symlink defaults if needed
         self.update_module_defaults()
@@ -1446,12 +1470,3 @@ class BaseModuleFileWriter:
             os.unlink(default_symlink)
         except OSError:
             pass
-
-
-@contextlib.contextmanager
-def disable_modules() -> Iterator[None]:
-    """Disable the generation of modulefiles within the context manager."""
-    data: Dict[str, object] = {"modules:": {"default": {"enable": []}}}
-    disable_scope = spack.config.InternalConfigScope("disable_modules", data=data)
-    with spack.config.CONFIG.override(disable_scope):
-        yield

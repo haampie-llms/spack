@@ -6,6 +6,7 @@ import pathlib
 
 import spack.fetch_strategy as spack_fs
 import spack.stage as spack_stage
+import spack.util.web
 
 
 def test_s3fetchstrategy_downloaded(tmp_path: pathlib.Path, config):
@@ -18,5 +19,10 @@ def test_s3fetchstrategy_downloaded(tmp_path: pathlib.Path, config):
             return archive
 
     fetcher = Archived_S3FS(url="s3://example/s3.tar.gz")
-    with spack_stage.stage_from_config(fetcher, path=str(tmp_path), config=config):
+    with spack_stage.stage_from_config(
+        fetcher,
+        path=str(tmp_path),
+        config=config,
+        client=spack.util.web.NetworkClient.from_config(config),
+    ):
         fetcher.fetch()

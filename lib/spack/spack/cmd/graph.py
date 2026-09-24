@@ -4,12 +4,17 @@
 import argparse
 
 import spack.cmd
-import spack.config
-import spack.store
-from spack.active_environment import active_environment
+import spack.context
 from spack.cmd.common import arguments
 from spack.concretize_ui import HeadlessUI, TerminalUI
-from spack.graph import DAGWithDependencyTypes, SimpleDAG, graph_ascii, graph_dot, static_graph_dot
+from spack.graph import (
+    DAGWithDependencyTypes,
+    DotGraphBuilder,
+    SimpleDAG,
+    graph_ascii,
+    graph_dot,
+    static_graph_dot,
+)
 from spack.util import tty
 
 description = "generate graphs of package dependency relationships"
@@ -55,8 +60,8 @@ in the lockfile.
     arguments.add_common_arguments(subparser, ["deptype", "long", "very_long", "specs"])
 
 
-def graph(parser, args):
-    env = active_environment()
+def graph(parser, args, ctx: spack.context.SpackContext):
+    env = ctx.environment
     if args.installed and env:
         args.subparser.error("cannot use --installed with an active environment")
 
@@ -65,11 +70,11 @@ def graph(parser, args):
 
     if args.installed:
         if not args.specs:
-            specs = spack.store.STORE.db.query()
+            specs = ctx.store.db.query()
         else:
             result = []
             for item in args.specs:
-                result.extend(spack.store.STORE.db.query(item))
+                result.extend(ctx.store.db.query(item))
             specs = list(set(result))
     elif env:
         specs = env.concrete_roots()
@@ -79,13 +84,13 @@ def graph(parser, args):
     else:
         # Machine-readable output goes to stdout, so concretization must not print anything there
         ui = HeadlessUI() if args.dot else TerminalUI()
-        specs = spack.cmd.parse_specs(args.specs, concretize=not args.static, ui=ui)
+        specs = spack.cmd.parse_specs(args.specs, ctx, concretize=not args.static, ui=ui)
 
     if not specs:
         tty.die("no spec matching the query")
 
     if args.static:
-        static_graph_dot(specs, depflag=args.deptype)
+        static_graph_dot(specs, depflag=args.deptype, ctx=ctx)
         return
 
     if args.dot:
@@ -95,15 +100,16 @@ def graph(parser, args):
             node_label_fmt = "{name}{@version}{/hash:7}"
         else:
             node_label_fmt = "{name}{@version}"
+        builder: DotGraphBuilder
         if args.color:
             builder = DAGWithDependencyTypes(node_label_fmt)
         else:
             builder = SimpleDAG(node_label_fmt)
-        graph_dot(specs, builder=builder, depflag=args.deptype)
+        graph_dot(specs, builder=builder, depflag=args.deptype, config=ctx.config)
         return
 
     # ascii is default: user doesn't need to provide it explicitly
-    debug = spack.config.CONFIG.get("config:debug")
+    debug = ctx.config.get("config:debug")
     graph_ascii(specs[0], debug=debug, depflag=args.deptype)
     for spec in specs[1:]:
         print()  # extra line bt/w independent graphs

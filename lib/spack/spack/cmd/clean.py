@@ -10,7 +10,6 @@ import spack.caches
 import spack.cmd
 import spack.config
 import spack.stage
-import spack.store
 import spack.util.filesystem
 from spack.cmd.common import arguments
 from spack.paths import lib_path, var_path
@@ -80,7 +79,7 @@ def remove_python_cache():
                     shutil.rmtree(dname)
 
 
-def clean(parser, args):
+def clean(parser, args, ctx):
     # If nothing was set, activate the default
     if not any(
         [
@@ -97,8 +96,8 @@ def clean(parser, args):
 
     # Then do the cleaning falling through the cases
     if args.specs:
-        specs = spack.cmd.parse_specs(args.specs, concretize=False)
-        specs = spack.cmd.matching_specs_from_env(specs)
+        specs = spack.cmd.parse_specs(args.specs, ctx, concretize=False)
+        specs = spack.cmd.matching_specs_from_env(specs, ctx)
 
         for spec in specs:
             msg = "Cleaning build stage [{0}]"
@@ -107,19 +106,19 @@ def clean(parser, args):
 
     if args.stage:
         tty.msg("Removing all temporary build stages")
-        spack.stage.purge(config=spack.config.CONFIG)
+        spack.stage.purge(config=ctx.config)
 
     if args.downloads:
         tty.msg("Removing cached downloads")
-        spack.caches.fetch_cache(spack.config.CONFIG).destroy()
+        spack.caches.fetch_cache(ctx.config).destroy()
 
     if args.failures:
         tty.msg("Removing install failure marks")
-        spack.store.STORE.failure_tracker.clear_all()
+        ctx.store.failure_tracker.clear_all()
 
     if args.misc_cache:
         tty.msg("Removing cached information on repositories")
-        spack.caches.MISC_CACHE.destroy()
+        ctx.misc_cache.destroy()
 
     if args.python_cache:
         tty.msg("Removing python cache files")
@@ -127,7 +126,7 @@ def clean(parser, args):
 
     if args.bootstrap:
         bootstrap_prefix = spack.config.canonicalize_path(
-            spack.config.CONFIG.get("bootstrap:root")
+            ctx.config.get("bootstrap:root"), config=ctx.config
         )
         msg = 'Removing bootstrapped software and configuration in "{0}"'
         tty.msg(msg.format(bootstrap_prefix))

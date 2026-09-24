@@ -39,9 +39,9 @@ spack_shebang_limit = 4096
 interpreter_regex = re.compile(b"#![ \t]*?([^ \t\0\n]+)")
 
 
-def sbang_install_path():
-    """Location sbang is installed within the install tree."""
-    sbang_root = str(spack.store.STORE.unpadded_root)
+def sbang_install_path_for(store: spack.store.Store) -> str:
+    """Location sbang is installed within the install tree of ``store``."""
+    sbang_root = str(store.unpadded_root)
     install_path = os.path.join(sbang_root, "bin", "sbang")
     path_length = len(install_path)
     if path_length > system_shebang_limit:
@@ -54,7 +54,7 @@ def sbang_install_path():
     return install_path
 
 
-def sbang_shebang_line():
+def sbang_shebang_line_for(store: spack.store.Store) -> str:
     """Full shebang line that should be prepended to files to use sbang.
 
     The line returned does not have a final newline (caller should add it
@@ -63,7 +63,23 @@ def sbang_shebang_line():
     This should be the only place in Spack that knows about what
     interpreter we use for ``sbang``.
     """
-    return "#!/bin/sh %s" % sbang_install_path()
+    return "#!/bin/sh %s" % sbang_install_path_for(store)
+
+
+def _package_api_only(name: str) -> spack.error.SpackError:
+    return spack.error.SpackError(
+        f"spack.package.{name} is available to package code only, while Spack sets up a package"
+    )
+
+
+def sbang_install_path() -> str:
+    """Location sbang is installed within the install tree (package API)."""
+    raise _package_api_only("sbang_install_path")
+
+
+def sbang_shebang_line() -> str:
+    """Full shebang line that should be prepended to files to use sbang (package API)."""
+    raise _package_api_only("sbang_shebang_line")
 
 
 def get_interpreter(binary_string):
@@ -74,6 +90,14 @@ def get_interpreter(binary_string):
 
 
 def filter_shebang(path):
+    """
+    Adds a second shebang line, using sbang, at the beginning of a file, if necessary
+    (package API).
+    """
+    raise _package_api_only("filter_shebang")
+
+
+def filter_shebang_for(path, store: spack.store.Store):
     """
     Adds a second shebang line, using sbang, at the beginning of a file, if necessary.
     Note: Spack imposes a relaxed shebang line limit, meaning that a newline or end of
@@ -102,7 +126,7 @@ def filter_shebang(path):
             return False
 
         # This line will be prepended to file
-        new_sbang_line = (sbang_shebang_line() + "\n").encode("utf-8")
+        new_sbang_line = (sbang_shebang_line_for(store) + "\n").encode("utf-8")
 
         # Skip files that are already using sbang.
         if old_shebang_line == new_sbang_line:
@@ -166,7 +190,7 @@ def filter_shebang(path):
     return True
 
 
-def filter_shebangs_in_directory(directory, filenames=None):
+def filter_shebangs_in_directory(directory, store: spack.store.Store, filenames=None):
     if filenames is None:
         filenames = os.listdir(directory)
 
@@ -185,7 +209,7 @@ def filter_shebangs_in_directory(directory, filenames=None):
             continue
 
         # test the file for a long shebang, and filter
-        if filter_shebang(path):
+        if filter_shebang_for(path, store):
             tty.debug("Patched overlong shebang in %s" % path)
 
 
@@ -200,8 +224,9 @@ def post_install(spec, explicit=None):
         tty.debug("SKIP: shebang filtering [external package]")
         return
 
+    store = spec.package.context.store
     for directory, _, filenames in os.walk(spec.prefix):
-        filter_shebangs_in_directory(directory, filenames)
+        filter_shebangs_in_directory(directory, store, filenames)
 
 
 class SbangPathError(spack.error.SpackError):

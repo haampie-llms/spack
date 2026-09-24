@@ -1,6 +1,7 @@
 # Copyright Spack Project Developers. See COPYRIGHT file for details.
 #
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
+import functools
 import pathlib
 import re
 import shutil
@@ -11,6 +12,7 @@ import pytest
 
 import spack.platforms
 import spack.relocate
+import spack.test.harness
 import spack.util.executable
 from spack import relocate_text
 
@@ -205,7 +207,9 @@ def test_fixup_macos_rpaths(make_dylib, make_object_file):
 
     # For each of these tests except for the "correct" case, the first fixup
     # should make changes, and the second fixup should be a null-op.
-    fixup_rpath = spack.relocate.fixup_macos_rpath
+    fixup_rpath = functools.partial(
+        spack.relocate.fixup_macos_rpath, store_root=spack.test.harness.current().store.layout.root
+    )
 
     no_rpath = []
     duplicate_rpaths = ["/usr", "/usr"]

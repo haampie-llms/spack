@@ -17,6 +17,7 @@ from urllib.parse import urlencode
 from urllib.request import Request
 
 import spack
+import spack.config
 import spack.paths
 import spack.platforms
 import spack.spec
@@ -89,9 +90,17 @@ class CDash(Reporter):
     CDash instance hosted at ``https://example.com/cdash``.
     """
 
-    def __init__(self, configuration: CDashConfiguration):
+    def __init__(
+        self,
+        configuration: CDashConfiguration,
+        *,
+        urlopen: web_util.OpenType,
+        config: spack.config.Configuration,
+    ):
         #: Set to False if any error occurs when building the CDash report
         self.success = True
+        self._urlopen = urlopen
+        self._config = config
 
         # Jinja2 expects `/` path separators
         self.template_dir = "reports/cdash"
@@ -265,7 +274,7 @@ class CDash(Reporter):
             phase_report = os.path.join(report_dir, report_file_name)
 
             with open(phase_report, "w", encoding="utf-8") as f:
-                env = spack.tengine.make_environment()
+                env = spack.tengine.make_environment(self._config)
                 if phase != "update":
                     # Update.xml stores site information differently
                     # than the rest of the CTest XML files.
@@ -331,7 +340,7 @@ class CDash(Reporter):
             phase_report = os.path.join(report_dir, report_file_name)
 
             with open(phase_report, "w", encoding="utf-8") as f:
-                env = spack.tengine.make_environment()
+                env = spack.tengine.make_environment(self._config)
                 if phase not in ["update", "testing"]:
                     # Update.xml stores site information differently
                     # than the rest of the CTest XML files.
@@ -410,7 +419,7 @@ class CDash(Reporter):
         report_data["update"]["revision"] = self.revision
         report_data["update"]["log"] = msg
 
-        env = spack.tengine.make_environment()
+        env = spack.tengine.make_environment(self._config)
         update_template = posixpath.join(self.template_dir, "Update.xml")
         t = env.get_template(update_template)
         output_filename = os.path.join(report_dir, "Update.xml")
@@ -460,7 +469,7 @@ class CDash(Reporter):
             if self.authtoken:
                 request.add_header("Authorization", "Bearer {0}".format(self.authtoken))
             try:
-                with web_util.urlopen(request, timeout=SPACK_CDASH_TIMEOUT) as response:
+                with self._urlopen(request, timeout=SPACK_CDASH_TIMEOUT) as response:
                     if self.current_package_name not in self.buildIds:
                         resp_value = io.TextIOWrapper(response, encoding="utf-8").read()
                         match = self.buildid_regexp.search(resp_value)

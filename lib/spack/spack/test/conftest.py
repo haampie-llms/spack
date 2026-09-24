@@ -24,7 +24,7 @@ import tempfile
 import textwrap
 import xml.etree.ElementTree
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import pytest
 
@@ -39,6 +39,7 @@ import spack.compilers.config
 import spack.compilers.libraries
 import spack.concretize
 import spack.config
+import spack.context
 import spack.database
 import spack.directives_meta
 import spack.environment as ev
@@ -58,11 +59,11 @@ import spack.store
 import spack.subprocess_context
 import spack.tengine
 import spack.test.concretization_cache_plugin
+import spack.test.harness
 import spack.util.executable
 import spack.util.file_cache
 import spack.util.git
 import spack.util.gpg
-import spack.util.lang
 import spack.util.libc
 import spack.util.lock
 import spack.util.naming
@@ -77,10 +78,10 @@ import spack.version
 from spack.config import Configuration
 from spack.enums import ConfigScopePriority
 from spack.fetch_strategy import URLFetchStrategy
-from spack.main import SpackCommand
-from spack.old_installer import PackageInstaller
+from spack.installer import PackageInstaller
 from spack.repo import RepoPath
 from spack.store import Store
+from spack.test.harness import SpackCommand
 from spack.util import tty
 from spack.util.filesystem import copy, join_path, mkdirp, remove_linked_tree, working_dir
 from spack.util.pattern import Bunch
@@ -441,7 +442,7 @@ def no_path_access(monkeypatch):
 @pytest.fixture(scope="session", autouse=True)
 def clean_user_environment():
     spack_env_value = os.environ.pop(ev.spack_env_var, None)
-    with ev.no_active_environment():
+    with ev.no_active_environment(spack.test.harness.current()):
         yield
     if spack_env_value:
         os.environ[ev.spack_env_var] = spack_env_value
@@ -453,7 +454,7 @@ def clean_user_environment():
 @pytest.fixture(scope="function", autouse=True)
 def clean_test_environment():
     yield
-    ev.deactivate()
+    spack.test.harness.current().deactivate()
 
 
 # Hooks to add command line options or set other custom behaviors.
@@ -552,7 +553,7 @@ class MockStageRoot:
 def mock_stage(tmp_path_factory: pytest.TempPathFactory, monkeypatch, request):
     """Establish the temporary build_stage for the mock archive."""
     # The approach with this autouse fixture is to replace the stage root
-    # instead of using spack.config.CONFIG.override() to avoid configuration
+    # instead of using config.override() to avoid configuration
     # conflicts with dozens of tests that rely on other configuration
     # fixtures, such as config.
 
@@ -702,9 +703,11 @@ def mock_binary_index(monkeypatch, tmp_path_factory: pytest.TempPathFactory):
     tmpdir = tmp_path_factory.mktemp("mock_binary_index")
     index_path = tmpdir / "binary_index"
     mock_index = spack.binary_distribution.BinaryIndexCache(
-        str(index_path), config=spack.config.CONFIG
+        str(index_path),
+        config=spack.test.harness.current().config,
+        client=spack.util.web.NetworkClient.from_config(spack.test.harness.current().config),
     )
-    monkeypatch.setattr(spack.binary_distribution, "BINARY_INDEX", mock_index)
+    monkeypatch.setattr(spack.test.harness.current(), "binary_index", mock_index)
     yield
 
 
@@ -735,7 +738,7 @@ def _use_test_platform(test_platform):
     # This is the only context manager used at session scope (see note
     # below for more insight) since we want to use the test platform as
     # a default during tests.
-    with spack.platforms.use_platform(test_platform):
+    with spack.test.harness.use_platform(test_platform):
         yield
 
 
@@ -776,7 +779,9 @@ def _load_clingo():
 #
 @pytest.fixture(scope="session")
 def mock_packages_repo():
-    yield spack.repo.from_path(spack.paths.mock_packages_path)
+    yield spack.repo.from_path(
+        spack.paths.mock_packages_path, cache=spack.test.harness.current().misc_cache
+    )
 
 
 @pytest.fixture
@@ -826,7 +831,7 @@ def fake_db_install(tmp_path):
 
     after doing something like ``fake_db_install(y)``
     """
-    with spack.store.use_store(str(tmp_path)) as the_store:
+    with spack.test.harness.use_store(str(tmp_path)) as the_store:
 
         def _install(a_spec):
             the_store.db.add(a_spec)
@@ -838,7 +843,7 @@ def fake_db_install(tmp_path):
 def mock_packages(mock_packages_repo, mock_pkg_install, request):
     """Use the 'builtin_mock' repository instead of 'builtin'"""
     ensure_configuration_fixture_run_before(request)
-    with spack.repo.use_repositories(mock_packages_repo) as mock_repo:
+    with spack.test.harness.use_repositories(mock_packages_repo) as mock_repo:
         yield mock_repo
 
 
@@ -846,8 +851,10 @@ def mock_packages(mock_packages_repo, mock_pkg_install, request):
 def mutable_mock_repo(mock_packages_repo, request):
     """Function-scoped mock packages, for tests that need to modify them."""
     ensure_configuration_fixture_run_before(request)
-    mock_repo = spack.repo.from_path(spack.paths.mock_packages_path)
-    with spack.repo.use_repositories(mock_repo) as mock_packages_repo:
+    mock_repo = spack.repo.from_path(
+        spack.paths.mock_packages_path, cache=spack.test.harness.current().misc_cache
+    )
+    with spack.test.harness.use_repositories(mock_repo) as mock_packages_repo:
         yield mock_packages_repo
 
 
@@ -963,7 +970,7 @@ def default_config():
     defaults_path = os.path.join(spack.paths.etc_path, "defaults")
     if sys.platform == "win32":
         defaults_path = os.path.join(defaults_path, "windows")
-    with spack.config.use_configuration(defaults_path) as defaults_config:
+    with spack.test.harness.use_configuration(defaults_path) as defaults_config:
         yield defaults_config
 
 
@@ -1109,21 +1116,10 @@ def mock_configuration_scopes(configuration_dir):
     yield _create_mock_configuration_scopes(configuration_dir)
 
 
-@contextlib.contextmanager
-def _use_configuration_and_store(*scopes):
-    """Activate config scopes and reset the store so it re-derives from them."""
-    with spack.config.use_configuration(*scopes) as cfg:
-        store_token = spack.store.reinitialize()
-        try:
-            yield cfg
-        finally:
-            spack.store.restore(store_token)
-
-
 @pytest.fixture(scope="function")
 def config(mock_configuration_scopes):
     """This fixture activates/deactivates the mock configuration."""
-    with _use_configuration_and_store(*mock_configuration_scopes) as config:
+    with spack.test.harness.use_configuration_and_store(*mock_configuration_scopes) as config:
         yield config
 
 
@@ -1134,7 +1130,7 @@ def mutable_config(tmp_path_factory: pytest.TempPathFactory, configuration_dir):
     shutil.copytree(configuration_dir, mutable_dir)
 
     scopes = _create_mock_configuration_scopes(mutable_dir)
-    with _use_configuration_and_store(*scopes) as cfg:
+    with spack.test.harness.use_configuration_and_store(*scopes) as cfg:
         yield cfg
 
 
@@ -1147,8 +1143,22 @@ def mutable_empty_config(tmp_path_factory: pytest.TempPathFactory, configuration
         for name in ["site", "system", "user"]
     ]
 
-    with _use_configuration_and_store(*scopes) as cfg:
+    with spack.test.harness.use_configuration_and_store(*scopes) as cfg:
         yield cfg
+
+
+@pytest.fixture
+def inactive_config():
+    """Returns a factory of Configuration objects that are never the configuration of the test
+    context, to test that code uses the configuration it is given.
+    """
+
+    def _factory(data: Dict[str, Any]) -> spack.config.Configuration:
+        config = spack.config.Configuration()
+        config.push_scope(spack.config.InternalConfigScope("inactive", data))
+        return config
+
+    return _factory
 
 
 # From  https://github.com/pytest-dev/pytest/issues/363#issuecomment-1335631998
@@ -1177,7 +1187,7 @@ def concretize_scope(mutable_config: Configuration, tmp_path: Path):
     ):
         yield str(concretize_dir)
 
-    spack.repo.PATH._provider_index = None
+    spack.test.harness.current().repo._provider_index = None
 
 
 @pytest.fixture
@@ -1200,7 +1210,7 @@ def mock_low_high_config(tmp_path: Path):
         spack.config.DirectoryConfigScope(name, str(tmp_path / name)) for name in ["low", "high"]
     ]
 
-    with spack.config.use_configuration(*scopes) as config:
+    with spack.test.harness.use_configuration(*scopes) as config:
         yield config
 
 
@@ -1233,7 +1243,7 @@ def mock_missing_dir_include_scopes(tmp_path: Path):
     includes that do not have representation on the filesystem"""
     scope = create_config_scope(tmp_path, "sub")
 
-    with spack.config.use_configuration(scope) as config:
+    with spack.test.harness.use_configuration(scope) as config:
         yield config
 
 
@@ -1243,7 +1253,7 @@ def mock_missing_file_include_scopes(tmp_path: Path):
     includes that do not have representation on the filesystem"""
     scope = create_config_scope(tmp_path, "sub.yaml")
 
-    with spack.config.use_configuration(scope) as config:
+    with spack.test.harness.use_configuration(scope) as config:
         yield config
 
 
@@ -1270,7 +1280,7 @@ def _populate(mock_db):
     """
 
     def _install(spec):
-        s = spack.concretize.concretize_one(spec)
+        s = spack.concretize.concretize_one(spec, spack.test.harness.current())
         PackageInstaller([s.package], fake=True, explicit=True).install()
 
     _install("mpileaks ^mpich")
@@ -1305,9 +1315,9 @@ def mock_store(
     store_path = _store_dir
     _mock_wsdk_externals = spack.bootstrap.ensure_winsdk_external_or_raise
 
-    with spack.config.use_configuration(*mock_configuration_scopes):
-        with spack.store.use_store(str(store_path)) as store:
-            with spack.repo.use_repositories(mock_packages_repo):
+    with spack.test.harness.use_configuration(*mock_configuration_scopes):
+        with spack.test.harness.use_store(str(store_path)) as store:
+            with spack.test.harness.use_repositories(mock_packages_repo):
                 try:
                     spack.bootstrap.ensure_winsdk_external_or_raise = _return_none
                     _populate(store.db)
@@ -1337,7 +1347,7 @@ def _mock_store_tarball(mock_store) -> bytes:
 @pytest.fixture(scope="function")
 def database_store(mock_store: Store, mock_packages, config):
     """This activates the mock store, packages, AND config. Yields the Store."""
-    with spack.store.use_store(str(mock_store)) as store:
+    with spack.test.harness.use_store(str(mock_store)) as store:
         yield store
         # Force reading the database again between tests
         store.db.last_seen_verifier = ""
@@ -1352,7 +1362,7 @@ def database(database_store: Store):
 @pytest.fixture(scope="function")
 def database_mutable_config_store(mock_store: Store, mock_packages, mutable_config, monkeypatch):
     """Like database_store, but with a mutable config. Yields the Store."""
-    with spack.store.use_store(str(mock_store)) as store:
+    with spack.test.harness.use_store(str(mock_store)) as store:
         yield store
         store.db.last_seen_verifier = ""
 
@@ -1422,18 +1432,23 @@ def _return_none(*args):
     return None
 
 
+class _InMemoryCompilerCache:
+    """Descriptor giving every context a compiler cache that does not persist."""
+
+    def __get__(self, obj, objtype=None):
+        return spack.compilers.libraries.CompilerCache()
+
+
 @pytest.fixture(autouse=True)
 def disable_compiler_output_cache(monkeypatch):
-    monkeypatch.setattr(
-        spack.compilers.libraries, "COMPILER_CACHE", spack.compilers.libraries.CompilerCache()
-    )
+    monkeypatch.setattr(spack.context.SpackContext, "compiler_cache", _InMemoryCompilerCache())
 
 
 @pytest.fixture(scope="function")
 def install_mockery(temporary_store: spack.store.Store, mutable_config, mock_packages):
     """Hooks a fake install directory, DB, and stage directory into Spack."""
     # We use a fake package, so temporarily disable checksumming
-    with spack.config.CONFIG.override("config:checksum", False):
+    with spack.test.harness.current().config.override("config:checksum", False):
         yield
 
     # Wipe out any cached prefix failure locks (associated with the session-scoped mock archive)
@@ -1469,7 +1484,7 @@ def temporary_store(tmp_path: Path, request):
     """Hooks a temporary empty store for the test function."""
     ensure_configuration_fixture_run_before(request)
     temporary_store_path = tmp_path / "opt"
-    with spack.store.use_store(str(temporary_store_path)) as s:
+    with spack.test.harness.use_store(str(temporary_store_path)) as s:
         yield s
     if temporary_store_path.exists():
         shutil.rmtree(temporary_store_path)
@@ -1582,7 +1597,7 @@ class ConfigUpdate:
         file = os.path.join(self.root_for_conf, filename + ".yaml")
         with open(file, encoding="utf-8") as f:
             config_settings = syaml.load_config(f)
-        spack.config.CONFIG.set("modules:default", config_settings)
+        spack.test.harness.current().config.set("modules:default", config_settings)
 
 
 @pytest.fixture()
@@ -1611,17 +1626,21 @@ def mock_gnupghome(monkeypatch):
     # This comes up because tmp paths on macOS are already long-ish, and
     # pytest makes them longer.
     short_name_tmpdir = tempfile.mkdtemp()
+    # We must manually set gnupghome here, else tests run in parallel
+    # will all fall back to the system default location and cause
+    # failures when multiple try to init the same location concurrently.
+    # Child processes inherit the variable.
+    monkeypatch.setenv("SPACK_GNUPGHOME", short_name_tmpdir)
+    ctx = spack.test.harness.current()
+    ctx.__dict__.pop("gpg", None)
     try:
-        # We must manually set gnupghome here, else tests run in parallel
-        # will all fall back to the system default location and cause
-        # failures when multiple try to init the same location concurrently
-        spack.util.gpg.init(gnupghome=short_name_tmpdir)
+        _ = ctx.gpg.gpg
     except spack.util.gpg.SpackGPGError:
-        if not spack.util.gpg.GPG:
-            pytest.skip("This test requires gpg")
+        pytest.skip("This test requires gpg")
 
-    with spack.util.gpg.gnupghome_override(short_name_tmpdir):
-        yield short_name_tmpdir
+    yield short_name_tmpdir
+
+    ctx.__dict__.pop("gpg", None)
 
     # clean up, since we are doing this manually
     # Ignore errors cause we seem to be hitting a bug similar to
@@ -2188,7 +2207,7 @@ repo:
 """
     )
 
-    with spack.repo.use_repositories(str(repodir)) as repo:
+    with spack.test.harness.use_repositories(str(repodir)) as repo:
         yield repo, repodir
 
     shutil.rmtree(str(repodir))
@@ -2272,9 +2291,7 @@ def inode_cache():
 @pytest.fixture(autouse=True)
 def brand_new_binary_cache():
     yield
-    spack.binary_distribution.BINARY_INDEX = spack.util.lang.Singleton(
-        spack.binary_distribution._binary_index
-    )
+    spack.test.harness.reset_derived_members()
 
 
 def _trivial_content_hash(self, content=None, *, repo: spack.repo.RepoPath) -> str:
@@ -2351,7 +2368,7 @@ def mock_curl_configs(mock_config_data, monkeypatch):
     config_data_dir, config_files = mock_config_data
 
     class MockCurl:
-        def __init__(self):
+        def __init__(self, *, client):
             self.returncode = None
 
         def __call__(self, *args, **kwargs):
@@ -2381,7 +2398,7 @@ def mock_fetch_url_text(mock_config_data, monkeypatch):
 
     stage_dir, config_files = mock_config_data
 
-    def _fetch_text_file(url, dest_dir):
+    def _fetch_text_file(url, dest_dir, *, client):
         raw_url = raw_github_gitlab_url(url)
         mkdirp(dest_dir)
         basename = os.path.basename(raw_url)
@@ -2465,15 +2482,6 @@ def shell_as(shell):
             os.environ["SPACK_SHELL"] = _shell
 
 
-@pytest.fixture()
-def nullify_globals(request, monkeypatch):
-    ensure_configuration_fixture_run_before(request)
-    monkeypatch.setattr(spack.config, "CONFIG", None)
-    monkeypatch.setattr(spack.caches, "MISC_CACHE", None)
-    monkeypatch.setattr(spack.repo, "PATH", None)
-    monkeypatch.setattr(spack.store, "STORE", None)
-
-
 def pytest_runtest_setup(item):
     # Tests redirect std fds (capfd, dup2) without going through spack code, so cached isatty()
     # results from a previous test may be stale.
@@ -2498,7 +2506,7 @@ def disable_parallelism(monkeypatch, request):
         monkeypatch.setattr(spack.util.parallel, "ENABLE_PARALLELISM", False)
 
 
-def _root_path(x, y, *, path):
+def _root_path(x, y, z, *, path):
     return path
 
 
@@ -2626,7 +2634,7 @@ def write_config_file(tmp_path: Path):
 @pytest.fixture()
 def wrapper_dir(install_mockery):
     """Installs the compiler wrapper and returns the prefix where the script is installed."""
-    wrapper = spack.concretize.concretize_one("compiler-wrapper")
+    wrapper = spack.concretize.concretize_one("compiler-wrapper", spack.test.harness.current())
     wrapper_pkg = wrapper.package
     PackageInstaller([wrapper_pkg], explicit=True).install()
     return wrapper_pkg.bin_dir()
@@ -2711,13 +2719,6 @@ def reset_extension_paths():
     spack.extensions.extension_paths_from_entry_points.cache_clear()
     yield
     spack.extensions.extension_paths_from_entry_points.cache_clear()
-
-
-@pytest.fixture(params=["old", "new"])
-def installer_variant(request):
-    """Parametrize a test over the old and new installer."""
-    with spack.config.CONFIG.override("config:installer", request.param):
-        yield request.param
 
 
 class FsTree:

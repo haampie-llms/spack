@@ -12,10 +12,10 @@ import spack.vendor.archspec.cpu
 import spack.concretize
 import spack.config
 import spack.environment as ev
-import spack.main
 import spack.modules.error
 import spack.modules.lmod
 import spack.spec
+import spack.test.harness
 import spack.util.environment
 from spack.config import Configuration
 
@@ -23,7 +23,7 @@ mpich_spec_string = "mpich@3.0.4"
 mpileaks_spec_string = "mpileaks"
 libdwarf_spec_string = "libdwarf arch=x64-linux"
 
-install = spack.main.SpackCommand("install")
+install = spack.test.harness.SpackCommand("install")
 
 #: Class of the writer tested in this module
 writer_cls = spack.modules.lmod.LmodModulefileWriter
@@ -465,14 +465,18 @@ class TestLmod:
         install_mockery,
         mock_fetch,
     ):
-        with ev.create_in_dir(str(tmp_path), with_view=True) as e:
+        with ev.create_in_dir(
+            str(tmp_path), with_view=True, ctx=spack.test.harness.current()
+        ) as e:
             module_configuration("with_view")
             install("--fake", "--add", "cmake")
 
-            spec = spack.concretize.concretize_one("cmake")
+            spec = spack.concretize.concretize_one("cmake", spack.test.harness.current())
 
             content = modulefile_content("cmake")
-            expected = e.default_view.get_projection_for_spec(spec)
+            expected = e.default_view.get_projection_for_spec(
+                spec, spack.test.harness.current().config
+            )
             # Rather than parse all lines, ensure all prefixes in the content
             # point to the right one
             assert any(expected in line for line in content)
@@ -489,10 +493,10 @@ class TestLmod:
         """Tests the addition and removal of hide command in modulerc."""
         module_configuration("hide_implicits")
 
-        spec = spack.concretize.concretize_one("mpileaks@2.3")
+        spec = spack.concretize.concretize_one("mpileaks@2.3", spack.test.harness.current())
 
         # mpileaks is defined as implicit, thus hide command should appear in modulerc
-        writer = writer_cls.from_spec(spec, "default", False)
+        writer = writer_cls.from_spec(spec, "default", False, ctx=spack.test.harness.current())
         writer.write()
         assert os.path.exists(writer.layout.modulerc)
         with open(writer.layout.modulerc, encoding="utf-8") as f:
@@ -514,7 +518,7 @@ class TestLmod:
 
         # when mpileaks becomes explicit, its file name changes (hash_length = 0), meaning an
         # extra module file is created; the old one still exists and remains hidden.
-        writer = writer_cls.from_spec(spec, "default", True)
+        writer = writer_cls.from_spec(spec, "default", True, ctx=spack.test.harness.current())
         writer.write()
         assert os.path.exists(writer.layout.modulerc)
         with open(writer.layout.modulerc, encoding="utf-8") as f:
@@ -524,13 +528,13 @@ class TestLmod:
 
         # after removing both the implicit and explicit module, the modulerc file would be empty
         # and should be removed.
-        writer_cls.from_spec(spec, "default", False).remove()
-        writer_cls.from_spec(spec, "default", True).remove()
+        writer_cls.from_spec(spec, "default", False, ctx=spack.test.harness.current()).remove()
+        writer_cls.from_spec(spec, "default", True, ctx=spack.test.harness.current()).remove()
         assert not os.path.exists(writer.layout.modulerc)
         assert not os.path.exists(writer.layout.filename)
 
         # implicit module is removed
-        writer = writer_cls.from_spec(spec, "default", False)
+        writer = writer_cls.from_spec(spec, "default", False, ctx=spack.test.harness.current())
         writer.write()
         assert os.path.exists(writer.layout.filename)
         assert os.path.exists(writer.layout.modulerc)
@@ -539,13 +543,17 @@ class TestLmod:
         assert not os.path.exists(writer.layout.filename)
 
         # three versions of mpileaks are implicit
-        writer = writer_cls.from_spec(spec, "default", False)
+        writer = writer_cls.from_spec(spec, "default", False, ctx=spack.test.harness.current())
         writer.write(overwrite=True)
-        spec_alt1 = spack.concretize.concretize_one("mpileaks@2.2")
-        spec_alt2 = spack.concretize.concretize_one("mpileaks@2.1")
-        writer_alt1 = writer_cls.from_spec(spec_alt1, "default", False)
+        spec_alt1 = spack.concretize.concretize_one("mpileaks@2.2", spack.test.harness.current())
+        spec_alt2 = spack.concretize.concretize_one("mpileaks@2.1", spack.test.harness.current())
+        writer_alt1 = writer_cls.from_spec(
+            spec_alt1, "default", False, ctx=spack.test.harness.current()
+        )
         writer_alt1.write(overwrite=True)
-        writer_alt2 = writer_cls.from_spec(spec_alt2, "default", False)
+        writer_alt2 = writer_cls.from_spec(
+            spec_alt2, "default", False, ctx=spack.test.harness.current()
+        )
         writer_alt2.write(overwrite=True)
         assert os.path.exists(writer.layout.modulerc)
         with open(writer.layout.modulerc, encoding="utf-8") as f:

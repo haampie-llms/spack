@@ -28,7 +28,7 @@ def add_command(parser, command_dict):
     )
 
 
-def setdefault(module_type, specs, args):
+def setdefault(module_type, specs, args, ctx):
     """set the default module file, when multiple are present"""
     # For details on the underlying mechanism see:
     #
@@ -38,6 +38,6 @@ def setdefault(module_type, specs, args):
     spec = specs[0]
     data = {"modules": {args.module_set_name: {"lmod": {"defaults": [str(spec)]}}}}
     scope = spack.config.InternalConfigScope("lmod-setdefault", data)
-    with spack.config.CONFIG.override(scope):
-        writer = spack.modules.module_types["lmod"].from_spec(spec, args.module_set_name)
+    with ctx.config.override(scope):
+        writer = spack.modules.module_types["lmod"].from_spec(spec, args.module_set_name, ctx=ctx)
         writer.update_module_defaults()

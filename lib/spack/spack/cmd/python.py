@@ -10,7 +10,6 @@ import runpy
 import sys
 
 import spack
-import spack.repo
 from spack.util import tty
 
 description = "launch an interpreter as spack would launch a command"
@@ -56,7 +55,7 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     )
 
 
-def python(parser, args, unknown_args):
+def python(parser, args, unknown_args, ctx):
     if args.python_version:
         print("Python", platform.python_version())
         return
@@ -77,16 +76,16 @@ def python(parser, args, unknown_args):
     if args.python_command and args.python_args:
         args.subparser.error("you can only specify a command OR script, but not both")
 
-    # Ensure that spack.repo.PATH is initialized
-    spack.repo.PATH.repos
+    # Ensure that the package repositories are initialized
+    ctx.repo.repos
 
     # Run user choice of interpreter
     if args.python_interpreter == "ipython":
-        return ipython_interpreter(args)
-    return python_interpreter(args)
+        return ipython_interpreter(args, ctx)
+    return python_interpreter(args, ctx)
 
 
-def ipython_interpreter(args):
+def ipython_interpreter(args, ctx):
     """An ipython interpreter is intended to be interactive, so it doesn't
     support running a script or arguments
     """
@@ -115,18 +114,19 @@ def ipython_interpreter(args):
         )
 
         __name__ = "__main__"  # noqa: F841
-        IPython.embed(module="__main__", header=header)
+        IPython.embed(module="__main__", header=header, user_ns={"ctx": ctx})
 
 
-def python_interpreter(args):
-    """A python interpreter is the default interpreter"""
+def python_interpreter(args, ctx):
+    """A python interpreter is the default interpreter. Scripts and commands have the context of
+    the invocation as ``ctx``."""
 
     if args.python_args and not args.python_command:
         sys.argv = args.python_args
-        runpy.run_path(args.python_args[0], run_name="__main__")
+        runpy.run_path(args.python_args[0], init_globals={"ctx": ctx}, run_name="__main__")
     else:
         # Fake a main python shell by setting __name__ to __main__.
-        console = code.InteractiveConsole({"__name__": "__main__", "spack": spack})
+        console = code.InteractiveConsole({"__name__": "__main__", "spack": spack, "ctx": ctx})
         if "PYTHONSTARTUP" in os.environ:
             startup_file = os.environ["PYTHONSTARTUP"]
             if os.path.isfile(startup_file):

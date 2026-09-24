@@ -117,12 +117,14 @@ def default_mirror_layout(
     fetcher: "spack.fetch_strategy.FetchStrategy",
     per_package_ref: str,
     spec: Optional["spack.spec.Spec"] = None,
+    *,
+    repo: spack.repo.RepoPath,
 ) -> MirrorLayout:
     """Returns a ``MirrorReference`` object which keeps track of the relative
     storage path of the resource associated with the specified ``fetcher``."""
     ext = None
     if spec:
-        pkg_cls = spack.repo.PATH.get_pkg_class(spec.name)
+        pkg_cls = repo.get_pkg_class(spec.name)
         versions = pkg_cls.versions.get(spec.version, {})
         ext = versions.get("extension", None)
     # If the spec does not explicitly specify an extension (the default case),

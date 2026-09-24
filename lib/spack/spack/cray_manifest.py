@@ -6,7 +6,7 @@ import json
 import os
 import traceback
 import warnings
-from typing import Any, Dict, Iterable, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional
 
 from spack.vendor import jsonschema
 from spack.vendor.jsonschema import exceptions
@@ -19,10 +19,12 @@ import spack.error
 import spack.platforms
 import spack.repo
 import spack.spec
-import spack.store
 from spack.detection.path import ExecutablesFinder
 from spack.schema.cray_manifest import schema as manifest_schema
 from spack.util import tty
+
+if TYPE_CHECKING:
+    import spack.context
 
 #: Cray systems can store a Spack-compatible description of system
 #: packages here.
@@ -31,7 +33,7 @@ default_path = "/opt/cray/pe/cpe-descriptive-manifest/"
 COMPILER_NAME_TRANSLATION = {"nvidia": "nvhpc", "rocm": "llvm-amdgpu", "clang": "llvm"}
 
 
-def translated_compiler_name(manifest_compiler_name):
+def translated_compiler_name(manifest_compiler_name, *, repo: spack.repo.RepoPath):
     """
     When creating a Compiler object, Spack expects a name matching
     one of the classes in :mod:`spack.compilers.config`. Names in the Cray manifest
@@ -43,9 +45,7 @@ def translated_compiler_name(manifest_compiler_name):
     """
     if manifest_compiler_name in COMPILER_NAME_TRANSLATION:
         return COMPILER_NAME_TRANSLATION[manifest_compiler_name]
-    elif manifest_compiler_name in spack.compilers.config.supported_compilers(
-        repo=spack.repo.PATH
-    ):
+    elif manifest_compiler_name in spack.compilers.config.supported_compilers(repo=repo):
         return manifest_compiler_name
     else:
         raise spack.compilers.config.UnknownCompilerError(
@@ -53,10 +53,16 @@ def translated_compiler_name(manifest_compiler_name):
         )
 
 
-def compiler_from_entry(entry: dict, *, manifest_path: str) -> Optional[spack.spec.Spec]:
+def compiler_from_entry(
+    entry: dict,
+    *,
+    manifest_path: str,
+    repo: spack.repo.RepoPath,
+    config: spack.config.Configuration,
+) -> Optional[spack.spec.Spec]:
     # Note that manifest_path is only passed here to compose a
     # useful warning message when paths appear to be missing.
-    compiler_name = translated_compiler_name(entry["name"])
+    compiler_name = translated_compiler_name(entry["name"], repo=repo)
     paths = extract_compiler_paths(entry)
 
     # Do a check for missing paths. Note that this isn't possible for
@@ -74,7 +80,9 @@ def compiler_from_entry(entry: dict, *, manifest_path: str) -> Optional[spack.sp
         )
 
     try:
-        compiler_spec = compiler_spec_from_paths(pkg_name=compiler_name, compiler_paths=paths)
+        compiler_spec = compiler_spec_from_paths(
+            pkg_name=compiler_name, compiler_paths=paths, repo=repo, config=config
+        )
     except spack.error.SpackError as e:
         tty.debug(f"[CRAY MANIFEST] {e}")
         return None
@@ -85,11 +93,17 @@ def compiler_from_entry(entry: dict, *, manifest_path: str) -> Optional[spack.sp
     return compiler_spec
 
 
-def compiler_spec_from_paths(*, pkg_name: str, compiler_paths: Iterable[str]) -> spack.spec.Spec:
+def compiler_spec_from_paths(
+    *,
+    pkg_name: str,
+    compiler_paths: Iterable[str],
+    repo: spack.repo.RepoPath,
+    config: spack.config.Configuration,
+) -> spack.spec.Spec:
     """Returns the external spec associated with a series of compilers, if any."""
-    pkg_cls = spack.repo.PATH.get_pkg_class(pkg_name)
+    pkg_cls = repo.get_pkg_class(pkg_name)
     finder = ExecutablesFinder()
-    specs = finder.detect_specs(pkg=pkg_cls, paths=compiler_paths, repo_path=spack.repo.PATH)
+    specs = finder.detect_specs(pkg=pkg_cls, paths=compiler_paths, repo_path=repo, config=config)
 
     if not specs or len(specs) > 1:
         raise CrayCompilerDetectionError(
@@ -108,7 +122,7 @@ def extract_compiler_paths(entry: Dict[str, Any]) -> List[str]:
     return paths
 
 
-def spec_from_entry(entry):
+def spec_from_entry(entry, *, ctx: "spack.context.SpackContext"):
     arch_str = ""
     if "arch" in entry:
         local_platform = spack.platforms.host()
@@ -129,7 +143,7 @@ def spec_from_entry(entry):
     if "compiler" in entry:
         compiler_format = "%{name}@={version}"
         compiler_str = compiler_format.format(
-            name=translated_compiler_name(entry["compiler"]["name"]),
+            name=translated_compiler_name(entry["compiler"]["name"], repo=ctx.repo),
             version=entry["compiler"]["version"],
         )
 
@@ -138,7 +152,7 @@ def spec_from_entry(entry):
         name=entry["name"], version=entry["version"], compiler=compiler_str, arch=arch_str
     )
 
-    pkg_cls = spack.repo.PATH.get_pkg_class(entry["name"])
+    pkg_cls = ctx.repo.get_pkg_class(entry["name"])
 
     if "parameters" in entry:
         variant_strs = list()
@@ -175,23 +189,23 @@ def spec_from_entry(entry):
                     )
         spec_str += " " + " ".join(variant_strs)
 
-    (spec,) = spack.cmd.parse_specs(spec_str.split())
+    (spec,) = spack.cmd.parse_specs(spec_str.split(), ctx)
 
     spec._hash = entry["hash"]
     spec._concrete = True
     spec.external_path = entry["prefix"]
-    spec.origin = "external-db"
+    spec.origin = "external-db"  # type: ignore[attr-defined]
     spec.namespace = pkg_cls.namespace
-    spack.spec.Spec.ensure_valid_variants(spec, repo=spack.repo.PATH)
+    spack.spec.Spec.ensure_valid_variants(spec, repo=ctx.repo)
 
     return spec
 
 
-def entries_to_specs(entries):
+def entries_to_specs(entries, *, ctx: "spack.context.SpackContext"):
     spec_dict = {}
     for entry in entries:
         try:
-            spec = spec_from_entry(entry)
+            spec = spec_from_entry(entry, ctx=ctx)
             assert spec.concrete, f"{spec} is not concrete"
             spec_dict[spec._hash] = spec
         except spack.repo.UnknownPackageError:
@@ -214,14 +228,12 @@ def entries_to_specs(entries):
                 parent_spec._add_dependency(dep_spec, depflag=depflag, virtuals=())
 
     # Edges above are added with virtuals=(), and the specs report the current format.
-    spack.repo.reconstruct_virtuals(
-        spec_dict.values(), repo=spack.repo.PATH, edges_lack_virtuals=True
-    )
+    spack.repo.reconstruct_virtuals(spec_dict.values(), repo=ctx.repo, edges_lack_virtuals=True)
 
     return spec_dict
 
 
-def read(path, apply_updates):
+def read(path, apply_updates, *, ctx: "spack.context.SpackContext"):
     decode_exception_type = json.decoder.JSONDecodeError
     try:
         with open(path, "r", encoding="utf-8") as json_file:
@@ -231,14 +243,16 @@ def read(path, apply_updates):
     except (exceptions.ValidationError, decode_exception_type) as e:
         raise ManifestValidationError("error parsing manifest JSON:", str(e)) from e
 
-    specs = entries_to_specs(json_data["specs"])
+    specs = entries_to_specs(json_data["specs"], ctx=ctx)
     tty.debug("{0}: {1} specs read from manifest".format(path, str(len(specs))))
     compilers = []
     if "compilers" in json_data:
         for x in json_data["compilers"]:
             # We don't want to fail reading the manifest, if a single compiler fails
             try:
-                candidate = compiler_from_entry(x, manifest_path=path)
+                candidate = compiler_from_entry(
+                    x, manifest_path=path, repo=ctx.repo, config=ctx.config
+                )
             except Exception:
                 candidate = None
 
@@ -249,11 +263,11 @@ def read(path, apply_updates):
     tty.debug(f"{path}: {str(len(compilers))} compilers read from manifest")
     # Filter out the compilers that already appear in the configuration
     compilers = spack.compilers.config.select_new_compilers(
-        compilers, config=spack.config.CONFIG, repo=spack.repo.PATH
+        compilers, config=ctx.config, repo=ctx.repo
     )
     if apply_updates and compilers:
         try:
-            spack.compilers.config.add_compiler_to_config(compilers, config=spack.config.CONFIG)
+            spack.compilers.config.add_compiler_to_config(compilers, config=ctx.config)
         except Exception:
             warnings.warn(
                 f"Could not add compilers from manifest: {path}"
@@ -263,7 +277,7 @@ def read(path, apply_updates):
     if apply_updates:
         for spec in specs.values():
             assert spec.concrete, f"{spec} is not concrete"
-            spack.store.STORE.db.add(spec)
+            ctx.store.db.add(spec)
 
 
 class ManifestValidationError(spack.error.SpackError):

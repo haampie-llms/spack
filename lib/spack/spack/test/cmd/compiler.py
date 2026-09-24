@@ -8,13 +8,12 @@ import pytest
 
 import spack.cmd.compiler
 import spack.compilers.config
-import spack.main
-import spack.repo
+import spack.test.harness
 import spack.util.pattern
 import spack.version
 from spack.config import Configuration
 
-compiler = spack.main.SpackCommand("compiler")
+compiler = spack.test.harness.SpackCommand("compiler")
 
 pytestmark = [pytest.mark.usefixtures("mock_packages")]
 
@@ -90,7 +89,7 @@ def test_compiler_remove(mutable_config, mock_packages):
         for compiler in spack.compilers.config.all_compilers(mutable_config, repo=mock_packages)
     )
     args = spack.util.pattern.Bunch(all=True, compiler_spec="gcc@9.4.0", add_paths=[], scope=None)
-    spack.cmd.compiler.compiler_remove(args)
+    spack.cmd.compiler.compiler_remove(args, spack.test.harness.current())
     assert not any(
         compiler.satisfies("gcc@=9.4.0")
         for compiler in spack.compilers.config.all_compilers(mutable_config, repo=mock_packages)
@@ -108,7 +107,7 @@ def test_removing_compilers_from_multiple_scopes(mutable_config: Configuration, 
         for compiler in spack.compilers.config.all_compilers(mutable_config, repo=mock_packages)
     )
     args = spack.util.pattern.Bunch(all=True, compiler_spec="gcc@9.4.0", add_paths=[], scope=None)
-    spack.cmd.compiler.compiler_remove(args)
+    spack.cmd.compiler.compiler_remove(args, spack.test.harness.current())
     assert not any(
         compiler.satisfies("gcc@=9.4.0")
         for compiler in spack.compilers.config.all_compilers(mutable_config, repo=mock_packages)
@@ -143,7 +142,7 @@ done
         mixed_toolchain=False,
         jobs=1,
     )
-    spack.cmd.compiler.compiler_find(args)
+    spack.cmd.compiler.compiler_find(args, spack.test.harness.current())
     compilers_after_find = set(
         spack.compilers.config.all_compilers(mutable_config, repo=mock_packages)
     )
@@ -169,7 +168,7 @@ def test_compiler_find_prefer_no_suffix(no_packages_yaml, working_env, compilers
     assert "gcc@8.4.0" in output
 
     compilers = spack.compilers.config.all_compilers_from(
-        no_packages_yaml, scope="site", repo=spack.repo.PATH
+        no_packages_yaml, scope="site", repo=spack.test.harness.current().repo
     )
     clang = [x for x in compilers if x.satisfies("llvm@11")]
 

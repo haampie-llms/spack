@@ -6,7 +6,7 @@ import io
 import pathlib
 import sys
 
-from spack.main import SpackCommand
+from spack.test.harness import SpackCommand
 
 log_parse = SpackCommand("log-parse")
 

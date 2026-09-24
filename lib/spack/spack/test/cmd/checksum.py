@@ -12,11 +12,12 @@ import spack.concretize
 import spack.error
 import spack.package_base
 import spack.stage
+import spack.test.harness
 import spack.util.web
-from spack.main import SpackCommand
 from spack.package_base import ManualDownloadRequiredError
 from spack.repo import RepoPath
 from spack.stage import interactive_version_filter
+from spack.test.harness import SpackCommand
 from spack.version import Version
 
 spack_checksum = SpackCommand("checksum")
@@ -43,7 +44,7 @@ def can_fetch_versions(monkeypatch, no_add):
             for v in url_by_version
         }
 
-    def url_exists(url, curl=None):
+    def url_exists(url, curl=None, *, client):
         return True
 
     monkeypatch.setattr(
@@ -63,7 +64,7 @@ def cannot_fetch_versions(monkeypatch, no_add):
     def get_checksums_for_versions(url_by_version, package_name, **kwargs):
         return {}
 
-    def url_exists(url, curl=None):
+    def url_exists(url, curl=None, *, client):
         return False
 
     monkeypatch.setattr(
@@ -319,7 +320,7 @@ def test_checksum_url(mock_packages, config):
 
 
 def test_checksum_verification_fails(config, mock_packages, capfd, can_fetch_versions):
-    spec = spack.concretize.concretize_one("zlib")
+    spec = spack.concretize.concretize_one("zlib", spack.test.harness.current())
     pkg = spec.package
     versions = list(pkg.versions.keys())
     version_hashes = {versions[0]: "abadhash", Version("0.1"): "123456789"}

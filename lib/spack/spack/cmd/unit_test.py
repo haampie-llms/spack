@@ -209,17 +209,16 @@ def add_back_pytest_args(args, unknown_args):
     return result
 
 
-def unit_test(parser, args, unknown_args):
+def unit_test(parser, args, unknown_args, ctx):
     global pytest
     import spack.bootstrap
 
     # Ensure clingo is available before switching to the
     # mock configuration used by unit tests
-    with spack.bootstrap.ensure_bootstrap_configuration():
-        spack.bootstrap.ensure_clingo_importable_or_raise()
-        if pytest is None:
-            spack.bootstrap.ensure_environment_dependencies()
-            import pytest
+    spack.bootstrap.ensure_clingo_importable_or_raise(ctx)
+    if pytest is None:
+        spack.bootstrap.ensure_environment_dependencies(ctx)
+        import pytest
 
     if args.pytest_help:
         # make the pytest.main help output more accurate
@@ -233,7 +232,7 @@ def unit_test(parser, args, unknown_args):
     # has been used, then test that extension.
     pytest_root = spack.paths.spack_root
     if args.extension:
-        pytest_root = spack.extensions.load_extension(args.extension)
+        pytest_root = spack.extensions.load_extension(args.extension, ctx.config)
 
     if args.numprocesses is not None and args.numprocesses > 1:
         try:

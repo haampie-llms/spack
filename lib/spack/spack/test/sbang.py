@@ -16,8 +16,8 @@ import tempfile
 
 import pytest
 
-import spack.config
 import spack.store
+import spack.test.harness
 import spack.util.filesystem as fs
 import spack.util.spack_yaml as syaml
 from spack.hooks import sbang
@@ -215,7 +215,7 @@ def test_shebang_interpreter_regex(shebang, interpreter):
 
 
 def test_shebang_handling(script_dir, sbang_line):
-    sbang.filter_shebangs_in_directory(script_dir.tempdir)
+    sbang.filter_shebangs_in_directory(script_dir.tempdir, spack.test.harness.current().store)
 
     # Make sure this is untouched
     with open(script_dir.short_shebang, "r", encoding="utf-8") as f:
@@ -302,7 +302,7 @@ all:
     group: {0}
 """.format(group_name)
     )
-    spack.config.CONFIG.set("packages", conf, scope="user")
+    spack.test.harness.current().config.set("packages", conf, scope="user")
 
     yield
 
@@ -317,13 +317,13 @@ all:
     write: user
 """
     )
-    spack.config.CONFIG.set("packages", conf, scope="user")
+    spack.test.harness.current().config.set("packages", conf, scope="user")
 
     yield
 
 
 def check_sbang_installation(store: spack.store.Store, group=False):
-    sbang_path = sbang.sbang_install_path()
+    sbang_path = sbang.sbang_install_path_for(store)
     sbang_bin_dir = os.path.dirname(sbang_path)
     assert sbang_path.startswith(store.unpadded_root)
 
@@ -346,13 +346,13 @@ def check_sbang_installation(store: spack.store.Store, group=False):
 
 
 def run_test_install_sbang(store: spack.store.Store, group):
-    sbang_path = sbang.sbang_install_path()
+    sbang_path = sbang.sbang_install_path_for(spack.test.harness.current().store)
     sbang_bin_dir = os.path.dirname(sbang_path)
 
     assert sbang_path.startswith(store.unpadded_root)
     assert not os.path.exists(sbang_bin_dir)
 
-    store.install_sbang()
+    store.install_sbang(spack.test.harness.current().config)
     check_sbang_installation(store, group)
 
     # put an invalid file in for sbang
@@ -360,11 +360,11 @@ def run_test_install_sbang(store: spack.store.Store, group):
     with open(sbang_path, "w", encoding="utf-8") as f:
         f.write("foo")
 
-    store.install_sbang()
+    store.install_sbang(spack.test.harness.current().config)
     check_sbang_installation(store, group)
 
     # install again and make sure sbang is still fine
-    store.install_sbang()
+    store.install_sbang(spack.test.harness.current().config)
     check_sbang_installation(store, group)
 
 
@@ -384,9 +384,9 @@ def test_install_sbang_too_long(tmp_path: pathlib.Path):
         add = min(num_extend, 255)
         long_path = os.path.join(long_path, "e" * add)
         num_extend -= add
-    with spack.store.use_store(long_path):
+    with spack.test.harness.use_store(long_path) as store:
         with pytest.raises(sbang.SbangPathError) as exc_info:
-            sbang.sbang_install_path()
+            sbang.sbang_install_path_for(store)
 
     err = str(exc_info.value)
     assert "root is too long" in err
@@ -404,7 +404,7 @@ def test_sbang_hook_skips_nonexecutable_blobs(tmp_path: pathlib.Path):
     with open(file, "wb") as f:
         f.write(contents)
 
-    sbang.filter_shebangs_in_directory(str(tmp_path))
+    sbang.filter_shebangs_in_directory(str(tmp_path), spack.test.harness.current().store)
 
     # Make sure there is no sbang shebang.
     with open(file, "rb") as f:
@@ -426,7 +426,7 @@ def test_sbang_handles_non_utf8_files(tmp_path: pathlib.Path):
         f.write(contents)
 
     # Run sbang
-    assert sbang.filter_shebang(file)
+    assert sbang.filter_shebang_for(file, spack.test.harness.current().store)
 
     with open(file, "rb") as f:
         new_contents = f.read()
@@ -453,7 +453,7 @@ def test_shebang_exceeds_spack_shebang_limit(
         f.write(b"#!" + b"x" * sbang.spack_shebang_limit)
 
     # Then Spack shouldn't try to add a shebang
-    assert not sbang.filter_shebang(file)
+    assert not sbang.filter_shebang_for(file, spack.test.harness.current().store)
 
     with open(file, "rb") as f:
         assert b"sbang" not in f.read()
@@ -464,7 +464,7 @@ def test_sbang_hook_handles_non_writable_files_preserving_permissions(tmp_path: 
     with open(path, "w", encoding="utf-8") as f:
         f.write(long_line)
     os.chmod(path, 0o555)
-    sbang.filter_shebang(path)
+    sbang.filter_shebang_for(path, spack.test.harness.current().store)
     with open(path, "r", encoding="utf-8") as f:
         assert "sbang" in f.readline()
     assert os.stat(path).st_mode & 0o777 == 0o555

@@ -16,12 +16,11 @@ import spack.error
 import spack.main
 import spack.paths
 import spack.platforms
+import spack.test.harness
 import spack.util.executable as exe
 import spack.util.filesystem as fs
 import spack.util.git
 import spack.util.spack_yaml as syaml
-from spack.active_environment import active_environment
-from spack.config import Configuration
 
 pytestmark = pytest.mark.not_on_windows(
     "Test functionality supported but tests are failing on Win"
@@ -150,7 +149,7 @@ config:
 
 def test_add_command_line_scope_env(tmp_path: pathlib.Path, mutable_mock_env_path):
     """Test whether --config-scope <env> works, either by name or path."""
-    managed_env = ev.create("example").manifest_path
+    managed_env = ev.create("example", ctx=spack.test.harness.current()).manifest_path
 
     with open(managed_env, "w", encoding="utf-8") as f:
         f.write(
@@ -182,7 +181,9 @@ spack:
     assert len(config.scopes) == 2
     assert config.get("config:install_tree:root") == "/tmp/first"
 
-    assert active_environment() is None  # shouldn't cause an environment to be activated
+    assert (
+        spack.test.harness.current().environment is None
+    )  # shouldn't cause an environment to be activated
 
 
 def test_include_cfg(mock_low_high_config, write_config_file, tmp_path: pathlib.Path):
@@ -346,15 +347,12 @@ include:
 
 
 @pytest.mark.regression("52664")
-def test_env_substitution_via_main_entrypoint(
-    mutable_mock_env_path, mutable_config: Configuration
-):
+def test_env_substitution_via_main_entrypoint(tmp_path: pathlib.Path, capfd):
     """Tests that an environment activated through the CLI entrypoint can substitute ``$env``"""
-    env = ev.create("test")
-    assert mutable_config.env_path is None
-
-    # Just call a fast command
-    spack.main._main(["-e", "test", "config", "scopes"])
-
-    assert mutable_config.env_path == env.path
-    assert spack.config.substitute_path_variables("$env/foo") == f"{env.path}/foo"
+    (tmp_path / "spack.yaml").write_text("spack:\n  specs: []\n")
+    code = (
+        "import spack.config; "
+        "print(spack.config.substitute_path_variables('$env/foo', ctx.config))"
+    )
+    spack.main._main(["-e", str(tmp_path), "python", "-c", code])
+    assert capfd.readouterr().out.strip() == f"{tmp_path}/foo"

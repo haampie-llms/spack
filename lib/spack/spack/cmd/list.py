@@ -90,13 +90,14 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     )
 
 
-def filter_by_name(pkgs, args):
+def filter_by_name(pkgs, args, repo: spack.repo.RepoPath):
     """
     Filters the sequence of packages according to user prescriptions
 
     Args:
         pkgs: sequence of packages
         args: parsed command line arguments
+        repo: repositories providing the packages
 
     Returns:
         filtered and sorted list of packages
@@ -118,7 +119,7 @@ def filter_by_name(pkgs, args):
                 if f.match(p):
                     return True
 
-                pkg_cls = spack.repo.PATH.get_pkg_class(p)
+                pkg_cls = repo.get_pkg_class(p)
                 if pkg_cls.__doc__:
                     return f.match(pkg_cls.__doc__)
                 return False
@@ -134,7 +135,7 @@ def filter_by_name(pkgs, args):
 
 
 @formatter
-def name_only(pkgs, out):
+def name_only(pkgs, out, repo):
     indent = 0
     colify(pkgs, indent=indent, output=out)
     if out.isatty():
@@ -149,16 +150,19 @@ def _is_spack_packages(url: str) -> bool:
     return url.endswith(("github.com/spack/spack-packages", "github.com:spack/spack-packages"))
 
 
-def github_url(pkg: Type[spack.package_base.PackageBase]) -> Optional[str]:
+def github_url(
+    pkg: Type[spack.package_base.PackageBase], repo_path: spack.repo.RepoPath
+) -> Optional[str]:
     """Link to a package file in spack package's github or the path to the file.
 
     Args:
         pkg: package instance
+        repo_path: repositories to search for the package file
 
     Returns: URL to the package file on github or the local file path; otherwise, ``None``.
     """
     module_path = f"{pkg.__module__.replace('.', '/')}.py"
-    for repo in spack.repo.PATH.repos:
+    for repo in repo_path.repos:
         if not repo.python_path:
             continue
 
@@ -198,9 +202,9 @@ def get_dependencies(pkg):
 
 
 @formatter
-def version_json(pkg_names, out):
+def version_json(pkg_names, out, repo):
     """Print all packages with their latest versions."""
-    pkg_classes = [spack.repo.PATH.get_pkg_class(name) for name in pkg_names]
+    pkg_classes = [repo.get_pkg_class(name) for name in pkg_names]
 
     out.write("[\n")
 
@@ -219,7 +223,7 @@ def version_json(pkg_names, out):
                 VersionList(pkg_cls.versions).preferred(),
                 json.dumps([str(v) for v in reversed(sorted(pkg_cls.versions))]),
                 pkg_cls.homepage,
-                github_url(pkg_cls),
+                github_url(pkg_cls, repo),
                 json.dumps(pkg_cls.maintainers),
                 json.dumps(get_dependencies(pkg_cls)),
             )
@@ -232,7 +236,7 @@ def version_json(pkg_names, out):
 
 
 @formatter
-def html(pkg_names, out):
+def html(pkg_names, out, repo):
     """Print out information on all packages in Sphinx HTML.
 
     This is intended to be inlined directly into Sphinx documentation.
@@ -242,7 +246,7 @@ def html(pkg_names, out):
     """
 
     # Read in all packages
-    pkg_classes = [spack.repo.PATH.get_pkg_class(name) for name in pkg_names]
+    pkg_classes = [repo.get_pkg_class(name) for name in pkg_names]
 
     # Start at 2 because the title of the page from Sphinx is id1.
     span_id = 2
@@ -305,7 +309,7 @@ def html(pkg_names, out):
         out.write('<dd><ul class="first last simple">\n')
         out.write(
             ('<li><a class="reference external" href="%s">%s/package.py</a></li>\n')
-            % (github_url(pkg_cls), pkg_cls.name)
+            % (github_url(pkg_cls, repo), pkg_cls.name)
         )
         out.write("</ul></dd>\n")
 
@@ -345,39 +349,39 @@ def html(pkg_names, out):
         out.write("</div>\n")
 
 
-def list(parser, args):
+def list(parser, args, ctx):
     # retrieve the formatter to use from args
     formatter = formatters[args.format]
 
     # Retrieve the names of all the packages
-    repos = [spack.repo.PATH]
+    repos = [ctx.repo]
     if args.repos:
-        repos = [spack.repo.PATH.get_repo(name) for name in args.repos]
+        repos = [ctx.repo.get_repo(name) for name in args.repos]
 
     pkgs = {name for repo in repos for name in repo.all_package_names(args.virtuals)}
 
     # Filter the set appropriately
-    sorted_packages = filter_by_name(pkgs, args)
+    sorted_packages = filter_by_name(pkgs, args, ctx.repo)
 
     # If tags have been specified on the command line, filter by tags
     if args.tags:
-        packages_with_tags = spack.repo.PATH.packages_with_tags(*args.tags)
+        packages_with_tags = ctx.repo.packages_with_tags(*args.tags)
         sorted_packages = [p for p in sorted_packages if p in packages_with_tags]
 
     if args.update:
         # change output stream if user asked for update
         if os.path.exists(args.update):
-            if os.path.getmtime(args.update) > spack.repo.PATH.last_mtime():
+            if os.path.getmtime(args.update) > ctx.repo.last_mtime():
                 tty.msg("File is up to date: %s" % args.update)
                 return
 
         tty.msg("Updating file: %s" % args.update)
         with open(args.update, "w", encoding="utf-8") as f:
-            formatter(sorted_packages, f)
+            formatter(sorted_packages, f, ctx.repo)
 
     elif args.count:
         # just print the number of packages in the result
         print(len(sorted_packages))
     else:
         # print formatted package list
-        formatter(sorted_packages, sys.stdout)
+        formatter(sorted_packages, sys.stdout, ctx.repo)

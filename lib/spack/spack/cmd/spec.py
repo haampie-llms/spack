@@ -8,11 +8,10 @@ import sys
 import spack
 import spack.binary_distribution
 import spack.cmd
+import spack.context
 import spack.package_base
 import spack.spec
-import spack.store
 import spack.traverse
-from spack.active_environment import active_environment
 from spack.cmd.common import arguments
 from spack.concretize_ui import HeadlessUI, TerminalUI
 from spack.util.lang import nullcontext
@@ -76,18 +75,18 @@ for further documentation regarding the spec syntax, see:
     arguments.add_concretizer_args(subparser)
 
 
-def spec(parser, args):
+def spec(parser, args, ctx: spack.context.SpackContext):
     fmt = spack.spec.DISPLAY_FORMAT
     if args.namespaces:
         fmt = "{namespace}." + fmt
 
-    env = active_environment()
+    env = ctx.environment
 
     # Machine-readable output goes to stdout, so concretization must not print anything there
     ui = HeadlessUI() if args.format else TerminalUI()
 
     if args.specs:
-        concrete_specs = spack.cmd.parse_specs(args.specs, concretize=True, ui=ui)
+        concrete_specs = spack.cmd.parse_specs(args.specs, ctx, concretize=True, ui=ui)
     elif env:
         env.concretize(ui=ui)
         concrete_specs = env.concrete_roots()
@@ -96,14 +95,14 @@ def spec(parser, args):
 
     show_status = args.install_status
     if show_status:
-        spack.binary_distribution.load_buildcache_index()
-        status_fn = spack.cmd.buildcache_status_fn(spack.binary_distribution.BINARY_INDEX)
+        spack.binary_distribution.load_buildcache_index(ctx.binary_index)
+        status_fn = spack.cmd.buildcache_status_fn(ctx.binary_index, store=ctx.store)
     else:
         status_fn = None
 
     # use a read transaction if we are getting install status for every
     # spec in the DAG.  This avoids repeatedly querying the DB.
-    tree_context = spack.store.STORE.db.read_transaction if show_status else nullcontext
+    tree_context = ctx.store.db.read_transaction if show_status else nullcontext
 
     # With --yaml, --json, or --format, just print the raw specs to output
     if args.format:

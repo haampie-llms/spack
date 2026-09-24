@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
 import itertools
-from typing import Any, Dict, List, NamedTuple, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, List, NamedTuple, Optional, Union
 
 import spack.spec
 import spack.util.spack_yaml
@@ -10,12 +10,22 @@ import spack.variant
 from spack.error import SpackError
 from spack.spec import Spec, expand_toolchains
 
+if TYPE_CHECKING:
+    import spack.context
+
 
 class SpecList:
     def __init__(
-        self, *, name: str = "specs", yaml_list=None, expanded_list=None, toolchains=None
+        self,
+        *,
+        name: str = "specs",
+        yaml_list=None,
+        expanded_list=None,
+        toolchains=None,
+        ctx: "spack.context.SpackContext",
     ):
         self.name = name
+        self.ctx = ctx
         self.yaml_list = yaml_list[:] if yaml_list is not None else []
         # Expansions can be expensive to compute and difficult to keep updated
         # We cache results and invalidate when self.yaml_list changes
@@ -37,7 +47,7 @@ class SpecList:
             constraints = []
             for item in self.specs_as_yaml_list:
                 if isinstance(item, dict):  # matrix of specs
-                    constraints.extend(_expand_matrix_constraints(item))
+                    constraints.extend(_expand_matrix_constraints(item, self.ctx))
                 else:  # individual spec
                     constraints.append([Spec(item)])
             self._constraints = constraints
@@ -111,7 +121,7 @@ class SpecList:
         return iter(self.specs)
 
 
-def _expand_matrix_constraints(matrix_config):
+def _expand_matrix_constraints(matrix_config, ctx: "spack.context.SpackContext"):
     # Avoid circular import
     import spack.hash_lookup
 
@@ -125,7 +135,7 @@ def _expand_matrix_constraints(matrix_config):
                 new_row.extend(
                     [
                         [" ".join([str(c) for c in expanded_constraint_list])]
-                        for expanded_constraint_list in _expand_matrix_constraints(r)
+                        for expanded_constraint_list in _expand_matrix_constraints(r, ctx)
                     ]
                 )
             else:
@@ -151,12 +161,14 @@ def _expand_matrix_constraints(matrix_config):
         # Catch exceptions because we want to be able to operate on
         # abstract specs without needing package information
         try:
-            spack.spec.substitute_abstract_variants(test_spec)
+            spack.spec.substitute_abstract_variants(test_spec, repo=ctx.repo)
         except spack.variant.UnknownVariantError:
             pass
 
         # Resolve abstract hashes for exclusion criteria
-        if any(spack.hash_lookup.lookup_hash(test_spec).satisfies(x) for x in excludes):
+        if any(
+            spack.hash_lookup.lookup_hash(test_spec, context=ctx).satisfies(x) for x in excludes
+        ):
             continue
 
         if sigil:
@@ -186,9 +198,10 @@ class Definition(NamedTuple):
 class SpecListParser:
     """Parse definitions and user specs from data in environments"""
 
-    def __init__(self, *, toolchains=None):
+    def __init__(self, *, toolchains=None, ctx: "spack.context.SpackContext"):
         self.definitions: Dict[str, SpecList] = {}
         self._toolchains = toolchains
+        self._ctx = ctx
 
     def parse_definitions(self, *, data: List[Dict[str, Any]]) -> Dict[str, SpecList]:
         definitions_from_yaml: Dict[str, List[Definition]] = {}
@@ -239,6 +252,7 @@ class SpecListParser:
             yaml_list=combined_yaml_list,
             expanded_list=expanded_list,
             toolchains=self._toolchains,
+            ctx=self._ctx,
         )
 
     def _expand_yaml_list(self, raw_yaml_list):

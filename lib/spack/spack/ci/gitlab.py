@@ -124,7 +124,8 @@ def generate_gitlab_yaml(pipeline: PipelineDag, spack_ci: SpackCIConfig, options
         if not os.path.exists(gen_ci_dir):
             os.makedirs(gen_ci_dir)
 
-    spack_ci_ir = spack_ci.generate_ir()
+    ctx = options.ctx
+    spack_ci_ir = spack_ci.generate_ir(config=ctx.config)
 
     concrete_env_dir = pipeline_artifacts_dir / "concrete_environment"
 
@@ -145,7 +146,8 @@ def generate_gitlab_yaml(pipeline: PipelineDag, spack_ci: SpackCIConfig, options
             )
 
         def _rewrite_include(path, orig_root, new_root):
-            expanded_path = spack.config.substitute_path_variables(path)
+            config = ctx.config
+            expanded_path = spack.config.substitute_path_variables(path, config)
 
             # Skip non-local paths
             parsed = urllib.parse.urlparse(expanded_path)
@@ -155,7 +157,7 @@ def generate_gitlab_yaml(pipeline: PipelineDag, spack_ci: SpackCIConfig, options
 
             if os.path.isabs(parsed.path):
                 return path
-            abs_path = spack.config.canonicalize_path(path, orig_root)
+            abs_path = spack.config.canonicalize_path(path, orig_root, config=config)
             return pathlib.Path(os.path.relpath(abs_path, new_root)).as_posix()
 
         # If there are no includes, just copy
@@ -266,7 +268,12 @@ def generate_gitlab_yaml(pipeline: PipelineDag, spack_ci: SpackCIConfig, options
             # Let downstream jobs know whether the spec needed rebuilding, regardless
             # whether DAG pruning was enabled or not.
             already_built = spack.binary_distribution.get_mirrors_for_spec(
-                spec=release_spec, index_only=True
+                spec=release_spec,
+                index_only=True,
+                binary_index=ctx.binary_index,
+                config=ctx.config,
+                client=ctx.network,
+                gpg=None,
             )
             job_vars["SPACK_SPEC_NEEDS_REBUILD"] = "False" if already_built else "True"
 
@@ -341,7 +348,9 @@ def generate_gitlab_yaml(pipeline: PipelineDag, spack_ci: SpackCIConfig, options
             }
         )
 
-        pipeline_mirrors = spack.mirrors.mirror.MirrorCollection(binary=True)
+        pipeline_mirrors = spack.mirrors.mirror.MirrorCollection.from_config(
+            ctx.config, binary=True
+        )
         if "buildcache-source" not in pipeline_mirrors:
             raise SpackCIError("Copy-only pipelines require a mirror named 'buildcache-source'")
 

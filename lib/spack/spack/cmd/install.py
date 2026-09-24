@@ -10,18 +10,16 @@ from typing import List
 
 import spack.binary_distribution
 import spack.cmd
-import spack.config
+import spack.context
 import spack.environment as ev
 import spack.installer_dispatch
 import spack.paths
 import spack.spec
-import spack.store
 import spack.util.filesystem as fs
-from spack.active_environment import active_environment
 from spack.cmd.common import arguments
 from spack.concretize_ui import TerminalUI
 from spack.error import InstallError, SpackError
-from spack.old_installer import InstallPolicy
+from spack.installer.base import InstallPolicy
 from spack.util import tty
 from spack.util.string import plural
 
@@ -38,7 +36,7 @@ def cache_opt(use_buildcache: str, default: InstallPolicy) -> InstallPolicy:
     return default
 
 
-def install_kwargs_from_args(args):
+def install_kwargs_from_args(args, config):
     """Translate command line arguments into a dictionary that will be passed
     to the package installer.
     """
@@ -59,7 +57,7 @@ def install_kwargs_from_args(args):
         "verbose": args.verbose or args.install_verbose,
         "show_log_on_error": args.show_log_on_error,
         "fake": args.fake,
-        "dirty": args.dirty,
+        "dirty": args.dirty if args.dirty is not None else config.get("config:dirty"),
         "root_policy": cache_opt(pkg_use_bc, default),
         "dependencies_policy": cache_opt(dep_use_bc, default),
         "include_build_deps": args.include_build_deps,
@@ -254,11 +252,11 @@ def compute_tests_install_kwargs(specs, cli_test_arg):
     return False
 
 
-def require_user_confirmation_for_overwrite(concrete_specs, args):
+def require_user_confirmation_for_overwrite(concrete_specs, args, store):
     if args.yes_to_all:
         return
 
-    installed = list(filter(lambda x: x, map(spack.store.STORE.db.query_one, concrete_specs)))
+    installed = list(filter(lambda x: x, map(store.db.query_one, concrete_specs)))
     display_args = {"long": True, "show_flags": True, "variants": True}
 
     if installed:
@@ -308,7 +306,7 @@ def _die_require_env(parser):
     parser.error(msg)
 
 
-def install(parser, args):
+def install(parser, args, ctx):
     # TODO: unify args.verbose?
     tty.set_verbose(args.verbose or args.install_verbose)
 
@@ -317,7 +315,7 @@ def install(parser, args):
         return
 
     if args.no_checksum:
-        spack.config.CONFIG.set("config:checksum", False, scope="command_line")
+        ctx.config.set("config:checksum", False, scope="command_line")
 
     if args.log_file and not args.log_format:
         msg = "the '--log-format' must be specified when using '--log-file'"
@@ -325,18 +323,18 @@ def install(parser, args):
 
     arguments.sanitize_reporter_options(args)
 
-    reporter = args.reporter() if args.log_format else None
-    install_kwargs = install_kwargs_from_args(args)
-    env = active_environment()
+    reporter = args.reporter(ctx) if args.log_format else None
+    install_kwargs = install_kwargs_from_args(args, ctx.config)
+    env = ctx.environment
 
     if not env and not args.spec:
         _die_require_env(args.subparser)
 
     try:
         if env:
-            install_with_active_env(env, args, install_kwargs, reporter)
+            install_with_active_env(env, args, install_kwargs, reporter, ctx)
         else:
-            install_without_active_env(args, install_kwargs, reporter)
+            install_without_active_env(args, install_kwargs, reporter, ctx)
     except InstallError as e:
         # The new installer dumps the logs itself; its error has no package attached.
         if args.show_log_on_error and e.pkg is not None:
@@ -344,7 +342,7 @@ def install(parser, args):
         raise
 
 
-def _maybe_add_and_concretize(args, env, specs):
+def _maybe_add_and_concretize(args, env, specs, ctx):
     """Handle the overloaded spack install behavior of adding
     and automatically concretizing specs"""
 
@@ -364,8 +362,8 @@ def _maybe_add_and_concretize(args, env, specs):
         concretized_specs = env.concretize(tests=tests, ui=TerminalUI())
         if concretized_specs:
             tty.msg(f"Concretized {plural(len(concretized_specs), 'spec')}")
-            spack.binary_distribution.load_buildcache_index()
-            status_fn = spack.cmd.buildcache_status_fn(spack.binary_distribution.BINARY_INDEX)
+            spack.binary_distribution.load_buildcache_index(ctx.binary_index)
+            status_fn = spack.cmd.buildcache_status_fn(ctx.binary_index, store=ctx.store)
             ev.display_specs([concrete for _, concrete in concretized_specs], status_fn=status_fn)
 
         # save view regeneration for later, so that we only do it
@@ -373,14 +371,16 @@ def _maybe_add_and_concretize(args, env, specs):
         env.write(regenerate=False)
 
 
-def install_with_active_env(env: ev.Environment, args, install_kwargs, reporter):
-    specs = spack.cmd.parse_specs(args.spec)
+def install_with_active_env(
+    env: ev.Environment, args, install_kwargs, reporter, ctx: spack.context.SpackContext
+):
+    specs = spack.cmd.parse_specs(args.spec, ctx)
 
     # The following two commands are equivalent:
     # 1. `spack install --add x y z`
     # 2. `spack add x y z && spack concretize && spack install --only-concrete`
     # here we do the `add` and `concretize` part.
-    _maybe_add_and_concretize(args, env, specs)
+    _maybe_add_and_concretize(args, env, specs, ctx)
 
     # Now we're doing `spack install --only-concrete`.
     if args.add or not specs:
@@ -403,7 +403,7 @@ def install_with_active_env(env: ev.Environment, args, install_kwargs, reporter)
     install_kwargs["tests"] = compute_tests_install_kwargs(specs_to_install, args.test)
 
     if args.overwrite:
-        require_user_confirmation_for_overwrite(specs_to_install, args)
+        require_user_confirmation_for_overwrite(specs_to_install, args, ctx.store)
         install_kwargs["overwrite"] = [spec.dag_hash() for spec in specs_to_install]
 
     try:
@@ -417,31 +417,31 @@ def install_with_active_env(env: ev.Environment, args, install_kwargs, reporter)
                 env.write(regenerate=True)
 
 
-def concrete_specs_from_cli(args, install_kwargs):
+def concrete_specs_from_cli(args, install_kwargs, ctx):
     """Return abstract and concrete spec parsed from the command line."""
-    abstract_specs = spack.cmd.parse_specs(args.spec)
+    abstract_specs = spack.cmd.parse_specs(args.spec, ctx)
     install_kwargs["tests"] = compute_tests_install_kwargs(abstract_specs, args.test)
     try:
         concrete_specs = spack.cmd.parse_specs(
-            args.spec, concretize=True, tests=install_kwargs["tests"]
+            args.spec, ctx, concretize=True, tests=install_kwargs["tests"]
         )
     except SpackError as e:
         tty.debug(e)
         if args.log_format is not None:
-            reporter = args.reporter()
+            reporter = args.reporter(ctx)
             reporter.concretization_report(report_filename(args, abstract_specs), e.message)
         raise
     return concrete_specs
 
 
-def install_without_active_env(args, install_kwargs, reporter):
-    concrete_specs = concrete_specs_from_cli(args, install_kwargs)
+def install_without_active_env(args, install_kwargs, reporter, ctx):
+    concrete_specs = concrete_specs_from_cli(args, install_kwargs, ctx)
 
     if len(concrete_specs) == 0:
         args.subparser.error("requires a spec")
 
     if args.overwrite:
-        require_user_confirmation_for_overwrite(concrete_specs, args)
+        require_user_confirmation_for_overwrite(concrete_specs, args, ctx.store)
         install_kwargs["overwrite"] = [spec.dag_hash() for spec in concrete_specs]
 
     installs = [s.package for s in concrete_specs]

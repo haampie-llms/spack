@@ -16,8 +16,9 @@ import spack.concretize
 import spack.error
 import spack.main
 import spack.spec
-from spack.main import SpackCommand
+import spack.test.harness
 from spack.store import Store
+from spack.test.harness import SpackCommand
 
 logs = SpackCommand("logs")
 install = SpackCommand("install")
@@ -51,7 +52,7 @@ def _rewind_collect_and_decode(rw_stream):
 def test_logs_cmd_errors(
     temporary_store: Store, install_mockery, mock_fetch, mock_archive, mock_packages
 ):
-    spec = spack.concretize.concretize_one("pkg-c")
+    spec = spack.concretize.concretize_one("pkg-c", spack.test.harness.current())
     assert not temporary_store.db.installed(spec)
 
     with pytest.raises(spack.error.SpackError, match="is not installed or staged"):
@@ -83,7 +84,7 @@ def test_dump_logs(
     decompress them.
     """
     cmdline_spec = spack.spec.Spec("libelf")
-    concrete_spec = spack.concretize.concretize_one(cmdline_spec)
+    concrete_spec = spack.concretize.concretize_one(cmdline_spec, spack.test.harness.current())
 
     # Sanity check, make sure this test is checking what we want: to
     # start with
@@ -95,7 +96,7 @@ def test_dump_logs(
     with concrete_spec.package.stage:
         _write_string_to_path(stage_log_content, concrete_spec.package.log_path)
         with stdout_as_buffered_text_stream() as redirected_stdout:
-            spack.cmd.logs._logs(cmdline_spec, concrete_spec)
+            spack.cmd.logs._logs(cmdline_spec, concrete_spec, temporary_store)
             assert _rewind_collect_and_decode(redirected_stdout) == stage_log_content
 
     install("--fake", "libelf")
@@ -110,7 +111,7 @@ def test_dump_logs(
         compressed_file.writelines(bstream)
 
     with stdout_as_buffered_text_stream() as redirected_stdout:
-        spack.cmd.logs._logs(cmdline_spec, concrete_spec)
+        spack.cmd.logs._logs(cmdline_spec, concrete_spec, temporary_store)
         assert _rewind_collect_and_decode(redirected_stdout) == installed_log_content
 
     with concrete_spec.package.stage:
@@ -118,5 +119,5 @@ def test_dump_logs(
         # We re-create the stage, but "spack log" should ignore that
         # if the package is installed
         with stdout_as_buffered_text_stream() as redirected_stdout:
-            spack.cmd.logs._logs(cmdline_spec, concrete_spec)
+            spack.cmd.logs._logs(cmdline_spec, concrete_spec, temporary_store)
             assert _rewind_collect_and_decode(redirected_stdout) == installed_log_content

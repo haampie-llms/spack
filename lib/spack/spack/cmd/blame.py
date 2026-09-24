@@ -136,7 +136,9 @@ def git_prefix(path: Union[str, pathlib.Path]) -> Optional[pathlib.Path]:
             tty.die(f"'{path}' is not in a git repository.")
 
 
-def package_repo_root(path: Union[str, pathlib.Path]) -> Optional[pathlib.Path]:
+def package_repo_root(
+    path: Union[str, pathlib.Path], config: spack.config.Configuration
+) -> Optional[pathlib.Path]:
     """Find the appropriate package repository's git root directory.
 
     Provides a warning for a remote package repository since there is a risk that
@@ -144,10 +146,11 @@ def package_repo_root(path: Union[str, pathlib.Path]) -> Optional[pathlib.Path]:
 
     Args:
       path: path to an arbitrary file presumably in one of the spack package repos
+      config: configuration listing the package repositories
 
     Returns: path to the package repository's git root directory or None
     """
-    descriptors = spack.repo.RepoDescriptors.from_config(spack.config.CONFIG)
+    descriptors = spack.repo.RepoDescriptors.from_config(config)
     path = pathlib.Path(path)
     prefix: Optional[pathlib.Path] = None
     for _, desc in descriptors.items():
@@ -208,7 +211,7 @@ def ensure_full_history(prefix: str, path: str) -> None:
                 )
 
 
-def blame(parser, args):
+def blame(parser, args, ctx):
     # make sure this is a git repo
     if not spack_is_git_repo():
         tty.die("This spack is not a git clone. You cannot use 'spack blame'.")
@@ -219,19 +222,19 @@ def blame(parser, args):
     prefix = None
     if os.path.exists(args.package_or_file):
         blame_file = os.path.realpath(args.package_or_file)
-        prefix = package_repo_root(blame_file)
+        prefix = package_repo_root(blame_file, ctx.config)
 
     # Get path to what we assume is a package (including to a cached version
     # of a remote package repository.)
     if not blame_file:
         try:
-            blame_file = spack.repo.PATH.filename_for_package_name(args.package_or_file)
+            blame_file = ctx.repo.filename_for_package_name(args.package_or_file)
         except spack.repo.UnknownNamespaceError:
             # the argument is not a package (or does not exist)
             pass
 
         if blame_file and os.path.isfile(blame_file):
-            prefix = package_repo_root(blame_file)
+            prefix = package_repo_root(blame_file, ctx.config)
 
     if not blame_file or not os.path.exists(blame_file):
         tty.die(f"'{args.package_or_file}' does not exist.")

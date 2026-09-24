@@ -38,9 +38,8 @@ import sys
 
 import spack.cmd
 import spack.filesystem_view as fsv
+import spack.repo
 import spack.schema.projections
-import spack.store
-from spack.active_environment import active_environment
 from spack.config import validate
 from spack.util import spack_yaml as s_yaml
 from spack.util import tty
@@ -55,7 +54,7 @@ actions_remove = ["remove", "rm"]
 actions_status = ["statlink", "status", "check"]
 
 
-def disambiguate_in_view(specs, view):
+def disambiguate_in_view(specs, view, store):
     """
     When dealing with querying actions (remove/status) we only need to
     disambiguate among specs in the view
@@ -72,7 +71,7 @@ def disambiguate_in_view(specs, view):
         return matching_in_view[0] if matching_in_view else matching_specs[0]
 
     # make function always return a list to keep consistency between py2/3
-    return list(map(squash, map(spack.store.STORE.db.query, specs)))
+    return list(map(squash, map(store.db.query, specs)))
 
 
 def setup_parser(sp: argparse.ArgumentParser) -> None:
@@ -187,7 +186,7 @@ def setup_parser(sp: argparse.ArgumentParser) -> None:
         act.add_argument("-i", "--ignore-conflicts", action="store_true")
 
 
-def view(parser, args):
+def view(parser, args, ctx):
     """Produce a view of a set of packages."""
 
     if sys.platform == "win32" and args.action in ("hardlink", "hard"):
@@ -195,7 +194,7 @@ def view(parser, args):
         # See https://github.com/spack/spack/pull/46335#discussion_r1757411915
         tty.die("Hard linking is not supported on Windows. Please use symlinks or copy methods.")
 
-    specs = spack.cmd.parse_specs(args.specs)
+    specs = spack.cmd.parse_specs(args.specs, ctx)
     path = args.path[0]
 
     if args.action in actions_link and args.projection_file:
@@ -211,11 +210,12 @@ def view(parser, args):
     link_type = args.action if args.action in actions_link else "symlink"
     view = fsv.YamlFilesystemView(
         path,
-        spack.store.STORE.layout,
+        ctx.store.layout,
         projections=ordered_projections,
         ignore_conflicts=getattr(args, "ignore_conflicts", False),
         link_type=link_type,
         verbose=args.verbose,
+        env_path=ctx.config.env_path,
     )
 
     # Process common args and specs
@@ -226,19 +226,20 @@ def view(parser, args):
 
     elif args.action in actions_link:
         # only link commands need to disambiguate specs
-        env = active_environment()
-        specs = [spack.cmd.disambiguate_spec(s, env) for s in specs]
+        env = ctx.environment
+        specs = [spack.cmd.disambiguate_spec(s, env, store=ctx.store) for s in specs]
+        spack.repo.attach_packages(specs, ctx)
 
     elif args.action in actions_status:
         # no specs implies all
         if len(specs) == 0:
             specs = view.get_all_specs()
         else:
-            specs = disambiguate_in_view(specs, view)
+            specs = disambiguate_in_view(specs, view, ctx.store)
 
     else:
         # status and remove can map a partial spec to packages in view
-        specs = disambiguate_in_view(specs, view)
+        specs = disambiguate_in_view(specs, view, ctx.store)
 
     with_dependencies = args.dependencies.lower() in ["true", "yes"]
 
@@ -255,11 +256,14 @@ def view(parser, args):
             raise
 
     elif args.action in actions_remove:
+        all_specs = set(view.get_all_specs())
+        spack.repo.attach_packages([*specs, *all_specs], ctx)
         view.remove_specs(
             *specs,
             with_dependencies=with_dependencies,
             exclude=args.exclude,
             with_dependents=not args.no_remove_dependents,
+            all_specs=all_specs,
         )
 
     elif args.action in actions_status:

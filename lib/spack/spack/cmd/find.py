@@ -5,19 +5,15 @@
 import argparse
 import copy
 import sys
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import spack.binary_distribution
-import spack.config
 import spack.context
-import spack.environment as ev
-import spack.repo
 import spack.solver.reuse
 import spack.spec
 import spack.store
 import spack.util.lang
 from spack import cmd
-from spack.active_environment import active_environment
 from spack.cmd.common import arguments
 from spack.util import tty
 from spack.util.tty import color
@@ -189,7 +185,7 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     arguments.add_common_arguments(subparser, ["constraint"])
 
 
-def query_arguments(args):
+def query_arguments(args, ctx: spack.context.SpackContext):
     if args.only_missing and (args.deprecated or args.missing):
         args.subparser.error("cannot use --only-missing with --deprecated, or --missing")
 
@@ -210,7 +206,7 @@ def query_arguments(args):
 
     predicate_fn = None
     if args.unknown:
-        predicate_fn = lambda x: not spack.repo.PATH.exists(x.spec.name)
+        predicate_fn = lambda x: not ctx.repo.exists(x.spec.name)
 
     explicit = None
     if args.explicit:
@@ -218,10 +214,14 @@ def query_arguments(args):
     if args.implicit:
         explicit = False
 
-    q_args = {"installed": installed, "predicate_fn": predicate_fn, "explicit": explicit}
+    q_args: Dict[str, Any] = {
+        "installed": installed,
+        "predicate_fn": predicate_fn,
+        "explicit": explicit,
+    }
 
     install_tree = args.install_tree
-    upstreams = spack.config.CONFIG.get("upstreams", {})
+    upstreams = ctx.config.get("upstreams", {})
     if install_tree in upstreams.keys():
         install_tree = upstreams[install_tree]["install_tree"]
     q_args["install_tree"] = install_tree
@@ -253,7 +253,7 @@ def make_env_decorator(env):
     return decorator
 
 
-def display_env(env, args, decorator, results, status_fn=None):
+def display_env(env, args, decorator, results, store: spack.store.Store, status_fn=None):
     """Display extra find output when running in an environment.
 
     In an environment, ``spack find`` outputs a preliminary section
@@ -265,7 +265,7 @@ def display_env(env, args, decorator, results, status_fn=None):
     tty.msg(f"In environment {env.name} ({root_spec_str})")
 
     concrete_specs = {x.root: env.specs_by_hash[x.hash] for x in env.concretized_roots}
-    _status_fn = status_fn if status_fn is not None else spack.store.STORE.db.install_status
+    _status_fn = status_fn if status_fn is not None else store.db.install_status
 
     def root_decorator(spec, string):
         """Decorate root specs with their install status if needed"""
@@ -287,7 +287,7 @@ def display_env(env, args, decorator, results, status_fn=None):
         else:
             return f"{status} {string}"
 
-    with spack.store.STORE.db.read_transaction():
+    with store.db.read_transaction():
         for group in env.manifest.groups():
             group_specs = env.user_specs_by(group=group)
             if not group_specs:
@@ -340,32 +340,33 @@ def display_env(env, args, decorator, results, status_fn=None):
 
 
 def _find_query(
-    args: argparse.Namespace, env: Optional[ev.Environment]
+    args: argparse.Namespace, ctx: spack.context.SpackContext
 ) -> Tuple[List[spack.spec.Spec], List[spack.spec.Spec]]:
-    q_args = query_arguments(args)
+    env = ctx.environment
+    q_args = query_arguments(args, ctx)
     concretized_but_not_installed = []
     if args.show_configured_externals:
-        results = spack.solver.reuse.reusable_external_specs(spack.context.default())
+        results = spack.solver.reuse.reusable_external_specs(ctx)
     elif env:
         all_env_specs = env.all_specs()
         if args.constraint:
-            init_specs = cmd.parse_specs(args.constraint)
+            init_specs = cmd.parse_specs(args.constraint, ctx)
             env_specs = env.all_matching_specs(*init_specs)
         else:
             env_specs = all_env_specs
 
         spec_hashes = {x.dag_hash() for x in env_specs}
-        specs_meeting_q_args = set(spack.store.STORE.db.query(hashes=list(spec_hashes), **q_args))
+        specs_meeting_q_args = set(ctx.store.db.query(hashes=list(spec_hashes), **q_args))
 
         results = list()
-        with spack.store.STORE.db.read_transaction():
+        with ctx.store.db.read_transaction():
             for spec in env_specs:
-                if not spack.store.STORE.db.installed(spec):
+                if not ctx.store.db.installed(spec):
                     concretized_but_not_installed.append(spec)
                 if spec in specs_meeting_q_args:
                     results.append(spec)
     else:
-        results = args.specs(**q_args)
+        results = args.specs(ctx, **q_args)
 
     if args.external:
         results = [s for s in results if s.external]
@@ -384,7 +385,7 @@ def _find_query(
 
     # If tags have been specified on the command line, filter by tags
     if args.tags:
-        packages_with_tags = spack.repo.PATH.packages_with_tags(*args.tags)
+        packages_with_tags = ctx.repo.packages_with_tags(*args.tags)
         results = [x for x in results if x.name in packages_with_tags]
         concretized_but_not_installed = [
             x for x in concretized_but_not_installed if x.name in packages_with_tags
@@ -396,8 +397,8 @@ def _find_query(
     return results, concretized_but_not_installed
 
 
-def find(parser, args):
-    env = active_environment()
+def find(parser, args, ctx: spack.context.SpackContext):
+    env = ctx.environment
 
     if not env and args.only_roots:
         args.subparser.error("-r / --only-roots requires an active environment")
@@ -405,15 +406,15 @@ def find(parser, args):
         args.subparser.error("-c / --show-concretized requires an active environment")
 
     try:
-        results, concretized_but_not_installed = _find_query(args, env)
+        results, concretized_but_not_installed = _find_query(args, ctx)
     except cmd.NoSpecMatches:
         # Note: this uses args.constraint vs. args.constraint_specs because
         # the latter only exists if you call args.specs()
         tty.die(f"No package matches the query: {' '.join(args.constraint)}")
 
     if args.install_status or args.show_concretized:
-        spack.binary_distribution.load_buildcache_index()
-        status_fn = cmd.buildcache_status_fn(spack.binary_distribution.BINARY_INDEX)
+        spack.binary_distribution.load_buildcache_index(ctx.binary_index)
+        status_fn = cmd.buildcache_status_fn(ctx.binary_index, store=ctx.store)
     else:
         status_fn = None
 
@@ -425,20 +426,21 @@ def find(parser, args):
 
         if not args.format:
             if env:
-                display_env(env, args, decorator, results, status_fn=status_fn)
+                display_env(env, args, decorator, results, ctx.store, status_fn=status_fn)
 
         if not args.only_roots:
             display_results = list(results)
             if args.show_concretized:
                 display_results += concretized_but_not_installed
-            cmd.display_specs(
-                display_results,
-                args,
-                decorator=decorator,
-                all_headers=True,
-                status_fn=status_fn,
-                specfile_format=args.specfile_format,
-            )
+            with ctx.store.db.read_transaction():
+                cmd.display_specs(
+                    display_results,
+                    args,
+                    decorator=decorator,
+                    all_headers=True,
+                    status_fn=status_fn,
+                    specfile_format=args.specfile_format,
+                )
 
         # print number of installed packages last (as the list may be long)
         if sys.stdout.isatty() and args.groups:

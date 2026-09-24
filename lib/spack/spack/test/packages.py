@@ -16,6 +16,7 @@ import spack.fetch_strategy
 import spack.package
 import spack.package_base
 import spack.repo
+import spack.test.harness
 from spack.paths import mock_packages_path
 from spack.repo import RepoPath
 from spack.spec import Spec
@@ -33,7 +34,7 @@ class MyPrependFileLoader(spack.repo._PrependFileLoader):
 
 def pkg_factory(name):
     """Return a package object tied to an abstract spec"""
-    pkg_cls = spack.repo.PATH.get_pkg_class(name)
+    pkg_cls = spack.test.harness.current().repo.get_pkg_class(name)
     return pkg_cls(Spec(name))
 
 
@@ -47,12 +48,16 @@ class TestPackage:
         assert pkg_cls.name == "mpich"
 
     def test_package_filename(self):
-        repo = spack.repo.from_path(mock_packages_path)
+        repo = spack.repo.from_path(
+            mock_packages_path, cache=spack.test.harness.current().misc_cache
+        )
         filename = repo.filename_for_package_name("mpich")
         assert filename == os.path.join(mock_packages_path, "packages", "mpich", "package.py")
 
     def test_nonexisting_package_filename(self):
-        repo = spack.repo.from_path(mock_packages_path)
+        repo = spack.repo.from_path(
+            mock_packages_path, cache=spack.test.harness.current().misc_cache
+        )
         filename = repo.filename_for_package_name("some-nonexisting-package")
         assert filename == os.path.join(
             mock_packages_path, "packages", "some_nonexisting_package", "package.py"
@@ -77,7 +82,7 @@ class TestPackage:
         pkg_path.parent.mkdir(parents=True)
         pkg_path.write_text("foo = 1")
 
-        with spack.repo.use_repositories(root):
+        with spack.test.harness.use_repositories(root):
             importlib.import_module("spack.pkg.testing_repo")
             assert importlib.import_module("spack.pkg.testing_repo.mpich").foo == 1
 
@@ -96,13 +101,15 @@ class TestPackage:
         assert len(pkg_cls.provided) == 2
 
         # Check that Spec instantiation behaves as we expect
-        s = spack.concretize.concretize_one("simple-inheritance")
+        s = spack.concretize.concretize_one("simple-inheritance", spack.test.harness.current())
         assert "^cmake" in s
         assert "^openblas" in s
         assert "+openblas" in s
         assert "mpi" in s
 
-        s = spack.concretize.concretize_one("simple-inheritance~openblas")
+        s = spack.concretize.concretize_one(
+            "simple-inheritance~openblas", spack.test.harness.current()
+        )
         assert "^cmake" in s
         assert "^openblas" not in s
         assert "~openblas" in s
@@ -111,14 +118,14 @@ class TestPackage:
     @pytest.mark.regression("11844")
     def test_inheritance_of_patches(self):
         # Will error if inheritor package cannot find inherited patch files
-        _ = spack.concretize.concretize_one("patch-inheritance")
+        _ = spack.concretize.concretize_one("patch-inheritance", spack.test.harness.current())
 
 
 @pytest.mark.regression("2737")
 def test_urls_for_versions(mock_packages, config):
     """Version directive without a 'url' argument should use default url."""
     for spec_str in ("url-override@0.9.0", "url-override@1.0.0"):
-        s = spack.concretize.concretize_one(spec_str)
+        s = spack.concretize.concretize_one(spec_str, spack.test.harness.current())
         url = s.package.url_for_version("0.9.0")
         assert url == "http://www.anothersite.org/uo-0.9.0.tgz"
 
@@ -149,7 +156,7 @@ def test_custom_cmake_prefix_path(mock_packages, config):
 
 
 def test_url_for_version_with_only_overrides(mock_packages, config):
-    s = spack.concretize.concretize_one("url-only-override")
+    s = spack.concretize.concretize_one("url-only-override", spack.test.harness.current())
 
     # these exist and should just take the URL provided in the package
     assert s.package.url_for_version("1.0.0") == "http://a.example.com/url_override-1.0.0.tar.gz"
@@ -164,7 +171,9 @@ def test_url_for_version_with_only_overrides(mock_packages, config):
 
 
 def test_url_for_version_with_only_overrides_with_gaps(mock_packages, config):
-    s = spack.concretize.concretize_one("url-only-override-with-gaps")
+    s = spack.concretize.concretize_one(
+        "url-only-override-with-gaps", spack.test.harness.current()
+    )
 
     # same as for url-only-override -- these are specific
     assert s.package.url_for_version("1.0.0") == "http://a.example.com/url_override-1.0.0.tar.gz"
@@ -276,6 +285,7 @@ def test_rpath_args(mutable_database):
     """Test a package's rpath_args property."""
 
     rec = mutable_database.get_record("mpich")
+    spack.repo.attach_packages([rec.spec], spack.test.harness.current())
 
     rpath_args = rec.spec.package.rpath_args
     assert "-rpath" in rpath_args
@@ -380,13 +390,17 @@ def test_package_version_can_have_sparse_checkout_properties(
 
 
 def test_package_can_depend_on_commit_of_dependency(mock_packages, config):
-    spec = spack.concretize.concretize_one(Spec("git-ref-commit-dep@1.0.0"))
+    spec = spack.concretize.concretize_one(
+        Spec("git-ref-commit-dep@1.0.0"), spack.test.harness.current()
+    )
     assert spec.satisfies(f"^git-ref-package commit={'a' * 40}")
     assert "surgical" not in spec["git-ref-package"].variants
 
 
 def test_package_condtional_variants_may_depend_on_commit(mock_packages, config):
-    spec = spack.concretize.concretize_one(Spec("git-ref-commit-dep@develop"))
+    spec = spack.concretize.concretize_one(
+        Spec("git-ref-commit-dep@develop"), spack.test.harness.current()
+    )
     assert spec.satisfies(f"^git-ref-package commit={'b' * 40}")
     conditional_variant = spec["git-ref-package"].variants.get("surgical", None)
     assert conditional_variant
@@ -399,7 +413,9 @@ def test_commit_variant_finds_matches_for_commit_versions(mock_packages, config)
     git-ref-commit-dep variant commit-selector depends on a specific commit of git-ref-package
     that commit is associated with the stable version of git-ref-package
     """
-    spec = spack.concretize.concretize_one(Spec("git-ref-commit-dep+commit-selector"))
+    spec = spack.concretize.concretize_one(
+        Spec("git-ref-commit-dep+commit-selector"), spack.test.harness.current()
+    )
     assert spec.satisfies(f"^git-ref-package commit={'c' * 40}")
 
 
@@ -426,11 +442,11 @@ def test_spack_package_api_versioning():
 def test_deprecated_version_honors_directive(mock_packages):
     """deprecated_version checks the deprecated() directive as well as the legacy flag."""
     # deprecated-with-reason flags @1.0 and @2.0 through the directive only (no deprecated=True).
-    pkg_cls = spack.repo.PATH.get_pkg_class("deprecated-with-reason")
+    pkg_cls = spack.test.harness.current().repo.get_pkg_class("deprecated-with-reason")
     assert spack.package_base.deprecated_version(pkg_cls, "1.0")
     assert spack.package_base.deprecated_version(pkg_cls, "2.0")
 
     # deprecated-dual deprecates only @1.0, so @2.0 must remain non-deprecated.
-    pkg_cls = spack.repo.PATH.get_pkg_class("deprecated-dual")
+    pkg_cls = spack.test.harness.current().repo.get_pkg_class("deprecated-dual")
     assert spack.package_base.deprecated_version(pkg_cls, "1.0")
     assert not spack.package_base.deprecated_version(pkg_cls, "2.0")

@@ -19,11 +19,9 @@ debugging easier.
 import contextlib
 import filecmp
 import os
-import pathlib
 import shutil
 import sys
-import uuid
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union, cast
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple, Union
 
 import spack.config
 import spack.database
@@ -32,10 +30,12 @@ import spack.error
 import spack.package_prefs
 import spack.paths
 import spack.spec
-import spack.util.lang
 import spack.util.path
 from spack.util import filesystem as fs
 from spack.util import tty
+
+if TYPE_CHECKING:
+    import spack.repo
 
 #: default installation root, relative to the Spack install path
 DEFAULT_INSTALL_TREE_ROOT = os.path.join(spack.paths.opt_path, "spack")
@@ -80,14 +80,13 @@ def parse_install_tree(config: spack.config.Configuration) -> Tuple[str, str, Di
 
 
 @contextlib.contextmanager
-def filter_padding():
+def filter_padding(store: "Store"):
     """Context manager to safely disable path padding in all Spack output.
 
     This is needed because Spack's debug output gets extremely long when we use a
     long padded installation path.
     """
-    padding = spack.config.CONFIG.get("config:install_tree:padded_length", None)
-    if padding:
+    if store.has_padding():
         # filter out all padding from the install command output
         with tty.output_filter(spack.util.path.padding_filter):
             yield
@@ -119,6 +118,7 @@ class Store:
             truncated to this length
         upstreams: optional list of upstream databases
         lock_cfg: lock configuration for the database
+        repo_provider: repositories to read metadata of spec formats before v6 with
     """
 
     def __init__(
@@ -129,18 +129,30 @@ class Store:
         hash_length: Optional[int] = None,
         upstreams: Optional[List[spack.database.Database]] = None,
         lock_cfg: spack.database.LockConfiguration = spack.database.NO_LOCK,
+        env_path: Optional[str] = None,
+        repo_provider: Optional["spack.repo.RepoProvider"] = None,
     ) -> None:
         self.root = root
+        self.env_path = env_path
+        self.repo_provider = repo_provider
         self.unpadded_root = unpadded_root or root
         self.projections = projections
         self.hash_length = hash_length
         self.upstreams = upstreams
         self.lock_cfg = lock_cfg
         self.layout = spack.directory_layout.DirectoryLayout(
-            root, projections=projections, hash_length=hash_length
+            root,
+            projections=projections,
+            hash_length=hash_length,
+            env_path=env_path,
+            repo_provider=repo_provider,
         )
         self.db = spack.database.Database(
-            root, upstream_dbs=upstreams, lock_cfg=lock_cfg, layout=self.layout
+            root,
+            upstream_dbs=upstreams,
+            lock_cfg=lock_cfg,
+            layout=self.layout,
+            repo_provider=repo_provider,
         )
 
         timeout_format_str = (
@@ -157,11 +169,25 @@ class Store:
         """Returns True if the store layout includes path padding."""
         return self.root != self.unpadded_root
 
+    def prefix_of(self, spec: "spack.spec.Spec") -> str:
+        """The prefix of a concrete spec, assigned from this store if it has none yet."""
+        if not spec.has_prefix:
+            self.assign_prefix(spec)
+        return spec.prefix
+
+    def assign_prefix(self, spec: "spack.spec.Spec") -> None:
+        """Set the prefix of a concrete spec: where it is installed, else where it would be."""
+        _, record = self.db.query_by_spec_hash(spec.dag_hash())
+        if record and record.path:
+            spec.set_prefix(record.path)
+        else:
+            spec.set_prefix(self.layout.path_for_spec(spec))
+
     def reindex(self) -> None:
         """Convenience function to reindex the store DB with its own layout."""
         return self.db.reindex()
 
-    def install_sbang(self) -> None:
+    def install_sbang(self, config: spack.config.Configuration) -> None:
         """Install the sbang script in this store's bin directory.
 
         sbang is a short shell script that Spack prepends to scripts with shebangs that are too
@@ -185,8 +211,8 @@ class Store:
         os.makedirs(bin_dir, exist_ok=True)
 
         all_spec = spack.spec.Spec("all")
-        group_name = spack.package_prefs.get_package_group(all_spec)
-        config_mode = spack.package_prefs.get_package_dir_permissions(all_spec)
+        group_name = spack.package_prefs.get_package_group(all_spec, config=config)
+        config_mode = spack.package_prefs.get_package_dir_permissions(all_spec, config=config)
         gid = grp.getgrnam(group_name).gr_gid if group_name else -1
 
         if group_name:
@@ -211,14 +237,21 @@ class Store:
             self.hash_length,
             self.upstreams,
             self.lock_cfg,
+            self.env_path,
+            self.repo_provider,
         )
 
 
-def create(configuration: spack.config.Configuration) -> Store:
+def create(
+    configuration: spack.config.Configuration,
+    *,
+    repo_provider: Optional["spack.repo.RepoProvider"] = None,
+) -> Store:
     """Create a store from the configuration passed as input.
 
     Args:
         configuration: configuration to create a store.
+        repo_provider: repositories to read metadata of spec formats before v6 with
     """
     config_dict = configuration.get_config("config")
     root, unpadded_root, projections = parse_install_tree(configuration)
@@ -228,7 +261,9 @@ def create(configuration: spack.config.Configuration) -> Store:
         install_properties["install_tree"]
         for install_properties in configuration.get_config("upstreams").values()
     ]
-    upstreams = _construct_upstream_dbs_from_install_roots(install_roots, config=configuration)
+    upstreams = _construct_upstream_dbs_from_install_roots(
+        install_roots, config=configuration, repo_provider=repo_provider
+    )
 
     return Store(
         root=root,
@@ -237,38 +272,16 @@ def create(configuration: spack.config.Configuration) -> Store:
         hash_length=hash_length,
         upstreams=upstreams,
         lock_cfg=spack.database.lock_configuration(configuration),
+        env_path=configuration.env_path,
+        repo_provider=repo_provider,
     )
 
 
-def _create_global() -> Store:
-    result = create(configuration=spack.config.CONFIG)
-    return result
-
-
-#: Singleton store instance
-STORE = cast(Store, spack.util.lang.Singleton(_create_global))
-
-
-def reinitialize():
-    """Restore globals to the same state they would have at start-up. Return a token
-    containing the state of the store before reinitialization.
-    """
-    global STORE
-
-    token = STORE
-    STORE = cast(Store, spack.util.lang.Singleton(_create_global))
-
-    return token
-
-
-def restore(token):
-    """Restore the environment from a token returned by reinitialize"""
-    global STORE
-    STORE = token
-
-
 def _construct_upstream_dbs_from_install_roots(
-    install_roots: List[str], *, config: spack.config.Configuration
+    install_roots: List[str],
+    *,
+    config: spack.config.Configuration,
+    repo_provider: Optional["spack.repo.RepoProvider"] = None,
 ) -> List[spack.database.Database]:
     accumulated_upstream_dbs: List[spack.database.Database] = []
     for install_root in reversed(install_roots):
@@ -277,6 +290,7 @@ def _construct_upstream_dbs_from_install_roots(
             spack.config.canonicalize_path(install_root, config=config),
             is_upstream=True,
             upstream_dbs=upstream_dbs,
+            repo_provider=repo_provider,
         )
         next_db._read()
         accumulated_upstream_dbs.insert(0, next_db)
@@ -286,8 +300,8 @@ def _construct_upstream_dbs_from_install_roots(
 
 def find(
     constraints: Union[str, List[str], List["spack.spec.Spec"]],
+    query_fn: Callable[..., List["spack.spec.Spec"]],
     multiple: bool = False,
-    query_fn: Optional[Callable[[Any], List["spack.spec.Spec"]]] = None,
     **kwargs,
 ) -> List["spack.spec.Spec"]:
     """Returns a list of specs matching the constraints passed as inputs.
@@ -295,17 +309,13 @@ def find(
     At least one spec per constraint must match, otherwise the function
     will error with an appropriate message.
 
-    By default, this function queries the current store, but a custom query
-    function can be passed to hit any other source of concretized specs
-    (e.g. a binary cache).
-
-    The query function must accept a spec as its first argument.
+    The query function, e.g. ``store.db.query``, may hit any source of concretized specs
+    (e.g. a binary cache). It must accept a spec as its first argument.
 
     Args:
         constraints: spec(s) to be matched against installed packages
+        query_fn: query function to get matching specs
         multiple: if True multiple matches per constraint are admitted
-        query_fn (Callable): query function to get matching specs. By default,
-            ``spack.store.STORE.db.query``
         **kwargs: keyword arguments forwarded to the query function
     """
     if isinstance(constraints, str):
@@ -313,7 +323,6 @@ def find(
 
     matching_specs: List[spack.spec.Spec] = []
     errors = []
-    query_fn = query_fn or STORE.db.query
     for spec in constraints:
         current_matches = query_fn(spec, **kwargs)
 
@@ -336,48 +345,6 @@ def find(
         )
 
     return matching_specs
-
-
-def ensure_singleton_created() -> None:
-    """Ensures the lazily evaluated singleton is created"""
-    _ = STORE.db
-
-
-@contextlib.contextmanager
-def use_store(
-    path: Union[str, pathlib.Path], extra_data: Optional[Dict[str, Any]] = None
-) -> Generator[Store, None, None]:
-    """Use the store passed as argument within the context manager.
-
-    Args:
-        path: path to the store.
-        extra_data: extra configuration under ``config:install_tree`` to be
-            taken into account.
-
-    Yields:
-        Store object associated with the context manager's store
-    """
-    global STORE
-
-    assert not isinstance(path, Store), "cannot pass a store anymore"
-    scope_name = "use-store-{}".format(uuid.uuid4())
-    data = {"root": str(path)}
-    if extra_data:
-        data.update(extra_data)
-
-    # Swap the store with the one just constructed and return it
-    spack.config.CONFIG.push_scope(
-        spack.config.InternalConfigScope(name=scope_name, data={"config": {"install_tree": data}})
-    )
-    temporary_store = create(configuration=spack.config.CONFIG)
-    original_store, STORE = STORE, temporary_store
-
-    try:
-        yield temporary_store
-    finally:
-        # Restore the original store
-        STORE = original_store
-        spack.config.CONFIG.remove_scope(scope_name=scope_name)
 
 
 class MatchError(spack.error.SpackError):

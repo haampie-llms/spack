@@ -11,14 +11,13 @@ from typing import List
 import spack.config
 import spack.environment as ev
 import spack.error
+import spack.repo
 import spack.schema
 import spack.schema.env
 import spack.spec
-import spack.store
 import spack.util.filesystem as fs
 import spack.util.spack_json as sjson
 import spack.util.spack_yaml as syaml
-from spack.active_environment import active_environment
 from spack.cmd.common import arguments
 from spack.util import tty
 from spack.util.editor import editor
@@ -175,7 +174,7 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     revert.set_defaults(subparser=revert)
 
 
-def _get_scope_and_section(args):
+def _get_scope_and_section(args, ctx):
     """Extract config scope and section from arguments."""
     scope = args.scope
     section = getattr(args, "section", None)
@@ -183,64 +182,65 @@ def _get_scope_and_section(args):
 
     # w/no args and an active environment, point to env manifest
     if not section and not scope:
-        env = active_environment()
+        env = ctx.environment
         if env:
             scope = env.scope_name
 
     # set scope defaults
     elif not scope:
-        scope = spack.config.CONFIG.default_modify_scope(section)
+        scope = ctx.config.default_modify_scope(section)
 
     # special handling for commands that take value instead of section
     if path:
         section = path[: path.find(":")] if ":" in path else path
         if not scope:
-            scope = spack.config.CONFIG.default_modify_scope(section)
+            scope = ctx.config.default_modify_scope(section)
 
     return scope, section
 
 
-def print_configuration(args, *, blame: bool) -> None:
-    if args.scope and args.scope not in spack.config.CONFIG.existing_scope_names():
+def print_configuration(args, ctx, *, blame: bool) -> None:
+    if args.scope and args.scope not in ctx.config.existing_scope_names():
         args.subparser.error(f"the argument --scope={args.scope} must refer to an existing scope")
     if args.scope and args.section is None:
         args.subparser.error(f"the argument --scope={args.scope} requires specifying a section")
 
     group = getattr(args, "group", None)
     if group is not None:
-        env = active_environment()
+        env = ctx.environment
         if env is None:
             args.subparser.error("the argument --group requires an active environment")
             return  # parser.error exits, but help mypy understand this is unreachable
         try:
             with env.config_override_for_group(group=group):
-                _print_configuration_helper(args, blame=blame)
+                _print_configuration_helper(args, ctx, blame=blame)
         except ValueError as e:
             tty.die(str(e))
         return
 
-    _print_configuration_helper(args, blame=blame)
+    _print_configuration_helper(args, ctx, blame=blame)
 
 
-def _print_configuration_helper(args, *, blame: bool) -> None:
+def _print_configuration_helper(args, ctx, *, blame: bool) -> None:
     yaml = blame or not args.json
 
     if args.section is not None:
-        spack.config.CONFIG.print_section(args.section, yaml=yaml, blame=blame, scope=args.scope)
+        ctx.config.print_section(args.section, yaml=yaml, blame=blame, scope=args.scope)
         return
 
-    print_flattened_configuration(blame=blame, yaml=yaml)
+    print_flattened_configuration(ctx, blame=blame, yaml=yaml)
 
 
-def print_flattened_configuration(*, blame: bool, yaml: bool) -> None:
+def print_flattened_configuration(ctx, *, blame: bool, yaml: bool) -> None:
     """Prints to stdout a flattened version of the configuration.
 
     Args:
+        ctx: context whose configuration, and environment manifest if any, are merged
         blame: if True, shows file provenance for each entry in the configuration.
     """
-    env = active_environment()
+    env = ctx.environment
     manifest = env.manifest.yaml_content if env is not None else None
-    flattened = spack.config.flattened_configuration(manifest)
+    flattened = spack.config.flattened_configuration(ctx.config, manifest)
 
     if blame or yaml:
         syaml.dump_config(flattened, stream=sys.stdout, default_flow_style=False, blame=blame)
@@ -249,28 +249,28 @@ def print_flattened_configuration(*, blame: bool, yaml: bool) -> None:
         sys.stdout.write("\n")
 
 
-def config_get(args):
+def config_get(args, ctx):
     """Dump merged YAML configuration for a specific section.
 
     With no arguments and an active environment, print the contents of
     the environment's manifest file (spack.yaml).
     """
-    print_configuration(args, blame=False)
+    print_configuration(args, ctx, blame=False)
 
 
-def config_blame(args):
+def config_blame(args, ctx):
     """Print out line-by-line blame of merged YAML."""
-    print_configuration(args, blame=True)
+    print_configuration(args, ctx, blame=True)
 
 
-def config_edit(args):
+def config_edit(args, ctx):
     """Edit the configuration file for a specific scope and config section.
 
     With no arguments and an active environment, edit the spack.yaml for
     the active environment.
     """
     spack_env = os.environ.get(ev.spack_env_var)
-    env_error = ev.environment._active_environment_error
+    env_error = ctx.environment_error
 
     if env_error and args.scope:
         # Cannot use scopes beyond the environment itself with a failed environment
@@ -282,13 +282,13 @@ def config_edit(args):
     elif spack_env and not args.scope:
         # Don't use the scope object for envs, as `config edit` can be called
         # for a malformed environment. Use SPACK_ENV to find spack.yaml.
-        config_file = ev.manifest_file(spack_env)
+        config_file = ev.manifest_file(spack_env, config=ctx.config)
     else:
         # If we aren't editing a spack.yaml file, get config path from scope.
-        scope, section = _get_scope_and_section(args)
+        scope, section = _get_scope_and_section(args, ctx)
         if not scope and not section:
             args.subparser.error("requires a section argument or an active environment")
-        config_file = spack.config.CONFIG.get_config_filename(scope, section)
+        config_file = ctx.config.get_config_filename(scope, section)
 
     if args.print_file:
         print(config_file)
@@ -297,7 +297,7 @@ def config_edit(args):
         editor(config_file)
 
 
-def config_list(args):
+def config_list(args, ctx):
     """List the possible configuration sections.
 
     Used primarily for shell tab completion scripts.
@@ -305,14 +305,14 @@ def config_list(args):
     print(" ".join(list(spack.config.SECTION_SCHEMAS)))
 
 
-def _config_scope_info(args, scope, active, included):
+def _config_scope_info(args, config, scope, active, included):
     result = [scope.name]  # always print the name
 
     if args.scopes_verbose:
         result.append(",".join(_config_basic_scope_types(scope, included)))
         if scope.name not in active:
             scope_status = "override"
-        elif args.section and not spack.config.CONFIG.get_config(args.section, scope=scope.name):
+        elif args.section and not config.get_config(args.section, scope=scope.name):
             scope_status = "absent"
         else:
             scope_status = "active"
@@ -349,13 +349,13 @@ def _config_basic_scope_types(scope, included):
     return sorted(types)
 
 
-def config_scopes(args):
+def config_scopes(args, ctx):
     """List configured scopes in descending order of precedence."""
-    included = [i.name for s in spack.config.CONFIG.scopes.values() for i in s.included_scopes]
-    active = [s.name for s in spack.config.CONFIG.active_scopes]
+    included = [i.name for s in ctx.config.scopes.values() for i in s.included_scopes]
+    active = [s.name for s in ctx.config.active_scopes]
     scopes = [
         s
-        for s in spack.config.CONFIG.scopes.reversed_values()
+        for s in ctx.config.scopes.reversed_values()
         if (
             "include" in args.type
             and s.name in included
@@ -371,7 +371,7 @@ def config_scopes(args):
         if args.section or args.paths:
             headers += ["Path"]
 
-        table = [_config_scope_info(args, s, active, included) for s in scopes]
+        table = [_config_scope_info(args, ctx.config, s, active, included) for s in scopes]
 
         # add headers if we have > 1 column
         if len(headers) > 1:
@@ -380,7 +380,7 @@ def config_scopes(args):
         colify_table(table)
 
 
-def config_add(args):
+def config_add(args, ctx):
     """Add the given configuration to the specified config scope
 
     This is a stateful operation that edits the config files."""
@@ -389,27 +389,27 @@ def config_add(args):
         setup_parser.add_parser.print_help()
         exit(1)
 
-    scope, section = _get_scope_and_section(args)
+    scope, section = _get_scope_and_section(args, ctx)
 
     if args.file:
-        spack.config.CONFIG.add_from_file(args.file, scope=scope)
+        ctx.config.add_from_file(args.file, scope=scope)
 
     if args.path:
-        spack.config.CONFIG.add(args.path, scope=scope)
+        ctx.config.add(args.path, scope=scope)
 
 
-def config_remove(args):
+def config_remove(args, ctx):
     """Remove the given configuration from the specified config scope
 
     This is a stateful operation that edits the config files."""
-    scope, _ = _get_scope_and_section(args)
+    scope, _ = _get_scope_and_section(args, ctx)
 
     path, _, value = args.path.rpartition(":")
-    existing = spack.config.CONFIG.get(path, scope=scope)
+    existing = ctx.config.get(path, scope=scope)
 
     if not isinstance(existing, (list, dict)):
         path, _, value = path.rpartition(":")
-        existing = spack.config.CONFIG.get(path, scope=scope)
+        existing = ctx.config.get(path, scope=scope)
 
     value = syaml.load(value)
 
@@ -423,7 +423,7 @@ def config_remove(args):
         # This should be impossible to reach
         raise spack.error.ConfigError("Config has nested non-dict values")
 
-    spack.config.CONFIG.set(path, existing, scope)
+    ctx.config.set(path, existing, scope)
 
 
 def _can_update_config_file(scope: spack.config.ConfigScope, cfg_file):
@@ -434,9 +434,9 @@ def _can_update_config_file(scope: spack.config.ConfigScope, cfg_file):
     return False
 
 
-def _config_change_requires_scope(path, spec, scope, match_spec=None):
+def _config_change_requires_scope(config, repo, path, spec, scope, match_spec=None):
     """Return whether or not anything changed."""
-    require = spack.config.CONFIG.get(path, scope=scope)
+    require = config.get(path, scope=scope)
     if not require:
         return False
 
@@ -454,7 +454,7 @@ def _config_change_requires_scope(path, spec, scope, match_spec=None):
             return spec_str
         elif not init_spec.intersects(spec):
             changed = True
-            return str(spack.spec.Spec.override(init_spec, spec))
+            return str(spack.spec.Spec.override(init_spec, spec, repo=repo))
         else:
             # Don't override things if they intersect, otherwise we'd
             # be e.g. attaching +debug to every single version spec
@@ -477,11 +477,11 @@ def _config_change_requires_scope(path, spec, scope, match_spec=None):
                 raise ValueError(f"Unexpected requirement: ({type(item)}) {str(item)}")
             new_require.append(item)
 
-    spack.config.CONFIG.set(path, new_require, scope=scope)
+    config.set(path, new_require, scope=scope)
     return changed
 
 
-def _config_change(config_path, match_spec_str=None):
+def _config_change(config, repo, config_path, match_spec_str=None):
     all_components = spack.config.process_config_path(config_path)
     key_components = all_components[:-1]
     key_path = ":".join(key_components)
@@ -499,11 +499,13 @@ def _config_change(config_path, match_spec_str=None):
         spec.name = pkg_name
 
         changed = False
-        for scope in spack.config.CONFIG.writable_scope_names():
-            changed |= _config_change_requires_scope(key_path, spec, scope, match_spec=match_spec)
+        for scope in config.writable_scope_names():
+            changed |= _config_change_requires_scope(
+                config, repo, key_path, spec, scope, match_spec=match_spec
+            )
 
         if not changed:
-            existing_requirements = spack.config.CONFIG.get(key_path)
+            existing_requirements = config.get(key_path)
             if isinstance(existing_requirements, str):
                 raise spack.error.ConfigError(
                     "'config change' needs to append a requirement,"
@@ -511,36 +513,36 @@ def _config_change(config_path, match_spec_str=None):
                 )
 
             ideal_scope_to_modify = None
-            for scope in spack.config.CONFIG.writable_scope_names():
-                if spack.config.CONFIG.get(key_path, scope=scope):
+            for scope in config.writable_scope_names():
+                if config.get(key_path, scope=scope):
                     ideal_scope_to_modify = scope
                     break
             # If we find our key in a specific scope, that's the one we want
             # to modify. Otherwise we use the default write scope.
-            write_scope = ideal_scope_to_modify or spack.config.CONFIG.default_modify_scope()
+            write_scope = ideal_scope_to_modify or config.default_modify_scope()
 
             update_path = f"{key_path}:[{str(spec)}]"
-            spack.config.CONFIG.add(update_path, scope=write_scope)
+            config.add(update_path, scope=write_scope)
     else:
         raise ValueError("'config change' can currently only change 'require' sections")
 
 
-def config_change(args):
-    _config_change(args.path, args.match_spec)
+def config_change(args, ctx):
+    _config_change(ctx.config, ctx.repo, args.path, args.match_spec)
 
 
-def config_update(args):
+def config_update(args, ctx):
     # Read the configuration files
-    spack.config.CONFIG.get_config(args.section, scope=args.scope)
+    ctx.config.get_config(args.section, scope=args.scope)
     updates: List[spack.config.ConfigScope] = [
         x
-        for x in spack.config.CONFIG.updated_scopes_by_section[args.section]
+        for x in ctx.config.updated_scopes_by_section[args.section]
         if not isinstance(x, spack.config.InternalConfigScope) and x.writable
     ]
 
     cannot_overwrite, skip_system_scope = [], False
     for scope in updates:
-        cfg_file = spack.config.CONFIG.get_config_filename(scope.name, args.section)
+        cfg_file = ctx.config.get_config_filename(scope.name, args.section)
         can_be_updated = _can_update_config_file(scope, cfg_file)
         if not can_be_updated:
             if scope.name == "system":
@@ -579,7 +581,7 @@ def config_update(args):
             " the latest schema format:\n\n"
         )
         for scope in updates:
-            cfg_file = spack.config.CONFIG.get_config_filename(scope.name, args.section)
+            cfg_file = ctx.config.get_config_filename(scope.name, args.section)
             msg += "\t[scope={0}, file={1}]\n".format(scope.name, cfg_file)
         msg += (
             "\nIf the configuration files are updated, versions of Spack "
@@ -596,17 +598,15 @@ def config_update(args):
     # Get a function to update the format
     update_fn = spack.config.ensure_latest_format_fn(args.section)
     for scope in updates:
-        cfg_file = spack.config.CONFIG.get_config_filename(scope.name, args.section)
+        cfg_file = ctx.config.get_config_filename(scope.name, args.section)
         data = scope.get_section(args.section)
         assert data is not None, f"Cannot find section {args.section} in {scope.name} scope"
-        update_fn(data)
+        update_fn(data, ctx.config)
 
         # Make a backup copy and rewrite the file
         bkp_file = cfg_file + ".bkp"
         shutil.copy(cfg_file, bkp_file)
-        spack.config.CONFIG.update_config(
-            args.section, data[args.section], scope=scope.name, force=True
-        )
+        ctx.config.update_config(args.section, data[args.section], scope=scope.name, force=True)
         tty.msg(f'File "{cfg_file}" update [backup={bkp_file}]')
 
 
@@ -617,14 +617,14 @@ def _can_revert_update(scope_dir, cfg_file, bkp_file):
     return dir_ok and cfg_ok and bkp_ok
 
 
-def config_revert(args):
-    scopes = [args.scope] if args.scope else [x.name for x in spack.config.CONFIG.writable_scopes]
+def config_revert(args, ctx):
+    scopes = [args.scope] if args.scope else [x.name for x in ctx.config.writable_scopes]
 
     # Search for backup files in the configuration scopes
     Entry = collections.namedtuple("Entry", ["scope", "cfg", "bkp"])
     to_be_restored, cannot_overwrite = [], []
     for scope in scopes:
-        cfg_file = spack.config.CONFIG.get_config_filename(scope, args.section)
+        cfg_file = ctx.config.get_config_filename(scope, args.section)
         bkp_file = cfg_file + ".bkp"
 
         # If the backup files doesn't exist move to the next scope
@@ -672,17 +672,18 @@ def config_revert(args):
         tty.msg(msg.format(cfg_file))
 
 
-def config_prefer_upstream(args):
+def config_prefer_upstream(args, ctx):
     """Generate a packages config based on the configuration of all upstream
     installs."""
 
     scope = args.scope
     if scope is None:
-        scope = spack.config.CONFIG.default_modify_scope("packages")
+        scope = ctx.config.default_modify_scope("packages")
 
-    all_specs = set(spack.store.STORE.db.query(installed=True))
-    local_specs = set(spack.store.STORE.db.query_local(installed=True))
+    all_specs = set(ctx.store.db.query(installed=True))
+    local_specs = set(ctx.store.db.query_local(installed=True))
     pref_specs = local_specs if args.local else all_specs - local_specs
+    spack.repo.attach_packages(pref_specs, ctx)
 
     conflicting_variants = set()
 
@@ -731,15 +732,15 @@ def config_prefer_upstream(args):
         )
 
     # Simply write the config to the specified file.
-    existing = spack.config.CONFIG.get("packages", scope=scope)
+    existing = ctx.config.get("packages", scope=scope)
     new = spack.schema.merge_yaml(existing, pkgs)
-    spack.config.CONFIG.set("packages", new, scope)
-    config_file = spack.config.CONFIG.get_config_filename(scope, section)
+    ctx.config.set("packages", new, scope)
+    config_file = ctx.config.get_config_filename(scope, section)
 
     tty.msg("Updated config at {0}".format(config_file))
 
 
-def config(parser, args):
+def config(parser, args, ctx):
     action = {
         "get": config_get,
         "blame": config_blame,
@@ -754,4 +755,4 @@ def config(parser, args):
         "prefer-upstream": config_prefer_upstream,
         "change": config_change,
     }
-    action[args.config_command](args)
+    action[args.config_command](args, ctx)

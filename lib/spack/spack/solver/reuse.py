@@ -14,7 +14,6 @@ import spack.repo
 import spack.spec
 import spack.traverse
 import spack.util.path
-from spack.active_environment import active_environment
 from spack.enums import InstallRecordStatus
 from spack.externals import ExternalSpecsParser
 from spack.externals_config import (
@@ -191,9 +190,6 @@ class ReusableSpecsSelector:
         packages_with_externals: Any,
         factory: Optional[SpecFiltersFactory] = None,
     ) -> None:
-        # Local import to break circular dependencies
-        import spack.environment
-
         configuration, store, repo = context.config, context.store, context.repo
         external_parser = create_external_parser(packages_with_externals, context=context)
         # Membership in this set replaces a per-spec query_by_spec_hash on the store
@@ -248,8 +244,8 @@ class ReusableSpecsSelector:
                 include = source.get("include", default_include)
                 exclude = source.get("exclude", default_exclude)
                 if source["type"] == "environment" and "path" in source:
-                    env_dir = spack.environment.as_env_dir(source["path"])
-                    active_env = active_environment()
+                    env_dir = context.environment_dir(source["path"])
+                    active_env = context.environment
                     if not active_env or env_dir not in active_env.included_concrete_env_root_dirs:
                         # If the environment is not included as a concrete environment, use the
                         # current specs from its lockfile.
@@ -258,7 +254,7 @@ class ReusableSpecsSelector:
                                 is_reusable=local_is_reusable,
                                 include=include,
                                 exclude=exclude,
-                                env=spack.environment.environment_from_name_or_dir(env_dir),
+                                env=context.read_environment(env_dir),
                             )
                         )
                 elif source["type"] == "local":
@@ -299,7 +295,7 @@ class ReusableSpecsSelector:
                 )
 
     def reusable_specs(
-        self, specs: List[spack.spec.Spec], *, policy: Optional[spack.deprecation.Policy] = None
+        self, specs: List[spack.spec.Spec], *, policy: spack.deprecation.Policy
     ) -> List[spack.spec.Spec]:
         result = []
         for reuse_source in self.reuse_sources:

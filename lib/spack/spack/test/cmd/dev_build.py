@@ -13,10 +13,11 @@ import spack.error
 import spack.main
 import spack.repo
 import spack.spec
+import spack.test.harness
 import spack.util.filesystem as fs
-from spack.main import SpackCommand
 from spack.repo import RepoPath
 from spack.store import Store
+from spack.test.harness import SpackCommand
 
 dev_build = SpackCommand("dev-build")
 install = SpackCommand("install")
@@ -27,7 +28,8 @@ pytestmark = [pytest.mark.disable_clean_stage_check]
 
 def test_dev_build_basics(tmp_path: pathlib.Path, install_mockery):
     spec = spack.concretize.concretize_one(
-        spack.spec.Spec(f"dev-build-test-install@0.0.0 dev_path={tmp_path}")
+        spack.spec.Spec(f"dev-build-test-install@0.0.0 dev_path={tmp_path}"),
+        spack.test.harness.current(),
     )
 
     assert "dev_path" in spec.variants
@@ -45,9 +47,10 @@ def test_dev_build_basics(tmp_path: pathlib.Path, install_mockery):
     assert os.path.exists(str(tmp_path))
 
 
-def test_dev_build_before(tmp_path: pathlib.Path, install_mockery, installer_variant):
+def test_dev_build_before(tmp_path: pathlib.Path, install_mockery):
     spec = spack.concretize.concretize_one(
-        spack.spec.Spec(f"dev-build-test-install@0.0.0 dev_path={tmp_path}")
+        spack.spec.Spec(f"dev-build-test-install@0.0.0 dev_path={tmp_path}"),
+        spack.test.harness.current(),
     )
 
     with fs.working_dir(str(tmp_path)):
@@ -65,10 +68,11 @@ def test_dev_build_before(tmp_path: pathlib.Path, install_mockery, installer_var
 
 @pytest.mark.parametrize("last_phase", ["edit", "install"])
 def test_dev_build_until(
-    tmp_path: pathlib.Path, temporary_store: Store, install_mockery, last_phase, installer_variant
+    tmp_path: pathlib.Path, temporary_store: Store, install_mockery, last_phase
 ):
     spec = spack.concretize.concretize_one(
-        spack.spec.Spec(f"dev-build-test-install@0.0.0 dev_path={tmp_path}")
+        spack.spec.Spec(f"dev-build-test-install@0.0.0 dev_path={tmp_path}"),
+        spack.test.harness.current(),
     )
 
     with fs.working_dir(str(tmp_path)):
@@ -85,9 +89,10 @@ def test_dev_build_until(
     assert not temporary_store.db.query(spec, installed=True)
 
 
-def test_dev_build_before_until(tmp_path: pathlib.Path, install_mockery, installer_variant):
+def test_dev_build_before_until(tmp_path: pathlib.Path, install_mockery):
     spec = spack.concretize.concretize_one(
-        spack.spec.Spec(f"dev-build-test-install@0.0.0 dev_path={tmp_path}")
+        spack.spec.Spec(f"dev-build-test-install@0.0.0 dev_path={tmp_path}"),
+        spack.test.harness.current(),
     )
 
     with fs.working_dir(str(tmp_path)):
@@ -99,18 +104,13 @@ def test_dev_build_before_until(tmp_path: pathlib.Path, install_mockery, install
 
         bad_phase = "phase_that_does_not_exist"
         not_allowed = "is not a valid phase"
-        not_installed = "was not installed"
         out = dev_build("-u", bad_phase, "dev-build-test-install@0.0.0", fail_on_error=False)
         assert bad_phase in out
         assert not_allowed in out
-        if installer_variant == "old":
-            assert not_installed in out
 
         out = dev_build("-b", bad_phase, "dev-build-test-install@0.0.0", fail_on_error=False)
         assert bad_phase in out
         assert not_allowed in out
-        if installer_variant == "old":
-            assert not_installed in out
 
 
 def _print_spack_short_spec(*args):
@@ -128,7 +128,8 @@ def test_dev_build_drop_in(
 
 def test_dev_build_fails_already_installed(tmp_path: pathlib.Path, install_mockery):
     spec = spack.concretize.concretize_one(
-        spack.spec.Spec("dev-build-test-install@0.0.0 dev_path=%s" % str(tmp_path))
+        spack.spec.Spec("dev-build-test-install@0.0.0 dev_path=%s" % str(tmp_path)),
+        spack.test.harness.current(),
     )
 
     with fs.working_dir(str(tmp_path)):
@@ -172,7 +173,7 @@ def test_dev_build_can_parse_path_with_at_symbol(tmp_path: pathlib.Path, install
     special_char_dir = tmp_path / "tmp@place"
     special_char_dir.mkdir()
     spec = spack.concretize.concretize_one(
-        f'dev-build-test-install@0.0.0 dev_path="{special_char_dir}"'
+        f'dev-build-test-install@0.0.0 dev_path="{special_char_dir}"', spack.test.harness.current()
     )
 
     with fs.working_dir(str(special_char_dir)):
@@ -182,15 +183,14 @@ def test_dev_build_can_parse_path_with_at_symbol(tmp_path: pathlib.Path, install
     assert spec.package.filename in os.listdir(spec.prefix)
 
 
-def test_dev_build_env(
-    tmp_path: pathlib.Path, install_mockery, mutable_mock_env_path, installer_variant
-):
+def test_dev_build_env(tmp_path: pathlib.Path, install_mockery, mutable_mock_env_path):
     """Test Spack does dev builds for packages in develop section of env."""
     # setup dev-build-test-install package for dev build
     build_dir = tmp_path / "build"
     build_dir.mkdir()
     spec = spack.concretize.concretize_one(
-        spack.spec.Spec("dev-build-test-install@0.0.0 dev_path=%s" % str(build_dir))
+        spack.spec.Spec("dev-build-test-install@0.0.0 dev_path=%s" % str(build_dir)),
+        spack.test.harness.current(),
     )
 
     with fs.working_dir(str(build_dir)):
@@ -215,7 +215,7 @@ spack:
 """
             )
         env("create", "test", "./spack.yaml")
-        with ev.read("test"):
+        with ev.read("test", ctx=spack.test.harness.current()):
             install()
 
     assert spec.package.filename in os.listdir(spec.prefix)
@@ -224,14 +224,15 @@ spack:
 
 
 def test_dev_build_env_with_vars(
-    tmp_path: pathlib.Path, install_mockery, mutable_mock_env_path, monkeypatch, installer_variant
+    tmp_path: pathlib.Path, install_mockery, mutable_mock_env_path, monkeypatch
 ):
     """Test Spack does dev builds for packages in develop section of env (path with variables)."""
     # setup dev-build-test-install package for dev build
     build_dir = tmp_path / "build"
     build_dir.mkdir()
     spec = spack.concretize.concretize_one(
-        spack.spec.Spec(f"dev-build-test-install@0.0.0 dev_path={str(build_dir)}")
+        spack.spec.Spec(f"dev-build-test-install@0.0.0 dev_path={str(build_dir)}"),
+        spack.test.harness.current(),
     )
 
     # store the build path in an environment variable that will be used in the environment
@@ -258,7 +259,7 @@ spack:
 """
             )
         env("create", "test", "./spack.yaml")
-        with ev.read("test"):
+        with ev.read("test", ctx=spack.test.harness.current()):
             install()
 
     assert spec.package.filename in os.listdir(spec.prefix)
@@ -267,14 +268,15 @@ spack:
 
 
 def test_dev_build_env_version_mismatch(
-    tmp_path: pathlib.Path, install_mockery, mutable_mock_env_path, installer_variant
+    tmp_path: pathlib.Path, install_mockery, mutable_mock_env_path
 ):
     """Test Spack constraints concretization by develop specs."""
     # setup dev-build-test-install package for dev build
     build_dir = tmp_path / "build"
     build_dir.mkdir()
     spec = spack.concretize.concretize_one(
-        spack.spec.Spec("dev-build-test-install@0.0.0 dev_path=%s" % str(tmp_path))
+        spack.spec.Spec("dev-build-test-install@0.0.0 dev_path=%s" % str(tmp_path)),
+        spack.test.harness.current(),
     )
 
     with fs.working_dir(str(build_dir)):
@@ -300,7 +302,7 @@ spack:
             )
 
         env("create", "test", "./spack.yaml")
-        with ev.read("test"):
+        with ev.read("test", ctx=spack.test.harness.current()):
             with pytest.raises((RuntimeError, spack.error.UnsatisfiableSpecError)):
                 install()
 
@@ -362,11 +364,11 @@ spack:
             )
 
         env("create", "test", "./spack.yaml")
-        with ev.read("test"):
+        with ev.read("test", ctx=spack.test.harness.current()):
             # Do concretization inside environment for dev info
             # These specs are the source of truth to compare against the installs
-            leaf_spec = spack.concretize.concretize_one(leaf_spec)
-            root_spec = spack.concretize.concretize_one(root_spec)
+            leaf_spec = spack.concretize.concretize_one(leaf_spec, spack.test.harness.current())
+            root_spec = spack.concretize.concretize_one(root_spec, spack.test.harness.current())
 
             # Do install
             install()
@@ -417,12 +419,12 @@ spack:
 """
             )
         env("create", "test", "./spack.yaml")
-        with ev.read("test"):
+        with ev.read("test", ctx=spack.test.harness.current()):
             # concretize in the environment to get the dev build info
             # equivalent to setting dev_build and dev_path variants
             # on all specs above
-            spec = spack.concretize.concretize_one(spec)
-            dep_spec = spack.concretize.concretize_one(dep_spec)
+            spec = spack.concretize.concretize_one(spec, spack.test.harness.current())
+            dep_spec = spack.concretize.concretize_one(dep_spec, spack.test.harness.current())
             install()
 
     # Ensure that both specs installed properly
@@ -448,7 +450,8 @@ def test_dev_build_rebuild_on_source_changes(
     build_dir = tmp_path / "build"
     build_dir.mkdir()
     spec = spack.concretize.concretize_one(
-        spack.spec.Spec("dev-build-test-install@0.0.0 dev_path=%s" % str(build_dir))
+        spack.spec.Spec("dev-build-test-install@0.0.0 dev_path=%s" % str(build_dir)),
+        spack.test.harness.current(),
     )
 
     def reset_string():
@@ -477,7 +480,7 @@ spack:
             )
 
         env("create", "test", "./spack.yaml")
-        with ev.read("test"):
+        with ev.read("test", ctx=spack.test.harness.current()):
             install()
 
             reset_string()  # so the package will accept rebuilds
@@ -485,4 +488,4 @@ spack:
             fs.touch(os.path.join(str(build_dir), "test"))
             output = install()
 
-    assert f"Installing {test_spec}" in output
+    assert any(ln.startswith("[+]") and f" {test_spec}@" in ln for ln in output.splitlines())

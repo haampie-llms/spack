@@ -468,7 +468,7 @@ schema = {
 }
 
 
-def update(data):
+def update(data, config):
     data = data["packages"]
     changed = False
     for key in data:

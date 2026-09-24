@@ -10,7 +10,6 @@ from typing import List, Optional, Set
 
 import spack
 import spack.cmd
-import spack.config
 import spack.detection
 import spack.error
 import spack.package_base
@@ -47,7 +46,7 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     find_parser.add_argument(
         "--scope",
         action=arguments.ConfigScope,
-        default=lambda: spack.config.CONFIG.default_modify_scope("packages"),
+        default=lambda config: config.default_modify_scope("packages"),
         help="configuration scope to modify",
     )
     find_parser.add_argument(
@@ -93,13 +92,13 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     )
 
 
-def external_find(args):
+def external_find(args, ctx):
     if args.all or not (args.tags or args.packages):
         # If the user calls 'spack external find' with no arguments, and
         # this system has a description of installed packages, then we should
         # consume it automatically.
         try:
-            _collect_and_consume_cray_manifest_files()
+            _collect_and_consume_cray_manifest_files(ctx)
         except NoManifestFileError:
             # It's fine to not find any manifest file if we are doing the
             # search implicitly (i.e. as part of 'spack external find')
@@ -128,17 +127,18 @@ def external_find(args):
         args.tags = ["core-packages", "build-tools"]
 
     candidate_packages = packages_to_search_for(
-        names=args.packages, tags=args.tags, exclude=args.exclude
+        ctx.repo, names=args.packages, tags=args.tags, exclude=args.exclude
     )
     detected_packages = spack.detection.by_path(
-        candidate_packages, repo=spack.repo.PATH, path_hints=args.path, max_workers=args.jobs
+        candidate_packages,
+        repo=ctx.repo,
+        config=ctx.config,
+        path_hints=args.path,
+        max_workers=args.jobs,
     )
 
     new_specs = spack.detection.update_configuration(
-        detected_packages,
-        config=spack.config.CONFIG,
-        scope=args.scope,
-        buildable=not args.not_buildable,
+        detected_packages, config=ctx.config, scope=args.scope, buildable=not args.not_buildable
     )
 
     # If the user runs `spack external find --not-buildable mpich` we also mark `mpi` non-buildable
@@ -147,14 +147,16 @@ def external_find(args):
         virtuals: Set[str] = {
             virtual.name
             for new_spec in new_specs
-            for virtual_specs in spack.repo.PATH.get_pkg_class(new_spec.name).provided.values()
+            for virtual_specs in ctx.repo.get_pkg_class(new_spec.name).provided.values()
             for virtual in virtual_specs
         }
-        new_virtuals = spack.detection.set_virtuals_nonbuildable(virtuals, scope=args.scope)
+        new_virtuals = spack.detection.set_virtuals_nonbuildable(
+            virtuals, scope=args.scope, config=ctx.config
+        )
         new_specs.extend(spack.spec.Spec(name) for name in new_virtuals)
 
     if new_specs:
-        path = spack.config.CONFIG.get_config_filename(args.scope, "packages")
+        path = ctx.config.get_config_filename(args.scope, "packages")
         tty.msg(f"The following specs have been detected on this system and added to {path}")
         spack.cmd.display_specs(new_specs)
     else:
@@ -162,11 +164,13 @@ def external_find(args):
 
 
 def packages_to_search_for(
-    *, names: Optional[List[str]], tags: List[str], exclude: Optional[List[str]]
+    repo: spack.repo.RepoPath,
+    *,
+    names: Optional[List[str]],
+    tags: List[str],
+    exclude: Optional[List[str]],
 ):
-    result = list(
-        {pkg for tag in tags for pkg in spack.repo.PATH.packages_with_tags(tag, full=True)}
-    )
+    result = list({pkg for tag in tags for pkg in repo.packages_with_tags(tag, full=True)})
 
     if names:
         # Match both fully qualified and unqualified
@@ -183,8 +187,9 @@ def packages_to_search_for(
     return result
 
 
-def external_read_cray_manifest(args):
+def external_read_cray_manifest(args, ctx):
     _collect_and_consume_cray_manifest_files(
+        ctx,
         manifest_file=args.file,
         manifest_directory=args.directory,
         dry_run=args.dry_run,
@@ -194,6 +199,7 @@ def external_read_cray_manifest(args):
 
 
 def _collect_and_consume_cray_manifest_files(
+    ctx,
     manifest_file=None,
     manifest_directory=None,
     dry_run=False,
@@ -239,7 +245,7 @@ def _collect_and_consume_cray_manifest_files(
     for path in manifest_files:
         tty.debug("Reading manifest file: " + path)
         try:
-            cray_manifest.read(path, not dry_run)
+            cray_manifest.read(path, not dry_run, ctx=ctx)
         except spack.error.SpackError as e:
             if fail_on_error:
                 raise
@@ -247,9 +253,9 @@ def _collect_and_consume_cray_manifest_files(
                 tty.warn("Failure reading manifest file: {0}\n\t{1}".format(path, str(e)))
 
 
-def external_list(args):
+def external_list(args, ctx):
     # Trigger a read of all packages, might take a long time.
-    list(spack.repo.PATH.all_package_classes())
+    list(ctx.repo.all_package_classes())
     # Print all the detectable packages
     tty.msg("Detectable packages per repository")
     for namespace, pkgs in sorted(spack.package_base.detectable_packages.items()):
@@ -257,14 +263,14 @@ def external_list(args):
         colify.colify(pkgs, indent=4, output=sys.stdout)
 
 
-def external(parser, args):
+def external(parser, args, ctx):
     action = {
         "find": external_find,
         "list": external_list,
         "ls": external_list,
         "read-cray-manifest": external_read_cray_manifest,
     }
-    action[args.external_command](args)
+    action[args.external_command](args, ctx)
 
 
 class NoManifestFileError(spack.error.SpackError):

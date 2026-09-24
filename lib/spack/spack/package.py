@@ -32,7 +32,8 @@ from spack.builder import (
     execute_install_time_tests,
     register_builder,
 )
-from spack.compilers.libraries import CompilerPropertyDetector, compiler_spec
+from spack.compilers.libraries import CompilerPropertyDetector as _CompilerPropertyDetector
+from spack.compilers.libraries import compiler_spec
 from spack.config import determine_number_of_jobs, get_user
 from spack.deptypes import ALL_TYPES as all_deptypes
 from spack.directives import (
@@ -193,6 +194,23 @@ MachO = MachO
 LC_ID_DYLIB = LC_ID_DYLIB
 
 
+class _PackageAPIError(SpackError):
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"spack.package.{name} is available to package code only, "
+            "while Spack sets up or detects a package"
+        )
+
+
+class CompilerPropertyDetector(_CompilerPropertyDetector):
+    """Detects compiler properties of a given compiler spec. Useful for compiler wrappers."""
+
+    def __init__(self, compiler_spec: Spec) -> None:
+        # Recipes construct detectors from the spec alone
+        ctx = compiler_spec.package.context
+        super().__init__(compiler_spec, repo=ctx.repo, cache=ctx.compiler_cache)
+
+
 class tty:
     debug = _tty.debug
     error = _tty.error
@@ -231,12 +249,7 @@ def find_compilers(path_hints: Optional[List[str]] = None) -> List[Spec]:
         path_hints: list of path hints where to look for. A sensible default based on the ``PATH``
             environment variable will be used if the value is None
     """
-    # Local imports to avoid polluting the package API
-    import spack.config
-    import spack.repo
-    from spack.compilers.config import find_compilers as _find_compilers
-
-    return _find_compilers(path_hints, config=spack.config.CONFIG, repo=spack.repo.PATH)
+    raise _PackageAPIError("find_compilers")
 
 
 #: Assigning this to :attr:`spack.package_base.PackageBase.flag_handler` means that compiler flags

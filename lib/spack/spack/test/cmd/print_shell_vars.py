@@ -2,11 +2,12 @@
 #
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
+import spack.test.harness
 from spack.main import print_setup_info
 
 
 def test_print_shell_vars_sh(capfd):
-    print_setup_info("sh")
+    print_setup_info(spack.test.harness.current().config, "sh")
     out, _ = capfd.readouterr()
 
     assert "_sp_sys_type=" in out
@@ -16,7 +17,7 @@ def test_print_shell_vars_sh(capfd):
 
 
 def test_print_shell_vars_csh(capfd):
-    print_setup_info("csh")
+    print_setup_info(spack.test.harness.current().config, "csh")
     out, _ = capfd.readouterr()
 
     assert "set _sp_sys_type = " in out

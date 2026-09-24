@@ -8,11 +8,13 @@ import pathlib
 import pytest
 
 import spack.concretize
+import spack.test.harness
 from spack.config import Configuration
 from spack.fetch_strategy import SvnFetchStrategy
 from spack.stage import stage_from_config
 from spack.util.executable import which
 from spack.util.filesystem import mkdirp, touch, working_dir
+from spack.util.web import NetworkClient
 from spack.version import Version
 
 pytestmark = [
@@ -47,7 +49,7 @@ def test_fetch(
     h = mock_svn_repository.hash
 
     # Construct the package under test
-    s = spack.concretize.concretize_one("svn-test")
+    s = spack.concretize.concretize_one("svn-test", spack.test.harness.current())
     monkeypatch.setitem(s.package.versions, Version("svn"), t.args)
 
     # Enter the stage directory and check some properties
@@ -84,7 +86,9 @@ def test_svn_extra_fetch(tmp_path: pathlib.Path, config):
     fetcher = SvnFetchStrategy(svn="file:///not-a-real-svn-repo")
     assert fetcher is not None
 
-    with stage_from_config(fetcher, path=testpath, config=config) as stage:
+    with stage_from_config(
+        fetcher, path=testpath, config=config, client=NetworkClient.from_config(config)
+    ) as stage:
         assert stage is not None
 
         source_path = stage.source_path

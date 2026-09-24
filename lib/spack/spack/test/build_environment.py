@@ -19,13 +19,15 @@ import spack.config
 import spack.deptypes as dt
 import spack.package_base
 import spack.spec
+import spack.subprocess_context
+import spack.test.harness
 import spack.util.environment
 import spack.util.module_cmd
 import spack.util.spack_yaml as syaml
 from spack.build_environment import UseMode, _static_to_shared_library, dso_suffix
 from spack.config import Configuration
 from spack.enums import Context
-from spack.old_installer import PackageInstaller
+from spack.installer import PackageInstaller
 from spack.util.environment import EnvironmentModifications
 from spack.util.executable import Executable
 from spack.util.filesystem import HeaderList, LibraryList
@@ -163,7 +165,7 @@ def test_cc_not_changed_by_modules(monkeypatch, mutable_config, working_env, com
 
     monkeypatch.setattr(spack.util.module_cmd, "load_module", _set_wrong_cc)
 
-    s = spack.concretize.concretize_one("cmake %gcc@14")
+    s = spack.concretize.concretize_one("cmake %gcc@14", spack.test.harness.current())
     spack.build_environment.setup_package(s.package, dirty=False)
 
     assert os.environ["CC"] != "NOT_THIS_PLEASE"
@@ -174,7 +176,7 @@ def test_setup_dependent_package_inherited_modules(
     working_env, mock_packages, install_mockery, mock_fetch
 ):
     # This will raise on regression
-    s = spack.concretize.concretize_one("cmake-client-inheritor")
+    s = spack.concretize.concretize_one("cmake-client-inheritor", spack.test.harness.current())
     PackageInstaller([s.package], fake=True).install()
 
 
@@ -276,7 +278,7 @@ def test_compiler_config_modifications(
 
         return convert_to_platform_path(pathlist)
 
-    pkg = spack.concretize.concretize_one("cmake %gcc@14").package
+    pkg = spack.concretize.concretize_one("cmake %gcc@14", spack.test.harness.current()).package
     # Trigger the modifications
     spack.build_environment.setup_package(pkg, dirty=False)
 
@@ -334,7 +336,7 @@ def test_external_config_env(mock_packages, mutable_config: Configuration, worki
     }
     mutable_config.set("packages:cmake", cmake_config)
 
-    cmake_client = spack.concretize.concretize_one("cmake-client")
+    cmake_client = spack.concretize.concretize_one("cmake-client", spack.test.harness.current())
     spack.build_environment.setup_package(cmake_client.package, False)
 
     assert os.environ["TEST_ENV_VAR_SET"] == "yes it's set"
@@ -357,7 +359,7 @@ def test_spack_paths_before_module_paths(
 
     monkeypatch.setattr(spack.util.module_cmd, "load_module", _set_wrong_cc)
 
-    s = spack.concretize.concretize_one("cmake")
+    s = spack.concretize.concretize_one("cmake", spack.test.harness.current())
 
     spack.build_environment.setup_package(s.package, dirty=False)
 
@@ -366,7 +368,7 @@ def test_spack_paths_before_module_paths(
 
 
 def test_package_inheritance_module_setup(config, mock_packages, working_env):
-    s = spack.concretize.concretize_one("multimodule-inheritance")
+    s = spack.concretize.concretize_one("multimodule-inheritance", spack.test.harness.current())
     pkg = s.package
 
     spack.build_environment.setup_package(pkg, False)
@@ -400,7 +402,7 @@ def test_wrapper_variables(
         not in cuda_include_dirs
     )
 
-    root = spack.concretize.concretize_one("dt-diamond")
+    root = spack.concretize.concretize_one("dt-diamond", spack.test.harness.current())
 
     for s in root.traverse():
         s.set_prefix(f"/{s.name}-prefix/")
@@ -467,7 +469,7 @@ dt-diamond-left:
 """
     )
     mutable_config.set("packages", cfg_data)
-    top = spack.concretize.concretize_one("dt-diamond")
+    top = spack.concretize.concretize_one("dt-diamond", spack.test.harness.current())
 
     def _trust_me_its_a_dir(path):
         return True
@@ -494,14 +496,14 @@ def test_parallel_false_is_not_propagating(config, mock_packages):
     # a foobar=bar (parallel = False)
     # |
     # b (parallel =True)
-    s = spack.concretize.concretize_one("pkg-a foobar=bar")
+    s = spack.concretize.concretize_one("pkg-a foobar=bar", spack.test.harness.current())
 
     spack.build_environment.set_package_py_globals(s.package, context=Context.BUILD)
     assert s["pkg-a"].package.module.make_jobs == 1
 
     spack.build_environment.set_package_py_globals(s["pkg-b"].package, context=Context.BUILD)
     assert s["pkg-b"].package.module.make_jobs == spack.config.determine_number_of_jobs(
-        parallel=s["pkg-b"].package.parallel
+        parallel=s["pkg-b"].package.parallel, config=spack.test.harness.current().config
     )
 
 
@@ -514,7 +516,7 @@ def test_setting_dtags_based_on_config(
     config_setting, expected_flag, config: Configuration, mock_packages, working_env
 ):
     # Pick a random package to be able to set compiler's variables
-    s = spack.concretize.concretize_one("cmake")
+    s = spack.concretize.concretize_one("cmake", spack.test.harness.current())
     with config.override("config:shared_linking", {"type": config_setting, "bind": False}):
         env = spack.build_environment.setup_package(s.package, dirty=False)
         modifications = env.group_by_name()
@@ -543,7 +545,7 @@ def test_module_globals_available_at_setup_dependent_time(
         assert dependent_module.ninja is not None
         dependent_spec.package.test_attr = True
 
-    externaltool = spack.concretize.concretize_one("externaltest")
+    externaltool = spack.concretize.concretize_one("externaltest", spack.test.harness.current())
     monkeypatch.setattr(
         externaltool["externaltool"].package, "setup_dependent_package", setup_dependent_package
     )
@@ -615,12 +617,12 @@ def test_build_jobs_defaults():
 
 class TestModuleMonkeyPatcher:
     def test_getting_attributes(self, config, mock_packages):
-        s = spack.concretize.concretize_one("libelf")
+        s = spack.concretize.concretize_one("libelf", spack.test.harness.current())
         module_wrapper = spack.build_environment.ModuleChangePropagator(s.package)
         assert module_wrapper.Libelf == s.package.module.Libelf
 
     def test_setting_attributes(self, config, mock_packages):
-        s = spack.concretize.concretize_one("libelf")
+        s = spack.concretize.concretize_one("libelf", spack.test.harness.current())
         module = s.package.module
         module_wrapper = spack.build_environment.ModuleChangePropagator(s.package)
 
@@ -638,7 +640,7 @@ class TestModuleMonkeyPatcher:
 
 
 def test_effective_deptype_build_environment(config, mock_packages):
-    s = spack.concretize.concretize_one("dttop")
+    s = spack.concretize.concretize_one("dttop", spack.test.harness.current())
 
     #  [    ]  dttop@1.0                    #
     #  [b   ]      ^dtbuild1@1.0            # <- direct build dep
@@ -672,7 +674,7 @@ def test_effective_deptype_build_environment(config, mock_packages):
 
 
 def test_effective_deptype_run_environment(config, mock_packages):
-    s = spack.concretize.concretize_one("dttop")
+    s = spack.concretize.concretize_one("dttop", spack.test.harness.current())
 
     #  [    ]  dttop@1.0                    #
     #  [b   ]      ^dtbuild1@1.0            # <- direct build-only dep is pruned
@@ -707,7 +709,7 @@ def test_monkey_patching_works_across_virtual(config, mock_packages):
     """Assert that a monkeypatched attribute is found regardless we access through the
     real name or the virtual name.
     """
-    s = spack.concretize.concretize_one("mpileaks ^mpich")
+    s = spack.concretize.concretize_one("mpileaks ^mpich", spack.test.harness.current())
     s["mpich"].foo = "foo"
     assert s["mpich"].foo == "foo"
     assert s["mpi"].foo == "foo"
@@ -717,7 +719,7 @@ def test_clear_compiler_related_runtime_variables_of_build_deps(config, mock_pac
     """Verify that Spack drops CC, CXX, FC and F77 from the dependencies related build environment
     variable changes if they are set in setup_run_environment. Spack manages those variables
     elsewhere."""
-    s = spack.concretize.concretize_one("build-env-compiler-var-a")
+    s = spack.concretize.concretize_one("build-env-compiler-var-a", spack.test.harness.current())
     ctx = spack.build_environment.SetupContext(s, context=Context.BUILD)
     result = {}
     ctx.get_env_modifications().apply_modifications(result)
@@ -779,8 +781,12 @@ def test_optimization_flags_are_using_node_target(config, mock_packages, monkeyp
     """Tests that we are using the target on the node to be compiled to retrieve the uarch
     specific flags, and not the target of the compiler.
     """
-    compiler_wrapper_pkg = spack.concretize.concretize_one("compiler-wrapper target=core2").package
-    mpileaks = spack.concretize.concretize_one("mpileaks target=x86_64")
+    compiler_wrapper_pkg = spack.concretize.concretize_one(
+        "compiler-wrapper target=core2", spack.test.harness.current()
+    ).package
+    mpileaks = spack.concretize.concretize_one(
+        "mpileaks target=x86_64", spack.test.harness.current()
+    )
 
     env = EnvironmentModifications()
     compiler_wrapper_pkg.setup_dependent_build_environment(env, mpileaks)
@@ -836,7 +842,7 @@ def test_extra_rpaths_is_set(
     """
     cfg_data = syaml.load_config(gcc_config)
     mutable_config.set("packages", cfg_data)
-    mpich = spack.concretize.concretize_one("mpich %gcc@14")
+    mpich = spack.concretize.concretize_one("mpich %gcc@14", spack.test.harness.current())
     spack.build_environment.setup_package(mpich.package, dirty=False)
 
     if expected_rpaths is not None:
@@ -934,9 +940,17 @@ def _pipe_fn(*, duplex: bool = False) -> Tuple[_TestPipe, _TestPipe]:
     return _TestPipe(), _TestPipe()
 
 
+class _TestInstallContext:
+    """Stands in for the package the tests do not have: no process is started to receive it."""
+
+    def __init__(self, pkg):
+        pass
+
+
 @pytest.fixture()
 def mock_build_process(monkeypatch):
     monkeypatch.setattr(spack.build_environment, "BuildProcess", _TestProcess)
+    monkeypatch.setattr(spack.subprocess_context, "PackageInstallContext", _TestInstallContext)
     monkeypatch.setattr(multiprocessing, "Pipe", _pipe_fn)
 
     def _factory(*, runtime: int):

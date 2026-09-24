@@ -6,8 +6,7 @@ import io
 import sys
 from typing import Dict, Iterable, List
 
-import spack.environment
-import spack.repo
+import spack.context
 import spack.util.string
 from spack.util import tty
 from spack.util.tty import colify
@@ -57,18 +56,18 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument("tag", nargs="*", help="show packages with the specified tag")
 
 
-def tags(parser, args):
+def tags(parser, args, ctx):
     # Disallow combining all option with (positional) tags to avoid confusion
     if args.all and args.tag:
         args.subparser.error("use the '--all' option OR provide tag(s) on the command line")
 
     # Provide a nice, simple message if database is empty
-    if args.installed and not spack.environment.installed_specs():
+    if args.installed and not _installed_specs(ctx):
         tty.msg("No installed packages")
         return
 
     # unique list of available tags
-    available_tags = sorted(spack.repo.PATH.tag_index.tags)
+    available_tags = sorted(ctx.repo.tag_index.tags)
     if not available_tags:
         tty.msg("No tagged packages")
         return
@@ -80,7 +79,7 @@ def tags(parser, args):
         if not args.installed:
             report_tags("available", available_tags)
         else:
-            tag_pkgs = packages_with_tags(available_tags, True, True)
+            tag_pkgs = packages_with_tags(available_tags, True, True, ctx)
             tags = tag_pkgs.keys() if tag_pkgs else []
             report_tags("installed", tags)
         return
@@ -90,7 +89,7 @@ def tags(parser, args):
     isatty = sys.stdout.isatty()
 
     tags = args.tag if args.tag else available_tags
-    tag_pkgs = packages_with_tags(tags, args.installed, False)
+    tag_pkgs = packages_with_tags(tags, args.installed, False, ctx)
     missing = "No installed packages" if args.installed else "None"
     for tag in sorted(tag_pkgs):
         # TODO: Remove the sorting once we're sure no one has an old
@@ -107,8 +106,14 @@ def tags(parser, args):
     print(buffer.getvalue())
 
 
+def _installed_specs(ctx: spack.context.SpackContext):
+    """Specs installed in the active environment, or in the store without one."""
+    hashes = ctx.environment.all_hashes() if ctx.environment else None
+    return ctx.store.db.query(hashes=hashes)
+
+
 def packages_with_tags(
-    tags: Iterable[str], installed: bool, skip_empty: bool
+    tags: Iterable[str], installed: bool, skip_empty: bool, ctx: spack.context.SpackContext
 ) -> Dict[str, List[str]]:
     """
     Returns a dict, indexed by tag, containing lists of names of packages
@@ -121,11 +126,12 @@ def packages_with_tags(
         skip_empty: True if exclude tags with no associated packages;
             otherwise, False if want entries for all tags even when no such
             tagged packages
+        ctx: context providing the repositories, and the store if ``installed``
     """
     tag_pkgs: Dict[str, List[str]] = {}
-    name_filter = {x.name for x in spack.environment.installed_specs()} if installed else None
+    name_filter = {x.name for x in _installed_specs(ctx)} if installed else None
     for tag in tags:
-        packages = spack.repo.PATH.tag_index.get_packages(tag)
+        packages = ctx.repo.tag_index.get_packages(tag)
         if name_filter is not None:
             packages = [p for p in packages if p in name_filter]
         if packages or not skip_empty:
