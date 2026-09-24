@@ -12,7 +12,7 @@ def test_dynamic_dot_graph_mpileaks(config, mock_packages, ctx: SpackContext):
     """Test dynamically graphing the mpileaks package."""
     s = spack.concretize.concretize_one("mpileaks", ctx)
     stream = io.StringIO()
-    spack.graph.graph_dot([s], out=stream)
+    spack.graph.graph_dot([s], out=stream, config=ctx.config)
     dot = stream.getvalue()
 
     nodes_to_check = ["mpileaks", "mpi", "callpath", "dyninst", "libdwarf", "libelf"]

@@ -209,7 +209,7 @@ def add_back_pytest_args(args, unknown_args):
     return result
 
 
-def unit_test(parser, args, unknown_args):
+def unit_test(parser, args, unknown_args, ctx):
     global pytest
     import spack.bootstrap
 
@@ -233,7 +233,7 @@ def unit_test(parser, args, unknown_args):
     # has been used, then test that extension.
     pytest_root = spack.paths.spack_root
     if args.extension:
-        pytest_root = spack.extensions.load_extension(args.extension)
+        pytest_root = spack.extensions.load_extension(args.extension, ctx.config)
 
     if args.numprocesses is not None and args.numprocesses > 1:
         try:

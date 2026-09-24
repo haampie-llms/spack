@@ -1342,7 +1342,7 @@ class BaseModuleFileWriter:
         template_name = self._get_template()
 
         try:
-            env = tengine.make_environment()
+            env = tengine.make_environment(self.conf.ctx.config)
             template = env.get_template(template_name)
         except spack.vendor.jinja2.TemplateNotFound:
             # If the template was not found raise an exception with a little

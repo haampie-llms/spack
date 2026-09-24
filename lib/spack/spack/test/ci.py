@@ -290,7 +290,7 @@ def test_ci_copy_stage_logs_to_artifacts_fail(
     a package."""
     log_dir = tmp_path / "log_dir"
     concrete_spec = spack.concretize.concretize_one("printing-package", ctx)
-    ci.copy_stage_logs_to_artifacts(concrete_spec, str(log_dir))
+    ci.copy_stage_logs_to_artifacts(concrete_spec, str(log_dir), store=ctx.store)
     _, err = capfd.readouterr()
     assert "Unable to copy files" in err
     assert "No such file or directory" in err
@@ -494,13 +494,17 @@ def test_ci_process_command_fail(repro_dir, monkeypatch):
         ci.process_command("help", [], str(repro_dir))
 
 
-def test_ci_create_buildcache(working_env, config, monkeypatch):
+def test_ci_create_buildcache(working_env, config, monkeypatch, ctx: SpackContext):
     """Test that create_buildcache returns a list of objects with the correct
     keys and types."""
-    monkeypatch.setattr(ci, "push_to_build_cache", lambda a, b, c: True)
+    monkeypatch.setattr(ci, "push_to_build_cache", lambda a, b, c, **kwargs: True)
 
     results = ci.create_buildcache(
-        Spec(), destination_mirror_urls=["file:///fake-url-one", "file:///fake-url-two"]
+        Spec(),
+        destination_mirror_urls=["file:///fake-url-one", "file:///fake-url-two"],
+        config=ctx.config,
+        client=ctx.network,
+        store=ctx.store,
     )
 
     assert len(results) == 2
@@ -510,7 +514,13 @@ def test_ci_create_buildcache(working_env, config, monkeypatch):
     assert result2.success
     assert result2.url == "file:///fake-url-two"
 
-    results = ci.create_buildcache(Spec(), destination_mirror_urls=["file:///fake-url-one"])
+    results = ci.create_buildcache(
+        Spec(),
+        destination_mirror_urls=["file:///fake-url-one"],
+        config=ctx.config,
+        client=ctx.network,
+        store=ctx.store,
+    )
 
     assert len(results) == 1
     assert results[0].success
@@ -581,7 +591,7 @@ def test_ci_run_standalone_tests_not_installed_cdash(
     os.environ["SPACK_CDASH_BUILD_STAMP"] = "ci-test-build-stamp"
     os.environ["CI_RUNNER_DESCRIPTION"] = "test-runner"
     client = spack.util.web.NetworkClient.from_config(spack.config.CONFIG)
-    handler = ci.CDashHandler(ci_cdash, urlopen=client.urlopen)
+    handler = ci.CDashHandler(ci_cdash, urlopen=client.urlopen, config=ctx.config)
     ci.run_standalone_tests(
         log_file=str(log_file),
         job_spec=spack.concretize.concretize_one("printing-package", ctx),
@@ -617,7 +627,7 @@ def test_ci_skipped_report(tmp_path: pathlib.Path, config, monkeypatch, ctx: Spa
     os.environ["SPACK_CDASH_BUILD_STAMP"] = "ci-test-build-stamp"
     os.environ["CI_RUNNER_DESCRIPTION"] = "test-runner"
     client = spack.util.web.NetworkClient.from_config(spack.config.CONFIG)
-    handler = ci.CDashHandler(ci_cdash, urlopen=client.urlopen)
+    handler = ci.CDashHandler(ci_cdash, urlopen=client.urlopen, config=ctx.config)
     reason = "Testing skip"
     handler.report_skipped(spec, str(tmp_path), reason=reason)
 

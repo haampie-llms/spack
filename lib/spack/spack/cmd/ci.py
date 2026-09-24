@@ -251,7 +251,7 @@ def ci_generate(args, ctx):
     a build group and register all generated jobs under it
     """
     env = spack.cmd.require_active_env(args.subparser, ctx.environment)
-    spack_ci.generate_pipeline(env, args)
+    spack_ci.generate_pipeline(env, args, ctx)
 
 
 def ci_reindex(args, ctx):
@@ -338,7 +338,9 @@ def ci_rebuild(args, ctx):
     cdash_handler = None
     if "build-group" in cdash_config:
         client = ctx.network
-        cdash_handler = spack_ci.CDashHandler(cdash_config, urlopen=client.urlopen)
+        cdash_handler = spack_ci.CDashHandler(
+            cdash_config, urlopen=client.urlopen, config=ctx.config
+        )
         tty.debug("cdash url = {0}".format(cdash_handler.url))
         tty.debug("cdash project = {0}".format(cdash_handler.project))
         tty.debug("cdash project_enc = {0}".format(cdash_handler.project_enc))
@@ -446,9 +448,9 @@ def ci_rebuild(args, ctx):
         else spack.binary_distribution.get_mirrors_for_spec(
             job_spec,
             index_only=False,
+            binary_index=ctx.binary_index,
             config=ctx.config,
             client=ctx.network,
-            binary_index=ctx.binary_index,
         )
     )
 
@@ -530,10 +532,12 @@ def ci_rebuild(args, ctx):
                 os.environ.get("CI_JOB_URL"),
                 os.environ.get("CI_PIPELINE_URL"),
                 job_spec.to_dict(),
+                config=ctx.config,
+                client=ctx.network,
             )
 
     # Copy logs and archived files from the install metadata (.spack) directory to artifacts now
-    spack_ci.copy_stage_logs_to_artifacts(job_spec, job_log_dir)
+    spack_ci.copy_stage_logs_to_artifacts(job_spec, job_log_dir, store=ctx.store)
 
     # Clear the stage directory
     spack.stage.purge(config=ctx.config)
@@ -604,6 +608,9 @@ def ci_rebuild(args, ctx):
             input_spec=job_spec,
             destination_mirror_urls=[buildcache_destination.push_url],
             sign_binaries=spack_ci.can_sign_binaries(),
+            config=ctx.config,
+            client=ctx.network,
+            store=ctx.store,
         ):
             if not result.success:
                 install_exit_code = FAILED_CREATE_BUILDCACHE_CODE
@@ -692,6 +699,7 @@ def ci_reproduce(args, ctx):
         gpg_key_url,
         args.runtime,
         args.use_local_head,
+        client=ctx.network,
     )
 
 
@@ -734,13 +742,18 @@ def _gitlab_artifacts_url(url: str) -> str:
 
 
 def validate_standard_versions(
-    pkg: spack.package_base.PackageBase, versions: List[StandardVersion], config: cfg.Configuration
+    pkg: spack.package_base.PackageBase,
+    versions: List[StandardVersion],
+    config: cfg.Configuration,
+    *,
+    client: web_util.NetworkClient,
 ) -> bool:
     """Get and test the checksum of a package version based on a tarball.
     Args:
       pkg: Spack package for which to validate a version checksum
       versions: list of package versions to validate
       config: configuration used to fetch the tarballs
+      client: network client used to fetch the tarballs
     Returns: True if all versions are valid, False if any version is invalid.
     """
     url_dict: Dict[StandardVersion, str] = {}
@@ -759,11 +772,7 @@ def validate_standard_versions(
             url_dict[version] = url
 
     version_hashes = spack.stage.get_checksums_for_versions(
-        url_dict,
-        pkg.name,
-        fetch_options=pkg.fetch_options,
-        config=config,
-        client=web_util.NetworkClient.from_config(config),
+        url_dict, pkg.name, fetch_options=pkg.fetch_options, config=config, client=client
     )
 
     for version, sha in version_hashes.items():
@@ -781,22 +790,25 @@ def validate_standard_versions(
 
 
 def validate_git_versions(
-    pkg: spack.package_base.PackageBase, versions: List[StandardVersion], config: cfg.Configuration
+    pkg: spack.package_base.PackageBase,
+    versions: List[StandardVersion],
+    config: cfg.Configuration,
+    *,
+    client: web_util.NetworkClient,
 ) -> bool:
     """Get and test the commit and tag of a package version based on a git repository.
     Args:
       pkg: Spack package for which to validate a version
       versions: list of package versions to validate
       config: configuration used to stage the repository
+      client: network client used to fetch the repository
     Returns: True if all versions are valid, False if any version is invalid.
     """
     valid_commit = True
     for version in versions:
         fetcher = spack.package_base.for_package_version(pkg, version)
         assert isinstance(fetcher, spack.fetch_strategy.GitFetchStrategy)
-        with spack.stage.stage_from_config(
-            fetcher, config=config, client=web_util.NetworkClient.from_config(config)
-        ) as stage:
+        with spack.stage.stage_from_config(fetcher, config=config, client=client) as stage:
             known_commit = pkg.versions[version]["commit"]
             try:
                 stage.fetch()
@@ -857,6 +869,7 @@ def ci_verify_versions(args, ctx):
     for pkg_name in pkgs:
         spec = spack.spec.Spec(pkg_name)
         pkg = ctx.repo.get_pkg_class(spec.name)(spec)
+        pkg.context = ctx
         path = ctx.repo.package_path(pkg_name)
 
         # Skip checking manual download packages and trust the maintainers
@@ -892,10 +905,12 @@ def ci_verify_versions(args, ctx):
             new_git_versions = filter_added_versions(git_version_to_checksum)
 
         if new_url_versions:
-            success &= validate_standard_versions(pkg, new_url_versions, ctx.config)
+            success &= validate_standard_versions(
+                pkg, new_url_versions, ctx.config, client=ctx.network
+            )
 
         if new_git_versions:
-            success &= validate_git_versions(pkg, new_git_versions, ctx.config)
+            success &= validate_git_versions(pkg, new_git_versions, ctx.config, client=ctx.network)
 
     if not success:
         sys.exit(1)

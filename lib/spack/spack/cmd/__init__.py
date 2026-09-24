@@ -13,6 +13,7 @@ import textwrap
 from typing import TYPE_CHECKING, Callable, Container, Generator, List, Optional, Sequence, Union
 
 import spack.concretize
+import spack.config
 import spack.environment as ev
 import spack.error
 import spack.extensions
@@ -88,7 +89,7 @@ def all_commands():
     if _all_commands is None:
         _all_commands = []
         command_paths = [spack.paths.command_path]  # Built-in commands
-        command_paths += spack.extensions.get_command_paths()  # Extensions
+        command_paths += spack.extensions.get_command_paths(spack.config.CONFIG)  # Extensions
         for path in command_paths:
             for file in os.listdir(path):
                 if file.endswith(".py") and not re.search(ignore_files, file):
@@ -125,7 +126,7 @@ def get_module(cmd_name):
         module = importlib.import_module(module_name)
         tty.debug("Imported {0} from built-in commands".format(pname))
     except ImportError:
-        module = spack.extensions.get_module(cmd_name)
+        module = spack.extensions.get_module(cmd_name, spack.config.CONFIG)
         if not module:
             raise CommandNotFoundError(cmd_name)
 

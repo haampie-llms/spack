@@ -129,7 +129,7 @@ class BootstrapEnvironment(spack.environment.Environment):
         tty.msg(
             "[BOOTSTRAPPING] Spack has missing dependencies, creating a bootstrapping environment"
         )
-        env = spack.tengine.make_environment()
+        env = spack.tengine.make_environment(spack.config.CONFIG)
         template = env.get_template("bootstrap/spack.yaml")
         context = {
             "python_spec": f"{spec_for_current_python()}+ctypes",
