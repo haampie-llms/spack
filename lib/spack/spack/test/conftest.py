@@ -449,7 +449,7 @@ def clean_user_environment(tmp_path_factory: pytest.TempPathFactory):
         mp.delenv("SPACK_DISABLE_LOCAL_CONFIG", raising=False)
         mp.setenv("SPACK_USER_CONFIG_PATH", str(tmp_path_factory.mktemp("user_config")))
         mp.setenv("SPACK_SYSTEM_CONFIG_PATH", str(tmp_path_factory.mktemp("system_config")))
-        with ev.no_active_environment():
+        with ev.no_active_environment(spack.context.default()):
             yield
 
 
@@ -457,9 +457,9 @@ def clean_user_environment(tmp_path_factory: pytest.TempPathFactory):
 # Make sure global state of active env does not leak between tests.
 #
 @pytest.fixture(scope="function", autouse=True)
-def clean_test_environment():
+def clean_test_environment(ctx: SpackContext):
     yield
-    ev.deactivate()
+    ctx.deactivate()
 
 
 # Hooks to add command line options or set other custom behaviors.

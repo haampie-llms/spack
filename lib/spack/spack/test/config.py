@@ -1528,7 +1528,7 @@ def test_env_activation_preserves_command_line_scope(
         assert mutable_config.highest() == expected_cl_scope
 
         # No active environment pops the scope
-        with ev.no_active_environment():
+        with ev.no_active_environment(ctx):
             assert mutable_config.highest() == expected_cl_scope
         assert mutable_config.highest() == expected_cl_scope
 
@@ -1563,7 +1563,7 @@ def test_env_activation_preserves_config_scopes(
         assert highest_priority_scopes(mutable_config, nscopes=3) == expected_scopes_with_first_env
 
         # No active environment pops the scope
-        with ev.no_active_environment():
+        with ev.no_active_environment(ctx):
             assert (
                 highest_priority_scopes(mutable_config, nscopes=2) == expected_scopes_without_env
             )
