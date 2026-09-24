@@ -9,7 +9,7 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
-from typing import List, Optional, Set, Tuple, Union
+from typing import TYPE_CHECKING, List, Optional, Set, Tuple, Union
 
 import spack.cmd
 import spack.cmd.common
@@ -29,6 +29,9 @@ from spack.util.environment import EnvironmentModifications
 from spack.util.filesystem import islink, symlink
 from spack.util.tty.colify import colify
 from spack.util.tty.color import cescape, colorize
+
+if TYPE_CHECKING:
+    import spack.context
 
 description = "manage environments"
 section = "environments"
@@ -118,6 +121,7 @@ def env_create(args, ctx):
 
     env = _env_create(
         args.env_name,
+        ctx=ctx,
         init_file=args.envfile,
         dir=args.dir or os.path.sep in args.env_name or args.env_name in (".", ".."),
         with_view=with_view,
@@ -133,6 +137,7 @@ def env_create(args, ctx):
 def _env_create(
     name_or_path: str,
     *,
+    ctx: "spack.context.SpackContext",
     init_file: Optional[str] = None,
     dir: bool = False,
     with_view: Optional[Union[bool, str]] = None,
@@ -143,6 +148,7 @@ def _env_create(
 
     Arguments:
         name_or_path: name of the environment to create, or path to it
+        ctx: context the environment is read in
         init_file: optional initialization file -- can be a JSON lockfile
             (*.lock, *.json), YAML manifest file, or env dir
         dir: if True, create an environment in a directory instead of a named
@@ -159,6 +165,7 @@ def _env_create(
             with_view=with_view,
             keep_relative=keep_relative,
             include_concrete=include_concrete,
+            ctx=ctx,
         )
         tty.msg(
             colorize(
@@ -172,6 +179,7 @@ def _env_create(
             with_view=with_view,
             keep_relative=keep_relative,
             include_concrete=include_concrete,
+            ctx=ctx,
         )
         tty.msg(colorize(f"Created independent environment in: @c{{{cescape(env.path)}}}"))
     tty.msg(f"Activate with: {colorize(f'@c{{spack env activate {cescape(name_or_path)}}}')}")
@@ -319,12 +327,12 @@ def env_activate(args, ctx):
     # the default environment. It's created when it doesn't exist yet.
     if not args.env_name and not args.temp:
         short_name = "default"
-        if not ev.exists(short_name):
-            ev.create(short_name)
+        if not ev.exists(short_name, config=ctx.config):
+            ev.create(short_name, ctx=ctx)
             action = "Created and activated"
         else:
             action = "Activated"
-        env_path = ev.root(short_name)
+        env_path = ev.root(short_name, config=ctx.config)
         _tty_info(f"{action} default environment in {env_path}")
 
     # Temporary environment
@@ -332,15 +340,15 @@ def env_activate(args, ctx):
         env = create_temp_env_directory()
         env_path = os.path.abspath(env)
         view = not args.without_view
-        ev.create_in_dir(env, with_view=view).write(regenerate=False)
+        ev.create_in_dir(env, with_view=view, ctx=ctx).write(regenerate=False)
         _tty_info(f"Created and activated temporary environment in {env_path}")
 
     # Managed environment
-    elif ev.exists(args.env_name) and not args.dir:
-        env_path = ev.root(args.env_name)
+    elif ev.exists(args.env_name, config=ctx.config) and not args.dir:
+        env_path = ev.root(args.env_name, config=ctx.config)
 
     # Environment directory
-    elif ev.is_env_dir(args.env_name):
+    elif ev.is_env_dir(args.env_name, config=ctx.config):
         env_path = os.path.abspath(args.env_name)
 
     # create if user requested, and then recall recursively
@@ -360,10 +368,10 @@ def env_activate(args, ctx):
         env_mods = EnvironmentModifications()
     else:
         cmds = spack.environment.shell.deactivate_header(shell=args.shell)
-        env_mods = spack.environment.shell.deactivate()
+        env_mods = spack.environment.shell.deactivate(ctx.environment, ctx)
 
     # Activate new environment
-    active_env = ev.Environment(env_path)
+    active_env = ev.Environment(env_path, ctx=ctx)
 
     # Check if runtime environment variables are requested, and if so, for what view.
     view: Optional[str] = None
@@ -377,7 +385,7 @@ def env_activate(args, ctx):
     cmds += spack.environment.shell.activate_header(
         env=active_env, shell=args.shell, prompt=args.prompt, view=view
     )
-    env_mods.extend(spack.environment.shell.activate(env=active_env, view=view))
+    env_mods.extend(spack.environment.shell.activate(env=active_env, ctx=ctx, view=view))
     cmds += env_mods.shell_modifications(args.shell)
     sys.stdout.write(cmds)
 
@@ -440,7 +448,7 @@ def env_deactivate(args, ctx):
         tty.die("No environment is currently active.")
 
     cmds = spack.environment.shell.deactivate_header(args.shell)
-    env_mods = spack.environment.shell.deactivate()
+    env_mods = spack.environment.shell.deactivate(ctx.environment, ctx)
     cmds += env_mods.shell_modifications(args.shell)
     sys.stdout.write(cmds)
 
@@ -457,7 +465,7 @@ def env_track_setup_parser(subparser):
 
 def env_track(args, ctx):
     src_path = os.path.abspath(args.dir)
-    if not ev.is_env_dir(src_path):
+    if not ev.is_env_dir(src_path, config=ctx.config):
         tty.die("Cannot track environment. Path doesn't contain an environment")
 
     if args.name:
@@ -466,7 +474,7 @@ def env_track(args, ctx):
         name = os.path.basename(src_path)
 
     try:
-        dst_path = ev.environment_dir_from_name(name, exists_ok=False)
+        dst_path = ev.environment_dir_from_name(name, exists_ok=False, config=ctx.config)
     except ev.SpackEnvironmentError:
         tty.die(
             f"An environment named {name} already exists. Set a name with:"
@@ -486,8 +494,10 @@ def env_track(args, ctx):
 #
 # env remove & untrack helpers
 #
-def filter_managed_env_names(env_names: Set[str]) -> Set[str]:
-    tracked_env_names = {e for e in env_names if islink(ev.environment_dir_from_name(e))}
+def filter_managed_env_names(env_names: Set[str], config: spack.config.Configuration) -> Set[str]:
+    tracked_env_names = {
+        e for e in env_names if islink(ev.environment_dir_from_name(e, config=config))
+    }
     managed_env_names = env_names - set(tracked_env_names)
 
     num_managed_envs = len(managed_env_names)
@@ -511,11 +521,11 @@ def filter_managed_env_names(env_names: Set[str]) -> Set[str]:
     return tracked_env_names
 
 
-def get_valid_envs(env_names: Set[str]) -> Set[ev.Environment]:
+def get_valid_envs(env_names: Set[str], ctx: "spack.context.SpackContext") -> Set[ev.Environment]:
     valid_envs = set()
     for env_name in env_names:
         try:
-            env = ev.read(env_name)
+            env = ev.read(env_name, ctx=ctx)
             valid_envs.add(env)
 
         except (spack.config.ConfigFormatError, ev.SpackEnvironmentConfigError):
@@ -525,9 +535,13 @@ def get_valid_envs(env_names: Set[str]) -> Set[ev.Environment]:
 
 
 def _env_untrack_or_remove(
-    env_names: List[str], remove: bool = False, force: bool = False, yes_to_all: bool = False
+    env_names: List[str],
+    ctx: "spack.context.SpackContext",
+    remove: bool = False,
+    force: bool = False,
+    yes_to_all: bool = False,
 ):
-    all_env_names = set(ev.all_environment_names())
+    all_env_names = set(ev.all_environment_names(ctx.config))
     known_env_names = set(env_names).intersection(all_env_names)
     unknown_env_names = set(env_names) - known_env_names
 
@@ -538,12 +552,12 @@ def _env_untrack_or_remove(
     # if only unlinking is allowed, remove all environments
     # which do not point internally at symlinks
     if not remove:
-        env_names_to_remove = filter_managed_env_names(known_env_names)
+        env_names_to_remove = filter_managed_env_names(known_env_names, ctx.config)
     else:
         env_names_to_remove = known_env_names
 
     # initialize all environments with valid spack.yaml configs
-    all_valid_envs = get_valid_envs(all_env_names)
+    all_valid_envs = get_valid_envs(all_env_names, ctx)
 
     # build a task list of environments and bad env names to remove
     envs_to_remove = [e for e in all_valid_envs if e.name in env_names_to_remove]
@@ -602,7 +616,9 @@ def _env_untrack_or_remove(
 
     for bad_env_name in bad_env_names_to_remove:
         shutil.rmtree(
-            spack.environment.environment.environment_dir_from_name(bad_env_name, exists_ok=True)
+            spack.environment.environment.environment_dir_from_name(
+                bad_env_name, exists_ok=True, config=ctx.config
+            )
         )
         tty.msg(f"Successfully removed environment '{bad_env_name}'")
         removed_env_names.append(bad_env_name)
@@ -629,7 +645,7 @@ def env_untrack_setup_parser(subparser):
 
 def env_untrack(args, ctx):
     _env_untrack_or_remove(
-        env_names=args.env, force=args.force, yes_to_all=args.yes_to_all, remove=False
+        env_names=args.env, ctx=ctx, force=args.force, yes_to_all=args.yes_to_all, remove=False
     )
 
 
@@ -660,7 +676,7 @@ def env_remove_setup_parser(subparser):
 def env_remove(args, ctx):
     """remove existing environment(s)"""
     _env_untrack_or_remove(
-        env_names=args.rm_env, remove=True, force=args.force, yes_to_all=args.yes_to_all
+        env_names=args.rm_env, ctx=ctx, remove=True, force=args.force, yes_to_all=args.yes_to_all
     )
 
 
@@ -698,11 +714,11 @@ def env_rename(args, ctx):
 
     # Directory option has been specified
     if args.dir:
-        if not ev.is_env_dir(args.mv_from):
+        if not ev.is_env_dir(args.mv_from, config=ctx.config):
             tty.die("The specified path does not correspond to a valid spack environment")
         from_path = Path(args.mv_from)
         if not args.force:
-            if ev.is_env_dir(args.mv_to):
+            if ev.is_env_dir(args.mv_to, config=ctx.config):
                 tty.die(
                     "The new path corresponds to an existing environment;"
                     " specify the --force flag to overwrite it."
@@ -712,14 +728,14 @@ def env_rename(args, ctx):
         to_path = Path(args.mv_to)
 
     # Name option being used
-    elif ev.exists(args.mv_from):
-        from_path = ev.environment.environment_dir_from_name(args.mv_from)
-        if not args.force and ev.exists(args.mv_to):
+    elif ev.exists(args.mv_from, config=ctx.config):
+        from_path = ev.environment.environment_dir_from_name(args.mv_from, config=ctx.config)
+        if not args.force and ev.exists(args.mv_to, config=ctx.config):
             tty.die(
                 "The new name corresponds to an existing environment;"
                 " specify the --force flag to overwrite it."
             )
-        to_path = ev.environment.root(args.mv_to)
+        to_path = ev.environment.root(args.mv_to, config=ctx.config)
 
     # Neither
     else:
@@ -728,7 +744,7 @@ def env_rename(args, ctx):
     # Guard against renaming from or to an active environment
     active_env = ctx.environment
     if active_env:
-        from_env = ev.Environment(from_path)
+        from_env = ev.Environment(from_path, ctx=ctx)
         if from_env.path == active_env.path:
             tty.die("Cannot rename active environment")
         if to_path == active_env.path:
@@ -747,11 +763,11 @@ def env_list_setup_parser(subparser):
 
 
 def env_list(args, ctx):
-    names = ev.all_environment_names()
+    names = ev.all_environment_names(ctx.config)
 
     color_names = []
     for name in names:
-        if ev.active(name):
+        if ev.active(name, ctx.environment):
             name = colorize("@*g{%s}" % name)
         color_names.append(name)
 
@@ -894,7 +910,7 @@ def env_update_setup_parser(subparser):
 
 def env_update(args, ctx):
     """update the manifest to the latest format"""
-    manifest_file = ev.manifest_file(args.update_env)
+    manifest_file = ev.manifest_file(args.update_env, config=ctx.config)
     backup_file = manifest_file + ".bkp"
 
     needs_update = not ev.is_latest_format(manifest_file)
@@ -940,7 +956,7 @@ def env_revert_setup_parser(subparser):
 
 def env_revert(args, ctx):
     """restore the environment manifest to its previous format"""
-    manifest_file = ev.manifest_file(args.revert_env)
+    manifest_file = ev.manifest_file(args.revert_env, config=ctx.config)
     backup_file = manifest_file + ".bkp"
 
     # Check that both the spack.yaml and the backup exist, the inform user

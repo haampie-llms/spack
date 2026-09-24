@@ -247,7 +247,7 @@ class ReusableSpecsSelector:
                 include = source.get("include", default_include)
                 exclude = source.get("exclude", default_exclude)
                 if source["type"] == "environment" and "path" in source:
-                    env_dir = spack.environment.as_env_dir(source["path"])
+                    env_dir = spack.environment.as_env_dir(source["path"], config=configuration)
                     active_env = context.environment
                     if not active_env or env_dir not in active_env.included_concrete_env_root_dirs:
                         # If the environment is not included as a concrete environment, use the
@@ -257,7 +257,9 @@ class ReusableSpecsSelector:
                                 is_reusable=local_is_reusable,
                                 include=include,
                                 exclude=exclude,
-                                env=spack.environment.environment_from_name_or_dir(env_dir),
+                                env=spack.environment.environment_from_name_or_dir(
+                                    env_dir, ctx=spack.context.default()
+                                ),
                             )
                         )
                 elif source["type"] == "local":

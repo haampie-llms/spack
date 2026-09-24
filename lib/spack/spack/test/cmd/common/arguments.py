@@ -91,7 +91,7 @@ def test_match_spec_env(mock_packages, mutable_mock_env_path, ctx: SpackContext)
     check_defaults = spack.cmd.parse_specs(["pkg-a"], ctx, concretize=True)[0]
     assert not check_defaults.satisfies("foobar=baz")
 
-    e = ev.create("test")
+    e = ev.create("test", ctx=ctx)
     e.add("pkg-a foobar=baz")
     e.concretize()
     with e:
@@ -101,7 +101,7 @@ def test_match_spec_env(mock_packages, mutable_mock_env_path, ctx: SpackContext)
 
 
 def test_multiple_env_match_raises_error(mock_packages, mutable_mock_env_path, ctx: SpackContext):
-    e = ev.create("test")
+    e = ev.create("test", ctx=ctx)
     e.add("pkg-a foobar=baz")
     e.add("pkg-a foobar=fee")
     e.concretize()
@@ -113,7 +113,7 @@ def test_multiple_env_match_raises_error(mock_packages, mutable_mock_env_path, c
 
 
 def test_root_and_dep_match_returns_root(mock_packages, mutable_mock_env_path, ctx: SpackContext):
-    e = ev.create("test")
+    e = ev.create("test", ctx=ctx)
     e.add("pkg-b@0.9")
     e.add("pkg-a foobar=bar")  # Depends on b, should choose b@1.0
     e.concretize()

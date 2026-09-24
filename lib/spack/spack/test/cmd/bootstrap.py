@@ -14,6 +14,7 @@ import spack.environment as ev
 import spack.main
 import spack.spec
 from spack.config import Configuration
+from spack.context import SpackContext
 
 _bootstrap = spack.main.SpackCommand("bootstrap")
 
@@ -58,10 +59,12 @@ def test_reset_in_file_scopes(mutable_config, scopes):
         assert not os.path.exists(bootstrap_yaml)
 
 
-def test_reset_in_environment(mutable_mock_env_path, mutable_config: Configuration):
+def test_reset_in_environment(
+    mutable_mock_env_path, mutable_config: Configuration, ctx: SpackContext
+):
     env = spack.main.SpackCommand("env")
     env("create", "bootstrap-test")
-    current_environment = ev.read("bootstrap-test")
+    current_environment = ev.read("bootstrap-test", ctx=ctx)
 
     with current_environment:
         _bootstrap("disable")

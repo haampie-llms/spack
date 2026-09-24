@@ -59,7 +59,7 @@ def test_gc_with_environment(mutable_database, mutable_mock_env_path, ctx: Spack
     s = spack.concretize.concretize_one("simple-inheritance", ctx)
     PackageInstaller([s.package], explicit=True, fake=True).install()
 
-    e = ev.create("test_gc")
+    e = ev.create("test_gc", ctx=ctx)
     with e:
         add("cmake")
         install()
@@ -76,7 +76,7 @@ def test_gc_with_build_dependency_in_environment(
     s = spack.concretize.concretize_one("simple-inheritance", ctx)
     PackageInstaller([s.package], explicit=True, fake=True).install()
 
-    e = ev.create("test_gc")
+    e = ev.create("test_gc", ctx=ctx)
     with e:
         add("simple-inheritance")
         install()
@@ -96,12 +96,14 @@ def test_gc_with_build_dependency_in_environment(
 
 
 @pytest.mark.db
-def test_gc_except_any_environments(mutable_database: Database, mutable_mock_env_path):
+def test_gc_except_any_environments(
+    mutable_database: Database, mutable_mock_env_path, ctx: SpackContext
+):
     """Tests whether the garbage collector can remove all specs except those still needed in some
     environment (needed in the sense of roots + link/run deps)."""
     assert mutable_database.query_local("zmpi")
 
-    e = ev.create("test_gc")
+    e = ev.create("test_gc", ctx=ctx)
     e.add("simple-inheritance")
     e.concretize()
     e.install_all(fake=True)
@@ -131,7 +133,7 @@ def test_gc_except_specific_environments(
 
     assert mutable_database.query_local("zmpi")
 
-    e = ev.create("test_gc")
+    e = ev.create("test_gc", ctx=ctx)
     with e:
         add("simple-inheritance")
         install()
@@ -161,7 +163,7 @@ def test_gc_except_specific_dir_env(
 
     assert mutable_database.query_local("zmpi")
 
-    e = ev.create_in_dir(str(tmp_path))
+    e = ev.create_in_dir(str(tmp_path), ctx=ctx)
     with e:
         add("simple-inheritance")
         install()
@@ -174,14 +176,14 @@ def test_gc_except_specific_dir_env(
 
 
 @pytest.fixture
-def mock_installed_environment(mutable_database, mutable_mock_env_path):
+def mock_installed_environment(mutable_database, mutable_mock_env_path, ctx: SpackContext):
 
     def _create_environment(name, spack_yaml):
-        tmp_env = ev.create(name)
+        tmp_env = ev.create(name, ctx=ctx)
         spack_yaml_path = pathlib.Path(tmp_env.path) / "spack.yaml"
         spack_yaml_path.write_text(spack_yaml)
-        e = ev.read(name)
-        with ev.read(name):
+        e = ev.read(name, ctx=ctx)
+        with ev.read(name, ctx=ctx):
             e.concretize()
             e.install_all(fake=True)
             e.write()

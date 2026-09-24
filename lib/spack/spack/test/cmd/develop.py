@@ -55,38 +55,38 @@ class TestDevelop:
                 "packages:{}:package_attributes:build_directory".format(spec.name), scope
             )
 
-    def test_develop_no_path_no_clone(self):
+    def test_develop_no_path_no_clone(self, ctx: SpackContext):
         env("create", "test")
-        with ev.read("test") as e:
+        with ev.read("test", ctx=ctx) as e:
             # develop checks that the path exists
             fs.mkdirp(os.path.join(e.path, "mpich"))
             develop("--no-clone", "mpich@1.0")
             self.check_develop(e, spack.spec.Spec("mpich@=1.0"))
 
-    def test_develop_no_clone(self, tmp_path: pathlib.Path):
+    def test_develop_no_clone(self, tmp_path: pathlib.Path, ctx: SpackContext):
         env("create", "test")
-        with ev.read("test") as e:
+        with ev.read("test", ctx=ctx) as e:
             develop("--no-clone", "-p", str(tmp_path), "mpich@1.0")
             self.check_develop(e, spack.spec.Spec("mpich@=1.0"), str(tmp_path))
 
-    def test_develop_no_version(self, tmp_path: pathlib.Path):
+    def test_develop_no_version(self, tmp_path: pathlib.Path, ctx: SpackContext):
         env("create", "test")
-        with ev.read("test") as e:
+        with ev.read("test", ctx=ctx) as e:
             develop("--no-clone", "-p", str(tmp_path), "mpich")
             self.check_develop(e, spack.spec.Spec("mpich@=main"), str(tmp_path))
 
-    def test_develop(self):
+    def test_develop(self, ctx: SpackContext):
         env("create", "test")
-        with ev.read("test") as e:
+        with ev.read("test", ctx=ctx) as e:
             develop("mpich@1.0")
             self.check_develop(e, spack.spec.Spec("mpich@=1.0"))
 
-    def test_develop_git_ref(self, tmp_path: pathlib.Path, monkeypatch):
+    def test_develop_git_ref(self, tmp_path: pathlib.Path, monkeypatch, ctx: SpackContext):
         """A develop spec with a bare git ref gets its Spack version assigned when the
         environment is concretized."""
         monkeypatch.setattr(GitRefLookup, "get", lambda self, ref: ("1.2", 0))
         env("create", "test")
-        with ev.read("test") as e:
+        with ev.read("test", ctx=ctx) as e:
             develop("--no-clone", "-p", str(tmp_path), "git-test-commit@git.1.x")
             e.add("git-test-commit")
             e.concretize()
@@ -94,9 +94,9 @@ class TestDevelop:
             assert str(root.version) == "git.1.x=1.2"
             assert root.variants["dev_path"].value == str(tmp_path)
 
-    def test_develop_no_args(self):
+    def test_develop_no_args(self, ctx: SpackContext):
         env("create", "test")
-        with ev.read("test") as e:
+        with ev.read("test", ctx=ctx) as e:
             # develop and remove it
             develop("mpich@1.0")
             shutil.rmtree(os.path.join(e.path, "mpich"))
@@ -105,15 +105,15 @@ class TestDevelop:
             develop()
             self.check_develop(e, spack.spec.Spec("mpich@=1.0"))
 
-    def test_develop_build_directory(self):
+    def test_develop_build_directory(self, ctx: SpackContext):
         env("create", "test")
-        with ev.read("test") as e:
+        with ev.read("test", ctx=ctx) as e:
             develop("-b", "test_build_dir", "mpich@1.0")
             self.check_develop(e, spack.spec.Spec("mpich@=1.0"), None, "test_build_dir")
 
-    def test_develop_twice(self):
+    def test_develop_twice(self, ctx: SpackContext):
         env("create", "test")
-        with ev.read("test") as e:
+        with ev.read("test", ctx=ctx) as e:
             develop("mpich@1.0")
             self.check_develop(e, spack.spec.Spec("mpich@=1.0"))
 
@@ -125,25 +125,25 @@ class TestDevelop:
             self.check_develop(e, spack.spec.Spec("mpich@=1.0"))
             assert len(e.dev_specs) == 1
 
-    def test_develop_update_path(self, tmp_path: pathlib.Path):
+    def test_develop_update_path(self, tmp_path: pathlib.Path, ctx: SpackContext):
         env("create", "test")
-        with ev.read("test") as e:
+        with ev.read("test", ctx=ctx) as e:
             develop("mpich@1.0")
             develop("-p", str(tmp_path), "mpich@1.0")
             self.check_develop(e, spack.spec.Spec("mpich@=1.0"), str(tmp_path))
             assert len(e.dev_specs) == 1
 
-    def test_develop_update_spec(self):
+    def test_develop_update_spec(self, ctx: SpackContext):
         env("create", "test")
-        with ev.read("test") as e:
+        with ev.read("test", ctx=ctx) as e:
             develop("mpich@1.0")
             develop("mpich@2.0")
             self.check_develop(e, spack.spec.Spec("mpich@=2.0"))
             assert len(e.dev_specs) == 1
 
-    def test_develop_applies_changes(self, monkeypatch):
+    def test_develop_applies_changes(self, monkeypatch, ctx: SpackContext):
         env("create", "test")
-        with ev.read("test") as e:
+        with ev.read("test", ctx=ctx) as e:
             e.add("mpich@1.0")
             e.concretize()
             e.write()
@@ -155,9 +155,9 @@ class TestDevelop:
             spec = next(e.roots())
             assert spec.satisfies("dev_path=*")
 
-    def test_develop_applies_changes_parents(self, monkeypatch):
+    def test_develop_applies_changes_parents(self, monkeypatch, ctx: SpackContext):
         env("create", "test")
-        with ev.read("test") as e:
+        with ev.read("test", ctx=ctx) as e:
             e.add("hdf5^mpich@1.0")
             e.concretize()
             e.write()
@@ -172,9 +172,9 @@ class TestDevelop:
             assert new_hdf5.dag_hash() != orig_hash
             assert new_hdf5["mpi"].satisfies("dev_path=*")
 
-    def test_develop_applies_changes_spec_conflict(self, monkeypatch):
+    def test_develop_applies_changes_spec_conflict(self, monkeypatch, ctx: SpackContext):
         env("create", "test")
-        with ev.read("test") as e:
+        with ev.read("test", ctx=ctx) as e:
             e.add("mpich@1.0")
             e.concretize()
             e.write()
@@ -187,7 +187,7 @@ class TestDevelop:
         self, monkeypatch, mutable_config: Configuration, ctx: SpackContext
     ):
         env("create", "test")
-        with ev.read("test") as e:
+        with ev.read("test", ctx=ctx) as e:
             e.add("mpich@1.0")
             e.concretize()
             e.write()
@@ -206,9 +206,9 @@ class TestDevelop:
                 assert spec.satisfies(f"dev_path={path}")
                 assert mutable_config.get("develop:mpich:path") == path
 
-    def test_develop_no_modify(self, monkeypatch):
+    def test_develop_no_modify(self, monkeypatch, ctx: SpackContext):
         env("create", "test")
-        with ev.read("test") as e:
+        with ev.read("test", ctx=ctx) as e:
             e.add("mpich@1.0")
             e.concretize()
             e.write()
@@ -222,7 +222,7 @@ class TestDevelop:
 
     def test_develop_canonicalize_path(self, monkeypatch, ctx: SpackContext):
         env("create", "test")
-        with ev.read("test") as e:
+        with ev.read("test", ctx=ctx) as e:
             e.add("mpich@1.0")
             e.concretize()
             e.write()
@@ -244,7 +244,7 @@ class TestDevelop:
 
     def test_develop_canonicalize_path_no_args(self, monkeypatch, ctx: SpackContext):
         env("create", "test")
-        with ev.read("test") as e:
+        with ev.read("test", ctx=ctx) as e:
             e.add("mpich@1.0")
             e.concretize()
             e.write()
@@ -312,7 +312,7 @@ def test_develop_full_git_repo(
     # sure the git repo pulled includes the full branch history (or rather,
     # more than just one commit).
     env("create", "test")
-    with ev.read("test") as e:
+    with ev.read("test", ctx=ctx) as e:
         add("git-test-commit@1.2")
         e.concretize()
         e.write()
@@ -326,10 +326,10 @@ def test_develop_full_git_repo(
         assert len(commits) > 1
 
 
-def test_recursive(mutable_mock_env_path, install_mockery, mock_fetch):
+def test_recursive(mutable_mock_env_path, install_mockery, mock_fetch, ctx: SpackContext):
     env("create", "test")
 
-    with ev.read("test") as e:
+    with ev.read("test", ctx=ctx) as e:
         add("indirect-mpich@1.0")
         e.concretize()
         e.write()
@@ -348,11 +348,11 @@ def test_recursive(mutable_mock_env_path, install_mockery, mock_fetch):
 
 
 def test_develop_fails_with_multiple_concrete_versions(
-    mutable_mock_env_path, install_mockery, mock_fetch, mutable_config
+    mutable_mock_env_path, install_mockery, mock_fetch, mutable_config, ctx: SpackContext
 ):
     env("create", "test")
 
-    with ev.read("test") as e:
+    with ev.read("test", ctx=ctx) as e:
         add("indirect-mpich@1.0")
         add("indirect-mpich@0.9")
         mutable_config.set("concretizer:unify", False)
@@ -366,7 +366,7 @@ def test_develop_fails_with_multiple_concrete_versions(
 
 
 def test_concretize_dev_path_with_at_symbol_in_env(
-    mutable_mock_env_path, tmp_path: pathlib.Path, mock_packages
+    mutable_mock_env_path, tmp_path: pathlib.Path, mock_packages, ctx: SpackContext
 ):
     spec_like = "develop-test@develop"
 
@@ -374,7 +374,7 @@ def test_concretize_dev_path_with_at_symbol_in_env(
     develop_dir.mkdir()
     env("create", "test_at_sym")
 
-    with ev.read("test_at_sym") as e:
+    with ev.read("test_at_sym", ctx=ctx) as e:
         add(spec_like)
         e.concretize()
         e.write()
@@ -407,6 +407,7 @@ def test_develop_with_devpath_staging(
     mock_resource_fetch,
     mock_stage,
     _devpath_should_exist,
+    ctx: SpackContext,
 ):
     # If the specified develop path exists, a resource should not be
     # downloaded at all at install time. Otherwise, it should be.
@@ -420,7 +421,7 @@ def test_develop_with_devpath_staging(
 
     spec_like = "simple-resource@1.0"
 
-    with ev.read("test") as e:
+    with ev.read("test", ctx=ctx) as e:
         e.add(spec_like)
         e.concretize()
         e.write()

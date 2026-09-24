@@ -453,8 +453,8 @@ def test_use_bin_index_active_env_with_view(
     s = spack.concretize.concretize_one("libdwarf", ctx)
 
     # Create an environment and install specs for the view
-    ev.create("testenv")
-    with ev.read("testenv"):
+    ev.create("testenv", ctx=ctx)
+    with ev.read("testenv", ctx=ctx):
         install_cmd("--add", "--fake", "--no-cache", s.name)
         buildcache_cmd("push", "-u", "test", s.name)
         buildcache_cmd("update-index", "test")
@@ -500,8 +500,8 @@ def test_use_bin_index_with_view(
     s = spack.concretize.concretize_one("libdwarf", ctx)
 
     # Create an environment and install specs for the view
-    ev.create("testenv")
-    with ev.read("testenv"):
+    ev.create("testenv", ctx=ctx)
+    with ev.read("testenv", ctx=ctx):
         install_cmd("--add", "--fake", "--no-cache", s.name)
         buildcache_cmd("push", "-u", "test", s.name)
 

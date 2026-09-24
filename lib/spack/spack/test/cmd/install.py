@@ -750,7 +750,7 @@ def test_install_only_dependencies_in_env(
 ):
     env("create", "test")
 
-    with ev.read("test"):
+    with ev.read("test", ctx=ctx):
         dep = spack.concretize.concretize_one("dependency-install", ctx)
         root = spack.concretize.concretize_one("dependent-install", ctx)
 
@@ -767,7 +767,7 @@ def test_install_only_dependencies_of_all_in_env(
 ):
     env("create", "--without-view", "test")
 
-    with ev.read("test"):
+    with ev.read("test", ctx=ctx):
         roots = [
             spack.concretize.concretize_one("dependent-install@1.0", ctx),
             spack.concretize.concretize_one("dependent-install@2.0", ctx),
@@ -790,6 +790,7 @@ def test_install_no_add_in_env(
     mock_fetch,
     temporary_store: Store,
     install_mockery,
+    ctx: SpackContext,
 ):
     # To test behavior of --add option, we create the following environment:
     #
@@ -804,7 +805,7 @@ def test_install_no_add_in_env(
     #         ^pkg-b
     #     pkg-a
     #         ^pkg-b
-    e = ev.create("test", with_view=False)
+    e = ev.create("test", with_view=False, ctx=ctx)
     e.add("mpileaks")
     e.add("libelf@0.8.10")  # so env has both root and dep libelf specs
     e.add("pkg-a")
@@ -977,7 +978,7 @@ def test_install_env_with_tests_all(
     mutable_mock_env_path, mock_packages, mock_fetch, install_mockery, ctx: SpackContext
 ):
     env("create", "test")
-    with ev.read("test"):
+    with ev.read("test", ctx=ctx):
         test_dep = spack.concretize.concretize_one("test-dependency", ctx)
         add("depb")
         install("--fake", "--test", "all")
@@ -990,7 +991,7 @@ def test_install_env_with_tests_root(
     mutable_mock_env_path, mock_packages, mock_fetch, install_mockery, ctx: SpackContext
 ):
     env("create", "test")
-    with ev.read("test"):
+    with ev.read("test", ctx=ctx):
         test_dep = spack.concretize.concretize_one("test-dependency", ctx)
         add("depb")
         install("--fake", "--test", "root")
@@ -999,10 +1000,12 @@ def test_install_env_with_tests_root(
 
 # Unit tests should not be affected by the user's managed environments
 @pytest.mark.not_on_windows("Environment views not supported on windows. Revisit after #34701")
-def test_install_empty_env(mutable_mock_env_path, mock_packages, mock_fetch, install_mockery):
+def test_install_empty_env(
+    mutable_mock_env_path, mock_packages, mock_fetch, install_mockery, ctx: SpackContext
+):
     env_name = "empty"
     env("create", env_name)
-    with ev.read(env_name):
+    with ev.read(env_name, ctx=ctx):
         out = install(fail_on_error=False)
 
     assert env_name in out

@@ -1512,7 +1512,7 @@ def test_config_path_dsl(path, it_should_work, expected_parsed):
 
 @pytest.mark.regression("48254")
 def test_env_activation_preserves_command_line_scope(
-    mutable_mock_env_path, mutable_config: Configuration
+    mutable_mock_env_path, mutable_config: Configuration, ctx: SpackContext
 ):
     """Check that the "command_line" scope remains the highest priority scope, when we activate,
     or deactivate, environments.
@@ -1521,8 +1521,8 @@ def test_env_activation_preserves_command_line_scope(
     assert expected_cl_scope.name == "command_line"
 
     # Creating an environment pushes a new scope
-    ev.create("test")
-    with ev.read("test"):
+    ev.create("test", ctx=ctx)
+    with ev.read("test", ctx=ctx):
         assert mutable_config.highest() == expected_cl_scope
 
         # No active environment pops the scope
@@ -1531,8 +1531,8 @@ def test_env_activation_preserves_command_line_scope(
         assert mutable_config.highest() == expected_cl_scope
 
         # Switch the environment to another one
-        ev.create("test-2")
-        with ev.read("test-2"):
+        ev.create("test-2", ctx=ctx)
+        with ev.read("test-2", ctx=ctx):
             assert mutable_config.highest() == expected_cl_scope
         assert mutable_config.highest() == expected_cl_scope
 
@@ -1542,7 +1542,7 @@ def test_env_activation_preserves_command_line_scope(
 @pytest.mark.regression("48414")
 @pytest.mark.regression("49188")
 def test_env_activation_preserves_config_scopes(
-    mutable_mock_env_path, mutable_config: Configuration
+    mutable_mock_env_path, mutable_config: Configuration, ctx: SpackContext
 ):
     """Check that the priority of scopes is respected when merging configuration files."""
     custom_scope = spack.config.InternalConfigScope("custom_scope")
@@ -1556,8 +1556,8 @@ def test_env_activation_preserves_config_scopes(
 
     assert highest_priority_scopes(mutable_config, nscopes=2) == expected_scopes_without_env
     # Creating an environment pushes a new scope
-    ev.create("test")
-    with ev.read("test"):
+    ev.create("test", ctx=ctx)
+    with ev.read("test", ctx=ctx):
         assert highest_priority_scopes(mutable_config, nscopes=3) == expected_scopes_with_first_env
 
         # No active environment pops the scope
@@ -1568,8 +1568,8 @@ def test_env_activation_preserves_config_scopes(
         assert highest_priority_scopes(mutable_config, nscopes=3) == expected_scopes_with_first_env
 
         # Switch the environment to another one
-        ev.create("test-2")
-        with ev.read("test-2"):
+        ev.create("test-2", ctx=ctx)
+        with ev.read("test-2", ctx=ctx):
             assert (
                 highest_priority_scopes(mutable_config, nscopes=3)
                 == expected_scopes_with_second_env
@@ -2153,7 +2153,7 @@ def test_env_substitution_follows_activation(
         spack.config.substitute_path_variables("$env/foo/bar", config=ctx.config) == "$env/foo/bar"
     )
 
-    env = ev.create("test")
+    env = ev.create("test", ctx=ctx)
     with env:
         # During activation "$env" resolves to the environment's path
         assert mutable_config.env_path == env.path

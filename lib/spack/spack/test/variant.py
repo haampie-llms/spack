@@ -6,7 +6,6 @@ import numbers
 import pytest
 
 import spack.concretize
-import spack.context
 import spack.error
 import spack.spec
 import spack.variant
@@ -702,18 +701,18 @@ def test_concretize_variant_default_with_multiple_defs(
         ("variant-values@2.0 v=bar", "v", spack.variant.VariantType.MULTI),
     ],
 )
-def test_substitute_abstract_variants_narrowing(mock_packages, spec, variant_name, narrowed_type):
+def test_substitute_abstract_variants_narrowing(
+    mock_packages, spec, variant_name, narrowed_type, ctx: SpackContext
+):
     spec = Spec(spec)
-    spack.spec.substitute_abstract_variants(spec, repo=spack.context.default().repo)
+    spack.spec.substitute_abstract_variants(spec, repo=ctx.repo)
     assert spec.variants[variant_name].type == narrowed_type
 
 
-def test_substitute_abstract_variants_failure(mock_packages):
+def test_substitute_abstract_variants_failure(mock_packages, ctx: SpackContext):
     with pytest.raises(spack.spec.InvalidVariantForSpecError):
         # variant doesn't exist at version
-        spack.spec.substitute_abstract_variants(
-            Spec("variant-values@4.0 v=bar"), repo=spack.context.default().repo
-        )
+        spack.spec.substitute_abstract_variants(Spec("variant-values@4.0 v=bar"), repo=ctx.repo)
 
 
 def test_abstract_variant_satisfies_abstract_abstract():

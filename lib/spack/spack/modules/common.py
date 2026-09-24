@@ -1098,7 +1098,10 @@ class ModuleContext(tengine.Context):
         # Project the environment variables from prefix to view if needed
         if view and self.spec in view:
             spack.user_environment.project_env_mods(
-                *self.spec.traverse(deptype=dt.LINK | dt.RUN), view=view, env=env
+                *self.spec.traverse(deptype=dt.LINK | dt.RUN),
+                view=view,
+                env=env,
+                config=self.conf.ctx.config,
             )
 
         # Modifications required from modules.yaml

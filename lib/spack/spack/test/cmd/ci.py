@@ -114,7 +114,11 @@ testjob:
 
 @pytest.fixture()
 def ci_generate_test(
-    tmp_path: pathlib.Path, mutable_mock_env_path, install_mockery, ci_base_environment
+    tmp_path: pathlib.Path,
+    mutable_mock_env_path,
+    install_mockery,
+    ci_base_environment,
+    ctx: SpackContext,
 ):
     """Returns a function that creates a new test environment, and runs 'spack generate'
     on it, given the content of the spack.yaml file.
@@ -126,9 +130,9 @@ def ci_generate_test(
         try:
             spack_yaml = tmp_path / "spack.yaml"
             spack_yaml.write_text(spack_yaml_content)
-            ev.create("test", init_file=spack_yaml, with_view=False)
+            ev.create("test", init_file=spack_yaml, with_view=False, ctx=ctx)
             outputfile = tmp_path / ".gitlab-ci.yml"
-            with ev.read("test"):
+            with ev.read("test", ctx=ctx):
                 output = ci_cmd(
                     "generate",
                     "--output-file",
@@ -555,7 +559,7 @@ class RebuildEnv(NamedTuple):
 
 
 def create_rebuild_env(
-    tmp_path: pathlib.Path, pkg_name: str, broken_tests: bool = False
+    tmp_path: pathlib.Path, pkg_name: str, broken_tests: bool = False, *, ctx: SpackContext
 ) -> RebuildEnv:
     scratch = tmp_path / "working_dir"
     log_dir = scratch / "logs"
@@ -600,7 +604,7 @@ spack:
 """
         )
 
-    with ev.Environment(env_dir) as env:
+    with ev.Environment(env_dir, ctx=ctx) as env:
         env.concretize()
         env.write()
 
@@ -661,9 +665,10 @@ def test_ci_rebuild_mock_success(
     mock_binary_index,
     monkeypatch,
     broken_tests,
+    ctx: SpackContext,
 ):
     pkg_name = "archive-files"
-    rebuild_env = create_rebuild_env(tmp_path, pkg_name, broken_tests)
+    rebuild_env = create_rebuild_env(tmp_path, pkg_name, broken_tests, ctx=ctx)
 
     monkeypatch.setattr(spack.cmd.ci, "SPACK_COMMAND", "echo")
     # the cdash url in the environment is fake; never upload reports to it
@@ -696,9 +701,10 @@ def test_ci_rebuild_mock_failure_to_push(
     mock_binary_index,
     ci_base_environment,
     monkeypatch,
+    ctx: SpackContext,
 ):
     pkg_name = "trivial-install-test-package"
-    rebuild_env = create_rebuild_env(tmp_path, pkg_name)
+    rebuild_env = create_rebuild_env(tmp_path, pkg_name, ctx=ctx)
 
     # Mock the install script succuess
     def mock_success(*args, **kwargs):
@@ -771,6 +777,7 @@ def test_ci_nothing_to_rebuild(
     mock_fetch,
     ci_base_environment,
     mock_binary_index,
+    ctx: SpackContext,
 ):
     scratch = tmp_path / "working_dir"
     mirror_dir = scratch / "mirror"
@@ -803,7 +810,7 @@ spack:
 
     with working_dir(tmp_path):
         env_cmd("create", "test", "./spack.yaml")
-        with ev.read("test") as env:
+        with ev.read("test", ctx=ctx) as env:
             env.concretize()
 
             # Create environment variables as gitlab would do it
@@ -876,7 +883,7 @@ spack:
 """
             )
         env_cmd("create", "test", "./spack.yaml")
-        with ev.read("test") as current_env:
+        with ev.read("test", ctx=ctx) as current_env:
             current_env.concretize()
             install_cmd("--keep-stage")
 
@@ -1149,7 +1156,7 @@ spack:
 
     with working_dir(tmp_path):
         env_cmd("create", "test", "./spack.yaml")
-        with ev.read("test"):
+        with ev.read("test", ctx=ctx):
             concrete_spec = spack.concretize.concretize_one("callpath", ctx)
             with open(tmp_path / "spec.json", "w", encoding="utf-8") as f:
                 f.write(concrete_spec.to_json())
@@ -1163,7 +1170,11 @@ spack:
 
 
 def test_ci_generate_prune_untouched(
-    ci_generate_test, monkeypatch, tmp_path: pathlib.Path, repo_builder: RepoBuilder
+    ci_generate_test,
+    monkeypatch,
+    tmp_path: pathlib.Path,
+    repo_builder: RepoBuilder,
+    ctx: SpackContext,
 ):
     """Test pipeline generation with pruning works to eliminate
     specs that were not affected by a change"""
@@ -1215,7 +1226,7 @@ spack:
     #                     -> libdwarf -> libelf
     #          -> mpich
     env_hashes = {}
-    with ev.read("test") as active_env:
+    with ev.read("test", ctx=ctx) as active_env:
         active_env.concretize()
         for s in active_env.all_specs():
             env_hashes[s.name] = s.dag_hash()
@@ -1248,6 +1259,7 @@ def test_ci_subcommands_without_mirror(
     install_mockery,
     ci_base_environment,
     mock_binary_index,
+    ctx: SpackContext,
 ):
     """Make sure we catch if there is not a mirror and report an error"""
     with open(tmp_path / "spack.yaml", "w", encoding="utf-8") as f:
@@ -1271,7 +1283,7 @@ spack:
     with working_dir(tmp_path):
         env_cmd("create", "test", "./spack.yaml")
 
-        with ev.read("test"):
+        with ev.read("test", ctx=ctx):
             # Check the 'generate' subcommand
             expect = "spack ci generate requires a mirror named 'buildcache-destination'"
             with pytest.raises(ci.SpackCIError, match=expect):
@@ -1336,7 +1348,7 @@ spack:
 
     with working_dir(tmp_path):
         env_cmd("create", "test", "./spack.yaml")
-        with ev.read("test"):
+        with ev.read("test", ctx=ctx):
             # Check output of the 'generate' subcommand
             output = ci_cmd("generate", fail_on_error=False)
             assert "known to be broken" in output
@@ -1407,6 +1419,7 @@ def test_ci_reproduce(
     last_two_git_commits,
     ci_base_environment,
     mock_binary_index,
+    ctx: SpackContext,
 ):
     repro_dir = tmp_path / "repro_dir"
     image_name = "org/image:tag"
@@ -1433,12 +1446,12 @@ spack:
 """
         )
 
-    with working_dir(tmp_path), ev.Environment(".") as env:
+    with working_dir(tmp_path), ev.Environment(".", ctx=ctx) as env:
         env.concretize()
         env.write()
 
     def fake_download_and_extract_artifacts(url, work_dir, *, urlopen, merge_commit_test=True):
-        with working_dir(tmp_path), ev.Environment(".") as env:
+        with working_dir(tmp_path), ev.Environment(".", ctx=ctx) as env:
             if not os.path.exists(repro_dir):
                 repro_dir.mkdir()
 
@@ -1616,7 +1629,9 @@ def test_docstring_utils():
     )
 
 
-def test_gitlab_config_scopes(install_mockery, ci_generate_test, tmp_path: pathlib.Path):
+def test_gitlab_config_scopes(
+    install_mockery, ci_generate_test, tmp_path: pathlib.Path, ctx: SpackContext
+):
     """Test pipeline generation with included configs"""
     # Create an included config scope
     configs_path = tmp_path / "gitlab" / "configs"
@@ -1686,13 +1701,17 @@ spack:
     # Ensure the relocated concrete env includes point to the same location
     rel_conc_path = env_manifest["spack"]["include"][0]
     abs_conc_path = (conc_env_path / rel_conc_path).absolute().resolve()
-    assert str(abs_conc_path) == os.path.join(ev.as_env_dir("test"), "gitlab", "configs")
+    assert str(abs_conc_path) == os.path.join(
+        ev.as_env_dir("test", config=ctx.config), "gitlab", "configs"
+    )
 
     # Ensure relative path include with "path" correctly updated
     # Ensure the relocated concrete env includes point to the same location
     rel_conc_path = env_manifest["spack"]["include"][1]["path"]
     abs_conc_path = (conc_env_path / rel_conc_path).absolute().resolve()
-    assert str(abs_conc_path) == os.path.join(ev.as_env_dir("test"), "gitlab", "configs")
+    assert str(abs_conc_path) == os.path.join(
+        ev.as_env_dir("test", config=ctx.config), "gitlab", "configs"
+    )
 
     # Ensure absolute path is unchanged
     # Ensure the relocated concrete env includes point to the same location
@@ -1711,6 +1730,7 @@ def test_ci_generate_mirror_config(
     monkeypatch,
     ci_base_environment,
     mock_binary_index,
+    ctx: SpackContext,
 ):
     """Make sure the correct mirror gets used as the buildcache destination"""
     fst, snd = (tmp_path / "first").as_uri(), (tmp_path / "second").as_uri()
@@ -1735,7 +1755,7 @@ spack:
 """
         )
 
-    with ev.Environment(tmp_path):
+    with ev.Environment(tmp_path, ctx=ctx):
         ci_cmd("generate", "--output-file", str(tmp_path / ".gitlab-ci.yml"))
 
     with open(tmp_path / ".gitlab-ci.yml", encoding="utf-8") as f:
@@ -1791,7 +1811,7 @@ def test_ci_dynamic_mapping_empty(
         env_cmd("create", "test", "./spack.yaml")
         outputfile = str(tmp_path / ".gitlab-ci.yml")
 
-        with ev.read("test"):
+        with ev.read("test", ctx=ctx):
             output = ci_cmd("generate", "--output-file", outputfile)
             assert "Response missing required keys: ['variables']" in output
 
@@ -1821,7 +1841,7 @@ def test_ci_dynamic_mapping_full(
         env_cmd("create", "test", "./spack.yaml")
         outputfile = str(tmp_path / ".gitlab-ci.yml")
 
-        with ev.read("test"):
+        with ev.read("test", ctx=ctx):
             ci_cmd("generate", "--output-file", outputfile)
 
             with open(outputfile, encoding="utf-8") as of:
@@ -1877,6 +1897,7 @@ def test_ci_generate_copy_only(
     install_mockery,
     mock_packages,
     ci_base_environment,
+    ctx: SpackContext,
 ):
     """Ensure the correct jobs are generated for a copy-only pipeline,
     and verify that pipeline manifest is produced containing the right
@@ -1953,7 +1974,7 @@ spack:
     with open(pipeline_manifest_path, encoding="utf-8") as fd:
         manifest_data = json.load(fd)
 
-    with ev.read("test") as active_env:
+    with ev.read("test", ctx=ctx) as active_env:
         active_env.concretize()
         for s in active_env.all_specs():
             assert s.dag_hash() in manifest_data

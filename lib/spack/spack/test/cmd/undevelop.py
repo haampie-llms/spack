@@ -36,7 +36,7 @@ spack:
             )
 
         env("create", "test", "./spack.yaml")
-        with ev.read("test"):
+        with ev.read("test", ctx=ctx):
             before = spack.concretize.concretize_one("mpich", ctx)
             undevelop("mpich")
             after = spack.concretize.concretize_one("mpich", ctx)
@@ -68,7 +68,7 @@ spack:
             )
 
         env("create", "test", "./spack.yaml")
-        with ev.read("test"):
+        with ev.read("test", ctx=ctx):
             before = spack.concretize.concretize_one("mpich", ctx)
             undevelop("--all")
             after = spack.concretize.concretize_one("mpich", ctx)
@@ -79,7 +79,7 @@ spack:
 
 
 def test_undevelop_nonexistent(
-    tmp_path: pathlib.Path, mutable_config, mock_packages, mutable_mock_env_path
+    tmp_path: pathlib.Path, mutable_config, mock_packages, mutable_mock_env_path, ctx: SpackContext
 ):
     # setup environment
     envdir = tmp_path / "env"
@@ -100,7 +100,7 @@ spack:
             )
 
         env("create", "test", "./spack.yaml")
-        with ev.read("test") as e:
+        with ev.read("test", ctx=ctx) as e:
             concretize()
             before = e.specs_by_hash
             undevelop("package-not-in-develop")  # does nothing

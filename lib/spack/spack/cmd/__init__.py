@@ -649,7 +649,9 @@ def require_active_env(
     )
 
 
-def find_environment(args: argparse.Namespace) -> Optional[ev.Environment]:
+def find_environment(
+    args: argparse.Namespace, ctx: "spack.context.SpackContext"
+) -> Optional[ev.Environment]:
     """Find active environment from args or environment variable.
 
     Check for an environment in this order:
@@ -661,6 +663,7 @@ def find_environment(args: argparse.Namespace) -> Optional[ev.Environment]:
 
     Arguments:
         args: argparse namespace with command arguments
+        ctx: context to read the environment in
 
     Returns: a found environment, or ``None``
     """
@@ -668,8 +671,8 @@ def find_environment(args: argparse.Namespace) -> Optional[ev.Environment]:
     # treat env as a name
     env = args.env
     if env:
-        if ev.exists(env):
-            return ev.read(env)
+        if ev.exists(env, config=ctx.config):
+            return ev.read(env, ctx=ctx)
 
     else:
         # if env was specified, see if it is a directory otherwise, look
@@ -686,8 +689,8 @@ def find_environment(args: argparse.Namespace) -> Optional[ev.Environment]:
 
     # if we get here, env isn't the name of a spack environment; it has
     # to be a path to an environment, or there is something wrong.
-    if ev.is_env_dir(env):
-        return ev.Environment(env)
+    if ev.is_env_dir(env, config=ctx.config):
+        return ev.Environment(env, ctx=ctx)
 
     raise ev.SpackEnvironmentError("no environment in %s" % env)
 

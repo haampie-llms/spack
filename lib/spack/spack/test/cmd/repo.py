@@ -91,6 +91,7 @@ def test_env_repo_path_vars_substitution(
     mutable_mock_env_path,
     monkeypatch,
     mutable_config: Configuration,
+    ctx: SpackContext,
 ):
     """Test Spack correctly substitutes repo paths with environment variables when creating an
     environment from a manifest file."""
@@ -115,7 +116,7 @@ spack:
         env("create", "test", "./spack.yaml")
         # check that repo path was correctly substituted with the environment variable
         current_dir = os.getcwd()
-        with ev.read("test") as newenv:
+        with ev.read("test", ctx=ctx) as newenv:
             repos_specs = mutable_config.get("repos", default={}, scope=newenv.scope_name)
             assert current_dir in repos_specs.values()
 

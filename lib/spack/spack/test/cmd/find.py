@@ -336,11 +336,16 @@ def test_find_command_basic_usage(database):
 
 @pytest.mark.regression("9875")
 def test_find_prefix_in_env(
-    mutable_mock_env_path, install_mockery, mock_fetch, mock_packages, mock_archive
+    mutable_mock_env_path,
+    install_mockery,
+    mock_fetch,
+    mock_packages,
+    mock_archive,
+    ctx: SpackContext,
 ):
     """Test `find` formats requiring concrete specs work in environments."""
     env("create", "test")
-    with ev.read("test"):
+    with ev.read("test", ctx=ctx):
         install("--fake", "--add", "mpileaks")
         find("-p")
         find("-l")
@@ -349,7 +354,7 @@ def test_find_prefix_in_env(
 
 
 def test_find_specs_include_concrete_env(
-    mutable_mock_env_path, mutable_mock_repo, tmp_path: pathlib.Path
+    mutable_mock_env_path, mutable_mock_repo, tmp_path: pathlib.Path, ctx: SpackContext
 ):
     path = tmp_path / "spack.yaml"
 
@@ -364,7 +369,7 @@ spack:
             )
         env("create", "test1", "spack.yaml")
 
-    test1 = ev.read("test1")
+    test1 = ev.read("test1", ctx=ctx)
     test1.concretize()
     test1.write()
 
@@ -379,13 +384,13 @@ spack:
             )
         env("create", "test2", "spack.yaml")
 
-    test2 = ev.read("test2")
+    test2 = ev.read("test2", ctx=ctx)
     test2.concretize()
     test2.write()
 
     env("create", "--include-concrete", "test1", "--include-concrete", "test2", "combined_env")
 
-    with ev.read("combined_env"):
+    with ev.read("combined_env", ctx=ctx):
         output = find()
 
     assert "no root specs" in output
@@ -395,7 +400,7 @@ spack:
 
 
 def test_find_specs_nested_include_concrete_env(
-    mutable_mock_env_path, mutable_mock_repo, tmp_path: pathlib.Path
+    mutable_mock_env_path, mutable_mock_repo, tmp_path: pathlib.Path, ctx: SpackContext
 ):
     path = tmp_path / "spack.yaml"
 
@@ -410,19 +415,19 @@ spack:
             )
         env("create", "test1", "spack.yaml")
 
-    test1 = ev.read("test1")
+    test1 = ev.read("test1", ctx=ctx)
     test1.concretize()
     test1.write()
 
     env("create", "--include-concrete", "test1", "test2")
-    test2 = ev.read("test2")
+    test2 = ev.read("test2", ctx=ctx)
     test2.add("libelf")
     test2.concretize()
     test2.write()
 
     env("create", "--include-concrete", "test2", "test3")
 
-    with ev.read("test3"):
+    with ev.read("test3", ctx=ctx):
         output = find()
 
     assert "no root specs" in output
@@ -445,13 +450,13 @@ def test_find_loaded(database: Database, working_env):
 
 @pytest.mark.regression("37712")
 def test_environment_with_version_range_in_compiler_doesnt_fail(
-    tmp_path: pathlib.Path, mock_packages
+    tmp_path: pathlib.Path, mock_packages, ctx: SpackContext
 ):
     """Tests that having an active environment with a root spec containing a compiler constrained
     by a version range (i.e. @X.Y rather the single version than @=X.Y) doesn't result in an error
     when invoking "spack find".
     """
-    test_environment = ev.create_in_dir(tmp_path)
+    test_environment = ev.create_in_dir(tmp_path, ctx=ctx)
     test_environment.add("zlib %gcc@12.1.0")
     test_environment.write()
 
@@ -494,7 +499,7 @@ def test_find_concretized_not_installed(
         return len(_qresult[0]), len(_qresult[1])
 
     env("create", "test")
-    with ev.read("test"):
+    with ev.read("test", ctx=ctx):
         install("--fake", "--add", "a0")
 
         assert _nresults(_query()) == (3, 0)
@@ -600,12 +605,14 @@ spack:
         ),
     ],
 )
-def test_find_env_with_groups(spack_yaml, expected, not_expected, tmp_path: pathlib.Path):
+def test_find_env_with_groups(
+    spack_yaml, expected, not_expected, tmp_path: pathlib.Path, ctx: SpackContext
+):
     """Tests that the output of spack find contains expected matches when using an
     environment with groups.
     """
     (tmp_path / "spack.yaml").write_text(spack_yaml)
-    with ev.Environment(tmp_path):
+    with ev.Environment(tmp_path, ctx=ctx):
         output = find()
 
     assert all(x in output for x in expected)

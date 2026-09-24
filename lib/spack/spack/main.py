@@ -907,7 +907,7 @@ def add_command_line_scopes(
     """
     for i, path in enumerate(command_line_scopes):
         name = f"cmd_scope_{i}"
-        scope = ev.environment_path_scope(name, path)
+        scope = ev.environment_path_scope(name, path, cfg)
         if scope is None:
             if os.path.isdir(path):  # directory with config files
                 cfg.push_scope(
@@ -982,7 +982,7 @@ def _main(argv=None):
     # try to find an active environment here, so that we can activate it later
     if not args.no_env:
         try:
-            env = spack.cmd.find_environment(args)
+            env = spack.cmd.find_environment(args, spack.context.default())
         except (spack.config.ConfigFormatError, ev.SpackEnvironmentConfigError) as e:
             # print the context but delay this exception so that commands like
             # `spack config edit` can still work with a bad environment.
@@ -997,7 +997,7 @@ def _main(argv=None):
             return
         # do not call activate here, as it has a lot of expensive function calls to deal
         # with mutation of spack.config.CONFIG -- but we are still building the config.
-        env.manifest.prepare_config_scope()
+        env.manifest.prepare_config_scope(spack.config.CONFIG)
         spack.environment.environment.set_active_environment(env)
 
     # add the environment

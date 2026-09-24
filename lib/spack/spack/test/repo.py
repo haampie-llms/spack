@@ -178,7 +178,7 @@ spack:
         Singleton(lambda: spack.repo.create_and_enable(config, cache=ctx.misc_cache)),
     )
 
-    env = spack.environment.Environment(tmp_path)
+    env = spack.environment.Environment(tmp_path, ctx=ctx)
     spack.environment.activate(env)
     try:
         assert {r.namespace for r in spack.repo.PATH.repos} == {"builder_test", "builtin_mock"}
@@ -631,7 +631,7 @@ def test_is_package_module():
     assert not spack.repo.is_package_module("spack.something.else")
 
 
-def test_environment_activation_updates_repo_path(tmp_path: pathlib.Path):
+def test_environment_activation_updates_repo_path(tmp_path: pathlib.Path, ctx: SpackContext):
     """Test that the environment activation updates the repo path correctly."""
     repo_root, _ = spack.repo.create_repo(str(tmp_path / "foo"), namespace="bar")
     (tmp_path / "spack.yaml").write_text(
@@ -641,7 +641,7 @@ spack:
         bar: $env/foo/spack_repo/bar
 """
     )
-    env = spack.environment.Environment(tmp_path)
+    env = spack.environment.Environment(tmp_path, ctx=ctx)
 
     with env:
         assert any(os.path.samefile(repo_root, r.root) for r in spack.repo.PATH.repos)

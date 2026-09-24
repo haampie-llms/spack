@@ -7,6 +7,7 @@ import pytest
 
 import spack.environment as ev
 from spack import spack_version
+from spack.context import SpackContext
 from spack.main import SpackCommand
 
 pytestmark = pytest.mark.usefixtures("mutable_config", "mutable_mock_repo")
@@ -20,11 +21,13 @@ unification_strategies = [False, True, "when_possible"]
 
 
 @pytest.mark.parametrize("unify", unification_strategies)
-def test_concretize_all_test_dependencies(unify, mutable_config, mutable_mock_env_path):
+def test_concretize_all_test_dependencies(
+    unify, mutable_config, mutable_mock_env_path, ctx: SpackContext
+):
     """Check all test dependencies are concretized."""
     env("create", "test")
 
-    with ev.read("test") as e:
+    with ev.read("test", ctx=ctx) as e:
         mutable_config.set("concretizer:unify", unify)
         add("depb")
         concretize("--test", "all")
@@ -33,12 +36,12 @@ def test_concretize_all_test_dependencies(unify, mutable_config, mutable_mock_en
 
 @pytest.mark.parametrize("unify", unification_strategies)
 def test_concretize_root_test_dependencies_not_recursive(
-    unify, mutable_config, mutable_mock_env_path
+    unify, mutable_config, mutable_mock_env_path, ctx: SpackContext
 ):
     """Check that test dependencies are not concretized recursively."""
     env("create", "test")
 
-    with ev.read("test") as e:
+    with ev.read("test", ctx=ctx) as e:
         mutable_config.set("concretizer:unify", unify)
         add("depb")
         concretize("--test", "root")
@@ -47,12 +50,12 @@ def test_concretize_root_test_dependencies_not_recursive(
 
 @pytest.mark.parametrize("unify", unification_strategies)
 def test_concretize_root_test_dependencies_are_concretized(
-    unify, mutable_config, mutable_mock_env_path
+    unify, mutable_config, mutable_mock_env_path, ctx: SpackContext
 ):
     """Check that root test dependencies are concretized."""
     env("create", "test")
 
-    with ev.read("test") as e:
+    with ev.read("test", ctx=ctx) as e:
         mutable_config.set("concretizer:unify", unify)
         add("pkg-a")
         add("pkg-b")

@@ -149,9 +149,11 @@ config:
     assert mutable_config.get("config:dirty") is False
 
 
-def test_add_command_line_scope_env(tmp_path: pathlib.Path, mutable_mock_env_path):
+def test_add_command_line_scope_env(
+    tmp_path: pathlib.Path, mutable_mock_env_path, ctx: SpackContext
+):
     """Test whether --config-scope <env> works, either by name or path."""
-    managed_env = ev.create("example").manifest_path
+    managed_env = ev.create("example", ctx=ctx).manifest_path
 
     with open(managed_env, "w", encoding="utf-8") as f:
         f.write(
@@ -351,7 +353,7 @@ def test_env_substitution_via_main_entrypoint(
     mutable_mock_env_path, mutable_config: Configuration, ctx: SpackContext
 ):
     """Tests that an environment activated through the CLI entrypoint can substitute ``$env``"""
-    env = ev.create("test")
+    env = ev.create("test", ctx=ctx)
     assert mutable_config.env_path is None
 
     # Just call a fast command

@@ -117,9 +117,9 @@ def location(parser, args, ctx):
             path = spack.cmd.require_active_env(args.subparser, ctx.environment).path
         else:
             # Get path of requested environment
-            if not ev.exists(args.location_env):
+            if not ev.exists(args.location_env, config=ctx.config):
                 tty.die("no such environment: '%s'" % args.location_env)
-            path = ev.root(args.location_env)
+            path = ev.root(args.location_env, config=ctx.config)
         print(path)
         return
 
