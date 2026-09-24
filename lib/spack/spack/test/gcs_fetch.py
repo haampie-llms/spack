@@ -6,9 +6,10 @@ import pathlib
 
 import spack.fetch_strategy
 import spack.stage
+from spack.context import SpackContext
 
 
-def test_gcsfetchstrategy_downloaded(tmp_path: pathlib.Path, config):
+def test_gcsfetchstrategy_downloaded(tmp_path: pathlib.Path, config, ctx: SpackContext):
     """Ensure fetch with archive file already downloaded is a noop."""
     archive = tmp_path / "gcs.tar.gz"
 
@@ -18,5 +19,7 @@ def test_gcsfetchstrategy_downloaded(tmp_path: pathlib.Path, config):
             return str(archive)
 
     fetcher = Archived_GCSFS(url="gs://example/gcs.tar.gz")
-    with spack.stage.stage_from_config(fetcher, path=str(tmp_path), config=config):
+    with spack.stage.stage_from_config(
+        fetcher, path=str(tmp_path), config=config, client=ctx.network
+    ):
         fetcher.fetch()

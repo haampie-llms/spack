@@ -1175,12 +1175,15 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
             config=spack.config.CONFIG,
             name=self._resource_stage(resource),
             mirror_paths=spack.mirrors.layout.default_mirror_layout(
-                resource.fetcher, os.path.join(self.name, pretty_resource_name)
+                resource.fetcher,
+                os.path.join(self.name, pretty_resource_name),
+                repo=spack.repo.PATH,
             ),
             mirrors=spack.mirrors.mirror.MirrorCollection.from_config(
                 spack.config.CONFIG, source=True
             ).values(),
             path=self.path,
+            client=spack.util.web.NetworkClient.from_config(spack.config.CONFIG),
         )
 
     def _download_search(self):
@@ -1192,7 +1195,7 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
         format_string = "{name}-{version}"
         pretty_name = self.spec.format_path(format_string)
         mirror_paths = spack.mirrors.layout.default_mirror_layout(
-            fetcher, os.path.join(self.name, pretty_name), self.spec
+            fetcher, os.path.join(self.name, pretty_name), self.spec, repo=spack.repo.PATH
         )
         # Construct a path where the stage should build..
         s = self.spec
@@ -1207,6 +1210,7 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
             name=stage_name,
             path=self.path,
             search_fn=self._download_search,
+            client=spack.util.web.NetworkClient.from_config(spack.config.CONFIG),
         )
         return stage
 
@@ -1260,7 +1264,9 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
 
             name = f"{os.path.basename(patch.url)}-{fetch_digest[:7]}"
             per_package_ref = os.path.join(patch.owner.split(".")[-1], name)
-            mirror_ref = spack.mirrors.layout.default_mirror_layout(fetcher, per_package_ref)
+            mirror_ref = spack.mirrors.layout.default_mirror_layout(
+                fetcher, per_package_ref, repo=spack.repo.PATH
+            )
 
             return stg.stage_from_config(
                 fetcher,
@@ -1270,6 +1276,7 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
                 mirrors=spack.mirrors.mirror.MirrorCollection.from_config(
                     spack.config.CONFIG, source=True
                 ).values(),
+                client=spack.util.web.NetworkClient.from_config(spack.config.CONFIG),
             )
 
         if self.spec.concrete:
@@ -2306,7 +2313,12 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
 
         try:
             return spack.url.find_versions_of_archive(
-                self.all_urls, self.list_url, self.list_depth, concurrency, reference_package=self
+                self.all_urls,
+                self.list_url,
+                self.list_depth,
+                concurrency,
+                reference_package=self,
+                client=spack.util.web.NetworkClient.from_config(spack.config.CONFIG),
             )
         except spack.util.web.NoNetworkConnectionError as e:
             tty.die("Package.fetch_versions couldn't connect to:", e.url, e.message)

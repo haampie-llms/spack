@@ -14,7 +14,6 @@ import spack.concretize
 import spack.environment as ev
 import spack.mirrors.utils
 import spack.package_base
-import spack.repo
 import spack.spec
 import spack.util.crypto
 import spack.util.git
@@ -85,9 +84,7 @@ def test_mirror_cli_parallel_args(
     mirror_dir = str(tmp_path / "mirror")
     env_name = "test-parallel"
 
-    def mock_create_mirror_for_all_specs(
-        mirror_specs, path, skip_unstable_versions, workers, repo
-    ):
+    def mock_create_mirror_for_all_specs(mirror_specs, path, skip_unstable_versions, workers, ctx):
         assert path == mirror_dir
         assert workers == 2
 
@@ -105,7 +102,12 @@ def test_mirror_cli_parallel_args(
 
 
 def test_mirror_from_env_parallel(
-    tmp_path, mock_packages, mock_fetch, mutable_mock_env_path, mutable_config: Configuration
+    tmp_path,
+    mock_packages,
+    mock_fetch,
+    mutable_mock_env_path,
+    mutable_config: Configuration,
+    ctx: SpackContext,
 ):
     """Directly test create_mirror_for_all_specs with parallel option"""
     mirror_dir = str(tmp_path / "mirror")
@@ -122,7 +124,7 @@ def test_mirror_from_env_parallel(
 
     with mutable_config.override("config:checksum", False):
         mirror_stats = spack.cmd.mirror.create_mirror_for_all_specs(
-            specs, mirror_dir, False, workers=2, repo=spack.repo.PATH
+            specs, mirror_dir, False, workers=2, ctx=ctx
         )
 
     assert len(mirror_stats.errors) == 0
@@ -220,14 +222,18 @@ def source_for_pkg_with_hash(mock_packages, tmp_path: pathlib.Path):
 
 
 def test_mirror_skip_unstable(
-    tmp_path_factory: pytest.TempPathFactory, mock_packages, config, source_for_pkg_with_hash
+    tmp_path_factory: pytest.TempPathFactory,
+    mock_packages,
+    config,
+    source_for_pkg_with_hash,
+    ctx: SpackContext,
 ):
     mirror_dir = str(tmp_path_factory.mktemp("mirror-dir"))
 
     specs = [
         spack.concretize.concretize_one(x) for x in ["git-test", "trivial-pkg-with-valid-hash"]
     ]
-    spack.cmd.mirror.create(mirror_dir, specs, spack.repo.PATH, skip_unstable_versions=True)
+    spack.cmd.mirror.create(mirror_dir, specs, ctx, skip_unstable_versions=True)
 
     assert set(os.listdir(mirror_dir)) - set(["_source-cache"]) == set(
         ["trivial-pkg-with-valid-hash"]
@@ -810,7 +816,7 @@ def test_git_provenance_relative_to_mirror(
 
 
 @pytest.mark.usefixtures("mock_packages")
-def test_mirror_skip_placeholder_pkg(tmp_path: pathlib.Path):
+def test_mirror_skip_placeholder_pkg(tmp_path: pathlib.Path, ctx: SpackContext):
     """Test a placeholder package which should skip during mirror all"""
     from spack.repo import PATH
 
@@ -820,7 +826,7 @@ def test_mirror_skip_placeholder_pkg(tmp_path: pathlib.Path):
     mirror_cache = spack.mirrors.utils.get_mirror_cache(str(tmp_path))
     mirror_stats = spack.mirrors.utils.MirrorStatsForOneSpec(spec)
     result = spack.mirrors.utils.create_mirror_from_package_object(
-        pkg_obj, mirror_cache, mirror_stats
+        pkg_obj, mirror_cache, mirror_stats, config=ctx.config
     )
     assert result is False
     assert not mirror_stats.errors

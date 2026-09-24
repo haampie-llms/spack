@@ -420,7 +420,7 @@ def _mirror(args, ctx):
         spack.util.tty.msg(msg.format(BINARY_TARBALL, mirror_dir))
         spack.util.tty.set_msg_enabled(False)
         stage = spack.stage.stage_from_config(
-            BINARY_TARBALL, path=tempfile.mkdtemp(), config=ctx.config
+            BINARY_TARBALL, path=tempfile.mkdtemp(), config=ctx.config, client=ctx.network
         )
         stage.create()
         stage.fetch()

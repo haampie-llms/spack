@@ -10,6 +10,7 @@ import spack.cmd.create
 import spack.stage
 import spack.util.executable
 import spack.util.url as url_util
+from spack.context import SpackContext
 
 
 @pytest.fixture(
@@ -56,9 +57,9 @@ def url_and_build_system(request, tmp_path: pathlib.Path):
         yield url, system
 
 
-def test_build_systems(url_and_build_system, config):
+def test_build_systems(url_and_build_system, config, ctx: SpackContext):
     url, build_system = url_and_build_system
-    with spack.stage.stage_from_config(url, config=config) as stage:
+    with spack.stage.stage_from_config(url, config=config, client=ctx.network) as stage:
         stage.fetch()
         guesser = spack.cmd.create.BuildSystemAndLanguageGuesser()
         guesser(stage.archive_file, url)

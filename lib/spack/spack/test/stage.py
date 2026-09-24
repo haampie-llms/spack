@@ -22,6 +22,7 @@ import spack.stage
 import spack.util.executable
 import spack.util.url as url_util
 from spack.config import Configuration, canonicalize_path
+from spack.context import SpackContext
 from spack.resource import Resource
 from spack.stage import (
     StageComposite,
@@ -309,12 +310,12 @@ def mock_expand_resource(tmp_path: pathlib.Path):
 
 @pytest.fixture
 def composite_stage_with_expanding_resource(
-    mock_stage_archive, mock_expand_resource, mutable_config
+    mock_stage_archive, mock_expand_resource, mutable_config, ctx: SpackContext
 ):
     """Sets up a composite for expanding resources prior to staging."""
     composite_stage = StageComposite()
     archive = mock_stage_archive()
-    root_stage = stage_from_config(archive.url, config=mutable_config)
+    root_stage = stage_from_config(archive.url, config=mutable_config, client=ctx.network)
     composite_stage.append(root_stage)
 
     test_resource_fetcher = spack.fetch_strategy.from_kwargs(url=mock_expand_resource.url)
@@ -322,7 +323,7 @@ def composite_stage_with_expanding_resource(
     # directory
     test_resource = Resource("test_resource", test_resource_fetcher, "", "resource-dir")
     resource_stage = resource_stage_from_config(
-        test_resource_fetcher, root_stage, test_resource, config=mutable_config
+        test_resource_fetcher, root_stage, test_resource, config=mutable_config, client=ctx.network
     )
     composite_stage.append(resource_stage)
     return composite_stage, root_stage, resource_stage, mock_expand_resource
@@ -397,43 +398,57 @@ def check_stage_dir_perms(prefix, path):
 class TestStage:
     stage_name = "spack-test-stage"
 
-    def test_setup_and_destroy_name_with_tmp(self, mock_stage_archive, mutable_config):
+    def test_setup_and_destroy_name_with_tmp(
+        self, mock_stage_archive, mutable_config, ctx: SpackContext
+    ):
         archive = mock_stage_archive()
-        with stage_from_config(archive.url, name=self.stage_name, config=mutable_config) as stage:
+        with stage_from_config(
+            archive.url, name=self.stage_name, config=mutable_config, client=ctx.network
+        ) as stage:
             check_setup(stage, self.stage_name, archive)
         check_destroy(stage, self.stage_name)
 
-    def test_setup_and_destroy_name_without_tmp(self, mock_stage_archive, mutable_config):
+    def test_setup_and_destroy_name_without_tmp(
+        self, mock_stage_archive, mutable_config, ctx: SpackContext
+    ):
         archive = mock_stage_archive()
-        with stage_from_config(archive.url, name=self.stage_name, config=mutable_config) as stage:
+        with stage_from_config(
+            archive.url, name=self.stage_name, config=mutable_config, client=ctx.network
+        ) as stage:
             check_setup(stage, self.stage_name, archive)
         check_destroy(stage, self.stage_name)
 
-    def test_setup_and_destroy_no_name_with_tmp(self, mock_stage_archive, mutable_config):
+    def test_setup_and_destroy_no_name_with_tmp(
+        self, mock_stage_archive, mutable_config, ctx: SpackContext
+    ):
         archive = mock_stage_archive()
-        with stage_from_config(archive.url, config=mutable_config) as stage:
+        with stage_from_config(archive.url, config=mutable_config, client=ctx.network) as stage:
             check_setup(stage, None, archive)
         check_destroy(stage, None)
 
-    def test_noexpand_stage_file(self, mock_stage_archive, mock_noexpand_resource, mutable_config):
+    def test_noexpand_stage_file(
+        self, mock_stage_archive, mock_noexpand_resource, mutable_config, ctx: SpackContext
+    ):
         """When creating a stage with a nonexpanding URL, the 'archive_file'
         property of the stage should refer to the path of that file.
         """
         test_noexpand_fetcher = spack.fetch_strategy.from_kwargs(
             url=url_util.path_to_file_url(mock_noexpand_resource), expand=False
         )
-        with stage_from_config(test_noexpand_fetcher, config=mutable_config) as stage:
+        with stage_from_config(
+            test_noexpand_fetcher, config=mutable_config, client=ctx.network
+        ) as stage:
             stage.fetch()
             stage.expand_archive()
             assert os.path.exists(stage.archive_file)
 
     @pytest.mark.disable_clean_stage_check
     def test_composite_stage_with_noexpand_resource(
-        self, mock_stage_archive, mock_noexpand_resource, mutable_config
+        self, mock_stage_archive, mock_noexpand_resource, mutable_config, ctx: SpackContext
     ):
         archive = mock_stage_archive()
         composite_stage = StageComposite()
-        root_stage = stage_from_config(archive.url, config=mutable_config)
+        root_stage = stage_from_config(archive.url, config=mutable_config, client=ctx.network)
         composite_stage.append(root_stage)
 
         resource_dst_name = "resource-dst-name.sh"
@@ -442,7 +457,11 @@ class TestStage:
         )
         test_resource = Resource("test_resource", test_resource_fetcher, resource_dst_name, None)
         resource_stage = resource_stage_from_config(
-            test_resource_fetcher, root_stage, test_resource, config=mutable_config
+            test_resource_fetcher,
+            root_stage,
+            test_resource,
+            config=mutable_config,
+            client=ctx.network,
         )
         composite_stage.append(resource_stage)
 
@@ -499,18 +518,22 @@ class TestStage:
         # Perform a little cleanup
         shutil.rmtree(root_stage.path)
 
-    def test_setup_and_destroy_no_name_without_tmp(self, mock_stage_archive, mutable_config):
+    def test_setup_and_destroy_no_name_without_tmp(
+        self, mock_stage_archive, mutable_config, ctx: SpackContext
+    ):
         archive = mock_stage_archive()
-        with stage_from_config(archive.url, config=mutable_config) as stage:
+        with stage_from_config(archive.url, config=mutable_config, client=ctx.network) as stage:
             check_setup(stage, None, archive)
         check_destroy(stage, None)
 
     @pytest.mark.parametrize("debug", [False, True])
-    def test_fetch(self, mutable_config: Configuration, mock_stage_archive, debug):
+    def test_fetch(
+        self, mutable_config: Configuration, mock_stage_archive, debug, ctx: SpackContext
+    ):
         archive = mock_stage_archive()
         with mutable_config.override("config:debug", debug):
             with stage_from_config(
-                archive.url, name=self.stage_name, config=mutable_config
+                archive.url, name=self.stage_name, config=mutable_config, client=ctx.network
             ) as stage:
                 stage.fetch()
                 check_setup(stage, self.stage_name, archive)
@@ -518,22 +541,27 @@ class TestStage:
             check_destroy(stage, self.stage_name)
 
     def test_no_search_if_default_succeeds(
-        self, mock_stage_archive, failing_search_fn, mutable_config
+        self, mock_stage_archive, failing_search_fn, mutable_config, ctx: SpackContext
     ):
         archive = mock_stage_archive()
         stage = stage_from_config(
-            archive.url, name=self.stage_name, search_fn=failing_search_fn, config=mutable_config
+            archive.url,
+            name=self.stage_name,
+            search_fn=failing_search_fn,
+            config=mutable_config,
+            client=ctx.network,
         )
         with stage:
             stage.fetch()
         check_destroy(stage, self.stage_name)
 
-    def test_no_search_mirror_only(self, failing_search_fn, config):
+    def test_no_search_mirror_only(self, failing_search_fn, config, ctx: SpackContext):
         stage = stage_from_config(
             FailingFetchStrategy(),
             name=self.stage_name,
             search_fn=failing_search_fn,
             config=config,
+            client=ctx.network,
         )
         with stage:
             try:
@@ -549,9 +577,15 @@ class TestStage:
             (None, "All fetchers failed"),
         ],
     )
-    def test_search_if_default_fails(self, search_fn, err_msg, expected, config):
+    def test_search_if_default_fails(
+        self, search_fn, err_msg, expected, config, ctx: SpackContext
+    ):
         stage = stage_from_config(
-            FailingFetchStrategy(), name=self.stage_name, search_fn=search_fn, config=config
+            FailingFetchStrategy(),
+            name=self.stage_name,
+            search_fn=search_fn,
+            config=config,
+            client=ctx.network,
         )
 
         with stage:
@@ -561,9 +595,11 @@ class TestStage:
         check_destroy(stage, self.stage_name)
         assert search_fn.performed_search
 
-    def test_ensure_one_stage_entry(self, mock_stage_archive, mutable_config):
+    def test_ensure_one_stage_entry(self, mock_stage_archive, mutable_config, ctx: SpackContext):
         archive = mock_stage_archive()
-        with stage_from_config(archive.url, name=self.stage_name, config=mutable_config) as stage:
+        with stage_from_config(
+            archive.url, name=self.stage_name, config=mutable_config, client=ctx.network
+        ) as stage:
             stage.fetch()
             stage_path = get_stage_path(stage, self.stage_name)
             spack.fetch_strategy._ensure_one_stage_entry(stage_path)
@@ -578,9 +614,13 @@ class TestStage:
             [_include_hidden, _include_readme],
         ],
     )
-    def test_expand_archive(self, expected_file_list, mock_stage_archive, mutable_config):
+    def test_expand_archive(
+        self, expected_file_list, mock_stage_archive, mutable_config, ctx: SpackContext
+    ):
         archive = mock_stage_archive(expected_file_list)
-        with stage_from_config(archive.url, name=self.stage_name, config=mutable_config) as stage:
+        with stage_from_config(
+            archive.url, name=self.stage_name, config=mutable_config, client=ctx.network
+        ) as stage:
             stage.fetch()
             check_setup(stage, self.stage_name, archive)
             check_fetch(stage, self.stage_name)
@@ -588,10 +628,14 @@ class TestStage:
             check_expand_archive(stage, self.stage_name, expected_file_list)
         check_destroy(stage, self.stage_name)
 
-    def test_expand_archive_extra_expand(self, mock_stage_archive, mutable_config):
+    def test_expand_archive_extra_expand(
+        self, mock_stage_archive, mutable_config, ctx: SpackContext
+    ):
         """Test expand with an extra expand after expand (i.e., no-op)."""
         archive = mock_stage_archive()
-        with stage_from_config(archive.url, name=self.stage_name, config=mutable_config) as stage:
+        with stage_from_config(
+            archive.url, name=self.stage_name, config=mutable_config, client=ctx.network
+        ) as stage:
             stage.fetch()
             check_setup(stage, self.stage_name, archive)
             check_fetch(stage, self.stage_name)
@@ -600,9 +644,11 @@ class TestStage:
             check_expand_archive(stage, self.stage_name, [_include_readme])
         check_destroy(stage, self.stage_name)
 
-    def test_restage(self, mock_stage_archive, mutable_config):
+    def test_restage(self, mock_stage_archive, mutable_config, ctx: SpackContext):
         archive = mock_stage_archive()
-        with stage_from_config(archive.url, name=self.stage_name, config=mutable_config) as stage:
+        with stage_from_config(
+            archive.url, name=self.stage_name, config=mutable_config, client=ctx.network
+        ) as stage:
             stage.fetch()
             stage.expand_archive()
 
@@ -621,20 +667,26 @@ class TestStage:
             assert "foobar" not in os.listdir(stage.source_path)
         check_destroy(stage, self.stage_name)
 
-    def test_no_keep_without_exceptions(self, mock_stage_archive, mutable_config):
+    def test_no_keep_without_exceptions(
+        self, mock_stage_archive, mutable_config, ctx: SpackContext
+    ):
         archive = mock_stage_archive()
         stage = stage_from_config(
-            archive.url, name=self.stage_name, keep=False, config=mutable_config
+            archive.url,
+            name=self.stage_name,
+            keep=False,
+            config=mutable_config,
+            client=ctx.network,
         )
         with stage:
             pass
         check_destroy(stage, self.stage_name)
 
     @pytest.mark.disable_clean_stage_check
-    def test_keep_without_exceptions(self, mock_stage_archive, mutable_config):
+    def test_keep_without_exceptions(self, mock_stage_archive, mutable_config, ctx: SpackContext):
         archive = mock_stage_archive()
         stage = stage_from_config(
-            archive.url, name=self.stage_name, keep=True, config=mutable_config
+            archive.url, name=self.stage_name, keep=True, config=mutable_config, client=ctx.network
         )
         with stage:
             pass
@@ -642,13 +694,17 @@ class TestStage:
         assert os.path.isdir(path)
 
     @pytest.mark.disable_clean_stage_check
-    def test_no_keep_with_exceptions(self, mock_stage_archive, mutable_config):
+    def test_no_keep_with_exceptions(self, mock_stage_archive, mutable_config, ctx: SpackContext):
         class ThisMustFailHere(Exception):
             pass
 
         archive = mock_stage_archive()
         stage = stage_from_config(
-            archive.url, name=self.stage_name, keep=False, config=mutable_config
+            archive.url,
+            name=self.stage_name,
+            keep=False,
+            config=mutable_config,
+            client=ctx.network,
         )
         try:
             with stage:
@@ -659,13 +715,13 @@ class TestStage:
             assert os.path.isdir(path)
 
     @pytest.mark.disable_clean_stage_check
-    def test_keep_exceptions(self, mock_stage_archive, mutable_config):
+    def test_keep_exceptions(self, mock_stage_archive, mutable_config, ctx: SpackContext):
         class ThisMustFailHere(Exception):
             pass
 
         archive = mock_stage_archive()
         stage = stage_from_config(
-            archive.url, name=self.stage_name, keep=True, config=mutable_config
+            archive.url, name=self.stage_name, keep=True, config=mutable_config, client=ctx.network
         )
         try:
             with stage:
@@ -675,10 +731,12 @@ class TestStage:
             path = get_stage_path(stage, self.stage_name)
             assert os.path.isdir(path)
 
-    def test_source_path_available(self, mock_stage_archive, mutable_config):
+    def test_source_path_available(self, mock_stage_archive, mutable_config, ctx: SpackContext):
         """Ensure source path available but does not exist on instantiation."""
         archive = mock_stage_archive()
-        stage = stage_from_config(archive.url, name=self.stage_name, config=mutable_config)
+        stage = stage_from_config(
+            archive.url, name=self.stage_name, config=mutable_config, client=ctx.network
+        )
 
         source_path = stage.source_path
         assert source_path
@@ -829,16 +887,18 @@ class TestStage:
                 assert os.path.exists(test_path)
                 shutil.rmtree(test_path)
 
-    def test_stage_constructor_no_fetcher(self, config):
+    def test_stage_constructor_no_fetcher(self, config, ctx: SpackContext):
         """Ensure Stage constructor with no URL or fetch strategy fails."""
         with pytest.raises(ValueError):
-            with stage_from_config(None, config=config):
+            with stage_from_config(None, config=config, client=ctx.network):
                 pass
 
-    def test_stage_constructor_with_path(self, tmp_path: pathlib.Path, config):
+    def test_stage_constructor_with_path(self, tmp_path: pathlib.Path, config, ctx: SpackContext):
         """Ensure Stage constructor with a path uses it."""
         testpath = str(tmp_path)
-        with stage_from_config("file:///does-not-exist", path=testpath, config=config) as stage:
+        with stage_from_config(
+            "file:///does-not-exist", path=testpath, config=config, client=ctx.network
+        ) as stage:
             assert stage.path == testpath
 
 
@@ -932,7 +992,7 @@ class TestDevelopStage:
         assert srctree2 == devtree
 
 
-def test_stage_create_replace_path(tmp_build_stage_dir, mutable_config):
+def test_stage_create_replace_path(tmp_build_stage_dir, mutable_config, ctx: SpackContext):
     """Ensure stage creation replaces a non-directory path."""
     _, test_stage_path = tmp_build_stage_dir
     mkdirp(test_stage_path)
@@ -941,7 +1001,7 @@ def test_stage_create_replace_path(tmp_build_stage_dir, mutable_config):
     touch(nondir)
     path = url_util.path_to_file_url(str(nondir))
 
-    stage = stage_from_config(path, name="afile", config=mutable_config)
+    stage = stage_from_config(path, name="afile", config=mutable_config, client=ctx.network)
     stage.create()
 
     # Ensure the stage path is "converted" to a directory
@@ -958,10 +1018,16 @@ def test_cannot_access(capfd):
     assert "Insufficient permissions" in str(captured)
 
 
-def test_override_keep_in_composite_stage(config):
-    stage_1 = stage_from_config("file:///does-not-exist", keep=True, config=config)
-    stage_2 = stage_from_config("file:///does-not-exist", keep=False, config=config)
-    stage_3 = stage_from_config("file:///does-not-exist", keep=True, config=config)
+def test_override_keep_in_composite_stage(config, ctx: SpackContext):
+    stage_1 = stage_from_config(
+        "file:///does-not-exist", keep=True, config=config, client=ctx.network
+    )
+    stage_2 = stage_from_config(
+        "file:///does-not-exist", keep=False, config=config, client=ctx.network
+    )
+    stage_3 = stage_from_config(
+        "file:///does-not-exist", keep=True, config=config, client=ctx.network
+    )
     stages = spack.stage.StageComposite.from_iterable((stage_1, stage_2, stage_3))
 
     # The getter for the composite stage just returns the value of the first stage

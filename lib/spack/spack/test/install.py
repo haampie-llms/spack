@@ -30,6 +30,7 @@ import spack.util.filesystem as fs
 import spack.util.spack_json as sjson
 from spack import binary_distribution
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.error import InstallError
 from spack.installer import PackageInstaller
 from spack.main import SpackCommand
@@ -211,7 +212,9 @@ def test_install_times(install_mockery, mock_fetch, mutable_mock_repo):
 
 
 @pytest.fixture()
-def install_upstream(tmp_path_factory: pytest.TempPathFactory, gen_mock_layout, install_mockery):
+def install_upstream(
+    tmp_path_factory: pytest.TempPathFactory, gen_mock_layout, install_mockery, ctx: SpackContext
+):
     """Provides a function that installs a specified set of specs to an
     upstream database. The function returns a store which points to the
     upstream, as well as the upstream layout (for verifying that dependent
@@ -641,7 +644,11 @@ def test_empty_install_sanity_check_prefix(
 
 @pytest.mark.disable_clean_stage_check
 def test_install_from_binary_with_missing_patch_succeeds(
-    temporary_store: spack.store.Store, mutable_config, tmp_path: pathlib.Path, mock_packages
+    temporary_store: spack.store.Store,
+    mutable_config,
+    tmp_path: pathlib.Path,
+    mock_packages,
+    ctx: SpackContext,
 ):
     """If a patch is missing in the local package repository, but was present when building and
     pushing the package to a binary cache, installation from that binary cache shouldn't error out
@@ -676,7 +683,7 @@ def test_install_from_binary_with_missing_patch_succeeds(
         PackageInstaller([s.package], explicit=True).install()
 
     # Binary install: succeeds, we don't need the patch.
-    spack.mirrors.utils.add(mirror)
+    spack.mirrors.utils.add(mirror, config=ctx.config)
     PackageInstaller(
         [s.package],
         explicit=True,

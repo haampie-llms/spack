@@ -26,6 +26,7 @@ import spack.util.lock
 import spack.util.parallel
 import spack.util.string
 import spack.util.url as url_util
+import spack.util.web
 from spack import fetch_strategy as fs  # breaks a cycle
 from spack.util import tty
 from spack.util.crypto import bit_length, prefix_bits
@@ -413,6 +414,8 @@ class Stage(AbstractStage):
         lock: bool,
         checksum: bool,
         download_cache: "fs.FsCache",
+        client: spack.util.web.NetworkClient,
+        debug: bool,
         name=None,
         mirror_paths: Optional["spack.mirrors.layout.MirrorLayout"] = None,
         mirrors: Optional[Iterable["spack.mirrors.mirror.Mirror"]] = None,
@@ -440,6 +443,12 @@ class Stage(AbstractStage):
               Cache of downloaded archives, tried before other fetchers and filled by
               :meth:`cache_local`.
 
+          client
+              Network client used by the fetchers of this stage.
+
+          debug
+              True if fetchers run their tools verbosely (``config:debug``).
+
           name
               If a name is provided, then this stage is a named stage and will persist between runs
               (or if you construct another stage object later).  If name is not provided, then this
@@ -463,6 +472,8 @@ class Stage(AbstractStage):
         super().__init__(name, path, keep, stage_root=stage_root, lock=lock)
         self.checksum = checksum
         self.download_cache = download_cache
+        self.client = client
+        self.debug = debug
 
         # TODO: fetch/stage coupling needs to be reworked -- the logic
         # TODO: here is convoluted and not modular enough.
@@ -770,6 +781,8 @@ class ResourceStage(Stage):
         lock: bool,
         checksum: bool,
         download_cache: "fs.FsCache",
+        client: spack.util.web.NetworkClient,
+        debug: bool,
         name=None,
         mirror_paths: Optional["spack.mirrors.layout.MirrorLayout"] = None,
         mirrors: Optional[Iterable["spack.mirrors.mirror.Mirror"]] = None,
@@ -783,6 +796,8 @@ class ResourceStage(Stage):
             lock=lock,
             checksum=checksum,
             download_cache=download_cache,
+            client=client,
+            debug=debug,
             name=name,
             mirror_paths=mirror_paths,
             mirrors=mirrors,
@@ -1057,6 +1072,7 @@ def stage_from_config(
     url_or_fetch_strategy,
     *,
     config: spack.config.Configuration,
+    client: spack.util.web.NetworkClient,
     name=None,
     mirror_paths: Optional["spack.mirrors.layout.MirrorLayout"] = None,
     mirrors: Optional[Iterable["spack.mirrors.mirror.Mirror"]] = None,
@@ -1064,14 +1080,16 @@ def stage_from_config(
     path=None,
     search_fn=None,
 ) -> Stage:
-    """Returns a :class:`Stage` whose root, locking, checksum verification and download cache are
-    taken from ``config``. The other arguments are forwarded to :class:`Stage`."""
+    """Returns a :class:`Stage` whose root, locking, checksum verification, download cache and
+    verbosity are taken from ``config``. The other arguments are forwarded to :class:`Stage`."""
     return Stage(
         url_or_fetch_strategy,
         stage_root=stage_root(config),
         lock=config.get("config:locks", True),
         checksum=config.get("config:checksum"),
         download_cache=spack.caches.fetch_cache(config),
+        client=client,
+        debug=bool(config.get("config:debug")),
         name=name,
         mirror_paths=mirror_paths,
         mirrors=mirrors,
@@ -1087,13 +1105,14 @@ def resource_stage_from_config(
     resource: spack.resource.Resource,
     *,
     config: spack.config.Configuration,
+    client: spack.util.web.NetworkClient,
     name=None,
     mirror_paths: Optional["spack.mirrors.layout.MirrorLayout"] = None,
     mirrors: Optional[Iterable["spack.mirrors.mirror.Mirror"]] = None,
     path=None,
 ) -> ResourceStage:
-    """Returns a :class:`ResourceStage` whose root, locking, checksum verification and download
-    cache are taken from ``config``. The other arguments are forwarded to
+    """Returns a :class:`ResourceStage` whose root, locking, checksum verification, download
+    cache and verbosity are taken from ``config``. The other arguments are forwarded to
     :class:`ResourceStage`."""
     return ResourceStage(
         fetch_strategy,
@@ -1103,6 +1122,8 @@ def resource_stage_from_config(
         lock=config.get("config:locks", True),
         checksum=config.get("config:checksum"),
         download_cache=spack.caches.fetch_cache(config),
+        client=client,
+        debug=bool(config.get("config:debug")),
         name=name,
         mirror_paths=mirror_paths,
         mirrors=mirrors,
@@ -1344,6 +1365,7 @@ def get_checksums_for_versions(
     concurrency: Optional[int] = None,
     fetch_options: Optional[Dict[str, str]] = None,
     config: spack.config.Configuration,
+    client: spack.util.web.NetworkClient,
 ) -> Dict[StandardVersion, str]:
     """Computes the checksums for each version passed in input, and returns the results.
 
@@ -1362,6 +1384,7 @@ def get_checksums_for_versions(
         fetch_options: options used for the fetcher (such as timeout or cookies)
         concurrency: maximum number of workers to use for retrieving archives
         config: configuration for the stages the archives are fetched into
+        client: network client used to fetch the archives
 
     Returns:
         A dictionary mapping each version to the corresponding checksum
@@ -1384,7 +1407,7 @@ def get_checksums_for_versions(
     if first_stage_function is not None:
         (url, version), search_arguments = search_arguments[0], search_arguments[1:]
         result = _fetch_and_checksum(
-            url, fetch_options, keep_stage, first_stage_function, config=config
+            url, fetch_options, keep_stage, first_stage_function, config=config, client=client
         )
         if isinstance(result, Exception):
             errors.append(str(result))
@@ -1396,7 +1419,12 @@ def get_checksums_for_versions(
             (
                 version,
                 executor.submit(
-                    _fetch_and_checksum, url, fetch_options, keep_stage, config=config
+                    _fetch_and_checksum,
+                    url,
+                    fetch_options,
+                    keep_stage,
+                    config=config,
+                    client=client,
                 ),
             )
             for url, version in search_arguments
@@ -1428,10 +1456,14 @@ def _fetch_and_checksum(
     action_fn: Optional[Callable[[str, str], None]] = None,
     *,
     config: spack.config.Configuration,
+    client: spack.util.web.NetworkClient,
 ) -> Union[str, Exception]:
     try:
         with stage_from_config(
-            fs.URLFetchStrategy(url=url, fetch_options=options), keep=keep_stage, config=config
+            fs.URLFetchStrategy(url=url, fetch_options=options),
+            keep=keep_stage,
+            config=config,
+            client=client,
         ) as stage:
             # Fetch the archive
             stage.fetch()

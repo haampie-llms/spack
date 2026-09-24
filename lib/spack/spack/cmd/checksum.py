@@ -172,6 +172,7 @@ def checksum(parser, args, ctx):
         keep_stage=args.keep_stage,
         fetch_options=pkg.fetch_options,
         config=ctx.config,
+        client=client,
     )
 
     if args.verify:
