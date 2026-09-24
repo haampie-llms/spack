@@ -39,5 +39,5 @@ def setdefault(module_type, specs, args, ctx):
     data = {"modules": {args.module_set_name: {"lmod": {"defaults": [str(spec)]}}}}
     scope = spack.config.InternalConfigScope("lmod-setdefault", data)
     with ctx.config.override(scope):
-        writer = spack.modules.module_types["lmod"].from_spec(spec, args.module_set_name)
+        writer = spack.modules.module_types["lmod"].from_spec(spec, args.module_set_name, ctx=ctx)
         writer.update_module_defaults()

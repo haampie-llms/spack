@@ -2532,7 +2532,7 @@ def disable_parallelism(monkeypatch, request):
         monkeypatch.setattr(spack.util.parallel, "ENABLE_PARALLELISM", False)
 
 
-def _root_path(x, y, *, path):
+def _root_path(x, y, z, *, path):
     return path
 
 
