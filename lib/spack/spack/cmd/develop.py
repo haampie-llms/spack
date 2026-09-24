@@ -8,6 +8,7 @@ from typing import Optional
 
 import spack.cmd
 import spack.config
+import spack.context
 import spack.environment
 import spack.fetch_strategy
 import spack.repo
@@ -75,16 +76,17 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
 
 
 def _retrieve_develop_source(
-    spec: spack.spec.Spec, abspath: str, repo: spack.repo.RepoPath
+    spec: spack.spec.Spec, abspath: str, ctx: spack.context.SpackContext
 ) -> None:
     # "steal" the source code via staging API. We ask for a stage
     # to be created, then copy it afterwards somewhere else. It would be
     # better if we can create the `source_path` directly into its final
     # destination.
-    pkg_cls = repo.get_pkg_class(spec.name)
+    pkg_cls = ctx.repo.get_pkg_class(spec.name)
     # We construct a package class ourselves, rather than asking for
     # Spec.package, since Spec only allows this when it is concrete
     package = pkg_cls(spec)
+    package.context = ctx
     source_stage: spack.stage.Stage = package.stage[0]
     if isinstance(source_stage.fetcher, spack.fetch_strategy.GitFetchStrategy):
         source_stage.fetcher.get_full_repo = True
@@ -128,7 +130,7 @@ def assure_concrete_spec(
 def setup_src_code(
     spec: spack.spec.Spec,
     src_path: str,
-    repo: spack.repo.RepoPath,
+    ctx: spack.context.SpackContext,
     clone: bool = True,
     force: bool = False,
 ):
@@ -138,7 +140,7 @@ def setup_src_code(
     assert spec.versions
 
     if clone:
-        _clone(spec, src_path, repo, force)
+        _clone(spec, src_path, ctx, force)
 
     if not clone and not os.path.exists(src_path):
         raise SpackError(f"Provided path {src_path} does not exist")
@@ -146,7 +148,7 @@ def setup_src_code(
     version = spec.versions.concrete_range_as_version
     if not version:
         # look up the maximum version so infintiy versions are preferred for develop
-        version = max(repo.get_pkg_class(spec.fullname).versions.keys())
+        version = max(ctx.repo.get_pkg_class(spec.fullname).versions.keys())
         tty.msg(f"Defaulting to highest version: {spec.name}@{version}")
     spec.versions = spack.version.VersionList([version])
 
@@ -196,7 +198,9 @@ def update_env(
             env.apply_develop([spec], [_abs_code_path(env, spec, specified_path, config)])
 
 
-def _clone(spec: spack.spec.Spec, abspath: str, repo: spack.repo.RepoPath, force: bool = False):
+def _clone(
+    spec: spack.spec.Spec, abspath: str, ctx: spack.context.SpackContext, force: bool = False
+):
     if os.path.exists(abspath):
         if force:
             shutil.rmtree(abspath)
@@ -208,7 +212,7 @@ def _clone(spec: spack.spec.Spec, abspath: str, repo: spack.repo.RepoPath, force
 
     # cloning can take a while and it's nice to get a message for the longer clones
     tty.msg(f"Cloning source code for {spec}")
-    _retrieve_develop_source(spec, abspath, repo)
+    _retrieve_develop_source(spec, abspath, ctx)
 
 
 def _abs_code_path(
@@ -269,5 +273,5 @@ def develop(parser, args, ctx):
 
     for spec, abspath in _dev_spec_generator(args, env, ctx):
         assure_concrete_spec(env, spec, ctx.repo)
-        setup_src_code(spec, abspath, ctx.repo, clone=args.clone, force=args.force)
+        setup_src_code(spec, abspath, ctx, clone=args.clone, force=args.force)
         update_env(env, spec, ctx.config, args.path, args.build_directory, args.apply_changes)

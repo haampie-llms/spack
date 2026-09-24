@@ -870,6 +870,7 @@ def ci_verify_versions(args, ctx):
         spec = spack.spec.Spec(pkg_name)
         pkg = ctx.repo.get_pkg_class(spec.name)(spec)
         pkg.context = ctx
+        pkg.context = ctx
         path = ctx.repo.package_path(pkg_name)
 
         # Skip checking manual download packages and trust the maintainers

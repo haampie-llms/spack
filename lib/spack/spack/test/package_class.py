@@ -266,13 +266,14 @@ def test_package_url_and_urls():
         UrlsPackage(s)
 
 
-def test_package_license():
+def test_package_license(ctx: SpackContext):
     LicensedPackage = type(
         "LicensedPackage", (PackageBase,), {"__module__": "spack.pkg.builtin.licensed_package"}
     )
 
     pkg = LicensedPackage(spack.spec.Spec("licensed-package"))
-    assert pkg.global_license_file is None
+    pkg.context = ctx
+    assert not pkg.global_license_file
 
     pkg.license_files = ["license.txt"]
     assert os.path.basename(pkg.global_license_file) == pkg.license_files[0]
