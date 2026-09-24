@@ -857,8 +857,6 @@ def start_build(request: BuildRequest, jobserver: JobServerBase) -> ChildInfo:
     gmake = next(iter(spec.dependencies("gmake")), None)
     makeflags = jobserver.makeflags(gmake)
 
-    # As a performance optimization, we do not serialize the environment which
-    # is slow to serialize and not needed in the build job
     proc = Process(
         target=worker_function,
         args=(
@@ -868,7 +866,7 @@ def start_build(request: BuildRequest, jobserver: JobServerBase) -> ChildInfo:
             channels.control_r,
             channels.tee_control_w,
             makeflags,
-            GlobalStateMarshaler(),
+            GlobalStateMarshaler(context=spec.package.context),
         ),
     )
     proc.start()

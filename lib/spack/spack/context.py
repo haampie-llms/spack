@@ -260,14 +260,11 @@ class SpackContext:
                 value.enable()
 
     def __reduce__(self):
+        # Not the environment, which is large: its scope and path are part of config
         return (
             SpackContext,
             (self._config,),
-            {
-                "_environment": self._environment,
-                "is_bootstrap": self.is_bootstrap,
-                "gpg_home": self.gpg_home,
-            },
+            {"is_bootstrap": self.is_bootstrap, "gpg_home": self.gpg_home},
         )
 
     def __setstate__(self, state):
