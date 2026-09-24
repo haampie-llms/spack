@@ -23,6 +23,7 @@ from spack.config import Configuration
 from spack.context import SpackContext
 from spack.main import SpackCommandError
 from spack.mirrors.utils import MirrorStatsForAllSpecs, MirrorStatsForOneSpec
+from spack.test.harness import SpackCommand
 
 config = SpackCommand("config")
 mirror = SpackCommand("mirror")

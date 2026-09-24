@@ -7,6 +7,7 @@ import pytest
 import spack.environment as ev
 from spack.context import SpackContext
 from spack.main import SpackCommandError
+from spack.test.harness import SpackCommand
 
 deconcretize = SpackCommand("deconcretize")
 

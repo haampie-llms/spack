@@ -6133,7 +6133,8 @@ def break_globals(monkeypatch, ctx: SpackContext):
 
     It is a context manager rather than a plain fixture so a test can break the globals after
     every other fixture is set up, and restore them before those fixtures are torn down: the
-    database and mock package fixtures use ``spack.test.harness.current().repo`` while tearing down.
+    database and mock package fixtures use the repositories of the test context while tearing
+    down.
     """
 
     @contextlib.contextmanager

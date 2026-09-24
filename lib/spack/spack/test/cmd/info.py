@@ -8,6 +8,7 @@ import pytest
 
 from spack.main import SpackCommandError
 from spack.repo import UnknownPackageError
+from spack.test.harness import SpackCommand
 
 pytestmark = [pytest.mark.usefixtures("mock_packages")]
 

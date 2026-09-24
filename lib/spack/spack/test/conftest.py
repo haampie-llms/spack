@@ -1160,18 +1160,6 @@ def config(ctx: SpackContext) -> spack.config.Configuration:
     return ctx.config
 
 
-#: Fixtures that replace the context of the process with one of another configuration
-_CONFIGURATION_FIXTURES = (
-    "config",
-    "mutable_config",
-    "mutable_empty_config",
-    "default_config",
-    "mock_low_high_config",
-    "mock_missing_dir_include_scopes",
-    "mock_missing_file_include_scopes",
-)
-
-
 @pytest.fixture
 def mutable_config(ctx: SpackContext) -> spack.config.Configuration:
     """Like ``config``, read from a copy of the mock configuration files the test can modify."""
@@ -1646,6 +1634,7 @@ def module_configuration(request, mutable_config: Configuration) -> ConfigUpdate
     writer_cls = getattr(request.module, "writer_cls")
     # Module where the module file writer is defined
     writer_mod = inspect.getmodule(writer_cls)
+    assert writer_mod is not None
     # Key for specific settings relative to this module type
     writer_key = str(writer_mod.__name__).split(".")[-1]
     # Root folder for configuration
