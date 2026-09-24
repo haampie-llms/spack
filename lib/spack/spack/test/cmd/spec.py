@@ -14,7 +14,6 @@ import spack.concretize
 import spack.environment as ev
 import spack.error
 import spack.spec
-import spack.store
 from spack.config import Configuration
 from spack.context import SpackContext
 from spack.main import SpackCommand, SpackCommandError
@@ -257,12 +256,12 @@ def test_buildcache_status_fn_marks_absent_spec(
     assert status_fn(s) == spack.spec.InstallStatus.absent
 
 
-def test_buildcache_status_fn_installed_not_overridden(mutable_database):
+def test_buildcache_status_fn_installed_not_overridden(mutable_database, ctx: SpackContext):
     """Tests that an installed spec stays installed even if its hash is in the cache."""
     s = mutable_database.query_one("mpileaks^mpich")
     assert mutable_database.install_status(s) == spack.spec.InstallStatus.installed
 
-    status_fn = spack.cmd.buildcache_status_fn({s.dag_hash()}, store=spack.store.STORE)
+    status_fn = spack.cmd.buildcache_status_fn({s.dag_hash()}, store=ctx.store)
     assert status_fn(s) == spack.spec.InstallStatus.installed
 
 

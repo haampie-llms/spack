@@ -142,4 +142,4 @@ def deprecate(parser, args, ctx):
     ctx.store.db.ensure_latest_db_version()
 
     for dcate, dcator in zip(all_deprecate, all_deprecators):
-        spack.old_installer.deprecate(dcate, dcator, symlink)
+        spack.old_installer.deprecate(dcate, dcator, symlink, store=ctx.store)

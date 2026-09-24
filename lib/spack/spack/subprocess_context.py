@@ -25,7 +25,6 @@ import spack.config
 import spack.paths
 import spack.platforms
 import spack.repo
-import spack.store
 import spack.util.lang
 from spack.active_environment import active_environment
 
@@ -107,7 +106,6 @@ class GlobalStateMarshaler:
 
         self.config = spack.util.lang.ensure_unwrapped(spack.config.CONFIG)
         self.platform = spack.platforms.host
-        self.store = spack.store.STORE
         self.test_patches = TestPatches.create()
         self.spack_working_dir = spack.paths.spack_working_dir
         if serialize_env:
@@ -125,7 +123,6 @@ class GlobalStateMarshaler:
             )
         )
         spack.platforms.host = self.platform
-        spack.store.STORE = self.store
         spack.paths.spack_working_dir = self.spack_working_dir
         self.test_patches.restore()
         if self.env:

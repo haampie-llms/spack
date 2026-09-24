@@ -19,22 +19,9 @@ debugging easier.
 import contextlib
 import filecmp
 import os
-import pathlib
 import shutil
 import sys
-import uuid
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Callable,
-    Dict,
-    Generator,
-    List,
-    Optional,
-    Tuple,
-    Union,
-    cast,
-)
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple, Union
 
 import spack.config
 import spack.database
@@ -43,7 +30,6 @@ import spack.error
 import spack.package_prefs
 import spack.paths
 import spack.spec
-import spack.util.lang
 import spack.util.path
 from spack.util import filesystem as fs
 from spack.util import tty
@@ -291,39 +277,6 @@ def create(
     )
 
 
-def _process_repo() -> "spack.repo.RepoPath":
-    """The repositories of the process (transitional)."""
-    import spack.repo
-
-    return spack.repo.PATH
-
-
-def _create_global() -> Store:
-    return create(configuration=spack.config.CONFIG, repo_provider=_process_repo)
-
-
-#: Singleton store instance
-STORE = cast(Store, spack.util.lang.Singleton(_create_global))
-
-
-def reinitialize():
-    """Restore globals to the same state they would have at start-up. Return a token
-    containing the state of the store before reinitialization.
-    """
-    global STORE
-
-    token = STORE
-    STORE = cast(Store, spack.util.lang.Singleton(_create_global))
-
-    return token
-
-
-def restore(token):
-    """Restore the environment from a token returned by reinitialize"""
-    global STORE
-    STORE = token
-
-
 def _construct_upstream_dbs_from_install_roots(
     install_roots: List[str],
     *,
@@ -392,48 +345,6 @@ def find(
         )
 
     return matching_specs
-
-
-def ensure_singleton_created() -> None:
-    """Ensures the lazily evaluated singleton is created"""
-    _ = STORE.db
-
-
-@contextlib.contextmanager
-def use_store(
-    path: Union[str, pathlib.Path], extra_data: Optional[Dict[str, Any]] = None
-) -> Generator[Store, None, None]:
-    """Use the store passed as argument within the context manager.
-
-    Args:
-        path: path to the store.
-        extra_data: extra configuration under ``config:install_tree`` to be
-            taken into account.
-
-    Yields:
-        Store object associated with the context manager's store
-    """
-    global STORE
-
-    assert not isinstance(path, Store), "cannot pass a store anymore"
-    scope_name = "use-store-{}".format(uuid.uuid4())
-    data = {"root": str(path)}
-    if extra_data:
-        data.update(extra_data)
-
-    # Swap the store with the one just constructed and return it
-    spack.config.CONFIG.push_scope(
-        spack.config.InternalConfigScope(name=scope_name, data={"config": {"install_tree": data}})
-    )
-    temporary_store = create(configuration=spack.config.CONFIG)
-    original_store, STORE = STORE, temporary_store
-
-    try:
-        yield temporary_store
-    finally:
-        # Restore the original store
-        STORE = original_store
-        spack.config.CONFIG.remove_scope(scope_name=scope_name)
 
 
 class MatchError(spack.error.SpackError):

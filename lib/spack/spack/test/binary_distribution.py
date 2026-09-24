@@ -30,7 +30,7 @@ import spack.mirrors.mirror
 import spack.oci.image
 import spack.spec
 import spack.stage
-import spack.store
+import spack.test.utilities
 import spack.url_buildcache
 import spack.util.gpg
 import spack.util.spack_yaml as syaml
@@ -602,7 +602,7 @@ def test_update_sbang(
     """Test relocation of the sbang shebang line in a package script"""
     s = spack.concretize.concretize_one("old-sbang", ctx)
     PackageInstaller([s.package]).install()
-    old_prefix, old_sbang_shebang = s.prefix, sbang.sbang_shebang_line()
+    old_prefix, old_sbang_shebang = s.prefix, sbang.sbang_shebang_line_for(ctx.store)
     old_contents = f"""\
 {old_sbang_shebang}
 #!/usr/bin/env python3
@@ -616,9 +616,9 @@ def test_update_sbang(
     buildcache_cmd("push", "--update-index", "--unsigned", temporary_mirror, f"/{s.dag_hash()}")
 
     # Switch the store to the new install tree locations
-    with spack.store.use_store(str(tmp_path)):
+    with spack.test.utilities.use_store(str(tmp_path)):
         s._prefix = None  # clear the cached old prefix
-        new_prefix, new_sbang_shebang = s.prefix, sbang.sbang_shebang_line()
+        new_prefix, new_sbang_shebang = s.prefix, sbang.sbang_shebang_line_for(ctx.store)
         assert old_prefix != new_prefix
         assert old_sbang_shebang != new_sbang_shebang
         PackageInstaller(
@@ -627,7 +627,7 @@ def test_update_sbang(
 
         # Check that the sbang line refers to the new install tree
         new_contents = f"""\
-{sbang.sbang_shebang_line()}
+{sbang.sbang_shebang_line_for(ctx.store)}
 #!/usr/bin/env python3
 
 {s.prefix.bin}

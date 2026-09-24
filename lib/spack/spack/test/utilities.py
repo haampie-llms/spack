@@ -4,9 +4,14 @@
 
 """Non-fixture utilities for test code. Must be imported."""
 
-from typing import List, Tuple
+import contextlib
+import pathlib
+import uuid
+from typing import Any, Dict, Generator, List, Optional, Tuple, Union
 
+import spack.config
 import spack.context
+import spack.store
 from spack.concretize_ui import ConcretizerUI, SolveKind
 from spack.main import make_argument_parser
 from spack.spec import Spec
@@ -90,3 +95,31 @@ class UnusableGlobal:
         raise AssertionError(
             f"{self._name} was read instead of the injected context (attribute {item!r})"
         )
+
+
+@contextlib.contextmanager
+def use_store(
+    path: Union[str, pathlib.Path], extra_data: Optional[Dict[str, Any]] = None
+) -> Generator[spack.store.Store, None, None]:
+    """Use the store at ``path`` in the process context within the context manager.
+    ``extra_data`` are extra settings under ``config:install_tree``."""
+    ctx = spack.context.default()
+    scope_name = f"use-store-{uuid.uuid4()}"
+    data = {"root": str(path)}
+    if extra_data:
+        data.update(extra_data)
+
+    config = ctx.config
+    config.push_scope(
+        spack.config.InternalConfigScope(name=scope_name, data={"config": {"install_tree": data}})
+    )
+    store = spack.store.create(config, repo_provider=ctx.repo_provider)
+    saved = ctx.__dict__.pop("store", None)
+    ctx.__dict__["store"] = store
+    try:
+        yield store
+    finally:
+        ctx.__dict__.pop("store", None)
+        if saved is not None:
+            ctx.__dict__["store"] = saved
+        config.remove_scope(scope_name=scope_name)

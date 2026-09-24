@@ -304,7 +304,6 @@ class _ProcessContext(SpackContext):
     ) -> None:
         import spack.config
         import spack.repo
-        import spack.store
         from spack.util.lang import ensure_unwrapped
 
         self.deactivate()
@@ -318,7 +317,7 @@ class _ProcessContext(SpackContext):
             env.manifest.prepare_config_scope(config)
             after = self._store_and_repo_config()
             if before[0] != after[0]:
-                setattr(env, "store_token", spack.store.reinitialize())
+                self._replace_member("store", None)
             if before[1] != after[1] or use_env_repo:
                 setattr(env, "repo_token", repo_before)
                 repo_before.disable()
@@ -333,15 +332,12 @@ class _ProcessContext(SpackContext):
     def deactivate(self) -> None:
         import spack.config
         import spack.repo
-        import spack.store
 
         env = self.environment
         if env is None:
             return
-        store = getattr(env, "store_token", None)
-        if store is not None:
-            spack.store.restore(store)
-            delattr(env, "store_token")
+        if "store" in self._before_activation:
+            self._restore_member("store", self._before_activation.pop("store"))
         repo = getattr(env, "repo_token", None)
         if repo is not None:
             spack.repo.PATH.disable()
@@ -364,12 +360,6 @@ class _ProcessContext(SpackContext):
         from spack.active_environment import active_environment
 
         return active_environment()
-
-    @property  # type: ignore[override]
-    def store(self) -> "spack.store.Store":
-        import spack.store
-
-        return spack.store.STORE
 
     @property  # type: ignore[override]
     def repo(self) -> "spack.repo.RepoPath":

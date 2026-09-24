@@ -17,7 +17,9 @@ import tempfile
 import pytest
 
 import spack.config
+import spack.context
 import spack.store
+import spack.test.utilities
 import spack.util.filesystem as fs
 import spack.util.spack_yaml as syaml
 from spack.context import SpackContext
@@ -324,7 +326,7 @@ all:
 
 
 def check_sbang_installation(store: spack.store.Store, group=False):
-    sbang_path = sbang.sbang_install_path()
+    sbang_path = sbang.sbang_install_path_for(spack.context.default().store)
     sbang_bin_dir = os.path.dirname(sbang_path)
     assert sbang_path.startswith(store.unpadded_root)
 
@@ -347,7 +349,7 @@ def check_sbang_installation(store: spack.store.Store, group=False):
 
 
 def run_test_install_sbang(store: spack.store.Store, group, *, ctx: SpackContext):
-    sbang_path = sbang.sbang_install_path()
+    sbang_path = sbang.sbang_install_path_for(spack.context.default().store)
     sbang_bin_dir = os.path.dirname(sbang_path)
 
     assert sbang_path.startswith(store.unpadded_root)
@@ -381,7 +383,7 @@ def test_install_user_sbang(
     run_test_install_sbang(temporary_store, False, ctx=ctx)
 
 
-def test_install_sbang_too_long(tmp_path: pathlib.Path):
+def test_install_sbang_too_long(tmp_path: pathlib.Path, ctx: SpackContext):
     root = str(tmp_path)
     num_extend = sbang.system_shebang_limit - len(root) - len("/bin/sbang")
     long_path = root
@@ -389,9 +391,9 @@ def test_install_sbang_too_long(tmp_path: pathlib.Path):
         add = min(num_extend, 255)
         long_path = os.path.join(long_path, "e" * add)
         num_extend -= add
-    with spack.store.use_store(long_path):
+    with spack.test.utilities.use_store(long_path):
         with pytest.raises(sbang.SbangPathError) as exc_info:
-            sbang.sbang_install_path()
+            sbang.sbang_install_path_for(ctx.store)
 
     err = str(exc_info.value)
     assert "root is too long" in err
@@ -416,7 +418,7 @@ def test_sbang_hook_skips_nonexecutable_blobs(tmp_path: pathlib.Path, ctx: Spack
         assert b"sbang" not in f.readline()
 
 
-def test_sbang_handles_non_utf8_files(tmp_path: pathlib.Path):
+def test_sbang_handles_non_utf8_files(tmp_path: pathlib.Path, ctx: SpackContext):
     # We have an executable with a copyright sign as filename
     contents = b"#!" + b"\xa9" * sbang.system_shebang_limit + b"\nand another symbol: \xa9"
 
@@ -431,7 +433,7 @@ def test_sbang_handles_non_utf8_files(tmp_path: pathlib.Path):
         f.write(contents)
 
     # Run sbang
-    assert sbang.filter_shebang(file)
+    assert sbang.filter_shebang_for(file, ctx.store)
 
     with open(file, "rb") as f:
         new_contents = f.read()
@@ -450,7 +452,7 @@ def shebang_limits_system_8_spack_16():
 
 
 def test_shebang_exceeds_spack_shebang_limit(
-    shebang_limits_system_8_spack_16, tmp_path: pathlib.Path
+    shebang_limits_system_8_spack_16, tmp_path: pathlib.Path, ctx: SpackContext
 ):
     """Tests whether shebangs longer than Spack's limit are skipped"""
     file = str(tmp_path / "longer_than_spack_limit.sh")
@@ -458,18 +460,20 @@ def test_shebang_exceeds_spack_shebang_limit(
         f.write(b"#!" + b"x" * sbang.spack_shebang_limit)
 
     # Then Spack shouldn't try to add a shebang
-    assert not sbang.filter_shebang(file)
+    assert not sbang.filter_shebang_for(file, ctx.store)
 
     with open(file, "rb") as f:
         assert b"sbang" not in f.read()
 
 
-def test_sbang_hook_handles_non_writable_files_preserving_permissions(tmp_path: pathlib.Path):
+def test_sbang_hook_handles_non_writable_files_preserving_permissions(
+    tmp_path: pathlib.Path, ctx: SpackContext
+):
     path = str(tmp_path / "file.sh")
     with open(path, "w", encoding="utf-8") as f:
         f.write(long_line)
     os.chmod(path, 0o555)
-    sbang.filter_shebang(path)
+    sbang.filter_shebang_for(path, ctx.store)
     with open(path, "r", encoding="utf-8") as f:
         assert "sbang" in f.readline()
     assert os.stat(path).st_mode & 0o777 == 0o555

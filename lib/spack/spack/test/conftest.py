@@ -59,6 +59,7 @@ import spack.store
 import spack.subprocess_context
 import spack.tengine
 import spack.test.concretization_cache_plugin
+import spack.test.utilities
 import spack.util.executable
 import spack.util.file_cache
 import spack.util.git
@@ -833,7 +834,7 @@ def fake_db_install(tmp_path):
 
     after doing something like ``fake_db_install(y)``
     """
-    with spack.store.use_store(str(tmp_path)) as the_store:
+    with spack.test.utilities.use_store(str(tmp_path)) as the_store:
 
         def _install(a_spec):
             the_store.db.add(a_spec)
@@ -1123,12 +1124,9 @@ def mock_configuration_scopes(configuration_dir):
 @contextlib.contextmanager
 def _use_configuration_and_store(*scopes):
     """Activate config scopes and reset the store so it re-derives from them."""
+    # The process context rebuilds its store when the configuration is replaced
     with spack.config.use_configuration(*scopes) as cfg:
-        store_token = spack.store.reinitialize()
-        try:
-            yield cfg
-        finally:
-            spack.store.restore(store_token)
+        yield cfg
 
 
 @pytest.fixture(scope="function")
@@ -1337,7 +1335,7 @@ def mock_store(
     _mock_wsdk_externals = spack.bootstrap.ensure_winsdk_external_or_raise
 
     with spack.config.use_configuration(*mock_configuration_scopes):
-        with spack.store.use_store(str(store_path)) as store:
+        with spack.test.utilities.use_store(str(store_path)) as store:
             with spack.repo.use_repositories(mock_packages_repo):
                 try:
                     spack.bootstrap.ensure_winsdk_external_or_raise = _return_none
@@ -1368,7 +1366,7 @@ def _mock_store_tarball(mock_store) -> bytes:
 @pytest.fixture(scope="function")
 def database_store(mock_store: Store, mock_packages, config):
     """This activates the mock store, packages, AND config. Yields the Store."""
-    with spack.store.use_store(str(mock_store)) as store:
+    with spack.test.utilities.use_store(str(mock_store)) as store:
         yield store
         # Force reading the database again between tests
         store.db.last_seen_verifier = ""
@@ -1383,7 +1381,7 @@ def database(database_store: Store):
 @pytest.fixture(scope="function")
 def database_mutable_config_store(mock_store: Store, mock_packages, mutable_config, monkeypatch):
     """Like database_store, but with a mutable config. Yields the Store."""
-    with spack.store.use_store(str(mock_store)) as store:
+    with spack.test.utilities.use_store(str(mock_store)) as store:
         yield store
         store.db.last_seen_verifier = ""
 
@@ -1512,7 +1510,7 @@ def temporary_store(tmp_path: Path, request):
     """Hooks a temporary empty store for the test function."""
     ensure_configuration_fixture_run_before(request)
     temporary_store_path = tmp_path / "opt"
-    with spack.store.use_store(str(temporary_store_path)) as s:
+    with spack.test.utilities.use_store(str(temporary_store_path)) as s:
         yield s
     if temporary_store_path.exists():
         shutil.rmtree(temporary_store_path)
@@ -2515,7 +2513,6 @@ def nullify_globals(request, monkeypatch):
     ensure_configuration_fixture_run_before(request)
     monkeypatch.setattr(spack.config, "CONFIG", None)
     monkeypatch.setattr(spack.repo, "PATH", None)
-    monkeypatch.setattr(spack.store, "STORE", None)
 
 
 def pytest_runtest_setup(item):

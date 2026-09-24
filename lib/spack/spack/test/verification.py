@@ -12,7 +12,6 @@ import stat
 import pytest
 
 import spack.spec
-import spack.store
 import spack.util.filesystem as fs
 import spack.util.spack_json as sjson
 import spack.verify
@@ -174,9 +173,7 @@ def test_check_prefix_manifest(tmp_path: pathlib.Path, ctx: SpackContext):
     assert results.errors[malware] == ["added"]
 
     manifest_file = os.path.join(
-        spec.prefix,
-        spack.store.STORE.layout.metadata_dir,
-        spack.store.STORE.layout.manifest_file_name,
+        spec.prefix, ctx.store.layout.metadata_dir, ctx.store.layout.manifest_file_name
     )
     with open(manifest_file, "w", encoding="utf-8") as f:
         f.write("{This) string is not proper json")
@@ -186,12 +183,12 @@ def test_check_prefix_manifest(tmp_path: pathlib.Path, ctx: SpackContext):
     assert results.errors[spec.prefix] == ["manifest corrupted"]
 
 
-def test_single_file_verification(tmp_path: pathlib.Path):
+def test_single_file_verification(tmp_path: pathlib.Path, ctx: SpackContext):
     # Test the API to verify a single file, including finding the package
     # to which it belongs
     filedir = tmp_path / "a" / "b" / "c" / "d"
     filepath = filedir / "file"
-    metadir = tmp_path / spack.store.STORE.layout.metadata_dir
+    metadir = tmp_path / ctx.store.layout.metadata_dir
 
     fs.mkdirp(str(filedir))
     fs.mkdirp(str(metadir))
@@ -201,7 +198,7 @@ def test_single_file_verification(tmp_path: pathlib.Path):
 
     data = spack.verify.create_manifest_entry(str(filepath))
 
-    manifest_file = os.path.join(metadir, spack.store.STORE.layout.manifest_file_name)
+    manifest_file = os.path.join(metadir, ctx.store.layout.manifest_file_name)
 
     with open(manifest_file, "w", encoding="utf-8") as f:
         sjson.dump({str(filepath): data}, f)

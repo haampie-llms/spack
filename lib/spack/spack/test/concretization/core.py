@@ -44,7 +44,6 @@ import spack.solver.result
 import spack.solver.reuse
 import spack.spec
 import spack.spec_filter
-import spack.store
 import spack.traverse
 import spack.util.file_cache
 import spack.util.filesystem
@@ -6112,7 +6111,7 @@ def test_concretize_one_reports_an_already_concrete_spec_as_no_work(
 #: The process globals a SpackContext replaces, as (module, attribute) pairs.
 #: ``spack.repo.PATH`` is missing: ``Spec`` resolves virtuals and computes package hashes
 #: through it, so a solve still reads it.
-_CONTEXT_GLOBALS = [(spack.config, "CONFIG"), (spack.store, "STORE")]
+_CONTEXT_GLOBALS = [(spack.config, "CONFIG")]
 
 
 @pytest.fixture()

@@ -15,7 +15,7 @@ import spack.platforms
 import spack.repo
 import spack.solver.asp
 import spack.spec
-import spack.store
+import spack.test.utilities
 import spack.util.spack_yaml as syaml
 import spack.version
 from spack.config import Configuration
@@ -486,7 +486,7 @@ packages:
 """
 
     store_dir = tmp_path / "store"
-    with spack.store.use_store(str(store_dir)):
+    with spack.test.utilities.use_store(str(store_dir)):
         s1 = spack.concretize.concretize_one("y@2.5~shared", ctx)
         PackageInstaller([s1.package], fake=True, explicit=True).install()
 

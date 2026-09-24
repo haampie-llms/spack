@@ -17,7 +17,6 @@ import spack.modules.tcl
 import spack.package_base
 import spack.package_prefs
 import spack.repo
-import spack.store
 from spack.config import Configuration
 from spack.context import SpackContext
 from spack.installer import PackageInstaller
@@ -207,7 +206,7 @@ def test_load_installed_package_not_in_repo(
     )
     assert module_path
 
-    spack.package_base.PackageBase.uninstall_by_spec(spec, spack.store.STORE)
+    spack.package_base.PackageBase.uninstall_by_spec(spec, ctx.store)
 
 
 @pytest.mark.regression("37649")

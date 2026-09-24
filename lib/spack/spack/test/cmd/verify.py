@@ -14,7 +14,6 @@ import spack.cmd.verify
 import spack.concretize
 import spack.installer
 import spack.repo
-import spack.store
 import spack.util.executable
 import spack.util.filesystem as fs
 import spack.util.spack_json as sjson
@@ -33,11 +32,11 @@ def skip_unless_linux(f):
     )(f)
 
 
-def test_single_file_verify_cmd(tmp_path: pathlib.Path):
+def test_single_file_verify_cmd(tmp_path: pathlib.Path, ctx: SpackContext):
     # Test the verify command interface to verifying a single file.
     filedir = tmp_path / "a" / "b" / "c" / "d"
     filepath = filedir / "file"
-    metadir = tmp_path / spack.store.STORE.layout.metadata_dir
+    metadir = tmp_path / ctx.store.layout.metadata_dir
 
     fs.mkdirp(str(filedir))
     fs.mkdirp(str(metadir))
@@ -47,7 +46,7 @@ def test_single_file_verify_cmd(tmp_path: pathlib.Path):
 
     data = spack.verify.create_manifest_entry(str(filepath))
 
-    manifest_file = metadir / spack.store.STORE.layout.manifest_file_name
+    manifest_file = metadir / ctx.store.layout.manifest_file_name
 
     with open(str(manifest_file), "w", encoding="utf-8") as f:
         sjson.dump({str(filepath): data}, f)
