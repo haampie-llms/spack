@@ -4,7 +4,6 @@
 import pytest
 
 import spack.enums
-import spack.repo
 import spack.spec
 import spack.util.spack_yaml as syaml
 from spack.concretize import concretize_one
@@ -40,11 +39,11 @@ def test_version_deprecated_true_prefers_non_deprecated(config, mock_packages, c
     assert spec.satisfies("@0.9")
 
 
-def test_version_deprecated_true_registers_in_deprecations(mock_packages):
+def test_version_deprecated_true_registers_in_deprecations(mock_packages, ctx: SpackContext):
     """Tests that version(..., deprecated=True) populates pkg.deprecations with
     reason=unspecified, severity=critical, and the label marking where it comes from.
     """
-    pkg_cls = spack.repo.PATH.get_pkg_class("deprecated-old-style")
+    pkg_cls = ctx.repo.get_pkg_class("deprecated-old-style")
     all_entries = [x for entries in pkg_cls.deprecations.values() for x in entries]
     assert all(
         x
@@ -154,11 +153,11 @@ packages:
         concretize_one("deprecated-buildtool-client", ctx)
 
 
-def test_old_style_deprecation_uses_exact_version(mock_packages):
+def test_old_style_deprecation_uses_exact_version(mock_packages, ctx: SpackContext):
     """Tests that version(..., deprecated=True) must map to an exact '@=X.Y' constraint, so that
     the range '@X.Y' does not spuriously match a sub-version such as 'X.Y.Z'.
     """
-    pkg_cls = spack.repo.PATH.get_pkg_class("deprecated-old-style")
+    pkg_cls = ctx.repo.get_pkg_class("deprecated-old-style")
     (constraint,) = pkg_cls.deprecations  # only @1.0 is deprecated
     assert spack.spec.Spec("deprecated-old-style@=1.0").satisfies(constraint)
     assert not spack.spec.Spec("deprecated-old-style@=1.0.1").satisfies(constraint)

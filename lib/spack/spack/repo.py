@@ -19,7 +19,6 @@ import stat
 import sys
 import traceback
 import types
-import uuid
 import warnings
 from typing import (
     TYPE_CHECKING,
@@ -37,7 +36,6 @@ from typing import (
     Tuple,
     Type,
     Union,
-    cast,
 )
 
 import spack
@@ -60,7 +58,7 @@ import spack.util.path
 import spack.util.spack_yaml as syaml
 from spack.util import tty
 from spack.util.filesystem import working_dir
-from spack.util.lang import Singleton, ensure_unwrapped
+from spack.util.lang import Singleton
 
 if TYPE_CHECKING:
     import spack.context
@@ -73,15 +71,6 @@ PKG_MODULE_PREFIX_V2 = "spack_repo."
 _API_REGEX = re.compile(r"^v(\d+)\.(\d+)$")
 
 SPACK_REPO_INDEX_FILE_NAME = "spack-repo-index.yaml"
-
-
-def repo_or_default(repo: Optional["RepoPath"]) -> "RepoPath":
-    """Return ``repo``, or the process-wide repositories when none was injected.
-
-    Call sites using this still read a process global; they are the ones left to convert to a
-    required argument.
-    """
-    return repo if repo is not None else PATH
 
 
 def package_repository_lock(config: spack.config.Configuration) -> spack.util.lock.Lock:
@@ -2170,17 +2159,6 @@ def create_and_enable(
     return repo_path
 
 
-#: Global package repository instance.
-PATH = cast(
-    RepoPath,
-    Singleton(
-        lambda: create_and_enable(
-            spack.config.CONFIG, cache=spack.caches.misc_cache(config=spack.config.CONFIG)
-        )
-    ),
-)
-
-
 # Add the finder to sys.meta_path
 REPOS_FINDER = ReposFinder()
 sys.meta_path.append(REPOS_FINDER)
@@ -2317,65 +2295,6 @@ def reconstruct_virtuals(
             virtuals_to_add = needed.intersection(s.name for s in edge.spec.provided_virtuals)
             if virtuals_to_add:
                 edge.update_virtuals(virtuals_to_add)
-
-
-@contextlib.contextmanager
-def use_repositories(
-    *paths_and_repos: Union[str, Repo], override: bool = True
-) -> Generator[RepoPath, None, None]:
-    """Use the repositories passed as arguments within the context manager.
-
-    ``Repo`` instances are used as-is; paths are constructed into fresh ``Repo`` instances,
-    with ``package_attributes`` overrides from the current configuration applied.
-
-    Args:
-        *paths_and_repos: paths to the repositories to be used, or
-            already constructed Repo objects
-        override: if True use only the repositories passed as input,
-            if False add them to the top of the list of current repositories.
-    Returns:
-        Corresponding RepoPath object
-    """
-    # Materialize the lazy PATH singleton before pushing the new scope, since its factory
-    # reads the configuration.
-    old_repo = ensure_unwrapped(PATH)
-    overrides = package_attributes_overrides(spack.config.CONFIG)
-    new_repos = [
-        x
-        if isinstance(x, Repo)
-        else Repo(
-            spack.config.canonicalize_path(x, config=spack.config.CONFIG),
-            cache=spack.caches.misc_cache(config=spack.config.CONFIG),
-            overrides=overrides,
-        )
-        for x in paths_and_repos
-    ]
-    paths = {r.root: r.root for r in new_repos}
-    if not override:
-        new_repos.extend(r for r in old_repo.repos if r.root not in paths)
-    new_repo = RepoPath(*new_repos)
-    # The scope is pushed only to keep the repos config section in sync with the enabled
-    # repositories: subprocess state transfer and environment activation read it.
-    scope_name = f"use-repo-{uuid.uuid4()}"
-    repos_key = "repos:" if override else "repos"
-    spack.config.CONFIG.push_scope(
-        spack.config.InternalConfigScope(name=scope_name, data={repos_key: paths})
-    )
-    old_repo.disable()
-    enable_repo(new_repo)
-    try:
-        yield new_repo
-    finally:
-        spack.config.CONFIG.remove_scope(scope_name=scope_name)
-        new_repo.disable()
-        enable_repo(old_repo)
-
-
-def enable_repo(repo_path: RepoPath) -> None:
-    """Set the global package repository and make them available in module search paths."""
-    global PATH
-    PATH = repo_path
-    PATH.enable()
 
 
 class RepoError(spack.error.SpackError):

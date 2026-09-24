@@ -7,8 +7,8 @@ import pytest
 
 import spack.concretize
 import spack.environment as ev
-import spack.repo
 import spack.spec
+import spack.test.utilities
 from spack.config import Configuration
 from spack.context import SpackContext
 from spack.main import SpackCommand
@@ -69,7 +69,7 @@ def test_mutate_internals(
     mutator = spack.spec.Spec(mutated_constraint)
     env.mutate(selectors=[selector], mutators=[mutator])
     cmake_spec.mutate(mutator)
-    spack.spec.rehash_mutated([cmake_spec], repo=spack.repo.PATH)
+    spack.spec.rehash_mutated([cmake_spec], repo=ctx.repo)
 
     for spec in env.all_specs_generator():
         if spec.name == "cmake":
@@ -148,7 +148,7 @@ def test_mutate_namespace(repo_builder, ctx: SpackContext):
     selector = spack.spec.Spec("cmake")
     mutator = spack.spec.Spec(f"{repo_builder.namespace}.cmake")
 
-    with spack.repo.use_repositories(repo_builder.root, override=False):
+    with spack.test.utilities.use_repositories(repo_builder.root, override=False):
         env.mutate(selectors=[selector], mutators=[mutator])
         cmake_spec.mutate(mutator)
 

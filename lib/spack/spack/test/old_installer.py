@@ -24,6 +24,7 @@ import spack.package_prefs as prefs
 import spack.repo
 import spack.report
 import spack.spec
+import spack.test.utilities
 import spack.util.filesystem as fs
 import spack.util.lock as lk
 from spack.context import SpackContext
@@ -264,7 +265,7 @@ def test_installer_prune_built_build_deps(
     repo_builder.add_package("pkg-e")
     repo_builder.add_package("pkg-f")
 
-    with spack.repo.use_repositories(repo_builder.root):
+    with spack.test.utilities.use_repositories(repo_builder.root):
         installer = create_installer(["pkg-a"], ctx=ctx)
 
         installer._init_queue()

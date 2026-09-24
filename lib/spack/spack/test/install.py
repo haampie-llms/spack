@@ -79,7 +79,7 @@ def test_uninstall_non_existing_package(
 
     # Mock deletion of the package
     spec._package = None
-    monkeypatch.setattr(spack.repo.PATH, "get", find_nothing)
+    monkeypatch.setattr(ctx.repo, "get", find_nothing)
     with pytest.raises(spack.repo.UnknownPackageError):
         spack.repo.attach_packages([spec], ctx)
 
@@ -844,7 +844,7 @@ def test_ensure_allowed_exempts_externals(
         spec = spack.concretize.concretize_one("deprecated-with-reason@2.0", ctx)
 
     # The spec is blocked by the strict default policy...
-    policy = spack.deprecation.Policy({}, [], repo=spack.repo.PATH)
+    policy = spack.deprecation.Policy({}, [], repo=ctx.repo)
     assert policy.disallowed(spec)
     # ...unless it is external, in which case the gate does not raise.
     spec.external_path = "/opt/example"

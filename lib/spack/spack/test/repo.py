@@ -12,15 +12,14 @@ import spack.paths
 import spack.repo
 import spack.schema.repos
 import spack.spec
+import spack.test.utilities
 import spack.util.executable
 import spack.util.file_cache
 import spack.util.lock
 import spack.util.naming
-from spack.config import Configuration
 from spack.context import SpackContext
 from spack.repo import RepoPath
 from spack.test.conftest import RepoBuilder
-from spack.util.lang import Singleton
 from spack.util.naming import valid_module_name
 
 
@@ -124,68 +123,15 @@ def test_all_package_names_is_updated_on_repo_changes(
 
 
 @pytest.mark.regression("29203")
-def test_use_repositories_doesnt_change_class(mock_packages):
+def test_use_repositories_doesnt_change_class(mock_packages, ctx: SpackContext):
     """Test that we don't create the same package module and class multiple times
     when swapping repositories.
     """
-    zlib_cls_outer = spack.repo.PATH.get_pkg_class("zlib")
-    current_paths = [r.root for r in spack.repo.PATH.repos]
-    with spack.repo.use_repositories(*current_paths):
-        zlib_cls_inner = spack.repo.PATH.get_pkg_class("zlib")
+    zlib_cls_outer = ctx.repo.get_pkg_class("zlib")
+    current_paths = [r.root for r in ctx.repo.repos]
+    with spack.test.utilities.use_repositories(*current_paths):
+        zlib_cls_inner = ctx.repo.get_pkg_class("zlib")
     assert id(zlib_cls_inner) == id(zlib_cls_outer)
-
-
-def test_use_repositories_with_unmaterialized_path(
-    tmp_path: pathlib.Path, config: Configuration, monkeypatch, ctx: SpackContext
-):
-    """Tests that use_repositories restores the repositories from config even when the global
-    PATH singleton is materialized for the first time inside the context manager. Materializing
-    it after pushing the new repos scope onto the config would "save" the new repositories and
-    "restore" those same repositories on exit."""
-    (tmp_path / "packages").mkdir()
-    (tmp_path / "repo.yaml").write_text("repo:\n  namespace: myrepo\n")
-
-    monkeypatch.setattr(
-        spack.repo,
-        "PATH",
-        Singleton(lambda: spack.repo.create_and_enable(config, cache=ctx.misc_cache)),
-    )
-
-    with spack.repo.use_repositories(str(tmp_path)) as repo:
-        assert [r.root for r in repo.repos] == [str(tmp_path)]
-
-    assert [r.root for r in spack.repo.PATH.repos] == [spack.paths.mock_packages_path]
-
-
-def test_env_activate_with_unmaterialized_path(
-    tmp_path: pathlib.Path, config: Configuration, monkeypatch, ctx: SpackContext
-):
-    """Tests that env deactivation restores the repositories from config even when activation
-    is the first to touch the global PATH singleton. Materializing it after pushing the env
-    config scope would "save" the env's repositories and "restore" them on deactivation."""
-    (tmp_path / "spack.yaml").write_text(
-        """\
-spack:
-  specs: []
-  repos:
-    extra: $spack/var/spack/test_repos/spack_repo/builder_test
-"""
-    )
-
-    monkeypatch.setattr(
-        spack.repo,
-        "PATH",
-        Singleton(lambda: spack.repo.create_and_enable(config, cache=ctx.misc_cache)),
-    )
-
-    env = spack.environment.Environment(tmp_path, ctx=ctx)
-    env.activate()
-    try:
-        assert {r.namespace for r in spack.repo.PATH.repos} == {"builder_test", "builtin_mock"}
-    finally:
-        env.ctx.deactivate()
-
-    assert [r.namespace for r in spack.repo.PATH.repos] == ["builtin_mock"]
 
 
 def test_absolute_import_spack_packages_as_python_modules(mock_packages):
@@ -215,12 +161,12 @@ def test_get_all_mock_packages(mock_packages):
 
 def test_repo_path_handles_package_removal(mock_packages, repo_builder: RepoBuilder):
     repo_builder.add_package("pkg-c")
-    with spack.repo.use_repositories(repo_builder.root, override=False) as repos:
+    with spack.test.utilities.use_repositories(repo_builder.root, override=False) as repos:
         r = repos.repo_for_pkg("pkg-c")
         assert r.namespace == repo_builder.namespace
 
     repo_builder.remove("pkg-c")
-    with spack.repo.use_repositories(repo_builder.root, override=False) as repos:
+    with spack.test.utilities.use_repositories(repo_builder.root, override=False) as repos:
         r = repos.repo_for_pkg("pkg-c")
         assert r.namespace == "builtin_mock"
 
@@ -286,10 +232,12 @@ def test_use_repositories_and_import():
     import spack.paths
 
     repo_dir = pathlib.Path(spack.paths.test_repos_path)
-    with spack.repo.use_repositories(str(repo_dir / "spack_repo" / "compiler_runtime_test")):
+    with spack.test.utilities.use_repositories(
+        str(repo_dir / "spack_repo" / "compiler_runtime_test")
+    ):
         import spack_repo.compiler_runtime_test.packages.gcc_runtime.package  # type: ignore[import]  # noqa: E501
 
-    with spack.repo.use_repositories(str(repo_dir / "spack_repo" / "builtin_mock")):
+    with spack.test.utilities.use_repositories(str(repo_dir / "spack_repo" / "builtin_mock")):
         import spack_repo.builtin_mock.packages.cmake.package  # type: ignore[import]  # noqa: F401
 
 
@@ -522,7 +470,7 @@ class Uppercase(PackageBase):
 """
     )
 
-    with spack.repo.use_repositories(str(repo_dir)) as repo:
+    with spack.test.utilities.use_repositories(str(repo_dir)) as repo:
         assert len(repo.all_package_names()) == 0
 
     stderr = capfd.readouterr().err
@@ -546,7 +494,7 @@ class _1example2Test(PackageBase):
 """
     )
 
-    with spack.repo.use_repositories(str(repo_dir)) as repo:
+    with spack.test.utilities.use_repositories(str(repo_dir)) as repo:
         assert repo.exists("1example-2-test")
         pkg_cls = repo.get_pkg_class("1example-2-test")
         assert pkg_cls.name == "1example-2-test"
@@ -644,14 +592,14 @@ spack:
     env = spack.environment.Environment(tmp_path, ctx=ctx)
 
     with env:
-        assert any(os.path.samefile(repo_root, r.root) for r in spack.repo.PATH.repos)
+        assert any(os.path.samefile(repo_root, r.root) for r in ctx.repo.repos)
 
-    assert not any(os.path.samefile(repo_root, r.root) for r in spack.repo.PATH.repos)
+    assert not any(os.path.samefile(repo_root, r.root) for r in ctx.repo.repos)
 
     with env:
-        assert any(os.path.samefile(repo_root, r.root) for r in spack.repo.PATH.repos)
+        assert any(os.path.samefile(repo_root, r.root) for r in ctx.repo.repos)
 
-    assert not any(os.path.samefile(repo_root, r.root) for r in spack.repo.PATH.repos)
+    assert not any(os.path.samefile(repo_root, r.root) for r in ctx.repo.repos)
 
 
 def test_reading_the_active_environment_keeps_store_and_repo(
@@ -1028,7 +976,7 @@ def test_repo_descriptors_update_invalid(tmp_path: pathlib.Path):
             descriptor.update(git=MockGitInvalidRemote())
 
 
-def test_repo_use_bad_import(config, repo_builder: RepoBuilder):
+def test_repo_use_bad_import(config, repo_builder: RepoBuilder, ctx: SpackContext):
     """Demonstrate failure when attempt to get the class for package containing
     a failing import (e.g., missing repository)."""
     package_py = pathlib.Path(repo_builder._recipe_filename("importer"))
@@ -1048,20 +996,20 @@ class Importer(PackageBase):
         encoding="utf-8",
     )
 
-    with spack.repo.use_repositories(repo_builder.root):
+    with spack.test.utilities.use_repositories(repo_builder.root):
         with pytest.raises(spack.repo.RepoError, match="cannot load"):
-            spack.repo.PATH.get_pkg_class("importer")
+            ctx.repo.get_pkg_class("importer")
 
 
-def test_repo_use_bad_syntax(config, repo_builder: RepoBuilder):
+def test_repo_use_bad_syntax(config, repo_builder: RepoBuilder, ctx: SpackContext):
     """Demonstrate failure when attempt to get class for package with invalid syntax."""
     package_py = pathlib.Path(repo_builder._recipe_filename("erroneous"))
     package_py.parent.mkdir(parents=True)
     package_py.write_text("class 123: pass", encoding="utf-8")
 
-    with spack.repo.use_repositories(repo_builder.root):
+    with spack.test.utilities.use_repositories(repo_builder.root):
         with pytest.raises(spack.repo.RepoError):
-            spack.repo.PATH.get_pkg_class("erroneous")
+            ctx.repo.get_pkg_class("erroneous")
 
 
 def test_unknownpkgerror_match_fails(mock_packages):

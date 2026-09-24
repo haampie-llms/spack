@@ -9,7 +9,8 @@ import pytest
 
 import spack.cmd.list
 import spack.paths
-import spack.repo
+import spack.test.utilities
+from spack.context import SpackContext
 from spack.main import SpackCommand
 from spack.repo import RepoPath
 from spack.test.conftest import RepoBuilder
@@ -96,7 +97,7 @@ def test_list_format_html():
 def test_list_url_schemes(mock_git_packages_repo, url):
     """Confirm the official spack-packages repo is recognized in any url scheme."""
     repo = mock_git_packages_repo(url)
-    with spack.repo.use_repositories(repo):
+    with spack.test.utilities.use_repositories(repo):
         output = list("--format", "version_json", "hdf5")
 
     assert (
@@ -118,7 +119,7 @@ def test_list_format_local_repo():
 def test_list_format_non_github_repo(mock_git_packages_repo):
     """Confirm a file path is returned for a non-github (e.g. gitlab) repository."""
     repo = mock_git_packages_repo("https://gitlab.com/username/my-packages.git")
-    with spack.repo.use_repositories(repo):
+    with spack.test.utilities.use_repositories(repo):
         output = list("--format", "version_json", "hdf5")
         assert "github.com" not in output
         assert "file://" in output
@@ -176,7 +177,7 @@ def test_list_count(mock_packages: RepoPath):
 
 
 def test_list_repos():
-    with spack.repo.use_repositories(
+    with spack.test.utilities.use_repositories(
         os.path.join(spack.paths.test_repos_path, "spack_repo", "builtin_mock"),
         os.path.join(spack.paths.test_repos_path, "spack_repo", "builder_test"),
     ):
@@ -190,23 +191,23 @@ def test_list_repos():
 
 
 @pytest.mark.usefixtures("config")
-def test_list_github_url_fails(repo_builder: RepoBuilder, monkeypatch):
-    with spack.repo.use_repositories(repo_builder.root):
+def test_list_github_url_fails(repo_builder: RepoBuilder, monkeypatch, ctx: SpackContext):
+    with spack.test.utilities.use_repositories(repo_builder.root):
         repo_builder.add_package("pkg-a")
-        repo = spack.repo.PATH.repos[0]
+        repo = ctx.repo.repos[0]
         pkg = repo.get_pkg_class("pkg-a")
 
         old_path = repo.python_path
         try:
             # Check that a repository with no python path has no URL
             monkeypatch.setattr(repo, "python_path", None)
-            assert spack.cmd.list.github_url(pkg, spack.repo.PATH) is None, (
+            assert spack.cmd.list.github_url(pkg, ctx.repo) is None, (
                 "Expected no python path means unable to determine the repo URL"
             )
 
             # Check that a repository path that doesn't exist has no URL
             monkeypatch.setattr(repo, "python_path", "/repo/root/does/not/exists")
-            assert spack.cmd.list.github_url(pkg, spack.repo.PATH) is None, (
+            assert spack.cmd.list.github_url(pkg, ctx.repo) is None, (
                 "Expected bad repo path means unable to determine the repo URL"
             )
         finally:
@@ -214,7 +215,7 @@ def test_list_github_url_fails(repo_builder: RepoBuilder, monkeypatch):
 
         # A repository without a configured git url (remote_info is None) yields a file URI
         assert repo.remote_info is None
-        filepath = spack.cmd.list.github_url(pkg, spack.repo.PATH)
+        filepath = spack.cmd.list.github_url(pkg, ctx.repo)
         assert filepath and filepath.startswith("file://"), (
             "Expected a path-configured repo results in a file URI"
         )

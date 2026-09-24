@@ -53,7 +53,6 @@ import spack.hooks
 import spack.mirrors.mirror
 import spack.package_base
 import spack.package_prefs as prefs
-import spack.repo
 import spack.report
 import spack.rewiring
 import spack.store
@@ -2377,7 +2376,7 @@ class PackageInstaller:
         roots = [request.pkg.spec for request in self.build_requests]
         spack.deprecation.check_deprecations(
             roots,
-            policy=spack.deprecation.Policy.from_config(spack.config.CONFIG, repo=spack.repo.PATH),
+            policy=spack.deprecation.Policy.from_config(spack.config.CONFIG, repo=self.ctx.repo),
         )
 
     def install(self) -> None:

@@ -833,10 +833,8 @@ def test_git_provenance_relative_to_mirror(
 @pytest.mark.usefixtures("mock_packages")
 def test_mirror_skip_placeholder_pkg(tmp_path: pathlib.Path, ctx: SpackContext):
     """Test a placeholder package which should skip during mirror all"""
-    from spack.repo import PATH
-
     spec = spack.spec.Spec("placeholder@1.5")
-    pkg_cls = PATH.get_pkg_class(spec.name)
+    pkg_cls = ctx.repo.get_pkg_class(spec.name)
     pkg_obj = pkg_cls(spec)
     mirror_cache = spack.mirrors.utils.get_mirror_cache(str(tmp_path))
     mirror_stats = spack.mirrors.utils.MirrorStatsForOneSpec(spec)

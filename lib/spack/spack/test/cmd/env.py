@@ -28,6 +28,7 @@ import spack.schema.env
 import spack.solver.asp
 import spack.spec
 import spack.stage
+import spack.test.utilities
 import spack.util.environment
 import spack.util.filesystem as fs
 import spack.util.link_tree
@@ -902,7 +903,7 @@ def test_env_status_broken_view(
 
     # switch to a new repo that doesn't include the installed package
     # test that Spack detects the missing package and warns the user
-    with spack.repo.use_repositories(mock_custom_repository):
+    with spack.test.utilities.use_repositories(mock_custom_repository):
         with ev.Environment(tmp_path, ctx=ctx):
             output = env("status")
             assert "includes out of date packages or repos" in output
@@ -926,7 +927,7 @@ def test_env_activate_broken_view(
 
     # switch to a new repo that doesn't include the installed package
     # test that Spack detects the missing package and fails gracefully
-    with spack.repo.use_repositories(mock_custom_repository):
+    with spack.test.utilities.use_repositories(mock_custom_repository):
         wrong_repo = env("activate", "--sh", "test")
         assert "Warning: could not load runtime environment" in wrong_repo
         assert "Unknown namespace: builtin_mock" in wrong_repo
@@ -1959,7 +1960,7 @@ def test_indirect_build_dep(repo_builder: RepoBuilder, ctx: SpackContext):
     repo_builder.add_package("y", dependencies=[("z", "build", None)])
     repo_builder.add_package("x", dependencies=[("y", None, None)])
 
-    with spack.repo.use_repositories(repo_builder.root):
+    with spack.test.utilities.use_repositories(repo_builder.root):
         x_spec = Spec("x")
         x_concretized = spack.concretize.concretize_one(x_spec, ctx)
 
@@ -1991,7 +1992,7 @@ def test_store_different_build_deps(repo_builder: RepoBuilder, ctx: SpackContext
     repo_builder.add_package("y", dependencies=[("z", "build", None)])
     repo_builder.add_package("x", dependencies=[("y", None, None), ("z", "build", None)])
 
-    with spack.repo.use_repositories(repo_builder.root):
+    with spack.test.utilities.use_repositories(repo_builder.root):
         y_spec = Spec("y ^z@3")
         y_concretized = spack.concretize.concretize_one(y_spec, ctx)
 

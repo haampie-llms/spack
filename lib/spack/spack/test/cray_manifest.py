@@ -24,7 +24,6 @@ import spack.cray_manifest
 import spack.deprecation
 import spack.platforms
 import spack.platforms.test
-import spack.repo
 import spack.solver.reuse
 import spack.spec
 import spack.test.utilities
@@ -291,9 +290,9 @@ def test_translate_cray_platform_to_linux(monkeypatch, _common_compiler, ctx: Sp
     "name_in_manifest,expected_name",
     [("nvidia", "nvhpc"), ("rocm", "llvm-amdgpu"), ("clang", "llvm")],
 )
-def test_translated_compiler_name(name_in_manifest, expected_name):
+def test_translated_compiler_name(name_in_manifest, expected_name, ctx: SpackContext):
     assert (
-        spack.cray_manifest.translated_compiler_name(name_in_manifest, repo=spack.repo.PATH)
+        spack.cray_manifest.translated_compiler_name(name_in_manifest, repo=ctx.repo)
         == expected_name
     )
 
@@ -305,7 +304,7 @@ def test_failed_translate_compiler_name(_common_arch, ctx: SpackContext):
         compiler_from_entry(
             unknown_compiler.compiler_json(),
             manifest_path="/example/file",
-            repo=spack.repo.PATH,
+            repo=ctx.repo,
             config=ctx.config,
         )
 
@@ -512,7 +511,7 @@ def test_cray_manifest_externals_from_a_build_cache_are_not_reusable(
         spec,
         packages_with_externals={},
         local=False,
-        repo=spack.repo.PATH,
+        repo=ctx.repo,
         external_db_hashes=spack.solver.reuse._external_db_hashes(temporary_store),
     )
 

@@ -12,7 +12,6 @@ import spack.config
 import spack.main
 import spack.modules
 import spack.modules.lmod
-import spack.repo
 import spack.test.utilities
 from spack.config import Configuration
 from spack.context import SpackContext
@@ -30,7 +29,7 @@ def ensure_module_files_are_there(mock_packages_repo, mock_store, mock_configura
     module = spack.main.SpackCommand("module")
     with spack.config.use_configuration(*mock_configuration_scopes):
         with spack.test.utilities.use_store(str(mock_store)):
-            with spack.repo.use_repositories(mock_packages_repo):
+            with spack.test.utilities.use_repositories(mock_packages_repo):
                 module("tcl", "refresh", "-y")
 
 

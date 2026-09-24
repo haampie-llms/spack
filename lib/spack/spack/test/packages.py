@@ -10,12 +10,14 @@ import sys
 import pytest
 
 import spack.concretize
+import spack.context
 import spack.directives
 import spack.error
 import spack.fetch_strategy
 import spack.package
 import spack.package_base
 import spack.repo
+import spack.test.utilities
 from spack.context import SpackContext
 from spack.paths import mock_packages_path
 from spack.repo import RepoPath
@@ -34,7 +36,7 @@ class MyPrependFileLoader(spack.repo._PrependFileLoader):
 
 def pkg_factory(name):
     """Return a package object tied to an abstract spec"""
-    pkg_cls = spack.repo.PATH.get_pkg_class(name)
+    pkg_cls = spack.context.default().repo.get_pkg_class(name)
     return pkg_cls(Spec(name))
 
 
@@ -78,7 +80,7 @@ class TestPackage:
         pkg_path.parent.mkdir(parents=True)
         pkg_path.write_text("foo = 1")
 
-        with spack.repo.use_repositories(root):
+        with spack.test.utilities.use_repositories(root):
             importlib.import_module("spack.pkg.testing_repo")
             assert importlib.import_module("spack.pkg.testing_repo.mpich").foo == 1
 
@@ -429,14 +431,14 @@ def test_spack_package_api_versioning():
     ]
 
 
-def test_deprecated_version_honors_directive(mock_packages):
+def test_deprecated_version_honors_directive(mock_packages, ctx: SpackContext):
     """deprecated_version checks the deprecated() directive as well as the legacy flag."""
     # deprecated-with-reason flags @1.0 and @2.0 through the directive only (no deprecated=True).
-    pkg_cls = spack.repo.PATH.get_pkg_class("deprecated-with-reason")
+    pkg_cls = ctx.repo.get_pkg_class("deprecated-with-reason")
     assert spack.package_base.deprecated_version(pkg_cls, "1.0")
     assert spack.package_base.deprecated_version(pkg_cls, "2.0")
 
     # deprecated-dual deprecates only @1.0, so @2.0 must remain non-deprecated.
-    pkg_cls = spack.repo.PATH.get_pkg_class("deprecated-dual")
+    pkg_cls = ctx.repo.get_pkg_class("deprecated-dual")
     assert spack.package_base.deprecated_version(pkg_cls, "1.0")
     assert not spack.package_base.deprecated_version(pkg_cls, "2.0")

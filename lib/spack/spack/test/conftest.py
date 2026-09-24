@@ -846,7 +846,7 @@ def fake_db_install(tmp_path):
 def mock_packages(mock_packages_repo, mock_pkg_install, request):
     """Use the 'builtin_mock' repository instead of 'builtin'"""
     ensure_configuration_fixture_run_before(request)
-    with spack.repo.use_repositories(mock_packages_repo) as mock_repo:
+    with spack.test.utilities.use_repositories(mock_packages_repo) as mock_repo:
         yield mock_repo
 
 
@@ -855,7 +855,7 @@ def mutable_mock_repo(mock_packages_repo, request, ctx: SpackContext):
     """Function-scoped mock packages, for tests that need to modify them."""
     ensure_configuration_fixture_run_before(request)
     mock_repo = spack.repo.from_path(spack.paths.mock_packages_path, cache=ctx.misc_cache)
-    with spack.repo.use_repositories(mock_repo) as mock_packages_repo:
+    with spack.test.utilities.use_repositories(mock_repo) as mock_packages_repo:
         yield mock_packages_repo
 
 
@@ -1206,7 +1206,7 @@ def concretize_scope(mutable_config: Configuration, tmp_path: Path):
     ):
         yield str(concretize_dir)
 
-    spack.repo.PATH._provider_index = None
+    spack.context.default().repo._provider_index = None
 
 
 @pytest.fixture
@@ -1336,7 +1336,7 @@ def mock_store(
 
     with spack.config.use_configuration(*mock_configuration_scopes):
         with spack.test.utilities.use_store(str(store_path)) as store:
-            with spack.repo.use_repositories(mock_packages_repo):
+            with spack.test.utilities.use_repositories(mock_packages_repo):
                 try:
                     spack.bootstrap.ensure_winsdk_external_or_raise = _return_none
                     _populate(store.db)
@@ -1451,10 +1451,6 @@ def _return_none(*args):
     return None
 
 
-def _compiler_cache_in_memory() -> spack.compilers.libraries.CompilerCache:
-    return spack.compilers.libraries.CompilerCache()
-
-
 class _InMemoryCompilerCache:
     """Descriptor giving every context a compiler cache that does not persist."""
 
@@ -1465,9 +1461,6 @@ class _InMemoryCompilerCache:
 @pytest.fixture(autouse=True)
 def disable_compiler_output_cache(monkeypatch):
     monkeypatch.setattr(SpackContext, "compiler_cache", _InMemoryCompilerCache())
-    monkeypatch.setattr(
-        spack.compilers.libraries, "process_compiler_cache", _compiler_cache_in_memory
-    )
 
 
 @pytest.fixture(scope="function")
@@ -2233,7 +2226,7 @@ repo:
 """
     )
 
-    with spack.repo.use_repositories(str(repodir)) as repo:
+    with spack.test.utilities.use_repositories(str(repodir)) as repo:
         yield repo, repodir
 
     shutil.rmtree(str(repodir))
@@ -2512,7 +2505,6 @@ def shell_as(shell):
 def nullify_globals(request, monkeypatch):
     ensure_configuration_fixture_run_before(request)
     monkeypatch.setattr(spack.config, "CONFIG", None)
-    monkeypatch.setattr(spack.repo, "PATH", None)
 
 
 def pytest_runtest_setup(item):

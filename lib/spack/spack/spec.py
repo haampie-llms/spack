@@ -3622,7 +3622,7 @@ class Spec:
         TODO: this only checks in the package; it doesn't resurrect old
         patches from install directories, but it probably should.
         """
-        return self.patches_from(spack.repo.PATH)
+        return self.patches_from(self.package.context.repo)
 
     def patches_from(self, repo: "spack.repo.RepoPath") -> List["spack.patch.Patch"]:
         """Return the patch objects for this spec, looked up in ``repo``.

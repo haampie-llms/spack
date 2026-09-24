@@ -299,53 +299,6 @@ class _ProcessContext(SpackContext):
         self._drop_members_of_other_config(config)
         return spack.config.CONFIG
 
-    def activate(
-        self, env: "spack.environment.Environment", *, use_env_repo: bool = False
-    ) -> None:
-        import spack.config
-        import spack.repo
-        from spack.util.lang import ensure_unwrapped
-
-        self.deactivate()
-        config = spack.config.CONFIG
-        try:
-            before = self._store_and_repo_config()
-            # PATH may be a lazy singleton created from config: materialize it before pushing
-            # the env scope, otherwise we'd save (and later restore) the env's repositories.
-            repo_before = ensure_unwrapped(spack.repo.PATH)
-            self._set_environment(env)
-            env.manifest.prepare_config_scope(config)
-            after = self._store_and_repo_config()
-            if before[0] != after[0]:
-                self._replace_member("store", None)
-            if before[1] != after[1] or use_env_repo:
-                setattr(env, "repo_token", repo_before)
-                repo_before.disable()
-                new_repo = spack.repo.RepoPath.from_config(config, cache=self.misc_cache)
-                if use_env_repo:
-                    new_repo.put_first(env.repo)
-                spack.repo.enable_repo(new_repo)
-        except Exception:
-            self._set_environment(None)
-            raise
-
-    def deactivate(self) -> None:
-        import spack.config
-        import spack.repo
-
-        env = self.environment
-        if env is None:
-            return
-        if "store" in self._before_activation:
-            self._restore_member("store", self._before_activation.pop("store"))
-        repo = getattr(env, "repo_token", None)
-        if repo is not None:
-            spack.repo.PATH.disable()
-            spack.repo.enable_repo(repo)
-            delattr(env, "repo_token")
-        env.manifest.deactivate_config_scope(spack.config.CONFIG)
-        self._set_environment(None)
-
     def _set_environment(self, env: Optional["spack.environment.Environment"]) -> None:
         import spack.active_environment
         import spack.config
@@ -360,12 +313,6 @@ class _ProcessContext(SpackContext):
         from spack.active_environment import active_environment
 
         return active_environment()
-
-    @property  # type: ignore[override]
-    def repo(self) -> "spack.repo.RepoPath":
-        import spack.repo
-
-        return spack.repo.PATH
 
     def __reduce__(self):
         return default, ()

@@ -17,7 +17,6 @@ import spack.concretize
 import spack.config
 import spack.context
 import spack.package_base
-import spack.repo
 import spack.spec
 from spack.context import SpackContext
 from spack.util.filesystem import working_dir
@@ -41,7 +40,7 @@ def assign_versions(spec_str: str) -> spack.spec.Spec:
     fixtures of the calling test have set up."""
     return assign_git_versions(
         spack.spec.Spec(spec_str),
-        repo=spack.repo.PATH,
+        repo=spack.context.default().repo,
         misc_cache=spack.context.default().misc_cache,
         config=spack.config.CONFIG,
     )

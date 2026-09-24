@@ -29,10 +29,8 @@ def call_compiler(exe, *args, **kwargs):
 
 
 @pytest.fixture()
-def mock_gcc(config):
-    compilers = spack.compilers.config.all_compilers_from(
-        configuration=config, repo=spack.repo.PATH
-    )
+def mock_gcc(config, ctx: SpackContext):
+    compilers = spack.compilers.config.all_compilers_from(configuration=config, repo=ctx.repo)
     assert compilers, "No compilers available"
 
     compilers.sort(key=lambda x: (x.name == "gcc", x.version))
@@ -53,7 +51,9 @@ class TestCompilerPropertyDetector:
         ],
     )
     @pytest.mark.not_on_windows("Not supported on Windows")
-    def test_compile_dummy_c_source(self, mock_gcc, monkeypatch, language, flagname):
+    def test_compile_dummy_c_source(
+        self, mock_gcc, monkeypatch, language, flagname, ctx: SpackContext
+    ):
         monkeypatch.setattr(spack.util.executable.Executable, "__call__", call_compiler)
         for key in list(mock_gcc.extra_attributes["compilers"]):
             if key == language:
@@ -61,7 +61,7 @@ class TestCompilerPropertyDetector:
             mock_gcc.extra_attributes["compilers"].pop(key)
 
         detector = spack.compilers.libraries.CompilerPropertyDetector(
-            mock_gcc, repo=spack.repo.PATH, cache=spack.compilers.libraries.CompilerCache()
+            mock_gcc, repo=ctx.repo, cache=spack.compilers.libraries.CompilerCache()
         )
 
         # Test without flags
@@ -73,22 +73,26 @@ class TestCompilerPropertyDetector:
             monkeypatch.setitem(mock_gcc.extra_attributes["flags"], flagname, "--correct-flag")
             assert detector._compile_dummy_c_source() == with_flag_output
 
-    def test_compile_dummy_c_source_no_path(self, mock_gcc):
+    def test_compile_dummy_c_source_no_path(self, mock_gcc, ctx: SpackContext):
         mock_gcc.extra_attributes["compilers"] = {}
         detector = spack.compilers.libraries.CompilerPropertyDetector(
-            mock_gcc, repo=spack.repo.PATH, cache=spack.compilers.libraries.CompilerCache()
+            mock_gcc, repo=ctx.repo, cache=spack.compilers.libraries.CompilerCache()
         )
         assert detector._compile_dummy_c_source() is None
 
-    def test_compile_dummy_c_source_no_verbose_flags(self, mock_gcc, monkeypatch):
-        monkeypatch.setattr(spack.repo.PATH.get_pkg_class(mock_gcc.name), "verbose_flags", "")
+    def test_compile_dummy_c_source_no_verbose_flags(
+        self, mock_gcc, monkeypatch, ctx: SpackContext
+    ):
+        monkeypatch.setattr(ctx.repo.get_pkg_class(mock_gcc.name), "verbose_flags", "")
         detector = spack.compilers.libraries.CompilerPropertyDetector(
-            mock_gcc, repo=spack.repo.PATH, cache=spack.compilers.libraries.CompilerCache()
+            mock_gcc, repo=ctx.repo, cache=spack.compilers.libraries.CompilerCache()
         )
         assert detector._compile_dummy_c_source() is None
 
     @pytest.mark.not_on_windows("Module files are not supported on Windows")
-    def test_compile_dummy_c_source_load_env(self, mock_gcc, monkeypatch, tmp_path: pathlib.Path):
+    def test_compile_dummy_c_source_load_env(
+        self, mock_gcc, monkeypatch, tmp_path: pathlib.Path, ctx: SpackContext
+    ):
         gcc = tmp_path / "gcc"
         gcc.write_text(
             f"""#!/bin/sh
@@ -114,16 +118,16 @@ class TestCompilerPropertyDetector:
         mock_gcc.external_modules = ["turn_on"]
 
         detector = spack.compilers.libraries.CompilerPropertyDetector(
-            mock_gcc, repo=spack.repo.PATH, cache=spack.compilers.libraries.CompilerCache()
+            mock_gcc, repo=ctx.repo, cache=spack.compilers.libraries.CompilerCache()
         )
         assert detector._compile_dummy_c_source() == without_flag_output
 
     @pytest.mark.not_on_windows("Not supported on Windows")
-    def test_implicit_rpaths(self, mock_gcc, dirs_with_libfiles, monkeypatch):
+    def test_implicit_rpaths(self, mock_gcc, dirs_with_libfiles, monkeypatch, ctx: SpackContext):
         lib_to_dirs, all_dirs = dirs_with_libfiles
 
         detector = spack.compilers.libraries.CompilerPropertyDetector(
-            mock_gcc, repo=spack.repo.PATH, cache=spack.compilers.libraries.CompilerCache()
+            mock_gcc, repo=ctx.repo, cache=spack.compilers.libraries.CompilerCache()
         )
         monkeypatch.setattr(
             spack.compilers.libraries.CompilerPropertyDetector,
@@ -134,18 +138,20 @@ class TestCompilerPropertyDetector:
         retrieved_rpaths = detector.implicit_rpaths()
         assert set(retrieved_rpaths) == set(lib_to_dirs["libstdc++"] + lib_to_dirs["libgfortran"])
 
-    def test_compiler_environment(self, working_env, mock_gcc, monkeypatch):
+    def test_compiler_environment(self, working_env, mock_gcc, monkeypatch, ctx: SpackContext):
         """Test whether environment modifications are applied in compiler_environment"""
         monkeypatch.delenv("TEST", raising=False)
         mock_gcc.extra_attributes["environment"] = {"set": {"TEST": "yes"}}
         detector = spack.compilers.libraries.CompilerPropertyDetector(
-            mock_gcc, repo=spack.repo.PATH, cache=spack.compilers.libraries.CompilerCache()
+            mock_gcc, repo=ctx.repo, cache=spack.compilers.libraries.CompilerCache()
         )
         with detector.compiler_environment():
             assert os.environ["TEST"] == "yes"
 
     @pytest.mark.not_on_windows("Module files are not supported on Windows")
-    def test_compiler_invalid_module_raises(self, working_env, mock_gcc, monkeypatch):
+    def test_compiler_invalid_module_raises(
+        self, working_env, mock_gcc, monkeypatch, ctx: SpackContext
+    ):
         """Test if an exception is raised when a module cannot be loaded"""
 
         def mock_load_module(module_name):
@@ -156,7 +162,7 @@ class TestCompilerPropertyDetector:
 
         mock_gcc.external_modules = ["non_existent"]
         detector = spack.compilers.libraries.CompilerPropertyDetector(
-            mock_gcc, repo=spack.repo.PATH, cache=spack.compilers.libraries.CompilerCache()
+            mock_gcc, repo=ctx.repo, cache=spack.compilers.libraries.CompilerCache()
         )
 
         with pytest.raises(spack.util.module_cmd.ModuleLoadError):
@@ -164,7 +170,7 @@ class TestCompilerPropertyDetector:
                 pass
 
 
-def test_detector_uses_the_cache_it_is_given(mock_packages, mock_gcc, tmp_path):
+def test_detector_uses_the_cache_it_is_given(mock_packages, mock_gcc, tmp_path, ctx: SpackContext):
     """A detector given a cache writes the compiler output there."""
     entries = os.path.join("compilers", "compilers.json")
     cache = spack.compilers.libraries.FileCompilerCache(
@@ -172,7 +178,7 @@ def test_detector_uses_the_cache_it_is_given(mock_packages, mock_gcc, tmp_path):
     )
 
     spack.compilers.libraries.CompilerPropertyDetector(
-        mock_gcc, repo=spack.repo.PATH, cache=cache
+        mock_gcc, repo=ctx.repo, cache=cache
     ).compiler_verbose_output()
 
     assert (tmp_path / entries).exists()

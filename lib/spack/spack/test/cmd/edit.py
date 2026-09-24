@@ -7,6 +7,7 @@ import pathlib
 
 import spack.paths
 import spack.repo
+import spack.test.utilities
 import spack.util.editor
 from spack.main import SpackCommand
 
@@ -62,6 +63,6 @@ def test_edit_non_default_build_system(monkeypatch, mock_packages, mutable_confi
 
     # set up an additional repo
     extra_repo_dir = pathlib.Path(spack.paths.test_repos_path) / "spack_repo" / "requirements_test"
-    with spack.repo.use_repositories(str(extra_repo_dir), override=False):
+    with spack.test.utilities.use_repositories(str(extra_repo_dir), override=False):
         edit("--build-system", "builtin_mock.autotools", "builtin_mock.cmake")
         assert called
