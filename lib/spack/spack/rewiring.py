@@ -34,11 +34,11 @@ def rewire_node(spec, explicit):
 
     # Copy spec.build_spec.prefix to spec.prefix through a temporary tarball
     tarball = os.path.join(tempdir, f"{spec.dag_hash()}.tar.gz")
-    spack.binary_distribution.create_tarball(spec.build_spec, tarball)
+    spack.binary_distribution.create_tarball(spec.build_spec, tarball, store=spack.store.STORE)
 
     spack.hooks.pre_install(spec)
     spack.binary_distribution.extract_buildcache_tarball(tarball, destination=spec.prefix)
-    spack.binary_distribution.relocate_package(spec)
+    spack.binary_distribution.relocate_package(spec, store=spack.store.STORE)
 
     # run post install hooks and add to db
     spack.hooks.post_install(spec, explicit)

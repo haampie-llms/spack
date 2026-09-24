@@ -5380,9 +5380,11 @@ packages:
     assert mpileaks["mpich"].satisfies("%c,cxx=llvm %fortran=gcc")
 
 
-def test_specs_from_mirror_warns_when_index_missing(monkeypatch):
+def test_specs_from_mirror_warns_when_index_missing(monkeypatch, ctx: SpackContext):
     """Tests that we get a warning when a binary mirror has no index."""
-    binary_index = spack.binary_distribution.BinaryIndexCache(config=spack.config.CONFIG)
+    binary_index = spack.binary_distribution.BinaryIndexCache(
+        config=spack.config.CONFIG, client=ctx.network
+    )
 
     def fake_update(*, config):
         binary_index.mirrors_without_index = {"file:///fake-mirror"}

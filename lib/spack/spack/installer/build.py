@@ -43,6 +43,7 @@ import spack.util.filesystem as fs
 import spack.util.lock
 import spack.util.timer
 import spack.util.tty
+import spack.util.web
 from spack.installer.base import (
     ExitCode,
     FdInfo,
@@ -321,7 +322,11 @@ def install_from_buildcache(
     try:
         with timer.measure("fetch"):
             tarball_stage = spack.binary_distribution.download_tarball(
-                spec.build_spec, unsigned, mirrors
+                spec.build_spec,
+                unsigned,
+                mirrors,
+                config=spack.config.CONFIG,
+                client=spack.util.web.NetworkClient.from_config(spack.config.CONFIG),
             )
     except spack.binary_distribution.NoConfiguredBinaryMirrors:
         return False
@@ -331,7 +336,14 @@ def install_from_buildcache(
 
     send_state("relocating", state_stream)
     with timer.measure("install"):
-        spack.binary_distribution.extract_tarball(spec, tarball_stage, force=False, timer=timer)
+        spack.binary_distribution.extract_tarball(
+            spec,
+            tarball_stage,
+            force=False,
+            timer=timer,
+            config=spack.config.CONFIG,
+            store=spack.store.STORE,
+        )
 
     if spec.spliced:  # overwrite old metadata with new
         spack.store.STORE.layout.write_spec(spec, spack.store.STORE.layout.spec_file_path(spec))
@@ -674,13 +686,15 @@ def _rewire_no_db(
     try:
         with timer.measure("setup"):
             tarball = os.path.join(tmpdir, f"{spec.dag_hash()}.tar.gz")
-            spack.binary_distribution.create_tarball(spec.build_spec, tarball)
+            spack.binary_distribution.create_tarball(
+                spec.build_spec, tarball, store=spack.store.STORE
+            )
         with timer.measure("pre-install"):
             spack.hooks.pre_install(spec)
         with timer.measure("extract"):
             spack.binary_distribution.extract_buildcache_tarball(tarball, destination=spec.prefix)
         with timer.measure("relocate"):
-            spack.binary_distribution.relocate_package(spec)
+            spack.binary_distribution.relocate_package(spec, store=spack.store.STORE)
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 

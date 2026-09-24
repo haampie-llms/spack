@@ -16,6 +16,7 @@ import pytest
 
 import spack.mirrors.mirror
 import spack.util.web
+from spack.context import SpackContext
 from spack.oci.image import Digest, ImageReference, default_config, default_manifest
 from spack.oci.oci import (
     copy_missing_layers,
@@ -473,7 +474,7 @@ def test_oci_registry_upload(tmp_path: pathlib.Path, client_single_request, serv
     )
 
 
-def test_copy_missing_layers(tmp_path: pathlib.Path, config):
+def test_copy_missing_layers(tmp_path: pathlib.Path, config, ctx: SpackContext):
     """Test copying layers from one registry to another.
     Creates 3 blobs, 1 config and 1 manifest in registry A
     and copies layers to registry B. Then checks that all
@@ -532,7 +533,9 @@ def test_copy_missing_layers(tmp_path: pathlib.Path, config):
     upload_manifest(src, manifest, urlopen=urlopen)
 
     # Finally, copy the image from src to dst
-    copy_missing_layers(src, dst, architecture="amd64", urlopen=urlopen)
+    copy_missing_layers(
+        src, dst, architecture="amd64", urlopen=urlopen, config=config, client=ctx.network
+    )
 
     # Check that all layers (not config) were copied and identical
     assert len(dst_registry.blobs) == len(blobs)
@@ -549,7 +552,9 @@ def test_copy_missing_layers(tmp_path: pathlib.Path, config):
 
     # Check that re-uploading skips existing layers.
     dst_registry.clear_log()
-    copy_missing_layers(src, dst, architecture="amd64", urlopen=urlopen)
+    copy_missing_layers(
+        src, dst, architecture="amd64", urlopen=urlopen, config=config, client=ctx.network
+    )
 
     # Check that no uploads were initiated, only existence checks were done.
     assert sum(is_upload(method, path) for method, path in dst_registry.requests) == 0
@@ -659,7 +664,7 @@ def test_default_credentials_provider(monkeypatch):
     )
 
 
-def test_manifest_index(tmp_path: pathlib.Path):
+def test_manifest_index(tmp_path: pathlib.Path, ctx: SpackContext):
     """Test obtaining manifest + config from a registry
     that has an index"""
     urlopen = create_opener(InMemoryOCIRegistry("registry.example.com")).open
@@ -710,13 +715,22 @@ def test_manifest_index(tmp_path: pathlib.Path):
     # Check that we fetcht the correct manifest and config for each architecture
     for arch in ("amd64", "arm64"):
         assert (
-            get_manifest_and_config(img, architecture=arch, urlopen=urlopen)
+            get_manifest_and_config(
+                img, architecture=arch, urlopen=urlopen, config=config, client=ctx.network
+            )
             == manifest_and_config[arch]
         )
 
     # Also test max recursion
     with pytest.raises(Exception, match="Maximum recursion depth reached"):
-        get_manifest_and_config(img, architecture="amd64", recurse=0, urlopen=urlopen)
+        get_manifest_and_config(
+            img,
+            architecture="amd64",
+            recurse=0,
+            urlopen=urlopen,
+            config=config,
+            client=ctx.network,
+        )
 
 
 class BrokenServer(DummyServer):

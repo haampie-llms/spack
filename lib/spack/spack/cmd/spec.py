@@ -95,7 +95,7 @@ def spec(parser, args, ctx: spack.context.SpackContext):
 
     show_status = args.install_status
     if show_status:
-        spack.binary_distribution.load_buildcache_index()
+        spack.binary_distribution.load_buildcache_index(ctx.binary_index)
         status_fn = spack.cmd.buildcache_status_fn(ctx.binary_index, store=ctx.store)
     else:
         status_fn = None

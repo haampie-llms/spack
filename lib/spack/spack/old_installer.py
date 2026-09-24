@@ -42,6 +42,7 @@ from typing import TYPE_CHECKING, Dict, Iterator, List, Optional, Set, Tuple, Un
 
 from spack.vendor.typing_extensions import Literal
 
+import spack.binary_distribution
 import spack.build_environment
 import spack.builder
 import spack.config
@@ -59,6 +60,7 @@ import spack.store
 import spack.util.filesystem as fs
 import spack.util.lock as lk
 import spack.util.path
+import spack.util.web
 from spack import binary_distribution
 from spack.installer.build import _do_fake_install, _write_timer_json, dump_packages
 from spack.url_buildcache import BuildcacheEntryError
@@ -411,7 +413,11 @@ def _process_binary_cache_tarball(
     """
     with timer.measure("fetch"):
         tarball_stage = binary_distribution.download_tarball(
-            pkg.spec.build_spec, unsigned, mirrors_for_spec
+            pkg.spec.build_spec,
+            unsigned,
+            mirrors_for_spec,
+            config=spack.config.CONFIG,
+            client=spack.util.web.NetworkClient.from_config(spack.config.CONFIG),
         )
 
         if tarball_stage is None:
@@ -420,7 +426,14 @@ def _process_binary_cache_tarball(
     tty.msg(f"Extracting {package_id(pkg.spec)} from binary cache")
 
     with timer.measure("install"), spack.store.filter_padding(store=spack.store.STORE):
-        binary_distribution.extract_tarball(pkg.spec, tarball_stage, force=False, timer=timer)
+        binary_distribution.extract_tarball(
+            pkg.spec,
+            tarball_stage,
+            force=False,
+            timer=timer,
+            config=spack.config.CONFIG,
+            store=spack.store.STORE,
+        )
 
         if pkg.spec.spliced:  # overwrite old metadata with new
             spack.store.STORE.layout.write_spec(
@@ -462,7 +475,13 @@ def _try_install_from_binary_cache(
     tty.debug(f"Searching for binary cache of {package_id(pkg.spec)}")
 
     with timer.measure("search"):
-        mirrors = binary_distribution.get_mirrors_for_spec(pkg.spec, index_only=True)
+        mirrors = binary_distribution.get_mirrors_for_spec(
+            pkg.spec,
+            index_only=True,
+            config=spack.config.CONFIG,
+            client=spack.util.web.NetworkClient.from_config(spack.config.CONFIG),
+            binary_index=spack.binary_distribution.BINARY_INDEX,
+        )
 
     return _process_binary_cache_tarball(
         pkg, explicit, unsigned, mirrors_for_spec=mirrors, timer=timer

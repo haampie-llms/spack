@@ -32,6 +32,7 @@ from spack.ci import gitlab as gitlab_generator
 from spack.ci.common import PipelineDag, PipelineOptions, SpackCIConfig
 from spack.ci.generator_registry import generator
 from spack.cmd.ci import FAILED_CREATE_BUILDCACHE_CODE
+from spack.context import SpackContext
 from spack.error import SpackError
 from spack.schema.database_index import schema as db_idx_schema
 from spack.test.conftest import MockHTTPResponse, RepoBuilder
@@ -835,6 +836,7 @@ def test_push_to_build_cache(
     mock_gnupghome,
     ci_base_environment,
     mock_binary_index,
+    ctx: SpackContext,
 ):
     scratch = tmp_path / "working_dir"
     mirror_dir = scratch / "mirror"
@@ -941,7 +943,7 @@ spack:
             mirror_metadata = spack.binary_distribution.MirrorMetadata(mirror_url, layout_version)
             client = spack.util.web.NetworkClient.from_config(spack.config.CONFIG)
             index_fetcher = spack.binary_distribution.DefaultIndexHandler(
-                mirror_metadata, None, urlopen=client.urlopen
+                mirror_metadata, None, urlopen=client.urlopen, config=ctx.config, client=client
             )
             result = index_fetcher.conditional_fetch()
             spack.vendor.jsonschema.validate(json.loads(result.data), db_idx_schema)

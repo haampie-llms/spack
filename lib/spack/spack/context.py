@@ -93,7 +93,7 @@ class SpackContext:
         """Buildcache index."""
         import spack.binary_distribution
 
-        return spack.binary_distribution.BinaryIndexCache(config=self.config)
+        return spack.binary_distribution.BinaryIndexCache(config=self.config, client=self.network)
 
     @_member
     def network(self) -> "spack.util.web.NetworkClient":

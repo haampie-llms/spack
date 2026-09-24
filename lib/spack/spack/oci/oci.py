@@ -229,6 +229,8 @@ def copy_missing_layers(
     architecture: str,
     *,
     urlopen: spack.oci.opener.OpenType,
+    config: spack.config.Configuration,
+    client: spack.util.web.NetworkClient,
 ) -> Tuple[dict, dict]:
     """Copy image layers from src to dst for given architecture.
 
@@ -237,11 +239,15 @@ def copy_missing_layers(
         dst: The destination image reference.
         architecture: The architecture (when referencing an index)
         urlopen: function used to open URLs
+        config: configuration for the stages blobs are fetched into
+        client: network client of those stages
 
     Returns:
         Tuple of manifest and config of the base image.
     """
-    manifest, config = get_manifest_and_config(src, architecture, urlopen=urlopen)
+    manifest, image_config = get_manifest_and_config(
+        src, architecture, urlopen=urlopen, config=config, client=client
+    )
 
     # Get layer digests
     digests = [Digest.from_string(layer["digest"]) for layer in manifest["layers"]]
@@ -252,11 +258,13 @@ def copy_missing_layers(
     ]
 
     if not missing_digests:
-        return manifest, config
+        return manifest, image_config
 
     # Pull missing blobs, push them to the registry
     with spack.stage.StageComposite.from_iterable(
-        make_stage(url=src.blob_url(digest), digest=digest, urlopen=urlopen)
+        make_stage(
+            url=src.blob_url(digest), digest=digest, urlopen=urlopen, config=config, client=client
+        )
         for digest in missing_digests
     ) as stages:
         stages.fetch()
@@ -267,7 +275,7 @@ def copy_missing_layers(
             # No need to check existence again, force=True.
             upload_blob(dst, file=stage.save_filename, force=True, digest=digest, urlopen=urlopen)
 
-    return manifest, config
+    return manifest, image_config
 
 
 #: OCI manifest content types (including docker type)
@@ -287,7 +295,13 @@ all_content_type = manifest_content_type + index_content_type
 
 
 def get_manifest_and_config(
-    ref: ImageReference, architecture="amd64", recurse=3, *, urlopen: spack.oci.opener.OpenType
+    ref: ImageReference,
+    architecture="amd64",
+    recurse=3,
+    *,
+    urlopen: spack.oci.opener.OpenType,
+    config: spack.config.Configuration,
+    client: spack.util.web.NetworkClient,
 ) -> Tuple[dict, dict]:
     """Recursively fetch manifest and config for a given image reference
     with a given architecture.
@@ -297,6 +311,8 @@ def get_manifest_and_config(
         architecture: The architecture (when referencing an index)
         recurse: How many levels of index to recurse into.
         urlopen: function used to open URLs
+        config: configuration for the stage the image config is fetched into
+        client: network client of that stage
 
     Returns:
         A tuple of (manifest, config)"""
@@ -322,6 +338,8 @@ def get_manifest_and_config(
                 architecture=architecture,
                 recurse=recurse - 1,
                 urlopen=urlopen,
+                config=config,
+                client=client,
             )
 
         # Otherwise, require a manifest
@@ -332,14 +350,16 @@ def get_manifest_and_config(
 
     # Download, verify and cache config file
     config_digest = Digest.from_string(manifest["config"]["digest"])
-    with make_stage(ref.blob_url(config_digest), config_digest, urlopen=urlopen) as stage:
+    with make_stage(
+        ref.blob_url(config_digest), config_digest, urlopen=urlopen, config=config, client=client
+    ) as stage:
         stage.fetch()
         stage.check()
         stage.cache_local()
         with open(stage.save_filename, "rb") as f:
-            config = json.load(f)
+            image_config = json.load(f)
 
-    return manifest, config
+    return manifest, image_config
 
 
 #: Same as upload_manifest, but with retry wrapper
@@ -356,7 +376,13 @@ copy_missing_layers_with_retry = spack.oci.opener.default_retry(copy_missing_lay
 
 
 def make_stage(
-    url: str, digest: Digest, keep: bool = False, *, urlopen: spack.oci.opener.OpenType
+    url: str,
+    digest: Digest,
+    keep: bool = False,
+    *,
+    urlopen: spack.oci.opener.OpenType,
+    config: spack.config.Configuration,
+    client: spack.util.web.NetworkClient,
 ) -> spack.stage.Stage:
     fetch_strategy = spack.fetch_strategy.OCIRegistryFetchStrategy(
         url=url, checksum=digest.digest, _urlopen=urlopen
@@ -370,6 +396,6 @@ def make_stage(
         mirror_paths=spack.mirrors.layout.OCILayout(digest),
         name=digest.digest,
         keep=keep,
-        config=spack.config.CONFIG,
-        client=spack.util.web.NetworkClient.from_config(spack.config.CONFIG),
+        config=config,
+        client=client,
     )

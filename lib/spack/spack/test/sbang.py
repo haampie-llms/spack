@@ -215,8 +215,8 @@ def test_shebang_interpreter_regex(shebang, interpreter):
     assert sbang.get_interpreter(shebang) == interpreter
 
 
-def test_shebang_handling(script_dir, sbang_line):
-    sbang.filter_shebangs_in_directory(script_dir.tempdir)
+def test_shebang_handling(script_dir, sbang_line, ctx: SpackContext):
+    sbang.filter_shebangs_in_directory(script_dir.tempdir, ctx.store)
 
     # Make sure this is untouched
     with open(script_dir.short_shebang, "r", encoding="utf-8") as f:
@@ -273,13 +273,13 @@ def test_shebang_handling(script_dir, sbang_line):
         assert f.readline() == last_line
 
 
-def test_shebang_handles_non_writable_files(script_dir, sbang_line):
+def test_shebang_handles_non_writable_files(script_dir, sbang_line, ctx: SpackContext):
     # make a file non-writable
     st = os.stat(script_dir.long_shebang)
     not_writable_mode = st.st_mode & ~stat.S_IWRITE
     os.chmod(script_dir.long_shebang, not_writable_mode)
 
-    test_shebang_handling(script_dir, sbang_line)
+    test_shebang_handling(script_dir, sbang_line, ctx)
 
     st = os.stat(script_dir.long_shebang)
     assert oct(not_writable_mode) == oct(st.st_mode)
@@ -399,7 +399,7 @@ def test_install_sbang_too_long(tmp_path: pathlib.Path):
     assert "cannot patch" in err
 
 
-def test_sbang_hook_skips_nonexecutable_blobs(tmp_path: pathlib.Path):
+def test_sbang_hook_skips_nonexecutable_blobs(tmp_path: pathlib.Path, ctx: SpackContext):
     # Write a binary blob to non-executable.sh, with a long interpreter "path"
     # consisting of invalid UTF-8. The latter is technically not really necessary for
     # the test, but binary blobs accidentally starting with b'#!' usually do not contain
@@ -409,7 +409,7 @@ def test_sbang_hook_skips_nonexecutable_blobs(tmp_path: pathlib.Path):
     with open(file, "wb") as f:
         f.write(contents)
 
-    sbang.filter_shebangs_in_directory(str(tmp_path))
+    sbang.filter_shebangs_in_directory(str(tmp_path), ctx.store)
 
     # Make sure there is no sbang shebang.
     with open(file, "rb") as f:
