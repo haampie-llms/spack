@@ -422,7 +422,7 @@ class _FakeBootstrapper(spack.bootstrap.core.Bootstrapper):
 
 
 @pytest.fixture
-def fake_bootstrap_type(monkeypatch):
+def fake_bootstrap_type(monkeypatch, mutable_config):
     """Register a bootstrapper type used by the sources built with ``_fake_sources``."""
     monkeypatch.setitem(spack.bootstrap.core._bootstrap_methods, "fake", _FakeBootstrapper)
 
