@@ -4,6 +4,7 @@
 """Manage configuration swapping for bootstrapping purposes"""
 
 import contextlib
+import copy
 import os
 import sys
 from typing import Any, Dict, Generator, MutableSequence, Sequence
@@ -115,10 +116,10 @@ def _read_and_sanitize_configuration() -> Dict[str, Any]:
     """Read the user configuration that needs to be reused for bootstrapping
     and remove the entries that should not be copied over.
     """
-    # Read the "config" section but pop the install tree (the entry will not be
+    # Read the "config" section without the install tree (the entry will not be
     # considered due to the use_store context manager, so it will be confusing
     # to have it in the configuration).
-    config_yaml = spack.config.CONFIG.get("config")
+    config_yaml = copy.copy(spack.config.CONFIG.get("config"))
     config_yaml.pop("install_tree", None)
     return {
         "bootstrap": spack.config.CONFIG.get("bootstrap"),
