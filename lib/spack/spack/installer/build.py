@@ -698,7 +698,7 @@ def _install(
     timer = spack.util.timer.Timer()
 
     if request.fake:
-        store.layout.create_install_directory(spec)
+        store.layout.create_install_directory(spec, config=spack.config.CONFIG)
         _do_fake_install(pkg)
         _post_install(pkg, spec, explicit, timer, cache=False)
         return
@@ -725,7 +725,7 @@ def _install(
 
     unmodified_env = os.environ.copy()
     env_mods = spack.build_environment.setup_package(pkg, dirty=request.dirty)
-    store.layout.create_install_directory(spec)
+    store.layout.create_install_directory(spec, config=spack.config.CONFIG)
 
     stage = pkg.stage
     stage.keep = request.keep_stage

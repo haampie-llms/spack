@@ -8,7 +8,10 @@
    :lines: 18-
 """
 
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict
+
+if TYPE_CHECKING:
+    import spack.config
 
 #: Properties for inclusion in other schemas
 properties: Dict[str, Any] = {
@@ -94,24 +97,24 @@ schema = {
 }
 
 
-def update(data: Dict[str, Any]) -> bool:
+def update(data: Dict[str, Any], config: "spack.config.Configuration") -> bool:
     """Update the repos.yaml configuration data to the new format."""
     if not isinstance(data["repos"], list):
         return False
 
-    from spack.repo import from_path
+    from spack.repo import namespace_of
     from spack.util import tty
 
     # Convert old format [paths...] to new format {namespace: path, ...}
     repos = {}
     for path in data["repos"]:
         try:
-            repo = from_path(path)
+            namespace = namespace_of(path, config)
         except Exception as e:
             tty.warn(f"package repository {path} is disabled due to: {e}")
             continue
-        if repo.namespace is not None:
-            repos[repo.namespace] = path
+        if namespace is not None:
+            repos[namespace] = path
 
     data["repos"] = repos
     return True

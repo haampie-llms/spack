@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import spack.config
+import spack.error
 import spack.projections
 import spack.spec
 import spack.util.filesystem as fs
@@ -21,6 +22,14 @@ from spack.util.filesystem import readlink
 default_projections = {
     "all": "{architecture.platform}-{architecture.target}/{name}-{version}-{hash}"
 }
+
+
+#: Directory with metadata in each install prefix
+METADATA_DIR = ".spack"
+#: Name of the spec file in the metadata directory
+SPEC_FILE_NAME = "spec.json"
+#: Name of the install manifest in the metadata directory
+MANIFEST_FILE_NAME = "install_manifest.json"
 
 
 def _check_concrete(spec: "spack.spec.Spec") -> None:
@@ -86,8 +95,11 @@ class DirectoryLayout:
         *,
         projections: Optional[Dict[str, str]] = None,
         hash_length: Optional[int] = None,
+        env_path: Optional[str] = None,
     ) -> None:
         self.root = root
+        #: Environment of the configuration the layout is read from, for ``$env`` in projections
+        self.env_path = env_path
         projections = projections or default_projections
         self.projections = {key: projection.lower() for key, projection in projections.items()}
 
@@ -108,14 +120,14 @@ class DirectoryLayout:
 
         # If any of these paths change, downstream databases may not be able to
         # locate files in older upstream databases
-        self.metadata_dir = ".spack"
+        self.metadata_dir = METADATA_DIR
         self.deprecated_dir = "deprecated"
-        self.spec_file_name = "spec.json"
+        self.spec_file_name = SPEC_FILE_NAME
         # Use for checking yaml and deprecated types
         self._spec_file_name_yaml = "spec.yaml"
         self.extension_file_name = "extensions.yaml"
         self.packages_dir = "repos"  # archive of package.py files
-        self.manifest_file_name = "install_manifest.json"
+        self.manifest_file_name = MANIFEST_FILE_NAME
 
     @property
     def hidden_file_regexes(self) -> Tuple[str]:
@@ -124,7 +136,7 @@ class DirectoryLayout:
     def relative_path_for_spec(self, spec: "spack.spec.Spec") -> str:
         _check_concrete(spec)
 
-        projection = spack.projections.get_projection(self.projections, spec)
+        projection = spack.projections.get_projection(self.projections, spec, self)
         path = spec.format_path(projection)
         return str(Path(path))
 
@@ -159,7 +171,7 @@ class DirectoryLayout:
                 else:
                     raise SpecReadError(f"Did not recognize spec file extension: {extension}")
         except Exception as e:
-            if spack.config.CONFIG.get("config:debug"):
+            if spack.error.debug:
                 raise
             raise SpecReadError(f"Unable to read file: {path}", f"Cause: {e}")
 
@@ -221,7 +233,9 @@ class DirectoryLayout:
     def build_packages_path(self, spec: "spack.spec.Spec") -> str:
         return os.path.join(self.metadata_path(spec), self.packages_dir)
 
-    def create_install_directory(self, spec: "spack.spec.Spec") -> None:
+    def create_install_directory(
+        self, spec: "spack.spec.Spec", config: spack.config.Configuration
+    ) -> None:
         _check_concrete(spec)
 
         # Create install directory with properly configured permissions
@@ -231,8 +245,8 @@ class DirectoryLayout:
         # Each package folder can have its own specific permissions, while
         # intermediate folders (arch/compiler) are set with access permissions
         # equivalent to the root permissions of the layout.
-        group = get_package_group(spec)
-        perms = get_package_dir_permissions(spec)
+        group = get_package_group(spec, config=config)
+        perms = get_package_dir_permissions(spec, config=config)
 
         fs.mkdirp(spec.prefix, mode=perms, group=group, default_perms="parents")
         fs.mkdirp(self.metadata_path(spec), mode=perms, group=group)  # in prefix

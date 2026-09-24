@@ -744,6 +744,8 @@ class ViewDescriptor:
         groups: Optional[Union[str, List[str]]] = None,
     ) -> None:
         self.base = base_path
+        #: Root of the environment, for ``$env`` in projections
+        self.env_path = base_path
         self.raw_root = root
         self.root = spack.config.canonicalize_path(
             root, default_wd=base_path, config=spack.config.CONFIG
@@ -927,6 +929,7 @@ class ViewDescriptor:
             projections=self.projections,
             link_type=self.link_type,
             link_dirs=self.link_dirs,
+            env_path=self.env_path,
         )
 
     def __contains__(self, spec):

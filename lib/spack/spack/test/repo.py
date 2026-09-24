@@ -17,6 +17,7 @@ import spack.util.file_cache
 import spack.util.lock
 import spack.util.naming
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.repo import RepoPath
 from spack.test.conftest import RepoBuilder
 from spack.util.lang import Singleton
@@ -649,11 +650,11 @@ spack:
     assert not any(os.path.samefile(repo_root, r.root) for r in spack.repo.PATH.repos)
 
 
-def test_repo_update(tmp_path: pathlib.Path):
+def test_repo_update(tmp_path: pathlib.Path, ctx: SpackContext):
     existing_root, _ = spack.repo.create_repo(str(tmp_path), namespace="foo")
     nonexisting_root = str(tmp_path / "nonexisting")
     config = {"repos": [existing_root, nonexisting_root]}
-    assert spack.schema.repos.update(config)
+    assert spack.schema.repos.update(config, ctx.config)
     assert config["repos"] == {
         "foo": existing_root
         # non-existing root is removed for simplicity; would be a warning otherwise.

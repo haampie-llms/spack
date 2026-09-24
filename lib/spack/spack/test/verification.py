@@ -16,6 +16,7 @@ import spack.store
 import spack.util.filesystem as fs
 import spack.util.spack_json as sjson
 import spack.verify
+from spack.context import SpackContext
 from spack.util.filesystem import symlink
 
 pytestmark = pytest.mark.not_on_windows("Tests fail on Win")
@@ -127,7 +128,7 @@ def test_check_chmod_manifest_entry(tmp_path: pathlib.Path):
     assert results.errors[file] == ["mode"]
 
 
-def test_check_prefix_manifest(tmp_path: pathlib.Path):
+def test_check_prefix_manifest(tmp_path: pathlib.Path, ctx: SpackContext):
     # Test the verification of an entire prefix and its contents
     prefix_path = tmp_path / "prefix"
     prefix = str(prefix_path)
@@ -155,7 +156,7 @@ def test_check_prefix_manifest(tmp_path: pathlib.Path):
     link = os.path.join(bin_dir, "run")
     symlink(file, link)
 
-    spack.verify.write_manifest(spec)
+    spack.verify.write_manifest(spec, config=ctx.config)
     results = spack.verify.check_spec_manifest(spec)
     assert not results.has_errors()
 

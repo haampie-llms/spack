@@ -91,26 +91,27 @@ def test_output_filtering(capfd, install_mockery, mutable_config: Configuration)
 
     # test filtering when padding is enabled
     with mutable_config.override("config:install_tree", {"padded_length": 256}):
+        store = spack.store.create(mutable_config)
         # tty.msg with filtering on the first argument
-        with spack.store.filter_padding():
+        with spack.store.filter_padding(store):
             tty.msg("here is a long path: %s/with/a/suffix" % long_path)
         out, err = capfd.readouterr()
         assert padding_string in out
 
         # tty.msg with filtering on a laterargument
-        with spack.store.filter_padding():
+        with spack.store.filter_padding(store):
             tty.msg("here is a long path:", "%s/with/a/suffix" % long_path)
         out, err = capfd.readouterr()
         assert padding_string in out
 
         # tty.error with filtering on the first argument
-        with spack.store.filter_padding():
+        with spack.store.filter_padding(store):
             tty.error("here is a long path: %s/with/a/suffix" % long_path)
         out, err = capfd.readouterr()
         assert padding_string in err
 
         # tty.error with filtering on a later argument
-        with spack.store.filter_padding():
+        with spack.store.filter_padding(store):
             tty.error("here is a long path:", "%s/with/a/suffix" % long_path)
         out, err = capfd.readouterr()
         assert padding_string in err

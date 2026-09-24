@@ -98,7 +98,7 @@ def test_read_and_write_spec(temporary_store, config, mock_packages):
         except Exception:
             continue
 
-        layout.create_install_directory(spec)
+        layout.create_install_directory(spec, config=config)
 
         install_dir = path_to_os_path(layout.path_for_spec(spec))[0]
         spec_path = layout.spec_file_path(spec)
@@ -174,7 +174,7 @@ def test_handle_unknown_package(
         except Exception:
             continue
 
-        layout.create_install_directory(spec)
+        layout.create_install_directory(spec, config=config)
         installed_specs[spec] = layout.path_for_spec(spec)
 
     with spack.repo.use_repositories(spack.paths.mock_packages_path):
@@ -204,7 +204,7 @@ def test_find(temporary_store: Store, config, mock_packages: RepoPath):
             continue
         spec = spack.concretize.concretize_one(name)
         installed_specs[spec.name] = spec
-        layout.create_install_directory(spec)
+        layout.create_install_directory(spec, config=config)
 
     # Make sure all the installed specs appear in
     # DirectoryLayout.all_specs()

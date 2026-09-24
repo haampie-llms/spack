@@ -8,6 +8,7 @@ import spack.repo
 import spack.spec
 import spack.util.spack_yaml as syaml
 from spack.concretize import concretize_one
+from spack.context import SpackContext
 from spack.solver.asp import UnsatisfiableSpecError
 
 
@@ -373,7 +374,7 @@ def test_legacy_config_deprecated_flag_warns(mock_packages, mutable_config):
 
 
 @pytest.fixture
-def lib_built_with_deprecated_tool(mutable_config, temporary_store):
+def lib_built_with_deprecated_tool(mutable_config, temporary_store, ctx: SpackContext):
     """Install deprecated-tool-lib built against the deprecated deprecated-tool@1.0.
 
     Models a library installed back when the tool it was built with was still allowed.
@@ -382,7 +383,7 @@ def lib_built_with_deprecated_tool(mutable_config, temporary_store):
         spec = concretize_one("deprecated-tool-lib ^deprecated-tool@1.0")
     assert spec["deprecated-tool"].satisfies("@1.0")
     for node in spec.traverse():
-        temporary_store.layout.create_install_directory(node)
+        temporary_store.layout.create_install_directory(node, config=ctx.config)
         temporary_store.db.add(node, explicit=node.name == spec.name)
     return spec
 

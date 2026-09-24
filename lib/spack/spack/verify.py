@@ -7,9 +7,10 @@ import os
 import stat
 from typing import Any, Dict
 
-import spack.store
+import spack.config
 import spack.util.file_permissions as fp
 import spack.util.spack_json as sjson
+from spack.directory_layout import MANIFEST_FILE_NAME, METADATA_DIR
 from spack.package_base import _spack_build_logfile, spack_times_log
 from spack.util import tty
 from spack.util.filesystem import readlink
@@ -46,12 +47,8 @@ def create_manifest_entry(path: str) -> Dict[str, Any]:
     return data
 
 
-def write_manifest(spec):
-    manifest_file = os.path.join(
-        spec.prefix,
-        spack.store.STORE.layout.metadata_dir,
-        spack.store.STORE.layout.manifest_file_name,
-    )
+def write_manifest(spec, config: spack.config.Configuration):
+    manifest_file = os.path.join(spec.prefix, METADATA_DIR, MANIFEST_FILE_NAME)
 
     if not os.path.exists(manifest_file):
         tty.debug("Writing manifest file: No manifest from binary")
@@ -66,7 +63,7 @@ def write_manifest(spec):
         with open(manifest_file, "w", encoding="utf-8") as f:
             sjson.dump(manifest, f)
 
-        fp.set_permissions_by_spec(manifest_file, spec)
+        fp.set_permissions_by_spec(manifest_file, spec, config)
 
 
 def check_entry(path, data):
@@ -107,15 +104,13 @@ def check_file_manifest(filename):
     dirname = os.path.dirname(filename)
 
     results = VerificationResults()
-    while spack.store.STORE.layout.metadata_dir not in os.listdir(dirname):
+    while METADATA_DIR not in os.listdir(dirname):
         if dirname == os.path.sep:
             results.add_error(filename, "not owned by any package")
             return results
         dirname = os.path.dirname(dirname)
 
-    manifest_file = os.path.join(
-        dirname, spack.store.STORE.layout.metadata_dir, spack.store.STORE.layout.manifest_file_name
-    )
+    manifest_file = os.path.join(dirname, METADATA_DIR, MANIFEST_FILE_NAME)
 
     if not os.path.exists(manifest_file):
         results.add_error(filename, "manifest missing")
@@ -139,9 +134,7 @@ def check_spec_manifest(spec):
     prefix = spec.prefix
 
     results = VerificationResults()
-    manifest_file = os.path.join(
-        prefix, spack.store.STORE.layout.metadata_dir, spack.store.STORE.layout.manifest_file_name
-    )
+    manifest_file = os.path.join(prefix, METADATA_DIR, MANIFEST_FILE_NAME)
 
     if not os.path.exists(manifest_file):
         results.add_error(prefix, "manifest missing")

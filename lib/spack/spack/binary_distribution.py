@@ -2116,8 +2116,8 @@ def extract_tarball(spec, tarball_stage: spack.stage.Stage, force=False, timer=t
     # Create the install prefix
     fsys.mkdirp(
         spec.prefix,
-        mode=get_package_dir_permissions(spec),
-        group=get_package_group(spec),
+        mode=get_package_dir_permissions(spec, config=spack.config.CONFIG),
+        group=get_package_group(spec, config=spack.config.CONFIG),
         default_perms="parents",
     )
 
@@ -2222,7 +2222,7 @@ def install_root_node(
         raise RuntimeError(msg.format(spec.build_spec.format()))
 
     # don't print long padded paths while extracting/relocating binaries
-    with spack.store.filter_padding():
+    with spack.store.filter_padding(store=spack.store.STORE):
         tty.msg('Installing "{0}" from a buildcache'.format(spec.format()))
         extract_tarball(spec, tarball_stage, force)
         spec.package.windows_establish_runtime_linkage()

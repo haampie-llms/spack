@@ -15,6 +15,7 @@ import spack.repo
 import spack.util.module_cmd
 import spack.util.spack_yaml as syaml
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.error import ConfigError
 from spack.spec import Spec
 from spack.version import Version
@@ -320,52 +321,52 @@ mpi:
         spec = spack.concretize.concretize_one("mpi")
         assert spec["mpich"].external_path == os.path.sep + os.path.join("dummy", "path")
 
-    def test_config_permissions_from_all(self, configure_permissions):
+    def test_config_permissions_from_all(self, configure_permissions, ctx: SpackContext):
         # Although these aren't strictly about concretization, they are
         # configured in the same file and therefore convenient to test here.
         # Make sure we can configure readable and writable
 
         # Test inheriting from 'all'
         spec = Spec("zmpi")
-        perms = spack.package_prefs.get_package_permissions(spec)
+        perms = spack.package_prefs.get_package_permissions(spec, config=ctx.config)
         assert perms == stat.S_IRWXU | stat.S_IRWXG
 
-        dir_perms = spack.package_prefs.get_package_dir_permissions(spec)
+        dir_perms = spack.package_prefs.get_package_dir_permissions(spec, config=ctx.config)
         assert dir_perms == stat.S_IRWXU | stat.S_IRWXG | stat.S_ISGID
 
-        group = spack.package_prefs.get_package_group(spec)
+        group = spack.package_prefs.get_package_group(spec, config=ctx.config)
         assert group == "all"
 
-    def test_config_permissions_from_package(self, configure_permissions):
+    def test_config_permissions_from_package(self, configure_permissions, ctx: SpackContext):
         # Test overriding 'all'
         spec = Spec("mpich")
-        perms = spack.package_prefs.get_package_permissions(spec)
+        perms = spack.package_prefs.get_package_permissions(spec, config=ctx.config)
         assert perms == stat.S_IRWXU
 
-        dir_perms = spack.package_prefs.get_package_dir_permissions(spec)
+        dir_perms = spack.package_prefs.get_package_dir_permissions(spec, config=ctx.config)
         assert dir_perms == stat.S_IRWXU
 
-        group = spack.package_prefs.get_package_group(spec)
+        group = spack.package_prefs.get_package_group(spec, config=ctx.config)
         assert group == "all"
 
-    def test_config_permissions_differ_read_write(self, configure_permissions):
+    def test_config_permissions_differ_read_write(self, configure_permissions, ctx: SpackContext):
         # Test overriding group from 'all' and different readable/writable
         spec = Spec("mpileaks")
-        perms = spack.package_prefs.get_package_permissions(spec)
+        perms = spack.package_prefs.get_package_permissions(spec, config=ctx.config)
         assert perms == stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP
 
-        dir_perms = spack.package_prefs.get_package_dir_permissions(spec)
+        dir_perms = spack.package_prefs.get_package_dir_permissions(spec, config=ctx.config)
         expected = stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_ISGID
         assert dir_perms == expected
 
-        group = spack.package_prefs.get_package_group(spec)
+        group = spack.package_prefs.get_package_group(spec, config=ctx.config)
         assert group == "mpileaks"
 
-    def test_config_perms_fail_write_gt_read(self, configure_permissions):
+    def test_config_perms_fail_write_gt_read(self, configure_permissions, ctx: SpackContext):
         # Test failure for writable more permissive than readable
         spec = Spec("callpath")
         with pytest.raises(ConfigError):
-            spack.package_prefs.get_package_permissions(spec)
+            spack.package_prefs.get_package_permissions(spec, config=ctx.config)
 
     @pytest.mark.regression("20040")
     def test_variant_not_flipped_to_pull_externals(self):
