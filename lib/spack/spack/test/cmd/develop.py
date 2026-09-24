@@ -16,6 +16,7 @@ import spack.stage
 import spack.util.filesystem as fs
 import spack.util.git
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.error import SpackError
 from spack.fetch_strategy import URLFetchStrategy
 from spack.main import SpackCommand
@@ -182,7 +183,9 @@ class TestDevelop:
             with pytest.raises(ev.SpackEnvironmentDevelopError, match="conflicts with concrete"):
                 develop("mpich@1.1")
 
-    def test_develop_applies_changes_path(self, monkeypatch, mutable_config: Configuration):
+    def test_develop_applies_changes_path(
+        self, monkeypatch, mutable_config: Configuration, ctx: SpackContext
+    ):
         env("create", "test")
         with ev.read("test") as e:
             e.add("mpich@1.0")
@@ -190,8 +193,8 @@ class TestDevelop:
             e.write()
 
             # canonicalize paths relative to env
-            testpath1 = spack.config.canonicalize_path("test/path1", e.path)
-            testpath2 = spack.config.canonicalize_path("test/path2", e.path)
+            testpath1 = spack.config.canonicalize_path("test/path1", e.path, config=ctx.config)
+            testpath2 = spack.config.canonicalize_path("test/path2", e.path, config=ctx.config)
 
             monkeypatch.setattr(spack.stage.Stage, "steal_source", lambda x, y: None)
             # Testing that second call to develop successfully changes both config and specs
@@ -217,7 +220,7 @@ class TestDevelop:
             spec = next(e.roots())
             assert not spec.satisfies("dev_path=*")
 
-    def test_develop_canonicalize_path(self, monkeypatch):
+    def test_develop_canonicalize_path(self, monkeypatch, ctx: SpackContext):
         env("create", "test")
         with ev.read("test") as e:
             e.add("mpich@1.0")
@@ -225,7 +228,7 @@ class TestDevelop:
             e.write()
 
             path = "../$user"
-            abspath = spack.config.canonicalize_path(path, e.path)
+            abspath = spack.config.canonicalize_path(path, e.path, config=ctx.config)
 
             def check_path(stage, dest):
                 assert dest == abspath
@@ -239,7 +242,7 @@ class TestDevelop:
             spec = next(e.roots())
             assert spec.satisfies("dev_path=%s" % abspath)
 
-    def test_develop_canonicalize_path_no_args(self, monkeypatch):
+    def test_develop_canonicalize_path_no_args(self, monkeypatch, ctx: SpackContext):
         env("create", "test")
         with ev.read("test") as e:
             e.add("mpich@1.0")
@@ -247,7 +250,7 @@ class TestDevelop:
             e.write()
 
             path = "$user"
-            abspath = spack.config.canonicalize_path(path, e.path)
+            abspath = spack.config.canonicalize_path(path, e.path, config=ctx.config)
 
             def check_path(stage, dest):
                 assert dest == abspath

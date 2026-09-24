@@ -145,7 +145,9 @@ class Bootstrapper:
 
     def __init__(self, conf: ConfigDictionary) -> None:
         self.name = conf["name"]
-        self.metadata_dir = spack.config.canonicalize_path(conf["metadata"])
+        self.metadata_dir = spack.config.canonicalize_path(
+            conf["metadata"], config=spack.config.CONFIG
+        )
 
         # Check for relative paths, and turn them into absolute paths
         # root is the metadata_dir
@@ -606,7 +608,9 @@ def bootstrapping_sources(scope: Optional[str] = None):
     list_of_sources = []
     for entry in source_configs:
         current = copy.copy(entry)
-        metadata_dir = spack.config.canonicalize_path(entry["metadata"])
+        metadata_dir = spack.config.canonicalize_path(
+            entry["metadata"], config=spack.config.CONFIG
+        )
         metadata_yaml = os.path.join(metadata_dir, METADATA_YAML_FILENAME)
         try:
             with open(metadata_yaml, encoding="utf-8") as stream:

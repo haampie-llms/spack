@@ -156,13 +156,17 @@ class ConfigScope:
 
     @property
     def included_scopes(self) -> List["ConfigScope"]:
+        """Included scopes, in the order they appear in this scope, once resolved."""
+        return self._included_scopes or []
+
+    def resolve_includes(self, config: "Configuration") -> List["ConfigScope"]:
         """Memoized list of included scopes, in the order they appear in this scope."""
         if self._included_scopes is None:
             self._included_scopes = []
 
             includes = self.get_section("include")
             if includes:
-                include_paths = [included_path(data) for data in includes["include"]]
+                include_paths = [included_path(data, config) for data in includes["include"]]
                 included_scopes = chain(*[include.scopes(self) for include in include_paths])
 
                 # Do not include duplicate scopes
@@ -552,7 +556,7 @@ class Configuration:
         # TODO: at the highest level is reflected in the value of an option that
         # TODO: is set in multiple included files.
         # before pushing the scope itself, push included scopes recursively, at the same priority
-        for included_scope in reversed(scope.included_scopes):
+        for included_scope in reversed(scope.resolve_includes(self)):
             if _depth + 1 > MAX_RECURSIVE_INCLUDES:  # make sure we're not recursing endlessly
                 mark = ""
                 if hasattr(included_scope, "path") and syaml.marked(included_scope.path):
@@ -1201,7 +1205,8 @@ class OptionalInclude:
     remote: bool
     _scopes: List[ConfigScope]
 
-    def __init__(self, entry: dict):
+    def __init__(self, entry: dict, config: "Configuration"):
+        self.config = config
         self.name = entry.get("name", "")
         self.when = entry.get("when", "")
         self.optional = entry.get("optional", False)
@@ -1312,7 +1317,7 @@ class OptionalInclude:
         # But ensure that name is unique if there are multiple paths.
         if not self.name or len(getattr(self, "paths", [])) > 1:
             parent_path = pathlib.Path(getattr(parent_scope, "path", ""))
-            real_path = pathlib.Path(substitute_path_variables(path))
+            real_path = pathlib.Path(substitute_path_variables(path, self.config))
 
             try:
                 included_name = real_path.relative_to(parent_path)
@@ -1413,16 +1418,14 @@ class IncludePath(OptionalInclude):
     sha256: str
     destination: Optional[str]
 
-    def __init__(self, entry: dict):
-        # circular dependencies
-
-        super().__init__(entry)
+    def __init__(self, entry: dict, config: "Configuration"):
+        super().__init__(entry, config)
         path_override_env_var = entry.get("path_override_env_var", "")
         if path_override_env_var and path_override_env_var in os.environ:
             path = os.environ[path_override_env_var]
         else:
             path = entry.get("path", "")
-        self.path = substitute_path_variables(path)
+        self.path = substitute_path_variables(path, config)
 
         self.sha256 = entry.get("sha256", "")
         self.remote = "sha256" in entry
@@ -1467,8 +1470,8 @@ class IncludePath(OptionalInclude):
         # path for a local (or remote) file.
         tty.debug(f"Local base directory for {self.path} is {base}")
 
-        canonical_path = canonicalize_path(self.path, base)
-        config_path = rfc_util.local_path(canonical_path, self.sha256, base, config=CONFIG)
+        canonical_path = canonicalize_path(self.path, base, config=self.config)
+        config_path = rfc_util.local_path(canonical_path, self.sha256, base, config=self.config)
         assert config_path
         self.destination = config_path
 
@@ -1493,16 +1496,14 @@ class GitIncludePaths(OptionalInclude):
     _paths: List[str]
     destination: Optional[str]
 
-    def __init__(self, entry: dict):
-        # circular dependencies
-
-        super().__init__(entry)
-        self.git = substitute_path_variables(entry.get("git", ""))
+    def __init__(self, entry: dict, config: "Configuration"):
+        super().__init__(entry, config)
+        self.git = substitute_path_variables(entry.get("git", ""), config)
 
         self.branch = entry.get("branch", "")
         self.commit = entry.get("commit", "")
         self.tag = entry.get("tag", "")
-        self._paths = [substitute_path_variables(path) for path in entry.get("paths", [])]
+        self._paths = [substitute_path_variables(p, config) for p in entry.get("paths", [])]
         self.destination = None
         self.remote = True
 
@@ -1634,35 +1635,39 @@ class GitIncludePaths(OptionalInclude):
         return self._paths
 
 
-def included_path(entry: Union[str, pathlib.Path, dict]) -> Union[IncludePath, GitIncludePaths]:
+def included_path(
+    entry: Union[str, pathlib.Path, dict], config: "Configuration"
+) -> Union[IncludePath, GitIncludePaths]:
     """Convert the included paths entry into the appropriate optional include.
 
     Args:
         entry: include configuration entry
+        config: configuration used for path substitution and fetching
 
     Returns: converted entry, where an empty ``when`` means the path is not conditionally included
     """
     if isinstance(entry, (str, pathlib.Path)):
-        return IncludePath({"path": str(entry)})
+        return IncludePath({"path": str(entry)}, config)
 
     if entry.get("path", ""):
-        return IncludePath(entry)
+        return IncludePath(entry, config)
 
-    return GitIncludePaths(entry)
+    return GitIncludePaths(entry, config)
 
 
-def paths_from_includes(includes: List[Union[str, dict]]) -> List[str]:
+def paths_from_includes(includes: List[Union[str, dict]], config: "Configuration") -> List[str]:
     """The path(s) from the configured includes.
 
     Args:
         includes: include configuration information
+        config: configuration used for path substitution
 
     Returns: list of path or an empty list if there are none
     """
 
     paths = []
     for entry in includes:
-        include = included_path(entry)
+        include = included_path(entry, config)
         paths.extend(include.paths)
     return paths
 
@@ -2272,7 +2277,7 @@ NOMATCH = object()
 
 
 # Substitutions to perform
-def replacements(config: Optional["Configuration"] = None):
+def replacements(config: "Configuration"):
     arch = architecture()
 
     return {
@@ -2289,12 +2294,12 @@ def replacements(config: Optional["Configuration"] = None):
         "target": lambda: arch.target,
         "target_family": lambda: arch.target.family,
         "date": lambda: __import__("datetime").date.today().strftime("%Y-%m-%d"),
-        "env": lambda: (config if config is not None else CONFIG).env_path or NOMATCH,
+        "env": lambda: config.env_path or NOMATCH,
         "spack_short_version": lambda: spack.get_short_version(),
     }
 
 
-def substitute_config_variables(path, config: Optional["Configuration"] = None):
+def substitute_config_variables(path, config: "Configuration"):
     """Substitute placeholders into paths.
 
     Spack allows paths in configs to have some placeholders, as follows:
@@ -2333,7 +2338,7 @@ def substitute_config_variables(path, config: Optional["Configuration"] = None):
     return re.sub(r"(\$\w+\b|\$\{\w+\})", repl, path)
 
 
-def substitute_path_variables(path, config: Optional["Configuration"] = None):
+def substitute_path_variables(path, config: "Configuration"):
     """Substitute config vars, expand environment vars, expand user home."""
     path = substitute_config_variables(path, config)
     path = os.path.expandvars(path)
@@ -2342,7 +2347,7 @@ def substitute_path_variables(path, config: Optional["Configuration"] = None):
 
 
 def canonicalize_path(
-    path: str, default_wd: Optional[str] = None, *, config: Optional["Configuration"] = None
+    path: str, default_wd: Optional[str] = None, *, config: "Configuration"
 ) -> str:
     """Same as substitute_path_variables, but also take absolute path.
 
@@ -2353,6 +2358,7 @@ def canonicalize_path(
     Arguments:
         path: path being converted as needed
         default_wd: optional working directory/root for non-yaml string paths
+        config: configuration providing ``$env``
 
     Returns: An absolute path or non-file URL with path variable substitution
     """

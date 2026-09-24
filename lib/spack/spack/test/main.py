@@ -22,6 +22,7 @@ import spack.util.git
 import spack.util.spack_yaml as syaml
 from spack.active_environment import active_environment
 from spack.config import Configuration
+from spack.context import SpackContext
 
 pytestmark = pytest.mark.not_on_windows(
     "Test functionality supported but tests are failing on Win"
@@ -347,7 +348,7 @@ include:
 
 @pytest.mark.regression("52664")
 def test_env_substitution_via_main_entrypoint(
-    mutable_mock_env_path, mutable_config: Configuration
+    mutable_mock_env_path, mutable_config: Configuration, ctx: SpackContext
 ):
     """Tests that an environment activated through the CLI entrypoint can substitute ``$env``"""
     env = ev.create("test")
@@ -357,4 +358,6 @@ def test_env_substitution_via_main_entrypoint(
     spack.main._main(["-e", "test", "config", "scopes"])
 
     assert mutable_config.env_path == env.path
-    assert spack.config.substitute_path_variables("$env/foo") == f"{env.path}/foo"
+    assert (
+        spack.config.substitute_path_variables("$env/foo", config=ctx.config) == f"{env.path}/foo"
+    )

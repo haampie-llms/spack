@@ -128,7 +128,9 @@ def get_extension_paths():
     """Return the list of canonicalized extension paths from config:extensions."""
     extension_paths = spack.config.CONFIG.get("config:extensions") or []
     extension_paths.extend(extension_paths_from_entry_points())
-    paths = [spack.config.canonicalize_path(p) for p in extension_paths]
+    paths = [
+        spack.config.canonicalize_path(p, config=spack.config.CONFIG) for p in extension_paths
+    ]
     return paths
 
 

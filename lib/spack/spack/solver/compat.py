@@ -82,7 +82,8 @@ def _ensure_clingo_or_raise(clingo_mod: ModuleType) -> None:
         if (
             pathlib.Path(
                 spack.config.canonicalize_path(
-                    spack.config.CONFIG.get("bootstrap:root", sp.default_user_bootstrap_path)
+                    spack.config.CONFIG.get("bootstrap:root", sp.default_user_bootstrap_path),
+                    config=spack.config.CONFIG,
                 )
             )
             in pathlib.Path(clingo_mod.__file__).parents

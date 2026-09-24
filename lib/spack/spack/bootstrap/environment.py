@@ -54,7 +54,8 @@ class BootstrapEnvironment(spack.environment.Environment):
         environment_dir = f"{python_part}-{arch_part}-{interpreter_part}"
         return pathlib.Path(
             spack.config.canonicalize_path(
-                os.path.join(bootstrap_root_path, "environments", environment_dir)
+                os.path.join(bootstrap_root_path, "environments", environment_dir),
+                config=spack.config.CONFIG,
             )
         )
 

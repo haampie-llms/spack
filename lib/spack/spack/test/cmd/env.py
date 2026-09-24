@@ -1565,7 +1565,9 @@ def test_env_with_included_config_scope(mutable_mock_env_path, packages_file):
     assert mpileaks.satisfies("mpileaks@2.2")
 
 
-def test_env_with_included_config_var_path(tmp_path: pathlib.Path, packages_file):
+def test_env_with_included_config_var_path(
+    tmp_path: pathlib.Path, packages_file, ctx: SpackContext
+):
     """Test inclusion of a package configuration file with path variables
     "staged" in the environment's configuration stage directory."""
     included_file = str(packages_file)
@@ -1575,7 +1577,7 @@ def test_env_with_included_config_var_path(tmp_path: pathlib.Path, packages_file
     spack_yaml = env_path / ev.manifest_name
     spack_yaml.write_text(mpileaks_env_config(config_var_path))
 
-    config_real_path = substitute_path_variables(config_var_path)
+    config_real_path = substitute_path_variables(config_var_path, config=ctx.config)
     shutil.move(included_file, config_real_path)
     assert os.path.exists(config_real_path)
 

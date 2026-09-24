@@ -336,7 +336,7 @@ def _remove_repo(
         key = namespace_or_path
     else:
         # delete by namespace or path (requires constructing the repo)
-        canon_path = spack.config.canonicalize_path(namespace_or_path)
+        canon_path = spack.config.canonicalize_path(namespace_or_path, config=config)
         descriptors = spack.repo.RepoDescriptors.from_config(config, scope=scope)
         for name, descriptor in descriptors.items():
             descriptor.initialize(fetch=False)

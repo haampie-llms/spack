@@ -91,7 +91,10 @@ def default_template_dirs(configuration: spack.config.Configuration) -> Tuple[st
     config_yaml = configuration.get_config("config")
     builtins = config_yaml.get("template_dirs", ["$spack/share/spack/templates"])
     extensions = spack.extensions.get_template_dirs()
-    return tuple(canonicalize_path(d) for d in itertools.chain(builtins, extensions))
+    return tuple(
+        canonicalize_path(d, config=spack.config.CONFIG)
+        for d in itertools.chain(builtins, extensions)
+    )
 
 
 # Extra filters for the template engine environment

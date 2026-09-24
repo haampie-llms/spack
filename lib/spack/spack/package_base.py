@@ -868,7 +868,9 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
     @classproperty
     def global_license_dir(cls):
         """Returns the directory where license files for all packages are stored."""
-        return spack.config.canonicalize_path(spack.config.CONFIG.get("config:license_dir"))
+        return spack.config.canonicalize_path(
+            spack.config.CONFIG.get("config:license_dir"), config=spack.config.CONFIG
+        )
 
     @property
     def global_license_file(self):

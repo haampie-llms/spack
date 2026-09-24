@@ -215,7 +215,9 @@ def _abs_code_path(
     env: spack.environment.Environment, spec: spack.spec.Spec, path: Optional[str] = None
 ):
     src_path = path if path else spec.name
-    return spack.config.canonicalize_path(src_path, default_wd=env.path)
+    return spack.config.canonicalize_path(
+        src_path, default_wd=env.path, config=spack.config.CONFIG
+    )
 
 
 def _dev_spec_generator(args, env, ctx):
@@ -229,7 +231,7 @@ def _dev_spec_generator(args, env, ctx):
 
         for name, entry in env.dev_specs.items():
             path = entry.get("path", name)
-            abspath = spack.config.canonicalize_path(path, default_wd=env.path)
+            abspath = spack.config.canonicalize_path(path, default_wd=env.path, config=ctx.config)
             # Both old syntax `spack develop pkg@x` and new syntax `spack develop pkg@=x`
             # are currently supported.
             spec = spack.spec.parse_with_version_concrete(entry["spec"])
