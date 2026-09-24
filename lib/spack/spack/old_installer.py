@@ -419,6 +419,7 @@ def _process_binary_cache_tarball(
             mirrors_for_spec,
             config=spack.config.CONFIG,
             client=spack.util.web.NetworkClient.from_config(spack.config.CONFIG),
+            gpg=pkg.context.gpg,
         )
 
         if tarball_stage is None:
@@ -483,6 +484,7 @@ def _try_install_from_binary_cache(
             config=spack.config.CONFIG,
             client=spack.util.web.NetworkClient.from_config(spack.config.CONFIG),
             binary_index=spack.binary_distribution.BINARY_INDEX,
+            gpg=pkg.context.gpg,
         )
 
     return _process_binary_cache_tarball(

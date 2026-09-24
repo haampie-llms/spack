@@ -271,6 +271,7 @@ def create_already_built_pruner(
     binary_index: spack.binary_distribution.BinaryIndexCache,
     config: cfg.Configuration,
     client: web_util.NetworkClient,
+    gpg: gpg_util.Gpg,
 ) -> PrunerCallback:
     """Return a filter that prunes specs already present on any configured
     mirrors"""
@@ -286,6 +287,7 @@ def create_already_built_pruner(
             binary_index=binary_index,
             config=config,
             client=client,
+            gpg=gpg,
         )
 
         if not spec_locations:
@@ -572,6 +574,7 @@ def generate_pipeline(env: ev.Environment, args, ctx: "spack.context.SpackContex
                 binary_index=ctx.binary_index,
                 config=ctx.config,
                 client=ctx.network,
+                gpg=ctx.gpg,
             )
         )
 
@@ -653,17 +656,17 @@ def import_signing_key(base64_signing_key: str) -> None:
     tty.debug(signing_keys_output)
 
 
-def can_sign_binaries():
+def can_sign_binaries(gpg: gpg_util.Gpg):
     """Utility method to determine if this spack instance is capable of
     signing binary packages.  This is currently only possible if the
     spack gpg keystore contains exactly one secret key."""
-    return len(gpg_util.signing_keys()) == 1
+    return len(gpg_util.signing_keys(gpg)) == 1
 
 
-def can_verify_binaries():
+def can_verify_binaries(gpg: gpg_util.Gpg):
     """Utility method to determine if this spack instance is capable (at
     least in theory) of verifying signed binaries."""
-    return len(gpg_util.public_keys()) >= 1
+    return len(gpg_util.public_keys(gpg)) >= 1
 
 
 def push_to_build_cache(
@@ -683,7 +686,7 @@ def push_to_build_cache(
         ctx: context the spec is installed in
     """
     tty.debug(f"Pushing to build cache ({'signed' if sign_binaries else 'unsigned'})")
-    signing_key = spack.binary_distribution.select_signing_key() if sign_binaries else None
+    signing_key = spack.binary_distribution.select_signing_key(ctx.gpg) if sign_binaries else None
     mirror = spack.mirrors.mirror.Mirror.from_url(mirror_url)
     try:
         with spack.binary_distribution.make_uploader(

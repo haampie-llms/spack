@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     import spack.store
     import spack.util.executable
     import spack.util.file_cache
+    import spack.util.gpg
     import spack.util.web
 
 T = TypeVar("T")
@@ -64,6 +65,8 @@ class SpackContext:
         self.is_bootstrap = is_bootstrap
         #: Members replaced by activating an environment, restored by deactivating it
         self._before_activation: Dict[str, Any] = {}
+        #: GnuPG home of ``gpg``; ``None`` for ``SPACK_GNUPGHOME``, or Spack's own
+        self.gpg_home: Optional[str] = None
 
     @property
     def config(self) -> "spack.config.Configuration":
@@ -124,6 +127,13 @@ class SpackContext:
         return spack.util.web.NetworkClient.from_config(self.config)
 
     @_member
+    def gpg(self) -> "spack.util.gpg.Gpg":
+        """GnuPG, to sign and verify binaries."""
+        import spack.util.gpg
+
+        return spack.util.gpg.Gpg(self.gpg_home, self)
+
+    @_member
     def bootstrap(self) -> "SpackContext":
         """Context to bootstrap Spack's own dependencies in. It shares the repositories, caches
         and network client of this context."""
@@ -132,6 +142,7 @@ class SpackContext:
         import spack.bootstrap.config
 
         result = SpackContext(spack.bootstrap.config.bootstrap_config(self), is_bootstrap=True)
+        result.gpg_home = spack.bootstrap.config.gpg_home(self.config)
         result.share(self, "repo", "misc_cache", "compiler_cache", "network")
         return result
 
@@ -246,7 +257,11 @@ class SpackContext:
         return (
             SpackContext,
             (self._config,),
-            {"_environment": self._environment, "is_bootstrap": self.is_bootstrap},
+            {
+                "_environment": self._environment,
+                "is_bootstrap": self.is_bootstrap,
+                "gpg_home": self.gpg_home,
+            },
         )
 
     def __setstate__(self, state):
@@ -264,6 +279,7 @@ class _ProcessContext(SpackContext):
 
     def __init__(self) -> None:
         self.is_bootstrap = False
+        self.gpg_home = None
         self._before_activation = {}
         #: Configuration the members in ``__dict__`` were built from
         self._built_from: Optional[object] = None

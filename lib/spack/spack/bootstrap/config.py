@@ -101,3 +101,8 @@ def bootstrap_config(ctx: "spack.context.SpackContext") -> spack.config.Configur
     config.push_scope(spack.config.InternalConfigScope("bootstrap_overrides", overrides))
 
     return config
+
+
+def gpg_home(config: spack.config.Configuration) -> str:
+    """GnuPG home of the bootstrap context of ``config``."""
+    return os.path.join(root_path(config), ".bootstrap_gpg_home")
