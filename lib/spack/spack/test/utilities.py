@@ -116,14 +116,11 @@ def use_store(
         spack.config.InternalConfigScope(name=scope_name, data={"config": {"install_tree": data}})
     )
     store = spack.store.create(config, repo_provider=ctx.repo_provider)
-    saved = ctx.__dict__.pop("store", None)
-    ctx.__dict__["store"] = store
+    saved = ctx.swap("store", store)
     try:
         yield store
     finally:
-        ctx.__dict__.pop("store", None)
-        if saved is not None:
-            ctx.__dict__["store"] = saved
+        ctx.swap("store", saved)
         config.remove_scope(scope_name=scope_name)
 
 
@@ -169,15 +166,13 @@ def use_repositories(
     repos_key = "repos:" if override else "repos"
     config.push_scope(spack.config.InternalConfigScope(name=scope_name, data={repos_key: paths}))
     old_repo.disable()
-    ctx.__dict__["repo"] = new_repo
-    new_repo.enable()
+    ctx.swap("repo", new_repo)
     try:
         yield new_repo
     finally:
         config.remove_scope(scope_name=scope_name)
         new_repo.disable()
-        ctx.__dict__["repo"] = old_repo
-        old_repo.enable()
+        ctx.swap("repo", old_repo)
 
 
 @contextlib.contextmanager

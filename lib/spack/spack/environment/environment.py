@@ -69,7 +69,7 @@ from spack.spec import Spec
 from spack.spec_filter import SpecFilter
 from spack.util import tty
 from spack.util.filesystem import copy_tree, islink, readlink
-from spack.util.lang import ensure_unwrapped, stable_partition
+from spack.util.lang import stable_partition
 from spack.util.link_tree import ConflictingSpecsError
 
 from .list import SpecList, SpecListError, SpecListParser
@@ -3713,8 +3713,7 @@ class EnvironmentManifestFile(collections.abc.Mapping):
 
         Only the scope of the active environment is swapped out, so the store and repositories of
         ``ctx`` stay as they are."""
-        # Unwrap the global configuration, so that its env_path is set, not the wrapper's
-        config = ensure_unwrapped(ctx.config)
+        config = ctx.config
         active, env_path = ctx.environment, config.env_path
         if active is not None:
             active.manifest.deactivate_config_scope(config)
