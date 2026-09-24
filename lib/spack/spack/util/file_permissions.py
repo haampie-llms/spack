@@ -6,6 +6,7 @@ import os
 import stat as st
 from typing import List, Optional, Union
 
+import spack.config
 import spack.package_prefs as pp
 from spack.error import SpackError
 
@@ -13,13 +14,13 @@ from spack.error import SpackError
 _UNCHANGED = -1
 
 
-def set_permissions_by_spec(path: str, spec) -> None:
+def set_permissions_by_spec(path: str, spec, config: spack.config.Configuration) -> None:
     """Recursively set permissions and group of path as configured for spec."""
     set_permissions(
         path,
-        dir_perms=pp.get_package_dir_permissions(spec),
-        file_perms=pp.get_package_permissions(spec),
-        group=pp.get_package_group(spec),
+        dir_perms=pp.get_package_dir_permissions(spec, config=config),
+        file_perms=pp.get_package_permissions(spec, config=config),
+        group=pp.get_package_group(spec, config=config),
     )
 
 

@@ -163,7 +163,7 @@ def test_enable_sandbox_paths(
     custom_read_link.symlink_to(custom_read_target)
 
     # Ensure the sbang exists
-    temporary_store.install_sbang()
+    temporary_store.install_sbang(config=config)
     sbang_file = pathlib.Path(temporary_store.unpadded_root) / "bin" / "sbang"
 
     config = {

@@ -80,14 +80,13 @@ def parse_install_tree(config: spack.config.Configuration) -> Tuple[str, str, Di
 
 
 @contextlib.contextmanager
-def filter_padding():
+def filter_padding(store: "Store"):
     """Context manager to safely disable path padding in all Spack output.
 
     This is needed because Spack's debug output gets extremely long when we use a
     long padded installation path.
     """
-    padding = spack.config.CONFIG.get("config:install_tree:padded_length", None)
-    if padding:
+    if store.has_padding():
         # filter out all padding from the install command output
         with tty.output_filter(spack.util.path.padding_filter):
             yield
@@ -129,15 +128,17 @@ class Store:
         hash_length: Optional[int] = None,
         upstreams: Optional[List[spack.database.Database]] = None,
         lock_cfg: spack.database.LockConfiguration = spack.database.NO_LOCK,
+        env_path: Optional[str] = None,
     ) -> None:
         self.root = root
+        self.env_path = env_path
         self.unpadded_root = unpadded_root or root
         self.projections = projections
         self.hash_length = hash_length
         self.upstreams = upstreams
         self.lock_cfg = lock_cfg
         self.layout = spack.directory_layout.DirectoryLayout(
-            root, projections=projections, hash_length=hash_length
+            root, projections=projections, hash_length=hash_length, env_path=env_path
         )
         self.db = spack.database.Database(
             root, upstream_dbs=upstreams, lock_cfg=lock_cfg, layout=self.layout
@@ -157,11 +158,19 @@ class Store:
         """Returns True if the store layout includes path padding."""
         return self.root != self.unpadded_root
 
+    def assign_prefix(self, spec: "spack.spec.Spec") -> None:
+        """Set the prefix of a concrete spec: where it is installed, else where it would be."""
+        _, record = self.db.query_by_spec_hash(spec.dag_hash())
+        if record and record.path:
+            spec.set_prefix(record.path)
+        else:
+            spec.set_prefix(self.layout.path_for_spec(spec))
+
     def reindex(self) -> None:
         """Convenience function to reindex the store DB with its own layout."""
         return self.db.reindex()
 
-    def install_sbang(self) -> None:
+    def install_sbang(self, config: spack.config.Configuration) -> None:
         """Install the sbang script in this store's bin directory.
 
         sbang is a short shell script that Spack prepends to scripts with shebangs that are too
@@ -185,8 +194,8 @@ class Store:
         os.makedirs(bin_dir, exist_ok=True)
 
         all_spec = spack.spec.Spec("all")
-        group_name = spack.package_prefs.get_package_group(all_spec)
-        config_mode = spack.package_prefs.get_package_dir_permissions(all_spec)
+        group_name = spack.package_prefs.get_package_group(all_spec, config=config)
+        config_mode = spack.package_prefs.get_package_dir_permissions(all_spec, config=config)
         gid = grp.getgrnam(group_name).gr_gid if group_name else -1
 
         if group_name:
@@ -211,6 +220,7 @@ class Store:
             self.hash_length,
             self.upstreams,
             self.lock_cfg,
+            self.env_path,
         )
 
 
@@ -237,6 +247,7 @@ def create(configuration: spack.config.Configuration) -> Store:
         hash_length=hash_length,
         upstreams=upstreams,
         lock_cfg=spack.database.lock_configuration(configuration),
+        env_path=configuration.env_path,
     )
 
 
@@ -286,8 +297,8 @@ def _construct_upstream_dbs_from_install_roots(
 
 def find(
     constraints: Union[str, List[str], List["spack.spec.Spec"]],
+    query_fn: Callable[..., List["spack.spec.Spec"]],
     multiple: bool = False,
-    query_fn: Optional[Callable[[Any], List["spack.spec.Spec"]]] = None,
     **kwargs,
 ) -> List["spack.spec.Spec"]:
     """Returns a list of specs matching the constraints passed as inputs.
@@ -295,17 +306,13 @@ def find(
     At least one spec per constraint must match, otherwise the function
     will error with an appropriate message.
 
-    By default, this function queries the current store, but a custom query
-    function can be passed to hit any other source of concretized specs
-    (e.g. a binary cache).
-
-    The query function must accept a spec as its first argument.
+    The query function, e.g. ``store.db.query``, may hit any source of concretized specs
+    (e.g. a binary cache). It must accept a spec as its first argument.
 
     Args:
         constraints: spec(s) to be matched against installed packages
+        query_fn: query function to get matching specs
         multiple: if True multiple matches per constraint are admitted
-        query_fn (Callable): query function to get matching specs. By default,
-            ``spack.store.STORE.db.query``
         **kwargs: keyword arguments forwarded to the query function
     """
     if isinstance(constraints, str):
@@ -313,7 +320,6 @@ def find(
 
     matching_specs: List[spack.spec.Spec] = []
     errors = []
-    query_fn = query_fn or STORE.db.query
     for spec in constraints:
         current_matches = query_fn(spec, **kwargs)
 

@@ -1741,6 +1741,11 @@ def from_path(path: str) -> Repo:
     return Repo(path, cache=spack.caches.MISC_CACHE)
 
 
+def namespace_of(path: str, config: spack.config.Configuration) -> str:
+    """The namespace of the repository at ``path``, canonicalized with ``config``."""
+    return from_path(spack.config.canonicalize_path(path, config=config)).namespace
+
+
 MaybeExecutable = Optional[spack.util.executable.Executable]
 
 

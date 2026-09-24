@@ -419,7 +419,7 @@ def _process_binary_cache_tarball(
 
     tty.msg(f"Extracting {package_id(pkg.spec)} from binary cache")
 
-    with timer.measure("install"), spack.store.filter_padding():
+    with timer.measure("install"), spack.store.filter_padding(store=spack.store.STORE):
         binary_distribution.extract_tarball(pkg.spec, tarball_stage, force=False, timer=timer)
 
         if pkg.spec.spliced:  # overwrite old metadata with new
@@ -990,10 +990,10 @@ class Task:
         if not os.path.exists(pkg.spec.prefix):
             path = spack.util.path.debug_padded_filter(pkg.spec.prefix)
             tty.debug(f"Creating the installation directory {path}")
-            spack.store.STORE.layout.create_install_directory(pkg.spec)
+            spack.store.STORE.layout.create_install_directory(pkg.spec, config=spack.config.CONFIG)
         else:
             # Set the proper group for the prefix
-            group = prefs.get_package_group(pkg.spec)
+            group = prefs.get_package_group(pkg.spec, config=spack.config.CONFIG)
             if group:
                 fs.chgrp(pkg.spec.prefix, group)
 
@@ -1001,7 +1001,7 @@ class Task:
             # This has to be done after group because changing groups blows
             # away the sticky group bit on the directory
             mode = os.stat(pkg.spec.prefix).st_mode
-            perms = prefs.get_package_dir_permissions(pkg.spec)
+            perms = prefs.get_package_dir_permissions(pkg.spec, config=spack.config.CONFIG)
             if mode != perms:
                 os.chmod(pkg.spec.prefix, perms)
 
@@ -2367,7 +2367,7 @@ class PackageInstaller:
 
         self._check_deprecations()
         self._init_queue()
-        spack.store.STORE.install_sbang()
+        spack.store.STORE.install_sbang(config=spack.config.CONFIG)
         failed_build_requests = []
         install_status = InstallStatus(len(self.build_pq))
         active_tasks: List[Task] = []
@@ -2695,7 +2695,7 @@ def build_process(pkg: "spack.package_base.PackageBase", install_args: dict) -> 
     installer = BuildProcessInstaller(pkg, install_args)
 
     # don't print long padded paths in executable debug output.
-    with spack.store.filter_padding():
+    with spack.store.filter_padding(store=spack.store.STORE):
         return installer.run()
 
 

@@ -17,9 +17,11 @@ import tempfile
 import pytest
 
 import spack.config
+import spack.context
 import spack.store
 import spack.util.filesystem as fs
 import spack.util.spack_yaml as syaml
+from spack.context import SpackContext
 from spack.hooks import sbang
 from spack.store import Store
 from spack.util.executable import which
@@ -345,14 +347,14 @@ def check_sbang_installation(store: spack.store.Store, group=False):
         assert mode == 0o755, "Unexpected {0}".format(oct(mode))
 
 
-def run_test_install_sbang(store: spack.store.Store, group):
+def run_test_install_sbang(store: spack.store.Store, group, *, ctx: SpackContext):
     sbang_path = sbang.sbang_install_path()
     sbang_bin_dir = os.path.dirname(sbang_path)
 
     assert sbang_path.startswith(store.unpadded_root)
     assert not os.path.exists(sbang_bin_dir)
 
-    store.install_sbang()
+    store.install_sbang(config=ctx.config)
     check_sbang_installation(store, group)
 
     # put an invalid file in for sbang
@@ -360,20 +362,24 @@ def run_test_install_sbang(store: spack.store.Store, group):
     with open(sbang_path, "w", encoding="utf-8") as f:
         f.write("foo")
 
-    store.install_sbang()
+    store.install_sbang(config=ctx.config)
     check_sbang_installation(store, group)
 
     # install again and make sure sbang is still fine
-    store.install_sbang()
+    store.install_sbang(config=ctx.config)
     check_sbang_installation(store, group)
 
 
-def test_install_group_sbang(temporary_store: Store, install_mockery, configure_group_perms):
-    run_test_install_sbang(temporary_store, True)
+def test_install_group_sbang(
+    temporary_store: Store, install_mockery, configure_group_perms, ctx: spack.context.SpackContext
+):
+    run_test_install_sbang(temporary_store, True, ctx=ctx)
 
 
-def test_install_user_sbang(temporary_store: Store, install_mockery, configure_user_perms):
-    run_test_install_sbang(temporary_store, False)
+def test_install_user_sbang(
+    temporary_store: Store, install_mockery, configure_user_perms, ctx: spack.context.SpackContext
+):
+    run_test_install_sbang(temporary_store, False, ctx=ctx)
 
 
 def test_install_sbang_too_long(tmp_path: pathlib.Path):

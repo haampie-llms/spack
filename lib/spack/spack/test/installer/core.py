@@ -11,6 +11,7 @@ import pytest
 import spack.error
 import spack.spec
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.installer.base import ExitCode
 from spack.installer.core import PackageInstaller, read_connection, write_connection
 from spack.installer.ui import ChangeJobs, SetEcho
@@ -144,13 +145,13 @@ def test_build_output_streams_to_frontend(temporary_store, mock_packages):
     assert ("state_changed", dag_hash, "finished") in ui.events
 
 
-def test_package_installer_with_injected_ui(temporary_store, mock_packages):
+def test_package_installer_with_injected_ui(temporary_store, mock_packages, ctx: SpackContext):
     """The event loop runs against a custom InstallerUI frontend without any terminal code.
 
     Uses the mark-explicit path (spec installed implicitly, requested explicitly) so the loop
     schedules, reports, and persists to the database without spawning build processes."""
     spec = _make_concrete("trivial-install-test-package")
-    temporary_store.layout.create_install_directory(spec)
+    temporary_store.layout.create_install_directory(spec, config=ctx.config)
     temporary_store.db.add(spec, explicit=False)
 
     ui = _install(None, spec)
@@ -244,11 +245,13 @@ def test_external_spec_uses_devnull_log(temporary_store, mock_packages):
     assert record is not None and record.installed
 
 
-def test_overwrite_reinstalls_through_event_loop(temporary_store, mock_packages):
+def test_overwrite_reinstalls_through_event_loop(
+    temporary_store, mock_packages, ctx: SpackContext
+):
     """An overwrite install of an already-installed spec launches a build and refreshes the
     database record."""
     spec = _make_concrete("trivial-install-test-package")
-    temporary_store.layout.create_install_directory(spec)
+    temporary_store.layout.create_install_directory(spec, config=ctx.config)
     temporary_store.db.add(spec, explicit=True)
     old_time = _record(temporary_store, spec).installation_time
 

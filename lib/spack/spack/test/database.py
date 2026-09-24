@@ -17,6 +17,7 @@ import pytest
 import spack.config
 import spack.subprocess_context
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.database import Database
 from spack.directory_layout import DirectoryLayoutError
 from spack.store import Store
@@ -1066,14 +1067,14 @@ def test_database_works_with_empty_dir(tmp_path: pathlib.Path, request):
         (["tensorflow"], spack.store.MatchError, "does not match any"),
     ],
 )
-def test_store_find_failures(database, query_arg, exc_type, msg_str):
+def test_store_find_failures(database, query_arg, exc_type, msg_str, ctx: SpackContext):
     with pytest.raises(exc_type) as exc_info:
-        spack.store.find(query_arg, multiple=False)
+        spack.store.find(query_arg, ctx.store.db.query, multiple=False)
     assert msg_str in str(exc_info.value)
 
 
-def test_store_find_accept_string(database):
-    result = spack.store.find("callpath", multiple=True)
+def test_store_find_accept_string(database, ctx: SpackContext):
+    result = spack.store.find("callpath", ctx.store.db.query, multiple=True)
     assert len(result) == 3
 
 

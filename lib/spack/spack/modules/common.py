@@ -768,7 +768,9 @@ class FileLayout:
     @property
     def use_name(self) -> str:
         """Returns the name used to load the module (e.g. with ``module load``)."""
-        projection = proj.get_projection(self.conf.projections, self.spec)
+        projection = proj.get_projection(
+            self.conf.projections, self.spec, config=spack.config.CONFIG
+        )
         if not projection:
             projection = self.conf.default_projections["all"]
 
@@ -1130,7 +1132,9 @@ class ModuleContext(tengine.Context):
     def conflicts(self) -> List[str]:
         """List of conflicts for the module file."""
         fmts = []
-        projection = proj.get_projection(self.conf.projections, self.spec)
+        projection = proj.get_projection(
+            self.conf.projections, self.spec, config=spack.config.CONFIG
+        )
         for item in self.conf.conflicts:
             self._verify_conflict_naming_consistency_or_raise(item, projection)
             item = self.spec.format(item)
@@ -1361,7 +1365,7 @@ class BaseModuleFileWriter:
 
         # Set the file permissions of the module to match that of the package
         if os.path.exists(self.layout.filename):
-            fp.set_permissions_by_spec(self.layout.filename, self.spec)
+            fp.set_permissions_by_spec(self.layout.filename, self.spec, config=spack.config.CONFIG)
 
         # Symlink defaults if needed
         self.update_module_defaults()

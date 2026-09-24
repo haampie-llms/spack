@@ -323,7 +323,7 @@ class PackageInstaller:
         self._run_event_loop()
 
     def _run_event_loop(self) -> None:
-        self.store.install_sbang()
+        self.store.install_sbang(config=spack.config.CONFIG)
         jobserver = JobServer(self.jobs, os.environ.get("MAKEFLAGS", ""))
         selector = selectors.DefaultSelector()
 

@@ -214,6 +214,7 @@ def view(parser, args, ctx):
         ignore_conflicts=getattr(args, "ignore_conflicts", False),
         link_type=link_type,
         verbose=args.verbose,
+        env_path=ctx.config.env_path,
     )
 
     # Process common args and specs

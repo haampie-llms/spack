@@ -11,6 +11,7 @@ import pickle
 
 import pytest
 
+import spack.concretize
 import spack.config
 import spack.environment as ev
 import spack.package_base
@@ -358,6 +359,25 @@ def test_environment_pickle(tmp_path: pathlib.Path):
     obj = pickle.dumps(env1)
     env2 = pickle.loads(obj)
     assert isinstance(env2, ev.Environment)
+
+
+def test_view_projections_expand_env(tmp_path: pathlib.Path, mutable_config, mock_packages):
+    """``$env`` in view projections is the directory of the environment."""
+    (tmp_path / "spack.yaml").write_text(
+        """\
+spack:
+  view:
+    default:
+      root: view
+      projections:
+        all: "$env/projected/{name}"
+"""
+    )
+    (tmp_path / "view").mkdir()
+    env = ev.Environment(str(tmp_path))
+    spec = spack.concretize.concretize_one("libelf")
+    view = env.default_view.view()
+    assert view.get_projection_for_spec(spec) == str(tmp_path / "projected" / "libelf")
 
 
 def test_can_add_specs_to_environment_without_specs_attribute(tmp_path: pathlib.Path, config):

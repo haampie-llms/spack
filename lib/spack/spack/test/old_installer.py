@@ -816,7 +816,7 @@ def test_setup_install_dir_grp(temporary_store: Store, install_mockery, monkeypa
     mock_group = "mockgroup"
     mock_chgrp_msg = "Changing group for {0} to {1}"
 
-    def _get_group(spec):
+    def _get_group(spec, config):
         return mock_group
 
     def _chgrp(path, group):

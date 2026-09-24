@@ -5,7 +5,7 @@
 import spack.config
 
 
-def get_projection(projections, spec):
+def get_projection(projections, spec, config: spack.config.HasEnvPath):
     """
     Get the projection for a spec from a projections dict.
     """
@@ -14,9 +14,7 @@ def get_projection(projections, spec):
         # "all" is a catch-all, not a spec: satisfies("all") would trigger a package lookup
         # to check whether "all" is a virtual provided by the spec.
         if spec_like == "all":
-            all_projection = spack.config.substitute_path_variables(
-                projection, config=spack.config.CONFIG
-            )
+            all_projection = spack.config.substitute_path_variables(projection, config)
         elif spec.satisfies(spec_like):
-            return spack.config.substitute_path_variables(projection, config=spack.config.CONFIG)
+            return spack.config.substitute_path_variables(projection, config)
     return all_projection

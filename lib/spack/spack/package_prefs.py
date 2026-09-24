@@ -30,20 +30,20 @@ class PackagePrefs:
     You can use it like this::
 
        # key function sorts CompilerSpecs for `mpich` in order of preference
-       kf = PackagePrefs("mpich", "compiler", configuration=spack.config.CONFIG)
+       kf = PackagePrefs("mpich", "compiler", configuration=config)
        compiler_list.sort(key=kf)
 
     Or like this::
 
        # key function to sort VersionLists for OpenMPI in order of preference.
-       kf = PackagePrefs("openmpi", "version", configuration=spack.config.CONFIG)
+       kf = PackagePrefs("openmpi", "version", configuration=config)
        version_list.sort(key=kf)
 
     Optionally, you can sort in order of preferred virtual dependency
     providers.  To do that, provide ``"providers"`` and a third argument
     denoting the virtual package (e.g., ``mpi``)::
 
-       kf = PackagePrefs("trilinos", "providers", "mpi", configuration=spack.config.CONFIG)
+       kf = PackagePrefs("trilinos", "providers", "mpi", configuration=config)
        provider_spec_list.sort(key=kf)
 
     """
@@ -161,14 +161,14 @@ class PackagePrefs:
         }
 
 
-def get_package_dir_permissions(spec):
+def get_package_dir_permissions(spec, *, config: spack.config.Configuration):
     """Return the permissions configured for the spec.
 
     Include the GID bit if group permissions are on. This makes the group
     attribute sticky for the directory. Package-specific settings take
     precedent over settings for ``all``"""
-    perms = get_package_permissions(spec)
-    if perms & stat.S_IRWXG and spack.config.CONFIG.get("config:allow_sgid", True):
+    perms = get_package_permissions(spec, config=config)
+    if perms & stat.S_IRWXG and config.get("config:allow_sgid", True):
         perms |= stat.S_ISGID
         if spec.concrete and "/afs/" in spec.prefix:
             warnings.warn(
@@ -179,7 +179,7 @@ def get_package_dir_permissions(spec):
     return perms
 
 
-def get_package_permissions(spec):
+def get_package_permissions(spec, *, config: spack.config.Configuration):
     """Return the permissions configured for the spec.
 
     Package-specific settings take precedence over settings for ``all``"""
@@ -187,7 +187,7 @@ def get_package_permissions(spec):
     # Get read permissions level
     for name in (spec.name, "all"):
         try:
-            readable = spack.config.CONFIG.get("packages:%s:permissions:read" % name, "")
+            readable = config.get("packages:%s:permissions:read" % name, "")
             if readable:
                 break
         except AttributeError:
@@ -196,7 +196,7 @@ def get_package_permissions(spec):
     # Get write permissions level
     for name in (spec.name, "all"):
         try:
-            writable = spack.config.CONFIG.get("packages:%s:permissions:write" % name, "")
+            writable = config.get("packages:%s:permissions:write" % name, "")
             if writable:
                 break
         except AttributeError:
@@ -228,13 +228,13 @@ def get_package_permissions(spec):
     return perms
 
 
-def get_package_group(spec):
+def get_package_group(spec, *, config: spack.config.Configuration):
     """Return the unix group associated with the spec.
 
     Package-specific settings take precedence over settings for ``all``"""
     for name in (spec.name, "all"):
         try:
-            group = spack.config.CONFIG.get("packages:%s:permissions:group" % name, "")
+            group = config.get("packages:%s:permissions:group" % name, "")
             if group:
                 break
         except AttributeError:

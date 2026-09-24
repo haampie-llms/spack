@@ -599,7 +599,7 @@ def config_update(args, ctx):
         cfg_file = ctx.config.get_config_filename(scope.name, args.section)
         data = scope.get_section(args.section)
         assert data is not None, f"Cannot find section {args.section} in {scope.name} scope"
-        update_fn(data)
+        update_fn(data, ctx.config)
 
         # Make a backup copy and rewrite the file
         bkp_file = cfg_file + ".bkp"

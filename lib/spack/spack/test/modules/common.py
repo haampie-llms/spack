@@ -52,7 +52,7 @@ def mock_module_defaults(monkeypatch):
 @pytest.fixture()
 def mock_package_perms(monkeypatch):
     perms = stat.S_IRGRP | stat.S_IWGRP
-    monkeypatch.setattr(spack.package_prefs, "get_package_permissions", lambda spec: perms)
+    monkeypatch.setattr(spack.package_prefs, "get_package_permissions", lambda spec, config: perms)
 
     yield perms
 

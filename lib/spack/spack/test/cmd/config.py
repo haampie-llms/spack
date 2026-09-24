@@ -692,7 +692,7 @@ spack:
 """
         )
 
-    def update_config(data):
+    def update_config(data, config):
         data["config"]["ccache"] = False
         return True
 
