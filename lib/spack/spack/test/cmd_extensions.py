@@ -13,6 +13,7 @@ import spack.cmd
 import spack.extensions
 import spack.main
 from spack.config import Configuration
+from spack.context import SpackContext
 
 
 class Extension:
@@ -257,7 +258,7 @@ def test_missing_command_function(extension_creator, capfd):
         assert "must define function 'bad_cmd'." in capture[1]
 
 
-def test_get_command_paths(config: Configuration):
+def test_get_command_paths(config: Configuration, ctx: SpackContext):
     """Exercise the construction of extension command search paths."""
     extensions = ("extension-1", "extension-2")
     ext_paths = []
@@ -270,10 +271,10 @@ def test_get_command_paths(config: Configuration):
         expected_cmd_paths.append(path)
 
     with config.override("config:extensions", ext_paths):
-        assert spack.extensions.get_command_paths() == expected_cmd_paths
+        assert spack.extensions.get_command_paths(ctx.config) == expected_cmd_paths
 
 
-def test_variable_in_extension_path(config: Configuration, working_env):
+def test_variable_in_extension_path(config: Configuration, working_env, ctx: SpackContext):
     """Test variables in extension paths."""
     os.environ["_MY_VAR"] = os.path.join("my", "var")
     ext_paths = [os.path.join("~", "${_MY_VAR}", "spack-extension-1")]
@@ -283,7 +284,7 @@ def test_variable_in_extension_path(config: Configuration, working_env):
         os.path.join(os.environ[home_env], os.environ["_MY_VAR"], "spack-extension-1")
     ]
     with config.override("config:extensions", ext_paths):
-        assert spack.extensions.get_extension_paths() == expected_ext_paths
+        assert spack.extensions.get_extension_paths(ctx.config) == expected_ext_paths
 
 
 @pytest.mark.parametrize(
@@ -295,11 +296,11 @@ def test_variable_in_extension_path(config: Configuration, working_env):
     ],
     ids=["ImportError", "NameError", "SyntaxError"],
 )
-def test_failing_command(command_name, contents, exception, extension_creator):
+def test_failing_command(command_name, contents, exception, extension_creator, ctx: SpackContext):
     """Ensure that the configured command fails to import with the specified
     error.
     """
     with extension_creator() as extension:
         extension.add_command(command_name, contents)
         with pytest.raises(exception):
-            spack.extensions.get_module(command_name)
+            spack.extensions.get_module(command_name, ctx.config)

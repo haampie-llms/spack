@@ -9,7 +9,6 @@ import sys
 import pytest
 
 import spack.concretize
-import spack.context
 import spack.database
 import spack.install_test
 import spack.spec
@@ -260,7 +259,7 @@ def test_test_virtuals():
         assert v_names.count(name) == number, "Expected {0} of '{1}'".format(number, name)
 
 
-def test_package_copy_test_files_fails(mock_packages, ctx: spack.context.SpackContext):
+def test_package_copy_test_files_fails(mock_packages, ctx: SpackContext):
     """Confirm copy_test_files fails as expected without package or test_suite."""
     vspec = spack.spec.Spec("something")
 
@@ -278,9 +277,7 @@ def test_package_copy_test_files_fails(mock_packages, ctx: spack.context.SpackCo
     assert "test suite is missing" in str(exc_info)
 
 
-def test_package_copy_test_files_skips(
-    mock_packages, ensure_debug, capfd, ctx: spack.context.SpackContext
-):
+def test_package_copy_test_files_skips(mock_packages, ensure_debug, capfd, ctx: SpackContext):
     """Confirm copy_test_files errors as expected if no package class found."""
     # Try with a non-concrete spec and package with a test suite
     MockSuite = collections.namedtuple("MockSuite", ["specs"])

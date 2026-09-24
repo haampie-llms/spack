@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
 import os
 
+import spack.config
 import spack.tengine
 
 from .base import Reporter
@@ -12,6 +13,9 @@ class JUnit(Reporter):
     """Generate reports of spec installations for JUnit."""
 
     _jinja_template = "reports/junit.xml"
+
+    def __init__(self, *, config: spack.config.Configuration):
+        self._config = config
 
     def concretization_report(self, filename, msg):
         pass
@@ -28,7 +32,7 @@ class JUnit(Reporter):
         report_data = {"specs": specs}
 
         with open(filename, "w", encoding="utf-8") as f:
-            env = spack.tengine.make_environment()
+            env = spack.tengine.make_environment(self._config)
             t = env.get_template(self._jinja_template)
             f.write(t.render(report_data))
 

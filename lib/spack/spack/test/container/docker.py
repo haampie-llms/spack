@@ -6,17 +6,18 @@ import re
 import pytest
 
 from spack.container import writers
+from spack.context import SpackContext
 
 
-def test_manifest(minimal_configuration):
-    writer = writers.create(minimal_configuration)
+def test_manifest(minimal_configuration, ctx: SpackContext):
+    writer = writers.create(minimal_configuration, ctx.config)
     manifest_str = writer.manifest
     for line in manifest_str.split("\n"):
         assert "echo" in line
 
 
-def test_build_and_run_images(minimal_configuration):
-    writer = writers.create(minimal_configuration)
+def test_build_and_run_images(minimal_configuration, ctx: SpackContext):
+    writer = writers.create(minimal_configuration, ctx.config)
 
     # Test the output of run property
     run = writer.run
@@ -27,16 +28,16 @@ def test_build_and_run_images(minimal_configuration):
     assert build.image == "spack/ubuntu-jammy:develop"
 
 
-def test_packages(minimal_configuration):
+def test_packages(minimal_configuration, ctx: SpackContext):
     # In this minimal configuration we don't have packages
-    writer = writers.create(minimal_configuration)
+    writer = writers.create(minimal_configuration, ctx.config)
     assert writer.os_packages_build is None
     assert writer.os_packages_final is None
 
     # If we add them a list should be returned
     pkgs = ["libgomp1"]
     minimal_configuration["spack"]["container"]["os_packages"] = {"final": pkgs}
-    writer = writers.create(minimal_configuration)
+    writer = writers.create(minimal_configuration, ctx.config)
     p = writer.os_packages_final
     assert p.update
     assert p.install
@@ -44,9 +45,9 @@ def test_packages(minimal_configuration):
     assert p.list == pkgs
 
 
-def test_container_os_packages_command(minimal_configuration):
+def test_container_os_packages_command(minimal_configuration, ctx: SpackContext):
     # In this minimal configuration we don't have packages
-    writer = writers.create(minimal_configuration)
+    writer = writers.create(minimal_configuration, ctx.config)
     assert writer.os_packages_build is None
     assert writer.os_packages_final is None
 
@@ -59,35 +60,35 @@ def test_container_os_packages_command(minimal_configuration):
         "command": "zypper",
         "final": ["libgomp1"],
     }
-    writer = writers.create(minimal_configuration)
+    writer = writers.create(minimal_configuration, ctx.config)
     p = writer.os_packages_final
     assert "zypper update -y" in p.update
     assert "zypper install -y" in p.install
     assert "zypper clean -a" in p.clean
 
 
-def test_ensure_render_works(minimal_configuration, default_config):
+def test_ensure_render_works(minimal_configuration, default_config, ctx: SpackContext):
     # Here we just want to ensure that nothing is raised
-    writer = writers.create(minimal_configuration)
+    writer = writers.create(minimal_configuration, ctx.config)
     writer()
 
 
-def test_strip_is_set_from_config(minimal_configuration):
-    writer = writers.create(minimal_configuration)
+def test_strip_is_set_from_config(minimal_configuration, ctx: SpackContext):
+    writer = writers.create(minimal_configuration, ctx.config)
     assert writer.strip is True
 
     minimal_configuration["spack"]["container"]["strip"] = False
-    writer = writers.create(minimal_configuration)
+    writer = writers.create(minimal_configuration, ctx.config)
     assert writer.strip is False
 
 
-def test_custom_base_images(minimal_configuration):
+def test_custom_base_images(minimal_configuration, ctx: SpackContext):
     """Test setting custom base images from configuration file"""
     minimal_configuration["spack"]["container"]["images"] = {
         "build": "custom-build:latest",
         "final": "custom-final:latest",
     }
-    writer = writers.create(minimal_configuration)
+    writer = writers.create(minimal_configuration, ctx.config)
 
     assert writer.bootstrap.image is None
     assert writer.build.image == "custom-build:latest"
@@ -107,40 +108,42 @@ def test_custom_base_images(minimal_configuration):
         )
     ],
 )
-def test_base_images_with_bootstrap(minimal_configuration, images_cfg, expected):
+def test_base_images_with_bootstrap(
+    minimal_configuration, images_cfg, expected, ctx: SpackContext
+):
     """Check that base images are computed correctly when a
     bootstrap phase is present
     """
     minimal_configuration["spack"]["container"]["images"] = images_cfg
-    writer = writers.create(minimal_configuration)
+    writer = writers.create(minimal_configuration, ctx.config)
 
     for property_name, value in expected.items():
         assert getattr(writer, property_name) == value
 
 
-def test_error_message_invalid_os(minimal_configuration):
+def test_error_message_invalid_os(minimal_configuration, ctx: SpackContext):
     minimal_configuration["spack"]["container"]["images"]["os"] = "invalid:1"
     with pytest.raises(ValueError, match="invalid operating system"):
-        writers.create(minimal_configuration)
+        writers.create(minimal_configuration, ctx.config)
 
 
 @pytest.mark.regression("34629,18030")
-def test_not_stripping_all_symbols(minimal_configuration):
+def test_not_stripping_all_symbols(minimal_configuration, ctx: SpackContext):
     """Tests that we are not stripping all symbols, so that libraries can still be
     used for linking.
     """
     minimal_configuration["spack"]["container"]["strip"] = True
-    content = writers.create(minimal_configuration)()
+    content = writers.create(minimal_configuration, ctx.config)()
     assert "xargs strip" in content
     assert "xargs strip -s" not in content
 
 
 @pytest.mark.regression("22341")
-def test_using_single_quotes_in_dockerfiles(minimal_configuration):
+def test_using_single_quotes_in_dockerfiles(minimal_configuration, ctx: SpackContext):
     """Tests that Dockerfiles written by Spack use single quotes in manifest, to avoid issues
     with shell substitution. This may happen e.g. when users have "definitions:" they want to
     expand in dockerfiles.
     """
-    manifest_in_docker = writers.create(minimal_configuration).manifest
+    manifest_in_docker = writers.create(minimal_configuration, ctx.config).manifest
     assert not re.search(r"echo\s*\"", manifest_in_docker, flags=re.MULTILINE)
     assert re.search(r"echo\s*'", manifest_in_docker)

@@ -107,13 +107,14 @@ def ensure_extension_loaded(extension, *, path):
     ensure_package_creation(extension + ".cmd")
 
 
-def load_extension(name: str) -> str:
+def load_extension(name: str, config: spack.config.Configuration) -> str:
     """Loads a single extension into the ``spack.extensions`` package.
 
     Args:
         name: name of the extension
+        config: configuration listing the extensions
     """
-    extension_root = path_for_extension(name, paths=get_extension_paths())
+    extension_root = path_for_extension(name, paths=get_extension_paths(config))
     ensure_extension_loaded(name, path=extension_root)
     commands = glob.glob(
         os.path.join(extension_root, extension_name(extension_root), "cmd", "*.py")
@@ -124,13 +125,11 @@ def load_extension(name: str) -> str:
     return extension_root
 
 
-def get_extension_paths():
+def get_extension_paths(config: spack.config.Configuration) -> List[str]:
     """Return the list of canonicalized extension paths from config:extensions."""
-    extension_paths = spack.config.CONFIG.get("config:extensions") or []
+    extension_paths = config.get("config:extensions") or []
     extension_paths.extend(extension_paths_from_entry_points())
-    paths = [
-        spack.config.canonicalize_path(p, config=spack.config.CONFIG) for p in extension_paths
-    ]
+    paths = [spack.config.canonicalize_path(p, config=config) for p in extension_paths]
     return paths
 
 
@@ -164,10 +163,10 @@ def extension_paths_from_entry_points() -> List[str]:
     return extension_paths
 
 
-def get_command_paths():
+def get_command_paths(config: spack.config.Configuration) -> List[str]:
     """Return the list of paths where to search for command files."""
     command_paths = []
-    extension_paths = get_extension_paths()
+    extension_paths = get_extension_paths(config)
 
     for path in extension_paths:
         extension = _python_name(extension_name(path))
@@ -194,17 +193,18 @@ def path_for_extension(target_name: str, *, paths: List[str]) -> str:
         raise OSError('extension "{0}" not found'.format(target_name))
 
 
-def get_module(cmd_name):
+def get_module(cmd_name, config: spack.config.Configuration):
     """Imports the extension module for a particular command name
     and returns it.
 
     Args:
         cmd_name (str): name of the command for which to get a module
             (contains ``-``, not ``_``).
+        config: configuration listing the extensions
     """
     # If built-in failed the import search the extension
     # directories in order
-    extensions = get_extension_paths()
+    extensions = get_extension_paths(config)
     for folder in extensions:
         module = load_command_extension(cmd_name, folder)
         if module:
@@ -212,11 +212,11 @@ def get_module(cmd_name):
     return None
 
 
-def get_template_dirs():
+def get_template_dirs(config: spack.config.Configuration) -> List[str]:
     """Returns the list of directories where to search for templates
     in extensions.
     """
-    extension_dirs = get_extension_paths()
+    extension_dirs = get_extension_paths(config)
     extensions = [os.path.join(x, "templates") for x in extension_dirs]
     return extensions
 

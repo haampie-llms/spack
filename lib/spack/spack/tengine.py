@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
 import itertools
 import textwrap
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 import spack.config
 import spack.extensions
@@ -64,13 +64,9 @@ class Context(metaclass=ContextMeta):
         return {name: getattr(self, name) for name in self.context_properties}
 
 
-def make_environment(dirs: Optional[Tuple[str, ...]] = None) -> "spack.vendor.jinja2.Environment":
-    """Returns a configured environment for template rendering."""
-    if dirs is None:
-        # Default directories where to search for templates
-        dirs = default_template_dirs(spack.config.CONFIG)
-
-    return make_environment_from_dirs(dirs)
+def make_environment(config: spack.config.Configuration) -> "spack.vendor.jinja2.Environment":
+    """Returns an environment for template rendering, using the configured template dirs."""
+    return make_environment_from_dirs(default_template_dirs(config))
 
 
 @spack.util.lang.memoized
@@ -90,10 +86,9 @@ def make_environment_from_dirs(dirs: Tuple[str, ...]) -> "spack.vendor.jinja2.En
 def default_template_dirs(configuration: spack.config.Configuration) -> Tuple[str, ...]:
     config_yaml = configuration.get_config("config")
     builtins = config_yaml.get("template_dirs", ["$spack/share/spack/templates"])
-    extensions = spack.extensions.get_template_dirs()
+    extensions = spack.extensions.get_template_dirs(configuration)
     return tuple(
-        canonicalize_path(d, config=spack.config.CONFIG)
-        for d in itertools.chain(builtins, extensions)
+        canonicalize_path(d, config=configuration) for d in itertools.chain(builtins, extensions)
     )
 
 

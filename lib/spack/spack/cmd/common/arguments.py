@@ -259,7 +259,9 @@ def _cdash_reporter(namespace):
             track=namespace.cdash_track,
         )
 
-        return spack.reporters.CDash(configuration=configuration, urlopen=ctx.network.urlopen)
+        return spack.reporters.CDash(
+            configuration=configuration, urlopen=ctx.network.urlopen, config=ctx.config
+        )
 
     return _factory
 
@@ -270,7 +272,7 @@ class CreateReporter(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
         setattr(namespace, self.dest, values)
         if values == "junit":
-            setattr(namespace, "reporter", lambda ctx: spack.reporters.JUnit())
+            setattr(namespace, "reporter", lambda ctx: spack.reporters.JUnit(config=ctx.config))
         elif values == "cdash":
             setattr(namespace, "reporter", _cdash_reporter(namespace))
 

@@ -1048,7 +1048,9 @@ def env_depfile(args, ctx):
     # What things do we build when running make? By default, we build the
     # root specs. If specific specs are provided as input, we build those.
     filter_specs = spack.cmd.parse_specs(args.specs, ctx) if args.specs else None
-    template = spack.tengine.make_environment().get_template(os.path.join("depfile", "Makefile"))
+    template = spack.tengine.make_environment(ctx.config).get_template(
+        os.path.join("depfile", "Makefile")
+    )
     model = depfile.MakefileModel.from_env(
         env,
         filter_specs=filter_specs,

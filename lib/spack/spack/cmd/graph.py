@@ -105,7 +105,7 @@ def graph(parser, args, ctx: spack.context.SpackContext):
             builder = DAGWithDependencyTypes(node_label_fmt)
         else:
             builder = SimpleDAG(node_label_fmt)
-        graph_dot(specs, builder=builder, depflag=args.deptype)
+        graph_dot(specs, builder=builder, depflag=args.deptype, config=ctx.config)
         return
 
     # ascii is default: user doesn't need to provide it explicitly

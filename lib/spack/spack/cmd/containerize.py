@@ -28,7 +28,7 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     )
 
 
-def containerize(parser, args):
+def containerize(parser, args, ctx):
     if args.list_os:
         possible_os = spack.container.images.all_bootstrap_os()
         msg = "The following operating systems can be used to bootstrap Spack:"
@@ -43,5 +43,5 @@ def containerize(parser, args):
         raise ValueError(msg.format(config_file))
 
     config = spack.container.validate(config_file)
-    recipe = spack.container.recipe(config, last_phase=args.last_stage)
+    recipe = spack.container.recipe(config, ctx.config, last_phase=args.last_stage)
     print(recipe)
