@@ -13,7 +13,7 @@ import spack.main
 import spack.util.spack_yaml as s_yaml
 from spack.context import SpackContext
 from spack.installer import PackageInstaller
-from spack.main import SpackCommand
+from spack.test.harness import SpackCommand
 from spack.util.filesystem import _windows_can_symlink
 
 extensions = SpackCommand("extensions")

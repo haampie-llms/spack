@@ -7,11 +7,12 @@ import re
 import pytest
 
 import spack.main
+import spack.test.harness
 from spack.repo import RepoPath
 
 pytestmark = [pytest.mark.usefixtures("mock_packages")]
 
-maintainers = spack.main.SpackCommand("maintainers")
+maintainers = spack.test.harness.SpackCommand("maintainers")
 
 MAINTAINED_PACKAGES = [
     "gcc-runtime",

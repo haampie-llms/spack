@@ -10,14 +10,14 @@ import spack.cmd.diff
 import spack.concretize
 import spack.main
 import spack.paths
-import spack.test.utilities
+import spack.test.harness
 import spack.util.spack_json as sjson
 import spack.version
 from spack.context import SpackContext
 
-install_cmd = spack.main.SpackCommand("install")
-diff_cmd = spack.main.SpackCommand("diff")
-find_cmd = spack.main.SpackCommand("find")
+install_cmd = spack.test.harness.SpackCommand("install")
+diff_cmd = spack.test.harness.SpackCommand("diff")
+find_cmd = spack.test.harness.SpackCommand("find")
 
 # Note that the hash of p1 will differ depending on the variant chosen
 # we probably always want to omit that from diffs
@@ -33,9 +33,9 @@ find_cmd = spack.main.SpackCommand("find")
 
 
 @pytest.fixture
-def test_repo(config):
+def test_repo(config, ctx: SpackContext):
     builder_test_path = os.path.join(spack.paths.test_repos_path, "spack_repo", "diff")
-    with spack.test.utilities.use_repositories(builder_test_path) as mock_repo:
+    with spack.test.harness.use_repositories(ctx, builder_test_path) as mock_repo:
         yield mock_repo
 
 

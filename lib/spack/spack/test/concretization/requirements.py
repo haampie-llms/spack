@@ -7,7 +7,6 @@ import pytest
 
 import spack.concretize
 import spack.config
-import spack.context
 import spack.error
 import spack.installer
 import spack.package_base
@@ -15,7 +14,7 @@ import spack.paths
 import spack.platforms
 import spack.solver.asp
 import spack.spec
-import spack.test.utilities
+import spack.test.harness
 import spack.util.spack_yaml as syaml
 import spack.version
 from spack.config import Configuration
@@ -30,13 +29,13 @@ from spack.util.url import path_to_file_url
 
 def update_packages_config(conf_str):
     conf = syaml.load_config(conf_str)
-    spack.context.default().config.set("packages", conf["packages"], scope="concretize")
+    spack.test.harness.current().config.set("packages", conf["packages"], scope="concretize")
 
 
 @pytest.fixture
-def test_repo(mutable_config, monkeypatch, mock_stage):
+def test_repo(mutable_config, monkeypatch, mock_stage, ctx: SpackContext):
     repo_dir = pathlib.Path(spack.paths.test_repos_path) / "spack_repo" / "requirements_test"
-    with spack.test.utilities.use_repositories(str(repo_dir)) as mock_packages_repo:
+    with spack.test.harness.use_repositories(ctx, str(repo_dir)) as mock_packages_repo:
         yield mock_packages_repo
 
 
@@ -486,7 +485,7 @@ packages:
 """
 
     store_dir = tmp_path / "store"
-    with spack.test.utilities.use_store(str(store_dir)):
+    with spack.test.harness.use_store(ctx, str(store_dir)):
         s1 = spack.concretize.concretize_one("y@2.5~shared", ctx)
         PackageInstaller([s1.package], fake=True, explicit=True).install()
 

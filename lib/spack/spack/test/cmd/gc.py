@@ -9,16 +9,16 @@ import pytest
 import spack.concretize
 import spack.deptypes as dt
 import spack.environment as ev
-import spack.main
 import spack.spec
+import spack.test.harness
 import spack.traverse
 from spack.context import SpackContext
 from spack.database import Database
 from spack.installer import PackageInstaller
 
-gc = spack.main.SpackCommand("gc")
-add = spack.main.SpackCommand("add")
-install = spack.main.SpackCommand("install")
+gc = spack.test.harness.SpackCommand("gc")
+add = spack.test.harness.SpackCommand("add")
+install = spack.test.harness.SpackCommand("install")
 
 
 @pytest.mark.db

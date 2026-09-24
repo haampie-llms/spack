@@ -7,8 +7,8 @@ import pytest
 
 from spack.cmd.url import name_parsed_correctly, url_summary, version_parsed_correctly
 from spack.context import SpackContext
-from spack.main import SpackCommand
 from spack.repo import RepoPath
+from spack.test.harness import SpackCommand
 from spack.url import UndetectableVersionError
 
 url = SpackCommand("url")

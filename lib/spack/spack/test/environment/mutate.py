@@ -8,10 +8,10 @@ import pytest
 import spack.concretize
 import spack.environment as ev
 import spack.spec
-import spack.test.utilities
+import spack.test.harness
 from spack.config import Configuration
 from spack.context import SpackContext
-from spack.main import SpackCommand
+from spack.test.harness import SpackCommand
 
 pytestmark = [
     pytest.mark.usefixtures("mutable_config", "mutable_mock_env_path", "mutable_mock_repo"),
@@ -148,7 +148,7 @@ def test_mutate_namespace(repo_builder, ctx: SpackContext):
     selector = spack.spec.Spec("cmake")
     mutator = spack.spec.Spec(f"{repo_builder.namespace}.cmake")
 
-    with spack.test.utilities.use_repositories(repo_builder.root, override=False):
+    with spack.test.harness.use_repositories(ctx, repo_builder.root, override=False):
         env.mutate(selectors=[selector], mutators=[mutator])
         cmake_spec.mutate(mutator)
 

@@ -6,7 +6,7 @@ import pytest
 
 import spack.environment as ev
 from spack.context import SpackContext
-from spack.main import SpackCommand, SpackCommandError
+from spack.main import SpackCommandError
 
 # everything here uses the mock_env_path
 pytestmark = pytest.mark.usefixtures(

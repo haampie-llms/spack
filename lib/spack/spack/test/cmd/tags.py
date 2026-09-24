@@ -3,12 +3,11 @@
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
 import spack.concretize
-import spack.main
-import spack.test.utilities
+import spack.test.harness
 from spack.context import SpackContext
 from spack.installer import PackageInstaller
 
-tags = spack.main.SpackCommand("tags")
+tags = spack.test.harness.SpackCommand("tags")
 
 
 def test_tags_bad_options(mock_packages):
@@ -38,9 +37,9 @@ def test_tags_all_mock_tag_packages(mock_packages):
         assert pkg in out
 
 
-def test_tags_no_tags(repo_builder):
+def test_tags_no_tags(repo_builder, ctx: SpackContext):
     repo_builder.add_package("pkg-a")
-    with spack.test.utilities.use_repositories(repo_builder.root):
+    with spack.test.harness.use_repositories(ctx, repo_builder.root):
         out = tags()
     assert "No tagged" in out
 

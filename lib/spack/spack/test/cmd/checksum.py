@@ -14,10 +14,10 @@ import spack.package_base
 import spack.stage
 import spack.util.web
 from spack.context import SpackContext
-from spack.main import SpackCommand
 from spack.package_base import ManualDownloadRequiredError
 from spack.repo import RepoPath
 from spack.stage import interactive_version_filter
+from spack.test.harness import SpackCommand
 from spack.version import Version
 
 spack_checksum = SpackCommand("checksum")

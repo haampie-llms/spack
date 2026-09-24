@@ -8,10 +8,9 @@ import stat
 import pytest
 
 import spack.concretize
-import spack.context
 import spack.package_prefs
 import spack.paths
-import spack.test.utilities
+import spack.test.harness
 import spack.util.module_cmd
 import spack.util.spack_yaml as syaml
 from spack.config import Configuration
@@ -55,11 +54,11 @@ def concretize(abstract_spec, *, ctx: SpackContext):
 def update_packages(pkgname, section, value):
     """Update config and reread package list"""
     conf = {pkgname: {section: value}}
-    spack.context.default().config.set("packages", conf, scope="concretize")
+    spack.test.harness.current().config.set("packages", conf, scope="concretize")
 
 
 def assert_variant_values(spec, **variants):
-    concrete = concretize(spec, ctx=spack.context.default())
+    concrete = concretize(spec, ctx=spack.test.harness.current())
     for variant, value in variants.items():
         assert concrete.variants[variant].value == value
 
@@ -181,7 +180,7 @@ class TestConcretizePreferences:
         """Test setting an existing attribute in the package class"""
         monkeypatch.setenv("SOMEPATH", "file:///some/where/else")
         update_packages("mpileaks", "package_attributes", update)
-        with spack.test.utilities.use_repositories(spack.paths.mock_packages_path):
+        with spack.test.harness.use_repositories(ctx, spack.paths.mock_packages_path):
             spec = concretize("mpileaks", ctx=ctx)
             assert spec.package.fetcher.url == expected
 
@@ -204,7 +203,7 @@ mpileaks:
 """
         )
         mutable_config.set("packages", conf, scope="concretize")
-        with spack.test.utilities.use_repositories(spack.paths.mock_packages_path):
+        with spack.test.harness.use_repositories(ctx, spack.paths.mock_packages_path):
             spec = concretize("mpileaks", ctx=ctx)
             assert spec.package.v1 == 1
             assert spec.package.v2 is True
@@ -214,7 +213,7 @@ mpileaks:
             assert list(spec.package.v6) == [1, 2]
 
         update_packages("mpileaks", "package_attributes", {})
-        with spack.test.utilities.use_repositories(spack.paths.mock_packages_path):
+        with spack.test.harness.use_repositories(ctx, spack.paths.mock_packages_path):
             spec = concretize("mpileaks", ctx=ctx)
             with pytest.raises(AttributeError):
                 spec.package.v1

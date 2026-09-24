@@ -4,7 +4,7 @@
 
 import pytest
 
-from spack.main import SpackCommand
+from spack.test.harness import SpackCommand
 
 arch = SpackCommand("arch")
 

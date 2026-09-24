@@ -16,9 +16,8 @@ import tempfile
 
 import pytest
 
-import spack.context
 import spack.store
-import spack.test.utilities
+import spack.test.harness
 import spack.util.filesystem as fs
 import spack.util.spack_yaml as syaml
 from spack.context import SpackContext
@@ -325,7 +324,7 @@ all:
 
 
 def check_sbang_installation(store: spack.store.Store, group=False):
-    sbang_path = sbang.sbang_install_path_for(spack.context.default().store)
+    sbang_path = sbang.sbang_install_path_for(spack.test.harness.current().store)
     sbang_bin_dir = os.path.dirname(sbang_path)
     assert sbang_path.startswith(store.unpadded_root)
 
@@ -348,7 +347,7 @@ def check_sbang_installation(store: spack.store.Store, group=False):
 
 
 def run_test_install_sbang(store: spack.store.Store, group, *, ctx: SpackContext):
-    sbang_path = sbang.sbang_install_path_for(spack.context.default().store)
+    sbang_path = sbang.sbang_install_path_for(spack.test.harness.current().store)
     sbang_bin_dir = os.path.dirname(sbang_path)
 
     assert sbang_path.startswith(store.unpadded_root)
@@ -390,7 +389,7 @@ def test_install_sbang_too_long(tmp_path: pathlib.Path, ctx: SpackContext):
         add = min(num_extend, 255)
         long_path = os.path.join(long_path, "e" * add)
         num_extend -= add
-    with spack.test.utilities.use_store(long_path):
+    with spack.test.harness.use_store(ctx, long_path):
         with pytest.raises(sbang.SbangPathError) as exc_info:
             sbang.sbang_install_path_for(ctx.store)
 

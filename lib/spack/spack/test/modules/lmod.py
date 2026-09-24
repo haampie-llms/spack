@@ -12,10 +12,10 @@ import spack.vendor.archspec.cpu
 import spack.concretize
 import spack.config
 import spack.environment as ev
-import spack.main
 import spack.modules.error
 import spack.modules.lmod
 import spack.spec
+import spack.test.harness
 import spack.util.environment
 from spack.config import Configuration
 from spack.context import SpackContext
@@ -24,7 +24,7 @@ mpich_spec_string = "mpich@3.0.4"
 mpileaks_spec_string = "mpileaks"
 libdwarf_spec_string = "libdwarf arch=x64-linux"
 
-install = spack.main.SpackCommand("install")
+install = spack.test.harness.SpackCommand("install")
 
 #: Class of the writer tested in this module
 writer_cls = spack.modules.lmod.LmodModulefileWriter

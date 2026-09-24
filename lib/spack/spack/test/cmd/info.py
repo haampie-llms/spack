@@ -6,7 +6,7 @@ import re
 
 import pytest
 
-from spack.main import SpackCommand, SpackCommandError
+from spack.main import SpackCommandError
 from spack.repo import UnknownPackageError
 
 pytestmark = [pytest.mark.usefixtures("mock_packages")]

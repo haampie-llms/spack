@@ -12,14 +12,14 @@ import spack.cmd.pkg
 import spack.main
 import spack.paths
 import spack.repo
-import spack.test.utilities
+import spack.test.harness
 import spack.util.executable
 import spack.util.file_cache
 from spack.context import SpackContext
 from spack.repo import RepoPath
 from spack.util.filesystem import mkdirp, working_dir
 
-pkg = spack.main.SpackCommand("pkg")
+pkg = spack.test.harness.SpackCommand("pkg")
 
 #: new fake package template
 pkg_template = """\
@@ -93,9 +93,9 @@ def _builtin_mock_copy(
 
 
 @pytest.fixture
-def builtin_mock_copy(_builtin_mock_copy: spack.repo.Repo):
+def builtin_mock_copy(_builtin_mock_copy: spack.repo.Repo, ctx: SpackContext):
     """Fixture that enables a copy of the builtin_mock repo."""
-    with spack.test.utilities.use_repositories(_builtin_mock_copy):
+    with spack.test.harness.use_repositories(ctx, _builtin_mock_copy):
         yield _builtin_mock_copy
 
 

@@ -12,7 +12,6 @@ import sys
 import pytest
 
 import spack.concretize
-import spack.context
 import spack.deptypes as dt
 import spack.error
 import spack.fetch_strategy
@@ -20,7 +19,7 @@ import spack.patch
 import spack.paths
 import spack.spec
 import spack.stage
-import spack.test.utilities
+import spack.test.harness
 import spack.util.url as url_util
 import spack.util.web
 from spack.context import SpackContext
@@ -436,7 +435,7 @@ def check_multi_dependency_patch_specs(
     def get_patch(spec, ending):
         return next(
             p
-            for p in spec.patches_from(spack.context.default().repo)
+            for p in spec.patches_from(spack.test.harness.current().repo)
             if p.path_or_url.endswith(ending)
         )
 
@@ -596,7 +595,7 @@ def test_patch_lookup_for_shadowed_package(mock_packages, config, repo_builder, 
     package in a higher-precedence repo doesn't shadow the patch owner."""
     repo_builder.add_package("patch")
 
-    with spack.test.utilities.use_repositories(repo_builder.root, override=False) as repos:
+    with spack.test.harness.use_repositories(ctx, repo_builder.root, override=False) as repos:
         assert repos.repo_for_pkg("patch").namespace == repo_builder.namespace
 
         spec = spack.concretize.concretize_one("builtin_mock.patch@=1.0", ctx)

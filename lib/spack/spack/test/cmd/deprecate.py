@@ -10,8 +10,8 @@ import spack.concretize
 import spack.spec
 from spack.context import SpackContext
 from spack.enums import InstallRecordStatus
-from spack.main import SpackCommand
 from spack.store import Store
+from spack.test.harness import SpackCommand
 
 install = SpackCommand("install")
 uninstall = SpackCommand("uninstall")

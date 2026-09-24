@@ -13,7 +13,7 @@ import spack.deptypes as dt
 import spack.error
 import spack.installer
 import spack.solver.asp
-import spack.test.utilities
+import spack.test.harness
 import spack.util.hash as hashutil
 import spack.version
 from spack.context import SpackContext
@@ -84,7 +84,7 @@ def test_test_deptype(repo_builder: RepoBuilder, ctx: SpackContext):
     repo_builder.add_package("y", dependencies=[("z", "test", None)])
     repo_builder.add_package("w", dependencies=[("x", "test", None), ("y", None, None)])
 
-    with spack.test.utilities.use_repositories(repo_builder.root):
+    with spack.test.harness.use_repositories(ctx, repo_builder.root):
         spec = spack.concretize.concretize_one("w", ctx, tests=("w",))
         assert "x" in spec
         assert "z" not in spec
@@ -140,7 +140,7 @@ def test_specify_preinstalled_dep(monkeypatch, repo_builder: RepoBuilder, ctx: S
     repo_builder.add_package("pkg-b", dependencies=[("pkg-c", None, None)])
     repo_builder.add_package("pkg-a", dependencies=[("pkg-b", None, None)])
 
-    with spack.test.utilities.use_repositories(repo_builder.root):
+    with spack.test.harness.use_repositories(ctx, repo_builder.root):
         b_spec = spack.concretize.concretize_one("pkg-b", ctx)
         monkeypatch.setattr(
             spack.database.Database, "installed", lambda self, spec: spec.name != "pkg-a"
@@ -170,7 +170,7 @@ def test_conditional_dep_with_user_constraints(
     repo_builder.add_package("y")
     repo_builder.add_package("x", dependencies=[("y", None, "x@2:")])
 
-    with spack.test.utilities.use_repositories(repo_builder.root):
+    with spack.test.harness.use_repositories(ctx, repo_builder.root):
         spec = spack.concretize.concretize_one(spec_str, ctx)
         result = expr_str in spec
         assert result is expected, "{0} in {1}".format(expr_str, spec)

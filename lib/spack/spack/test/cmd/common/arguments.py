@@ -12,7 +12,7 @@ import spack.config
 import spack.deprecation
 import spack.environment as ev
 import spack.error
-import spack.main
+import spack.test.harness
 from spack.cmd.common import arguments
 from spack.config import Configuration
 from spack.context import SpackContext
@@ -143,7 +143,7 @@ def test_root_and_dep_match_returns_root(mock_packages, mutable_mock_env_path, c
 )
 def test_concretizer_arguments(mutable_config: Configuration, mock_packages, arg, conf):
     """Ensure that ConfigSetAction is doing the right thing."""
-    spec = spack.main.SpackCommand("spec")
+    spec = spack.test.harness.SpackCommand("spec")
 
     assert mutable_config.get("concretizer:reuse", None, scope="command_line") is None
 
@@ -213,7 +213,7 @@ def test_deprecated_flag_allows_deprecations_on_packages_with_an_allow_list(
     mutable_config.set(
         "packages:deprecated-with-labels:deprecation:allow", [{"labels": ["CVE-2026-0002"]}]
     )
-    spec = spack.main.SpackCommand("spec")
+    spec = spack.test.harness.SpackCommand("spec")
 
     with pytest.raises(UnsatisfiableSpecError, match="deprecated"):
         spec("deprecated-with-labels@3.0")

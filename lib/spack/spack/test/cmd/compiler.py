@@ -8,13 +8,13 @@ import pytest
 
 import spack.cmd.compiler
 import spack.compilers.config
-import spack.main
+import spack.test.harness
 import spack.util.pattern
 import spack.version
 from spack.config import Configuration
 from spack.context import SpackContext
 
-compiler = spack.main.SpackCommand("compiler")
+compiler = spack.test.harness.SpackCommand("compiler")
 
 pytestmark = [pytest.mark.usefixtures("mock_packages")]
 

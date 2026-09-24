@@ -5,7 +5,7 @@
 import pytest
 
 import spack.url
-from spack.main import SpackCommand
+from spack.test.harness import SpackCommand
 from spack.version import Version
 
 versions = SpackCommand("versions")

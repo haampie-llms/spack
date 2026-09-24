@@ -11,15 +11,15 @@ import spack.concretize
 import spack.error
 import spack.paths
 import spack.repo
-import spack.test.utilities
+import spack.test.harness
 from spack.context import SpackContext
 from spack.util.filesystem import touch
 
 
 @pytest.fixture()
-def builder_test_repository(config):
+def builder_test_repository(config, ctx: SpackContext):
     builder_test_path = os.path.join(spack.paths.test_repos_path, "spack_repo", "builder_test")
-    with spack.test.utilities.use_repositories(builder_test_path) as mock_repo:
+    with spack.test.harness.use_repositories(ctx, builder_test_path) as mock_repo:
         yield mock_repo
 
 

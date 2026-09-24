@@ -16,14 +16,15 @@ import spack.database
 import spack.environment as ev
 import spack.main
 import spack.schema.config
+import spack.test.harness
 import spack.util.filesystem as fs
 import spack.util.spack_yaml as syaml
 from spack.config import Configuration
 from spack.context import SpackContext
 from spack.store import Store
 
-config = spack.main.SpackCommand("config")
-env = spack.main.SpackCommand("env")
+config = spack.test.harness.SpackCommand("config")
+env = spack.test.harness.SpackCommand("env")
 
 pytestmark = pytest.mark.usefixtures("mock_packages")
 

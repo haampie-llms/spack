@@ -16,7 +16,7 @@ import spack.error
 import spack.spec
 from spack.config import Configuration
 from spack.context import SpackContext
-from spack.main import SpackCommand, SpackCommandError
+from spack.main import SpackCommandError
 from spack.store import Store
 
 buildcache = SpackCommand("buildcache")

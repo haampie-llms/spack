@@ -11,8 +11,8 @@ import spack.binary_distribution
 import spack.util.filesystem as fs
 import spack.util.gpg
 from spack.context import SpackContext
-from spack.main import SpackCommand
 from spack.paths import mock_gpg_keys_path
+from spack.test.harness import SpackCommand
 from spack.util.executable import ProcessError
 
 #: spack command used by tests below

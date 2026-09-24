@@ -15,9 +15,8 @@ import sys
 import pytest
 
 import spack.config
-import spack.context
 import spack.subprocess_context
-import spack.test.utilities
+import spack.test.harness
 from spack.config import Configuration
 from spack.context import SpackContext
 from spack.database import Database
@@ -99,7 +98,7 @@ def test_installed_upstream(
     repo_builder.add_package("y", dependencies=[("z", None, None)])
     repo_builder.add_package("w", dependencies=[("x", None, None), ("y", None, None)])
 
-    with spack.test.utilities.use_repositories(repo_builder.root):
+    with spack.test.harness.use_repositories(ctx, repo_builder.root):
         spec = spack.concretize.concretize_one("w", ctx)
         with writable(upstream_db):
             for dep in spec.traverse(root=False):
@@ -149,7 +148,7 @@ def test_missing_upstream_build_dep(
 
     monkeypatch.setattr(ctx.store, "db", downstream_db)
 
-    with spack.test.utilities.use_repositories(repo_builder.root):
+    with spack.test.harness.use_repositories(ctx, repo_builder.root):
         y = spack.concretize.concretize_one("y", ctx)
         z_y = y["z"]
         z_y.set_prefix(z_y_prefix)
@@ -187,7 +186,7 @@ def test_removed_upstream_dep(
     repo_builder.add_package("z")
     repo_builder.add_package("y", dependencies=[("z", None, None)])
 
-    with spack.test.utilities.use_repositories(repo_builder.root):
+    with spack.test.harness.use_repositories(ctx, repo_builder.root):
         y = spack.concretize.concretize_one("y", ctx)
         z = y["z"]
 
@@ -222,7 +221,7 @@ def test_add_to_upstream_after_downstream(
 
     repo_builder.add_package("x")
 
-    with spack.test.utilities.use_repositories(repo_builder.root):
+    with spack.test.harness.use_repositories(ctx, repo_builder.root):
         spec = spack.concretize.concretize_one("x", ctx)
 
         downstream_db.add(spec)
@@ -272,7 +271,7 @@ def test_recursive_upstream_dbs(
     repo_builder.add_package("y", dependencies=[("z", None, None)])
     repo_builder.add_package("x", dependencies=[("y", None, None)])
 
-    with spack.test.utilities.use_repositories(repo_builder.root):
+    with spack.test.harness.use_repositories(ctx, repo_builder.root):
         spec = spack.concretize.concretize_one("x", ctx)
         db_c = Database(roots[2], layout=layouts[2])
         db_c.add(spec["z"])
@@ -432,7 +431,7 @@ def _mock_remove(spec, db):
     specs = db.query(spec)
     assert len(specs) == 1
     spec = specs[0]
-    spack.repo.attach_packages([spec], spack.context.default())
+    spack.repo.attach_packages([spec], spack.test.harness.current())
     spec.package.do_uninstall(spec)
 
 
@@ -642,17 +641,15 @@ class ReadModify:
 
     def __call__(self):
         # Runs in a child process, which receives the context of the test
-        db = spack.context.default().store.db
+        db = spack.test.harness.current().store.db
         # check that other process can read DB
         _check_db_sanity(db)
         with db.write_transaction():
             _mock_remove("mpileaks ^zmpi", db)
 
 
-def test_030_db_sanity_from_another_process(mutable_database):
-    spack_process = spack.subprocess_context.SpackTestProcess(
-        ReadModify(), context=spack.context.default()
-    )
+def test_030_db_sanity_from_another_process(mutable_database, ctx: SpackContext):
+    spack_process = spack.subprocess_context.SpackTestProcess(ReadModify(), context=ctx)
     p = spack_process.create()
     p.start()
     p.join()
@@ -809,12 +806,12 @@ def test_110_no_write_with_exception_on_install(database, ctx: SpackContext):
 
 
 def test_115_reindex_with_packages_not_in_repo(
-    mutable_database_store: Store, repo_builder: RepoBuilder
+    mutable_database_store: Store, repo_builder: RepoBuilder, ctx: SpackContext
 ):
     # Dont add any package definitions to this repository, the idea is that
     # packages should not have to be defined in the repository once they
     # are installed
-    with spack.test.utilities.use_repositories(repo_builder.root):
+    with spack.test.harness.use_repositories(ctx, repo_builder.root):
         mutable_database_store.reindex()
         _check_db_sanity(mutable_database_store.db)
 
@@ -1203,7 +1200,7 @@ def test_query_installed_when_package_unknown(
     """Test that we can query the installation status of a spec
     when we don't know its package.py
     """
-    with spack.test.utilities.use_repositories(repo_builder.root):
+    with spack.test.harness.use_repositories(ctx, repo_builder.root):
         specs = database.query("mpileaks")
         for s in specs:
             # Assert that we can query the installation methods even though we
@@ -1450,7 +1447,7 @@ def test_database_installed(
     """Test the owner-side Database.installed / installed_upstream API."""
     upstream_db, downstream_db = upstream_and_downstream_db
 
-    with spack.test.utilities.use_repositories(mock_custom_repository):
+    with spack.test.harness.use_repositories(ctx, mock_custom_repository):
         spec = spack.concretize.concretize_one("pkg-c", ctx)
 
         # a concrete but not-yet-installed spec is not installed anywhere

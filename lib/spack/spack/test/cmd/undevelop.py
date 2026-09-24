@@ -6,7 +6,7 @@ import pathlib
 import spack.concretize
 import spack.environment as ev
 from spack.context import SpackContext
-from spack.main import SpackCommand
+from spack.test.harness import SpackCommand
 from spack.util.filesystem import working_dir
 
 undevelop = SpackCommand("undevelop")

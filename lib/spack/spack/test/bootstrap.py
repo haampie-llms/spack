@@ -17,14 +17,13 @@ import spack.bootstrap.status
 import spack.compilers.config
 import spack.concretize
 import spack.config
-import spack.context
 import spack.database
 import spack.environment
 import spack.error
 import spack.installer_dispatch
 import spack.paths
 import spack.spec
-import spack.test.utilities
+import spack.test.harness
 import spack.util.executable
 import spack.version
 from spack.context import SpackContext
@@ -75,7 +74,7 @@ def test_bootstrap_context_does_not_change_the_user_store(
 ):
     """Tests that the bootstrap context has its own store, and leaves the user's unchanged."""
     user_path = str(tmp_path / "store")
-    with spack.test.utilities.use_store(user_path):
+    with spack.test.harness.use_store(ctx, user_path):
         _assert_is_bootstrap_store(ctx.bootstrap, ctx.config)
         assert ctx.store.root == user_path
         assert ctx.config.get("config:install_tree:root") == user_path
@@ -89,7 +88,7 @@ def test_store_padding_length_is_zero_during_bootstrapping(
     a padded length of zero.
     """
     user_path = str(tmp_path / "store")
-    with spack.test.utilities.use_store(user_path, extra_data={"padded_length": 512}):
+    with spack.test.harness.use_store(ctx, user_path, extra_data={"padded_length": 512}):
         _assert_is_bootstrap_store(ctx.bootstrap, ctx.config)
         assert ctx.config.get("config:install_tree:padded_length") == 512
 
@@ -564,7 +563,7 @@ class _RecordingInstaller:
         return self
 
     def install(self) -> None:
-        self.mirrors_when_installing = spack.context.default().config.get("mirrors")
+        self.mirrors_when_installing = spack.test.harness.current().config.get("mirrors")
 
 
 class _FakeConcreteSpec:
