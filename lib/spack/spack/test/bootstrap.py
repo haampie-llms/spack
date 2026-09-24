@@ -56,8 +56,8 @@ def isolated_bootstrap_root(monkeypatch, tmp_path: pathlib.Path):
 
 
 @pytest.fixture
-def active_mock_environment(mutable_config, mutable_mock_env_path):
-    with spack.environment.create("bootstrap-test") as env:
+def active_mock_environment(mutable_config, mutable_mock_env_path, ctx: SpackContext):
+    with spack.environment.create("bootstrap-test", ctx=ctx) as env:
         yield env
 
 
@@ -245,7 +245,9 @@ def test_bootstrap_config_does_not_modify_the_user_config(mutable_config):
 
 
 @pytest.mark.regression("26548")
-def test_bootstrap_custom_store_in_environment(mutable_config, tmp_path: pathlib.Path):
+def test_bootstrap_custom_store_in_environment(
+    mutable_config, tmp_path: pathlib.Path, ctx: SpackContext
+):
     # Test that the custom store in an environment is taken into account
     # during bootstrapping
     spack_yaml = tmp_path / "spack.yaml"
@@ -260,7 +262,7 @@ spack:
       root: {0}
 """.format(install_root)
     )
-    with spack.environment.Environment(str(tmp_path)):
+    with spack.environment.Environment(str(tmp_path), ctx=ctx):
         assert active_environment()
         assert spack.config.CONFIG.get("config:install_tree:root") == str(install_root)
         # Don't trigger evaluation here

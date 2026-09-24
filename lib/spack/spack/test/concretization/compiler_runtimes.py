@@ -162,8 +162,8 @@ def test_views_can_handle_duplicate_runtime_nodes(
     monkeypatch.setattr(spack.database.Database, "installed", lambda self, spec: True)
     nodes = list(root.traverse())
 
-    view = ViewDescriptor(str(tmp_path), str(tmp_path))
-    candidate_specs = view.specs_for_view(nodes)
+    view = ViewDescriptor(str(tmp_path), str(tmp_path), config=ctx.config)
+    candidate_specs = view.specs_for_view(nodes, ctx.store)
 
     for x in expected:
         assert any(node.satisfies(x) for node in candidate_specs)

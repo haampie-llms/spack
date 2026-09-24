@@ -1051,7 +1051,7 @@ def update_view(
     if sources:
         for source in sources:
             tty.debug(f"reading specs from source: {source}")
-            env = ev.environment_from_name_or_dir(source)
+            env = ev.environment_from_name_or_dir(source, ctx=ctx)
             hashes.extend(env.all_hashes())
     else:
         # Get hashes in the current active environment

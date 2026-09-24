@@ -11,6 +11,7 @@ import spack.cmd.uninstall
 import spack.environment
 import spack.error
 import spack.store
+from spack.context import SpackContext
 from spack.database import Database
 from spack.enums import InstallRecordStatus
 from spack.main import SpackCommand, SpackCommandError
@@ -276,9 +277,11 @@ class TestUninstallFromEnv:
     find = SpackCommand("find")
 
     @pytest.fixture(scope="function")
-    def environment_setup(self, mock_packages, mutable_database, install_mockery):
+    def environment_setup(
+        self, mock_packages, mutable_database, install_mockery, ctx: SpackContext
+    ):
         TestUninstallFromEnv.env("create", "e1")
-        e1 = spack.environment.read("e1")
+        e1 = spack.environment.read("e1", ctx=ctx)
         with e1:
             TestUninstallFromEnv.add("diamond-link-left")
             TestUninstallFromEnv.add("diamond-link-bottom")
@@ -286,7 +289,7 @@ class TestUninstallFromEnv:
             install("--fake")
 
         TestUninstallFromEnv.env("create", "e2")
-        e2 = spack.environment.read("e2")
+        e2 = spack.environment.read("e2", ctx=ctx)
         with e2:
             TestUninstallFromEnv.add("diamond-link-right")
             TestUninstallFromEnv.add("diamond-link-bottom")
@@ -296,19 +299,21 @@ class TestUninstallFromEnv:
         TestUninstallFromEnv.env("rm", "e1", "-y")
         TestUninstallFromEnv.env("rm", "e2", "-y")
 
-    def test_basic_env_sanity(self, environment_setup):
+    def test_basic_env_sanity(self, environment_setup, ctx: SpackContext):
         for env_name in ["e1", "e2"]:
-            e = spack.environment.read(env_name)
+            e = spack.environment.read(env_name, ctx=ctx)
             with e:
                 for _, concretized_spec in e.concretized_specs():
                     assert spack.store.STORE.db.installed(concretized_spec)
 
-    def test_uninstall_force_dependency_shared_between_envs(self, environment_setup):
+    def test_uninstall_force_dependency_shared_between_envs(
+        self, environment_setup, ctx: SpackContext
+    ):
         """If you "spack uninstall -f --dependents diamond-link-bottom" from
         e1, then all packages should be uninstalled (but not removed) from
         both e1 and e2.
         """
-        e1 = spack.environment.read("e1")
+        e1 = spack.environment.read("e1", ctx=ctx)
         with e1:
             uninstall("-f", "-y", "--dependents", "diamond-link-bottom")
 
@@ -323,7 +328,7 @@ class TestUninstallFromEnv:
 
         # Everything in e2 depended on diamond-link-bottom, so should also
         # have been uninstalled. The roots should be unchanged though.
-        e2 = spack.environment.read("e2")
+        e2 = spack.environment.read("e2", ctx=ctx)
         with e2:
             assert {root.name for (root, _) in e2.concretized_specs()} == set(
                 ["diamond-link-right", "diamond-link-bottom"]
@@ -331,13 +336,15 @@ class TestUninstallFromEnv:
             for _, concretized_spec in e2.concretized_specs():
                 assert not spack.store.STORE.db.installed(concretized_spec)
 
-    def test_uninstall_remove_dependency_shared_between_envs(self, environment_setup):
+    def test_uninstall_remove_dependency_shared_between_envs(
+        self, environment_setup, ctx: SpackContext
+    ):
         """If you "spack uninstall --dependents --remove diamond-link-bottom" from
         e1, then all packages are removed from e1 (it is now empty);
         diamond-link-left is also uninstalled (since only e1 needs it) but
         diamond-link-bottom is not uninstalled (since e2 needs it).
         """
-        e1 = spack.environment.read("e1")
+        e1 = spack.environment.read("e1", ctx=ctx)
         with e1:
             dtdiamondleft = next(
                 concrete
@@ -351,7 +358,7 @@ class TestUninstallFromEnv:
 
         # Since -f was not specified, all specs in e2 should still be installed
         # (and e2 should be unchanged)
-        e2 = spack.environment.read("e2")
+        e2 = spack.environment.read("e2", ctx=ctx)
         with e2:
             assert {root.name for (root, _) in e2.concretized_specs()} == set(
                 ["diamond-link-right", "diamond-link-bottom"]
@@ -359,12 +366,14 @@ class TestUninstallFromEnv:
             for _, concretized_spec in e2.concretized_specs():
                 assert spack.store.STORE.db.installed(concretized_spec)
 
-    def test_uninstall_dependency_shared_between_envs_fail(self, environment_setup):
+    def test_uninstall_dependency_shared_between_envs_fail(
+        self, environment_setup, ctx: SpackContext
+    ):
         """If you "spack uninstall --dependents diamond-link-bottom" from
         e1 (without --remove or -f), then this should fail (this is needed by
         e2).
         """
-        e1 = spack.environment.read("e1")
+        e1 = spack.environment.read("e1", ctx=ctx)
         with e1:
             output = uninstall("-y", "--dependents", "diamond-link-bottom", fail_on_error=False)
             assert "There are still dependents." in output
@@ -378,13 +387,15 @@ class TestUninstallFromEnv:
         for _, concretized_spec in e1.concretized_specs():
             assert spack.store.STORE.db.installed(concretized_spec)
 
-    def test_uninstall_force_and_remove_dependency_shared_between_envs(self, environment_setup):
+    def test_uninstall_force_and_remove_dependency_shared_between_envs(
+        self, environment_setup, ctx: SpackContext
+    ):
         """If you "spack uninstall -f --dependents --remove diamond-link-bottom" from
         e1, then all packages should be uninstalled and removed from e1.
         All packages will also be uninstalled from e2, but the roots will
         remain unchanged.
         """
-        e1 = spack.environment.read("e1")
+        e1 = spack.environment.read("e1", ctx=ctx)
         with e1:
             dtdiamondleft = next(
                 concrete
@@ -395,7 +406,7 @@ class TestUninstallFromEnv:
             assert not list(e1.roots())
             assert not spack.store.STORE.db.installed(dtdiamondleft)
 
-        e2 = spack.environment.read("e2")
+        e2 = spack.environment.read("e2", ctx=ctx)
         with e2:
             assert {root.name for (root, _) in e2.concretized_specs()} == set(
                 ["diamond-link-right", "diamond-link-bottom"]
@@ -403,13 +414,15 @@ class TestUninstallFromEnv:
             for _, concretized_spec in e2.concretized_specs():
                 assert not spack.store.STORE.db.installed(concretized_spec)
 
-    def test_uninstall_keep_dependents_dependency_shared_between_envs(self, environment_setup):
+    def test_uninstall_keep_dependents_dependency_shared_between_envs(
+        self, environment_setup, ctx: SpackContext
+    ):
         """If you "spack uninstall -f --remove diamond-link-bottom" from
         e1, then diamond-link-bottom should be uninstalled, which leaves
         "dangling" references in both environments, since
         diamond-link-left and diamond-link-right both need it.
         """
-        e1 = spack.environment.read("e1")
+        e1 = spack.environment.read("e1", ctx=ctx)
         with e1:
             dtdiamondleft = next(
                 concrete
@@ -422,7 +435,7 @@ class TestUninstallFromEnv:
             assert {x.name for x in e1.roots()} == set(["diamond-link-left"])
             assert spack.store.STORE.db.installed(dtdiamondleft)
 
-        e2 = spack.environment.read("e2")
+        e2 = spack.environment.read("e2", ctx=ctx)
         with e2:
             assert {root.name for (root, _) in e2.concretized_specs()} == set(
                 ["diamond-link-right", "diamond-link-bottom"]

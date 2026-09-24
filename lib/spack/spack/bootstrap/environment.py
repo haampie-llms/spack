@@ -13,6 +13,7 @@ from typing import Iterable, List
 import spack.vendor.archspec.cpu
 
 import spack.config
+import spack.context
 import spack.environment
 import spack.error
 import spack.paths
@@ -33,7 +34,7 @@ class BootstrapEnvironment(spack.environment.Environment):
     def __init__(self) -> None:
         if not self.spack_yaml().exists():
             self._write_spack_yaml_file()
-        super().__init__(self.environment_root())
+        super().__init__(self.environment_root(), ctx=spack.context.default())
 
         # Remove python package roots created before python-venv was introduced
         for s in self.concrete_roots():

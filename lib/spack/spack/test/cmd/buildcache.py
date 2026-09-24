@@ -105,7 +105,7 @@ def tests_buildcache_create_env(
     pkg = "trivial-install-test-package"
 
     env("create", "--without-view", "test")
-    with ev.read("test"):
+    with ev.read("test", ctx=ctx):
         add(pkg)
         install()
 
@@ -260,7 +260,7 @@ def test_buildcache_sync(
     buildcache("push", "-u", "-f", src_mirror_url, s.name)
 
     env("create", "--without-view", "test")
-    with ev.read("test"):
+    with ev.read("test", ctx=ctx):
         add(in_env_pkg)
         install()
         buildcache("push", "-u", "-f", src_mirror_url, in_env_pkg)
@@ -1103,14 +1103,14 @@ def test_buildcache_prune_new_specs_race_condition(
     assert web_util.url_exists(manifest_url, client=client)
 
 
-def create_env_from_concrete_spec(spec: spack.spec.Spec):
+def create_env_from_concrete_spec(spec: spack.spec.Spec, *, ctx: SpackContext):
     """Build cache index view source is current active environment"""
     # Create a unique environment for this spec only
     env_name = f"specenv-{spec.dag_hash()}"
-    if not ev.exists(env_name):
+    if not ev.exists(env_name, config=ctx.config):
         env("create", "--without-view", env_name)
 
-    e = ev.environment_from_name_or_dir(env_name)
+    e = ev.environment_from_name_or_dir(env_name, ctx=ctx)
     with e:
         add(f"{spec.name}/{spec.dag_hash()}")
         # This should handle updating the environment to mark all packages as installed
@@ -1120,19 +1120,19 @@ def create_env_from_concrete_spec(spec: spack.spec.Spec):
 
 def args_for_active_env(spec: spack.spec.Spec):
     """Build cache index view source is an active environment"""
-    env = create_env_from_concrete_spec(spec)
+    env = create_env_from_concrete_spec(spec, ctx=spack.context.default())
     return [env, []]
 
 
 def args_for_env_by_path(spec: spack.spec.Spec):
     """Build cache index view source is an environment path"""
-    env = create_env_from_concrete_spec(spec)
+    env = create_env_from_concrete_spec(spec, ctx=spack.context.default())
     return [nullcontext(), [env.path]]
 
 
 def args_for_env_by_name(spec: spack.spec.Spec):
     """Build cache index view source is a managed environment name"""
-    env = create_env_from_concrete_spec(spec)
+    env = create_env_from_concrete_spec(spec, ctx=spack.context.default())
     return [nullcontext(), [env.name]]
 
 
@@ -1450,7 +1450,12 @@ def test_buildcache_check_index_full(
 
 
 def test_buildcache_push_with_group(
-    tmp_path: pathlib.Path, monkeypatch, install_mockery, mock_fetch, mutable_mock_env_path
+    tmp_path: pathlib.Path,
+    monkeypatch,
+    install_mockery,
+    mock_fetch,
+    mutable_mock_env_path,
+    ctx: SpackContext,
 ):
     """Tests that --group pushes only specs from the requested group."""
     env_dir = tmp_path / "myenv"
@@ -1470,7 +1475,7 @@ spack:
     mirror_dir = tmp_path / "mirror"
     mirror_dir.mkdir()
 
-    with ev.Environment(env_dir) as e:
+    with ev.Environment(env_dir, ctx=ctx) as e:
         e.concretize()
         e.write()
         for _, root in e.concretized_specs():
@@ -1488,7 +1493,12 @@ spack:
 
 
 def test_buildcache_push_with_multiple_groups(
-    tmp_path: pathlib.Path, monkeypatch, install_mockery, mock_fetch, mutable_mock_env_path
+    tmp_path: pathlib.Path,
+    monkeypatch,
+    install_mockery,
+    mock_fetch,
+    mutable_mock_env_path,
+    ctx: SpackContext,
 ):
     """Tests that --group can be repeated to push specs from multiple groups."""
     env_dir = tmp_path / "myenv"
@@ -1508,7 +1518,7 @@ spack:
     mirror_dir = tmp_path / "mirror"
     mirror_dir.mkdir()
 
-    with ev.Environment(env_dir) as e:
+    with ev.Environment(env_dir, ctx=ctx) as e:
         e.concretize()
         e.write()
         for _, root in e.concretized_specs():
@@ -1536,7 +1546,9 @@ spack:
     assert len(uploader.pushed) == len(set(uploader.pushed))
 
 
-def test_buildcache_push_group_nonexistent_errors(tmp_path: pathlib.Path, mutable_mock_env_path):
+def test_buildcache_push_group_nonexistent_errors(
+    tmp_path: pathlib.Path, mutable_mock_env_path, ctx: SpackContext
+):
     """Tests that --group with a nonexistent group name raises an error."""
     env_dir = tmp_path / "myenv"
     env_dir.mkdir()
@@ -1552,7 +1564,7 @@ spack:
     mirror_dir = tmp_path / "mirror"
     mirror_dir.mkdir()
 
-    with ev.Environment(env_dir):
+    with ev.Environment(env_dir, ctx=ctx):
         with pytest.raises(spack.main.SpackCommandError):
             buildcache(
                 "push", "--unsigned", "--group", "nonexistent", str(mirror_dir), fail_on_error=True
@@ -1560,7 +1572,7 @@ spack:
 
 
 def test_buildcache_push_group_and_specs_mutually_exclusive(
-    tmp_path: pathlib.Path, mutable_mock_env_path
+    tmp_path: pathlib.Path, mutable_mock_env_path, ctx: SpackContext
 ):
     """Tests that --group and explicit specs on the command line are mutually exclusive."""
     env_dir = tmp_path / "myenv"
@@ -1577,7 +1589,7 @@ spack:
     mirror_dir = tmp_path / "mirror"
     mirror_dir.mkdir()
 
-    with ev.Environment(env_dir):
+    with ev.Environment(env_dir, ctx=ctx):
         with pytest.raises(spack.main.SpackCommandError):
             buildcache(
                 "push",

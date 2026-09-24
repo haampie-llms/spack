@@ -388,7 +388,7 @@ def test_setup_spack_repro_version(
     assert "Unable to merge {0}".format(c1) in err
 
 
-def test_get_spec_filter_list(mutable_mock_env_path, mutable_mock_repo):
+def test_get_spec_filter_list(mutable_mock_env_path, mutable_mock_repo, ctx: SpackContext):
     """Tests that, given an active environment and list of touched pkgs, we get the right
     list of possibly-changed env specs.
 
@@ -407,7 +407,7 @@ def test_get_spec_filter_list(mutable_mock_env_path, mutable_mock_repo):
 
     and simulates a change in libdwarf.
     """
-    e1 = ev.create("test")
+    e1 = ev.create("test", ctx=ctx)
     e1.add("mpileaks")
     e1.add("hypre")
     e1.concretize()
@@ -464,8 +464,8 @@ def test_get_spec_filter_list(mutable_mock_env_path, mutable_mock_repo):
 
 
 @pytest.mark.regression("29947")
-def test_affected_specs_on_first_concretization(mutable_mock_env_path):
-    e = ev.create("first_concretization")
+def test_affected_specs_on_first_concretization(mutable_mock_env_path, ctx: SpackContext):
+    e = ev.create("first_concretization", ctx=ctx)
     e.add("mpileaks~shared")
     e.add("mpileaks+shared")
     e.concretize()

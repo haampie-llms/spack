@@ -52,19 +52,20 @@ def test_mirror_from_env(
     mock_packages,
     mock_fetch,
     mutable_config: Configuration,
+    ctx: SpackContext,
 ):
     mirror_dir = str(tmp_path / "mirror")
     env_name = "test"
 
     env("create", env_name)
-    with ev.read(env_name):
+    with ev.read(env_name, ctx=ctx):
         add("trivial-install-test-package")
         add("git-test")
         concretize()
         with mutable_config.override("config:checksum", False):
             mirror("create", "-d", mirror_dir, "--all")
 
-    e = ev.read(env_name)
+    e = ev.read(env_name, ctx=ctx)
     assert set(os.listdir(mirror_dir)) == set([s.name for s in e.user_specs])
     for spec in e.specs_by_hash.values():
         mirror_res = os.listdir(os.path.join(mirror_dir, spec.name))
@@ -79,12 +80,15 @@ def test_mirror_cli_parallel_args(
     mutable_mock_env_path,
     monkeypatch,
     mutable_config: Configuration,
+    ctx: SpackContext,
 ):
     """Test the CLI parallel args"""
     mirror_dir = str(tmp_path / "mirror")
     env_name = "test-parallel"
 
-    def mock_create_mirror_for_all_specs(mirror_specs, path, skip_unstable_versions, workers, ctx):
+    def mock_create_mirror_for_all_specs(
+        mirror_specs, path, skip_unstable_versions, workers, **kw
+    ):
         assert path == mirror_dir
         assert workers == 2
 
@@ -93,7 +97,7 @@ def test_mirror_cli_parallel_args(
     )
 
     env("create", env_name)
-    with ev.read(env_name):
+    with ev.read(env_name, ctx=ctx):
         add("trivial-install-test-package")
         add("git-test")
         concretize()
@@ -114,12 +118,12 @@ def test_mirror_from_env_parallel(
     env_name = "test-parallel"
 
     env("create", env_name)
-    with ev.read(env_name):
+    with ev.read(env_name, ctx=ctx):
         add("trivial-install-test-package")
         add("git-test")
         concretize()
 
-    e = ev.read(env_name)
+    e = ev.read(env_name, ctx=ctx)
     specs = list(e.specs_by_hash.values())
 
     with mutable_config.override("config:checksum", False):
@@ -192,18 +196,19 @@ def test_mirror_spec_from_env(
     mock_packages,
     mock_fetch,
     mutable_config: Configuration,
+    ctx: SpackContext,
 ):
     mirror_dir = str(tmp_path / "mirror-B")
     env_name = "test"
 
     env("create", env_name)
-    with ev.read(env_name):
+    with ev.read(env_name, ctx=ctx):
         add("simple-standalone-test@0.9")
         concretize()
         with mutable_config.override("config:checksum", False):
             mirror("create", "-d", mirror_dir, "simple-standalone-test")
 
-    e = ev.read(env_name)
+    e = ev.read(env_name, ctx=ctx)
     assert set(os.listdir(mirror_dir)) == set([s.name for s in e.user_specs])
     spec = e.concrete_roots()[0]
     mirror_res = os.listdir(os.path.join(mirror_dir, spec.name))

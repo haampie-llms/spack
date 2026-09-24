@@ -3,17 +3,17 @@
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
 import os
 import textwrap
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
-import spack.config
 import spack.environment as ev
 import spack.repo
 import spack.schema.environment
-import spack.store
-from spack.active_environment import active_environment
 from spack.util import tty
 from spack.util.environment import EnvironmentModifications, ShellCmdString
 from spack.util.tty.color import colorize
+
+if TYPE_CHECKING:
+    import spack.context
 
 
 def _make_spack_prompt(shell: str, prompt: str) -> List[str]:
@@ -149,7 +149,10 @@ def deactivate_header(shell):
 
 
 def activate(
-    env: ev.Environment, use_env_repo=False, view: Optional[str] = "default"
+    env: ev.Environment,
+    ctx: "spack.context.SpackContext",
+    use_env_repo=False,
+    view: Optional[str] = "default",
 ) -> EnvironmentModifications:
     """Activate an environment and append environment modifications
 
@@ -159,6 +162,7 @@ def activate(
 
     Arguments:
         env: the environment to activate
+        ctx: context whose configuration and store reflect the activation
         use_env_repo: use the packages exactly as they appear in the environment's repository
         view: generate commands to add runtime environment variables for named view
 
@@ -176,13 +180,13 @@ def activate(
     # become PATH variables.
     #
 
-    env_vars_yaml = spack.config.CONFIG.get("env_vars", None)
+    env_vars_yaml = ctx.config.get("env_vars", None)
     if env_vars_yaml:
         env_mods.extend(spack.schema.environment.parse(env_vars_yaml))
 
     try:
         if view and env.has_view(view):
-            with spack.store.STORE.db.read_transaction():
+            with ctx.store.db.read_transaction():
                 env.add_view_to_env(env_mods, view)
     except (spack.repo.UnknownPackageError, spack.repo.UnknownNamespaceError) as e:
         tty.error(e)
@@ -197,24 +201,29 @@ def activate(
     return env_mods
 
 
-def deactivate() -> EnvironmentModifications:
+def deactivate(
+    active: Optional[ev.Environment], ctx: "spack.context.SpackContext"
+) -> EnvironmentModifications:
     """Deactivate an environment and collect corresponding environment modifications.
 
     Note: unloads the environment in its current state, not in the state it was
         loaded in, meaning that specs that were removed from the spack environment
         after activation are not unloaded.
 
+    Args:
+        active: the active environment
+        ctx: context whose configuration and store reflect the activation
+
     Returns:
         Environment variables modifications to activate environment.
     """
     env_mods = EnvironmentModifications()
-    active = active_environment()
 
     if active is None:
         return env_mods
 
-    with active.manifest.use_config():
-        env_vars_yaml = spack.config.CONFIG.get("env_vars", None)
+    with active.manifest.use_config(ctx.config):
+        env_vars_yaml = ctx.config.get("env_vars", None)
     if env_vars_yaml:
         env_mods.extend(spack.schema.environment.parse(env_vars_yaml).reversed())
 
@@ -222,7 +231,7 @@ def deactivate() -> EnvironmentModifications:
 
     if active_view and active.has_view(active_view):
         try:
-            with spack.store.STORE.db.read_transaction():
+            with ctx.store.db.read_transaction():
                 active.rm_view_from_env(env_mods, active_view)
         except (spack.repo.UnknownPackageError, spack.repo.UnknownNamespaceError) as e:
             tty.warn(e)

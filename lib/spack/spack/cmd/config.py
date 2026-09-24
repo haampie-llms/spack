@@ -280,7 +280,7 @@ def config_edit(args, ctx):
     elif spack_env and not args.scope:
         # Don't use the scope object for envs, as `config edit` can be called
         # for a malformed environment. Use SPACK_ENV to find spack.yaml.
-        config_file = ev.manifest_file(spack_env)
+        config_file = ev.manifest_file(spack_env, config=ctx.config)
     else:
         # If we aren't editing a spack.yaml file, get config path from scope.
         scope, section = _get_scope_and_section(args, ctx)

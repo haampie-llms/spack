@@ -626,7 +626,12 @@ class TestConcretize:
         assert pkg["zlib"].satisfies("@1.2.8")
 
     def test_disable_mixing_env(
-        self, mutable_mock_env_path, tmp_path: pathlib.Path, mock_packages, mutable_config
+        self,
+        mutable_mock_env_path,
+        tmp_path: pathlib.Path,
+        mock_packages,
+        mutable_config,
+        ctx: SpackContext,
     ):
         spack_yaml = tmp_path / ev.manifest_name
         spack_yaml.write_text(
@@ -641,7 +646,7 @@ spack:
 """
         )
 
-        with ev.Environment(tmp_path) as e:
+        with ev.Environment(tmp_path, ctx=ctx) as e:
             e.concretize()
             for root in e.roots():
                 if root.satisfies("%gcc"):
@@ -1142,11 +1147,9 @@ spack:
             ("mpileaks", "direct-mpich"),
         ],
     )
-    def test_simultaneous_concretization_of_specs(self, abstract_specs):
+    def test_simultaneous_concretization_of_specs(self, abstract_specs, ctx: SpackContext):
         abstract_specs = [Spec(x) for x in abstract_specs]
-        concrete_specs = spack.concretize._concretize_specs_together(
-            abstract_specs, spack.context.default()
-        )
+        concrete_specs = spack.concretize._concretize_specs_together(abstract_specs, ctx)
 
         # Check there's only one configuration of each package in the DAG
         names = {
@@ -6225,14 +6228,14 @@ def test_buildcache_query_reads_no_global(break_globals, injected_context):
 
 
 def test_concretization_cache_reads_no_global(
-    break_globals, mutable_mock_env_path, mutable_config, mock_packages
+    break_globals, mutable_mock_env_path, mutable_config, mock_packages, ctx: SpackContext
 ):
     """The concretization cache expands ``$env`` in its configured path, which is the one
     place a solve used to reach for the global configuration to find the active environment.
     """
-    ev.create("test_conc_cache_globals")
+    ev.create("test_conc_cache_globals", ctx=ctx)
 
-    with ev.read("test_conc_cache_globals") as env:
+    with ev.read("test_conc_cache_globals", ctx=ctx) as env:
         mutable_config.set(
             "concretizer:concretization_cache",
             {"enable": True, "url": "$env/concretization", "entry_limit": 10},
@@ -6280,15 +6283,20 @@ def test_git_ref_lookup_uses_the_injected_cache_and_config(
 
 
 def test_develop_specs_read_no_global(
-    break_globals, mutable_mock_env_path, mutable_config, mock_packages, tmp_path
+    break_globals,
+    mutable_mock_env_path,
+    mutable_config,
+    mock_packages,
+    tmp_path,
+    ctx: SpackContext,
 ):
     """Develop specs are declared in configuration and their paths are expanded against it,
     so a solve has to read both from the injected context."""
     develop_dir = tmp_path / "build"
     develop_dir.mkdir()
-    ev.create("test_develop_globals")
+    ev.create("test_develop_globals", ctx=ctx)
 
-    with ev.read("test_develop_globals") as env:
+    with ev.read("test_develop_globals", ctx=ctx) as env:
         mutable_config.set(
             "develop", {"develop-test": {"spec": "develop-test@develop", "path": str(develop_dir)}}
         )

@@ -13,6 +13,7 @@ import spack.store
 import spack.traverse
 from spack.cmd.stage import StageFilter
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.main import SpackCommand, SpackCommandError
 from spack.spec import Spec
 from spack.version import Version
@@ -63,7 +64,7 @@ def test_stage_path_errors_multiple_specs(check_stage_path):
 
 
 @pytest.mark.disable_clean_stage_check
-def test_stage_with_env_outside_env(mutable_mock_env_path, monkeypatch):
+def test_stage_with_env_outside_env(mutable_mock_env_path, monkeypatch, ctx: SpackContext):
     """Verify that stage concretizes specs not in environment instead of erroring."""
 
     def fake_stage(pkg, mirror_only=False):
@@ -72,7 +73,7 @@ def test_stage_with_env_outside_env(mutable_mock_env_path, monkeypatch):
 
     monkeypatch.setattr(spack.package_base.PackageBase, "do_stage", fake_stage)
 
-    e = ev.create("test")
+    e = ev.create("test", ctx=ctx)
     e.add("mpileaks")
     e.concretize()
 
@@ -81,7 +82,7 @@ def test_stage_with_env_outside_env(mutable_mock_env_path, monkeypatch):
 
 
 @pytest.mark.disable_clean_stage_check
-def test_stage_with_env_inside_env(mutable_mock_env_path, monkeypatch):
+def test_stage_with_env_inside_env(mutable_mock_env_path, monkeypatch, ctx: SpackContext):
     """Verify that stage filters specs in environment instead of reconcretizing."""
 
     def fake_stage(pkg, mirror_only=False):
@@ -90,7 +91,7 @@ def test_stage_with_env_inside_env(mutable_mock_env_path, monkeypatch):
 
     monkeypatch.setattr(spack.package_base.PackageBase, "do_stage", fake_stage)
 
-    e = ev.create("test")
+    e = ev.create("test", ctx=ctx)
     e.add("mpileaks@=100.100")
     e.concretize()
 
@@ -99,10 +100,10 @@ def test_stage_with_env_inside_env(mutable_mock_env_path, monkeypatch):
 
 
 @pytest.mark.disable_clean_stage_check
-def test_stage_full_env(mutable_mock_env_path, monkeypatch):
+def test_stage_full_env(mutable_mock_env_path, monkeypatch, ctx: SpackContext):
     """Verify that stage filters specs in environment."""
 
-    e = ev.create("test")
+    e = ev.create("test", ctx=ctx)
     e.add("mpileaks@=100.100")
     e.concretize()
 
@@ -150,8 +151,9 @@ def test_stage_spec_filters(
     skip_installed,
     exclusions,
     monkeypatch,
+    ctx: SpackContext,
 ):
-    e = ev.create("test")
+    e = ev.create("test", ctx=ctx)
     e.add("mpileaks@=100.100")
     e.concretize()
     all_specs = e.all_specs()

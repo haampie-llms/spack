@@ -467,14 +467,14 @@ class TestLmod:
         mock_fetch,
         ctx: SpackContext,
     ):
-        with ev.create_in_dir(str(tmp_path), with_view=True) as e:
+        with ev.create_in_dir(str(tmp_path), with_view=True, ctx=ctx) as e:
             module_configuration("with_view")
             install("--fake", "--add", "cmake")
 
             spec = spack.concretize.concretize_one("cmake", ctx)
 
             content = modulefile_content("cmake")
-            expected = e.default_view.get_projection_for_spec(spec)
+            expected = e.default_view.get_projection_for_spec(spec, ctx.config)
             # Rather than parse all lines, ensure all prefixes in the content
             # point to the right one
             assert any(expected in line for line in content)

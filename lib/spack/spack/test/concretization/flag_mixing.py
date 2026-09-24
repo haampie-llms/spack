@@ -241,7 +241,9 @@ packages:
     # the note about #37180 in concretize.lp
 
 
-def test_dev_mix_flags(tmp_path: pathlib.Path, concretize_scope, mutable_mock_env_path, test_repo):
+def test_dev_mix_flags(
+    tmp_path: pathlib.Path, concretize_scope, mutable_mock_env_path, test_repo, ctx: SpackContext
+):
     src_dir = tmp_path / "x-src"
 
     env_content = f"""\
@@ -259,7 +261,7 @@ spack:
 
     manifest_file = tmp_path / ev.manifest_name
     manifest_file.write_text(env_content)
-    e = ev.create("test", manifest_file)
+    e = ev.create("test", manifest_file, ctx=ctx)
     with e:
         e.concretize()
     e.write()

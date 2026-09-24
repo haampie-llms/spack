@@ -216,7 +216,7 @@ spack:
 """
             )
         env("create", "test", "./spack.yaml")
-        with ev.read("test"):
+        with ev.read("test", ctx=ctx):
             install()
 
     assert spec.package.filename in os.listdir(spec.prefix)
@@ -259,7 +259,7 @@ spack:
 """
             )
         env("create", "test", "./spack.yaml")
-        with ev.read("test"):
+        with ev.read("test", ctx=ctx):
             install()
 
     assert spec.package.filename in os.listdir(spec.prefix)
@@ -301,7 +301,7 @@ spack:
             )
 
         env("create", "test", "./spack.yaml")
-        with ev.read("test"):
+        with ev.read("test", ctx=ctx):
             with pytest.raises((RuntimeError, spack.error.UnsatisfiableSpecError)):
                 install()
 
@@ -364,7 +364,7 @@ spack:
             )
 
         env("create", "test", "./spack.yaml")
-        with ev.read("test"):
+        with ev.read("test", ctx=ctx):
             # Do concretization inside environment for dev info
             # These specs are the source of truth to compare against the installs
             leaf_spec = spack.concretize.concretize_one(leaf_spec, ctx)
@@ -420,7 +420,7 @@ spack:
 """
             )
         env("create", "test", "./spack.yaml")
-        with ev.read("test"):
+        with ev.read("test", ctx=ctx):
             # concretize in the environment to get the dev build info
             # equivalent to setting dev_build and dev_path variants
             # on all specs above
@@ -485,7 +485,7 @@ spack:
             )
 
         env("create", "test", "./spack.yaml")
-        with ev.read("test"):
+        with ev.read("test", ctx=ctx):
             install()
 
             reset_string()  # so the package will accept rebuilds
