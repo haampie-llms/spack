@@ -1433,7 +1433,7 @@ def _oci_get_blob_info(
     """Get the spack tarball layer digests and size if it exists"""
     try:
         manifest, image_config = get_manifest_and_config_with_retry(
-            image_ref, urlopen=spack.oci.opener.opener_for(client), config=config, client=client
+            image_ref, urlopen=spack.oci.opener.oci_urlopen(client), config=config, client=client
         )
 
         return spack.oci.oci.Blob(
@@ -1471,7 +1471,7 @@ def _oci_push_pkg_blob(
         image_ref,
         file=filename,
         digest=blob.compressed_digest,
-        urlopen=spack.oci.opener.opener_for(client),
+        urlopen=spack.oci.opener.oci_urlopen(client),
     )
     elapsed = time.time() - start
 
@@ -1576,7 +1576,7 @@ def _oci_put_manifest(
     )
 
     # Upload the config file
-    urlopen = spack.oci.opener.opener_for(client)
+    urlopen = spack.oci.opener.oci_urlopen(client)
     upload_blob_with_retry(
         image_ref, file=config_file, digest=config_file_checksum, urlopen=urlopen
     )
@@ -1642,7 +1642,7 @@ def _oci_update_base_images(
             base_image,
             target_image,
             architecture,
-            urlopen=spack.oci.opener.opener_for(client),
+            urlopen=spack.oci.opener.oci_urlopen(client),
             config=config,
             client=client,
         )
@@ -1812,7 +1812,7 @@ def _oci_config_from_tag(
         image_ref.with_tag(tag),
         tag,
         recurse=0,
-        urlopen=spack.oci.opener.opener_for(client),
+        urlopen=spack.oci.opener.oci_urlopen(client),
         config=config,
         client=client,
     )
@@ -1832,7 +1832,7 @@ def _oci_update_index(
     client: web_util.NetworkClient,
     repo_provider: Optional["spack.repo.RepoProvider"] = None,
 ) -> None:
-    urlopen = spack.oci.opener.opener_for(client)
+    urlopen = spack.oci.opener.oci_urlopen(client)
     with timer.measure("list"):
         tags = list_tags(image_ref, urlopen=urlopen)
 
@@ -1983,7 +1983,7 @@ def download_tarball(
         if spack.oci.image.is_oci_url(fetch_url):
             ref = ImageReference.from_url(fetch_url).with_tag(_oci_default_tag(spec))
 
-            urlopen = spack.oci.opener.opener_for(client)
+            urlopen = spack.oci.opener.oci_urlopen(client)
 
             # Fetch the manifest
             try:
@@ -3289,7 +3289,7 @@ def _get_index_fetcher(
         return OCIIndexHandler(
             mirror_metadata,
             cache_entry.get("index_hash", None),
-            urlopen=spack.oci.opener.opener_for(client),
+            urlopen=spack.oci.opener.oci_urlopen(client),
         )
 
     if mirror_metadata.version < 3:

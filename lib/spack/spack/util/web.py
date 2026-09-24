@@ -43,8 +43,8 @@ import spack.mirrors.mirror
 import spack.util.executable
 import spack.util.url
 import spack.util.url as url_util
-from spack.util import lang, tty
 from spack.util import s3 as s3_util
+from spack.util import tty
 from spack.util.filesystem import mkdirp, working_dir
 
 from .executable import CommandNotFoundError, Executable
@@ -267,11 +267,9 @@ def _custom_ssl_certs(config: spack.config.Configuration) -> Optional[Tuple[bool
     return (file_type == stat.S_IFREG, path)
 
 
-@lang.memoized
 def _verifying_ssl_context(certs: Optional[Tuple[bool, str]]) -> ssl.SSLContext:
     """Returns an SSL context verifying against ``certs``, or against the system certificates if
-    None. Contexts are memoized, since loading certificates is slow.
-    """
+    None."""
     if certs is None:
         return ssl.create_default_context()
     is_file, path = certs
@@ -280,16 +278,6 @@ def _verifying_ssl_context(certs: Optional[Tuple[bool, str]]) -> ssl.SSLContext:
         return ssl.create_default_context(cafile=path)
     tty.debug(f"urllib: certs: using capath {path}")
     return ssl.create_default_context(capath=path)
-
-
-def clear_ssl_contexts() -> None:
-    """Drop the SSL contexts created so far, e.g. in a forked child process."""
-    _verifying_ssl_context.cache_clear()
-
-
-def default_ssl_context(client: "NetworkClient") -> ssl.SSLContext:
-    """Returns the verifying SSL context for urllib, with the custom certificates of ``client``."""
-    return _verifying_ssl_context(client.ssl_certs)
 
 
 def _set_curl_env_for_ssl_certs(curl: Executable, client: "NetworkClient") -> None:
@@ -309,7 +297,7 @@ def _set_curl_env_for_ssl_certs(curl: Executable, client: "NetworkClient") -> No
 def _build_opener(client: "NetworkClient") -> OpenType:
     """Returns a function that opens URLs with the SSL, timeout and S3 settings of ``client``."""
     if client.verify_ssl:
-        context = default_ssl_context(client)
+        context = client.ssl_context
     else:
         context = ssl._create_unverified_context()
     opener = build_opener(
@@ -322,9 +310,10 @@ def _build_opener(client: "NetworkClient") -> OpenType:
 
 
 class NetworkClient:
-    """Network settings resolved from a configuration, and the URL opener built from them.
+    """Network settings resolved from a configuration, and the connections built from them.
 
-    The opener is built on first use in each process. Pickling a client keeps only its settings.
+    Connections are built on first use in each process, since SSL and S3 connections are not
+    fork-safe. Pickling a client keeps only its settings.
     """
 
     def __init__(
@@ -349,8 +338,17 @@ class NetworkClient:
         self.ssl_certs = ssl_certs
         self.fetch_method = fetch_method
         self.mirrors = tuple(mirrors)
-        self._urlopen: Optional[OpenType] = None
-        self._urlopen_pid: Optional[int] = None
+        self._pid: Optional[int] = None
+        self._connections: Dict[str, Any] = {}
+
+    def connection(self, name: str, build: Callable[[], _R]) -> _R:
+        """Connection state named ``name`` of this process, built by ``build`` on first use."""
+        if self._pid != os.getpid():
+            self._pid = os.getpid()
+            self._connections = {}
+        if name not in self._connections:
+            self._connections[name] = build()
+        return self._connections[name]
 
     @staticmethod
     def from_config(config: spack.config.Configuration) -> "NetworkClient":
@@ -364,19 +362,25 @@ class NetworkClient:
         )
 
     @property
+    def ssl_context(self) -> ssl.SSLContext:
+        """SSL context verifying against the custom certificates, or the system ones."""
+        return self.connection("ssl_context", lambda: _verifying_ssl_context(self.ssl_certs))
+
+    @property
     def urlopen(self) -> OpenType:
         """Function with the signature of ``OpenerDirector.open``, whose ``timeout`` defaults to
         ``connect_timeout``."""
-        # Forked children rebuild the opener after restore() clears the parent's SSL contexts
-        if self._urlopen is None or self._urlopen_pid != os.getpid():
-            self._urlopen = _build_opener(self)
-            self._urlopen_pid = os.getpid()
-        return self._urlopen
+        return self.connection("urlopen", lambda: _build_opener(self))
+
+    @property
+    def s3_clients(self) -> Dict["spack.util.s3.S3ClientKey", Any]:
+        """S3 clients, keyed by the arguments they are created with."""
+        return self.connection("s3_clients", dict)
 
     def __getstate__(self):
         state = self.__dict__.copy()
-        state["_urlopen"] = None
-        state["_urlopen_pid"] = None
+        state["_pid"] = None
+        state["_connections"] = {}
         return state
 
 
@@ -820,11 +824,7 @@ def stat_url(url: str, *, client: NetworkClient) -> Optional[Tuple[int, float]]:
 
 
 def spider(
-    root_urls: Union[str, Iterable[str]],
-    depth: int = 0,
-    *,
-    executor: concurrent.futures.Executor,
-    client: NetworkClient,
+    root_urls: Union[str, Iterable[str]], depth: int = 0, *, executor: concurrent.futures.Executor
 ):
     """Get web pages from root URLs.
 
@@ -834,8 +834,8 @@ def spider(
     Args:
         root_urls: root urls used as a starting point for spidering
         depth: level of recursion into links
-        executor: executor the requests are submitted to
-        client: client to open the URLs with
+        executor: executor the requests are submitted to, whose workers share the network
+            client to open the URLs with
 
     Returns:
         A dict of pages visited (URL) mapped to their full text and the set of visited links.
@@ -855,7 +855,7 @@ def spider(
     while current_depth <= depth:
         tty.debug(f"SPIDER: [depth={current_depth}, max_depth={depth}, urls={len(spider_args)}]")
         results = [
-            executor.submit(_spider, *one_search_args, client=client)
+            executor.submit_shared(_spider, *one_search_args)  # type: ignore[attr-defined]
             for one_search_args in spider_args
         ]
         spider_args = []
@@ -874,11 +874,7 @@ def spider(
 
 
 def _spider(
-    url: urllib.parse.ParseResult,
-    collect_nested: bool,
-    _visited: Set[str],
-    *,
-    client: NetworkClient,
+    client: NetworkClient, url: urllib.parse.ParseResult, collect_nested: bool, _visited: Set[str]
 ):
     """Fetches URL and any pages it links to.
 

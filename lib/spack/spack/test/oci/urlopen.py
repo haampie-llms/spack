@@ -818,32 +818,3 @@ def test_list_tags():
     assert json.loads(urlopen(image.tags_url() + f"?last={to_tag(N - 3)}").read())["tags"] == [
         to_tag(i) for i in range(N - 2, N)
     ]
-
-
-def test_openers_sharing_auth_headers_log_in_once_per_credentials():
-    """Tests that openers sharing authorization headers reuse a token obtained with the same
-    credentials, and do not reuse it for different ones."""
-    image = ImageReference.from_string("private.example.com/spack-registry:latest")
-    registry = InMemoryOCIRegistryWithBearerAuth(
-        image.domain, token="private_token", realm="https://auth.example.com/login"
-    )
-    auth_server = MockBearerTokenServer("auth.example.com")
-    auth_headers: dict = {}
-
-    def open_with(credentials: UsernamePassword):
-        opener = create_opener(
-            registry,
-            auth_server,
-            credentials_provider=lambda domain: credentials,
-            auth_headers=auth_headers,
-        )
-        assert opener.open(image.endpoint()).status == 200
-
-    open_with(UsernamePassword("user", "pass"))
-    open_with(UsernamePassword("user", "pass"))
-    assert len(auth_server.requests) == 1
-
-    # The token server rejects these credentials, so the login must be attempted
-    with pytest.raises(urllib.error.HTTPError, match="Cannot login to registry"):
-        open_with(UsernamePassword("wrong", "wrong"))
-    assert len(auth_server.requests) == 2
