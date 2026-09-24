@@ -1050,6 +1050,7 @@ def get_repository(
     name: str,
     repos: spack.repo.RepoPath,
     cache: spack.util.file_cache.FileCache,
+    config: spack.config.Configuration,
 ) -> spack.repo.Repo:
     """Returns a Repo object that will allow us to determine the path where
     the new package file should be created.
@@ -1059,6 +1060,7 @@ def get_repository(
         name: The name of the package to create
         repos: The configured package repositories
         cache: Cache for the index of a repository given by path
+        config: Configuration used to substitute variables in a repository path
 
     Returns:
         A Repo object capable of determining the path to the package file
@@ -1074,7 +1076,9 @@ def get_repository(
     # Figure out where the new package should live
     repo_path = args.repo
     if repo_path is not None:
-        repo = spack.repo.Repo(repo_path, cache=cache)
+        repo = spack.repo.Repo(
+            spack.config.canonicalize_path(repo_path, config=config), cache=cache
+        )
         if spec.namespace and spec.namespace != repo.namespace:
             tty.die(
                 "Can't create package with namespace {0} in repo with namespace {1}".format(
@@ -1112,7 +1116,7 @@ def create(parser, args, ctx):
     tty.msg("Created template for {0} package".format(package.name))
 
     # Create a directory for the new package
-    repo = get_repository(args, name, ctx.repo, ctx.misc_cache)
+    repo = get_repository(args, name, ctx.repo, ctx.misc_cache, ctx.config)
     pkg_path = repo.filename_for_package_name(package.name)
     if os.path.exists(pkg_path) and not args.force:
         tty.die(

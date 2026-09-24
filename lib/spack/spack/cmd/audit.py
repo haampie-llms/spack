@@ -56,7 +56,7 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
 def configs(parser, args, ctx):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        reports = spack.audit.run_group(args.subcommand)
+        reports = spack.audit.run_group(args.subcommand, repo=ctx.repo, config=ctx.config)
         _process_reports(reports)
 
 
@@ -71,7 +71,7 @@ def _ensure_repos_are_valid(ctx: spack.context.SpackContext) -> None:
 
 def packages(parser, args, ctx):
     pkgs = args.name or ctx.repo.all_package_names()
-    reports = spack.audit.run_group(args.subcommand, pkgs=pkgs)
+    reports = spack.audit.run_group(args.subcommand, pkgs=pkgs, repo=ctx.repo, config=ctx.config)
     _process_reports(reports)
 
 
@@ -81,7 +81,7 @@ def packages_https(parser, args, ctx):
         args.subparser.error("please specify one or more packages to audit, or --all")
 
     pkgs = args.name or ctx.repo.all_package_names()
-    reports = spack.audit.run_group(args.subcommand, pkgs=pkgs)
+    reports = spack.audit.run_group(args.subcommand, pkgs=pkgs, repo=ctx.repo, config=ctx.config)
     _process_reports(reports)
 
 
@@ -89,11 +89,13 @@ def externals(parser, args, ctx):
     if args.list_externals:
         msg = "@*{The following packages have detection tests:}"
         tty.msg(cl.colorize(msg))
-        spack.util.tty.colify.colify(spack.audit.packages_with_detection_tests(), indent=2)
+        spack.util.tty.colify.colify(spack.audit.packages_with_detection_tests(ctx.repo), indent=2)
         return
 
     pkgs = args.name or ctx.repo.all_package_names()
-    reports = spack.audit.run_group(args.subcommand, pkgs=pkgs, debug_log=tty.debug)
+    reports = spack.audit.run_group(
+        args.subcommand, pkgs=pkgs, debug_log=tty.debug, repo=ctx.repo, config=ctx.config
+    )
     _process_reports(reports)
 
 

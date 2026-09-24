@@ -11,6 +11,7 @@ import sys
 from typing import IO, Dict, List, Optional, Set, Tuple
 
 import spack.repo
+import spack.util.file_cache
 import spack.util.naming
 import spack.util.spack_yaml
 
@@ -32,7 +33,11 @@ def _same_contents(f: str, g: str) -> bool:
 
 
 def migrate_v1_to_v2(
-    repo: spack.repo.Repo, *, patch_file: Optional[IO[bytes]], err: IO[str] = sys.stderr
+    repo: spack.repo.Repo,
+    *,
+    patch_file: Optional[IO[bytes]],
+    cache: spack.util.file_cache.FileCache,
+    err: IO[str] = sys.stderr,
 ) -> Tuple[bool, Optional[spack.repo.Repo]]:
     """To upgrade a repo from Package API v1 to v2 we need to:
     1. ensure ``spack_repo/<namespace>`` parent dirs to the ``repo.yaml`` file.
@@ -219,7 +224,7 @@ def migrate_v1_to_v2(
     if not patch_file:
         with open(os.path.join(new_root, "repo.yaml"), "w", encoding="utf-8") as f:
             spack.util.spack_yaml.dump(updated_config, f)
-        updated_repo = spack.repo.from_path(new_root)
+        updated_repo = spack.repo.from_path(new_root, cache=cache)
     else:
         patch_file.write(b"\n")
         updated_repo = repo  # compute the import diff on the v1 repo since v2 doesn't exist yet

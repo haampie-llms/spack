@@ -108,11 +108,11 @@ def test_all_package_names_is_cached_correctly(mock_packages: RepoPath):
 
 
 def test_all_package_names_is_updated_on_repo_changes(
-    mock_packages: RepoPath, repo_builder: RepoBuilder
+    mock_packages: RepoPath, repo_builder: RepoBuilder, ctx: SpackContext
 ):
     """Package names are cached, but changing the search path drops the cache."""
     repo_builder.add_package("pkg-in-extra-repo")
-    extra_repo = spack.repo.from_path(repo_builder.root)
+    extra_repo = spack.repo.from_path(repo_builder.root, cache=ctx.misc_cache)
     repos = RepoPath(*mock_packages.repos)
     assert "pkg-in-extra-repo" not in repos.all_package_names()
 
@@ -136,7 +136,7 @@ def test_use_repositories_doesnt_change_class(mock_packages):
 
 
 def test_use_repositories_with_unmaterialized_path(
-    tmp_path: pathlib.Path, config: Configuration, monkeypatch
+    tmp_path: pathlib.Path, config: Configuration, monkeypatch, ctx: SpackContext
 ):
     """Tests that use_repositories restores the repositories from config even when the global
     PATH singleton is materialized for the first time inside the context manager. Materializing
@@ -146,7 +146,9 @@ def test_use_repositories_with_unmaterialized_path(
     (tmp_path / "repo.yaml").write_text("repo:\n  namespace: myrepo\n")
 
     monkeypatch.setattr(
-        spack.repo, "PATH", Singleton(lambda: spack.repo.create_and_enable(config))
+        spack.repo,
+        "PATH",
+        Singleton(lambda: spack.repo.create_and_enable(config, cache=ctx.misc_cache)),
     )
 
     with spack.repo.use_repositories(str(tmp_path)) as repo:
@@ -156,7 +158,7 @@ def test_use_repositories_with_unmaterialized_path(
 
 
 def test_env_activate_with_unmaterialized_path(
-    tmp_path: pathlib.Path, config: Configuration, monkeypatch
+    tmp_path: pathlib.Path, config: Configuration, monkeypatch, ctx: SpackContext
 ):
     """Tests that env deactivation restores the repositories from config even when activation
     is the first to touch the global PATH singleton. Materializing it after pushing the env
@@ -171,7 +173,9 @@ spack:
     )
 
     monkeypatch.setattr(
-        spack.repo, "PATH", Singleton(lambda: spack.repo.create_and_enable(config))
+        spack.repo,
+        "PATH",
+        Singleton(lambda: spack.repo.create_and_enable(config, cache=ctx.misc_cache)),
     )
 
     env = spack.environment.Environment(tmp_path)
@@ -665,7 +669,7 @@ def test_mock_builtin_repo(mock_packages: RepoPath):
     assert spack.repo.builtin_repo(mock_packages) is mock_packages.get_repo("builtin_mock")
 
 
-def test_parse_config_descriptor_git_1(tmp_path: pathlib.Path):
+def test_parse_config_descriptor_git_1(tmp_path: pathlib.Path, ctx: SpackContext):
     descriptor = spack.repo.parse_config_descriptor(
         name="name",
         descriptor={
@@ -673,6 +677,7 @@ def test_parse_config_descriptor_git_1(tmp_path: pathlib.Path):
             "destination": str(tmp_path / "some/destination"),
         },
         lock=spack.util.lock.Lock(str(tmp_path / "x"), enable=False),
+        config=ctx.config,
     )
 
     assert isinstance(descriptor, spack.repo.RemoteRepoDescriptor)
@@ -682,17 +687,18 @@ def test_parse_config_descriptor_git_1(tmp_path: pathlib.Path):
     assert descriptor.relative_paths is None
 
 
-def test_parse_config_descriptor_git_2(tmp_path: pathlib.Path):
+def test_parse_config_descriptor_git_2(tmp_path: pathlib.Path, ctx: SpackContext):
     descriptor = spack.repo.parse_config_descriptor(
         name="name",
         descriptor={"git": str(tmp_path / "repo.git"), "paths": ["some/path"]},
         lock=spack.util.lock.Lock(str(tmp_path / "x"), enable=False),
+        config=ctx.config,
     )
     assert isinstance(descriptor, spack.repo.RemoteRepoDescriptor)
     assert descriptor.relative_paths == ["some/path"]
 
 
-def test_remote_descriptor_no_git(tmp_path: pathlib.Path):
+def test_remote_descriptor_no_git(tmp_path: pathlib.Path, ctx: SpackContext):
     """Test that descriptor fails without git."""
     descriptor = spack.repo.parse_config_descriptor(
         name="name",
@@ -701,6 +707,7 @@ def test_remote_descriptor_no_git(tmp_path: pathlib.Path):
             "destination": str(tmp_path / "some/destination"),
         },
         lock=spack.util.lock.Lock(str(tmp_path / "x"), enable=False),
+        config=ctx.config,
     )
 
     descriptor.initialize(fetch=True, git=None)
@@ -709,7 +716,7 @@ def test_remote_descriptor_no_git(tmp_path: pathlib.Path):
     assert descriptor.error == "Git executable not found"
 
 
-def test_remote_descriptor_update_no_git(tmp_path: pathlib.Path):
+def test_remote_descriptor_update_no_git(tmp_path: pathlib.Path, ctx: SpackContext):
     """Test that descriptor fails without git."""
     descriptor = spack.repo.parse_config_descriptor(
         name="name",
@@ -718,6 +725,7 @@ def test_remote_descriptor_update_no_git(tmp_path: pathlib.Path):
             "destination": str(tmp_path / "some/destination"),
         },
         lock=spack.util.lock.Lock(str(tmp_path / "x"), enable=False),
+        config=ctx.config,
     )
 
     assert isinstance(descriptor, spack.repo.RemoteRepoDescriptor)
@@ -726,24 +734,26 @@ def test_remote_descriptor_update_no_git(tmp_path: pathlib.Path):
         descriptor.update(git=None)
 
 
-def test_parse_config_descriptor_local(tmp_path: pathlib.Path):
+def test_parse_config_descriptor_local(tmp_path: pathlib.Path, ctx: SpackContext):
     descriptor = spack.repo.parse_config_descriptor(
         name="name",
         descriptor=str(tmp_path / "local_repo"),
         lock=spack.util.lock.Lock(str(tmp_path / "x"), enable=False),
+        config=ctx.config,
     )
     assert isinstance(descriptor, spack.repo.LocalRepoDescriptor)
     assert descriptor.name == "name"
     assert descriptor.path == str(tmp_path / "local_repo")
 
 
-def test_parse_config_descriptor_no_git(tmp_path: pathlib.Path):
+def test_parse_config_descriptor_no_git(tmp_path: pathlib.Path, ctx: SpackContext):
     """Test that we can parse a descriptor without a git key."""
     with pytest.raises(RuntimeError, match="Invalid configuration for repository"):
         spack.repo.parse_config_descriptor(
             name="name",
             descriptor={"destination": str(tmp_path / "some/destination"), "paths": ["some/path"]},
             lock=spack.util.lock.Lock(str(tmp_path / "x"), enable=False),
+            config=ctx.config,
         )
 
 

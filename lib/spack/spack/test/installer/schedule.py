@@ -9,7 +9,6 @@ from typing import Dict, List, Optional, Set, Tuple
 
 import pytest
 
-import spack.context
 import spack.deptypes as dt
 import spack.error
 import spack.spec
@@ -237,7 +236,7 @@ class TestBuildGraph:
         assert diamond_dag["dep2"].dag_hash() in graph.child_to_parent[shared_hash]
 
     def test_pruning_installed_specs(
-        self, mock_specs: Dict[str, Spec], temporary_store: Store, ctx: spack.context.SpackContext
+        self, mock_specs: Dict[str, Spec], temporary_store: Store, ctx: SpackContext
     ):
         """Test that installed specs are correctly pruned from the graph."""
         # Install dep2 in the database
@@ -262,7 +261,7 @@ class TestBuildGraph:
         assert len(graph.parent_to_child[mock_specs["dep1"].dag_hash()]) == 0
 
     def test_pruning_with_shared_dependency_partially_installed(
-        self, diamond_dag: Dict[str, Spec], temporary_store: Store, ctx: spack.context.SpackContext
+        self, diamond_dag: Dict[str, Spec], temporary_store: Store, ctx: SpackContext
     ):
         """Test that pruning a shared dependency correctly updates all parents."""
         # Install the shared dependency
@@ -285,7 +284,7 @@ class TestBuildGraph:
         assert len(graph.parent_to_child[diamond_dag["dep2"].dag_hash()]) == 0
 
     def test_overwrite_set_prevents_pruning(
-        self, mock_specs: Dict[str, Spec], temporary_store: Store, ctx: spack.context.SpackContext
+        self, mock_specs: Dict[str, Spec], temporary_store: Store, ctx: SpackContext
     ):
         """Test that specs in overwrite_set are not pruned even if installed."""
         # Install dep2 in the database
@@ -312,10 +311,7 @@ class TestBuildGraph:
         assert mock_specs["dep1"].dag_hash() in graph.child_to_parent[dep2.dag_hash()]
 
     def test_installed_root_excludes_build_deps_even_when_requested(
-        self,
-        specs_with_build_deps: Dict[str, Spec],
-        temporary_store: Store,
-        ctx: spack.context.SpackContext,
+        self, specs_with_build_deps: Dict[str, Spec], temporary_store: Store, ctx: SpackContext
     ):
         """Test that installed root specs never include build deps, even with
         include_build_deps=True."""
@@ -382,7 +378,7 @@ class TestBuildGraph:
         assert specs_with_build_deps["all_dep"].dag_hash() in graph.nodes
 
     def test_install_deps_false_with_all_deps_installed(
-        self, mock_specs: Dict[str, Spec], temporary_store: Store, ctx: spack.context.SpackContext
+        self, mock_specs: Dict[str, Spec], temporary_store: Store, ctx: SpackContext
     ):
         """Test successful package-only install when all dependencies are already installed."""
         # Install all dependencies
@@ -407,10 +403,7 @@ class TestBuildGraph:
         assert len(graph.parent_to_child.get(mock_specs["root"].dag_hash(), [])) == 0
 
     def test_pruning_creates_cartesian_product_of_connections(
-        self,
-        complex_pruning_dag: Dict[str, Spec],
-        temporary_store: Store,
-        ctx: spack.context.SpackContext,
+        self, complex_pruning_dag: Dict[str, Spec], temporary_store: Store, ctx: SpackContext
     ):
         """Test that pruning creates full Cartesian product of parent-child connections.
 
@@ -480,7 +473,7 @@ class TestBuildGraph:
         assert middle_hash not in graph.child_to_parent
 
     def test_empty_graph_all_specs_installed(
-        self, mock_specs: Dict[str, Spec], temporary_store: Store, ctx: spack.context.SpackContext
+        self, mock_specs: Dict[str, Spec], temporary_store: Store, ctx: SpackContext
     ):
         """Test that the graph is empty when all specs are already installed."""
         # Install all specs in the DAG
@@ -503,7 +496,7 @@ class TestBuildGraph:
         assert len(graph.child_to_parent) == 0
 
     def test_empty_graph_install_package_false_all_deps_installed(
-        self, mock_specs: Dict[str, Spec], temporary_store: Store, ctx: spack.context.SpackContext
+        self, mock_specs: Dict[str, Spec], temporary_store: Store, ctx: SpackContext
     ):
         """Test empty graph when install_package=False and all dependencies are installed."""
         # Install all dependencies (but not the root)
@@ -528,7 +521,7 @@ class TestBuildGraph:
         assert len(graph.child_to_parent) == 0
 
     def test_pruning_leaf_node(
-        self, mock_specs: Dict[str, Spec], temporary_store: Store, ctx: spack.context.SpackContext
+        self, mock_specs: Dict[str, Spec], temporary_store: Store, ctx: SpackContext
     ):
         """Test that pruning a leaf node (no children) works correctly.
 
@@ -672,10 +665,7 @@ class TestBuildGraphTestDeps:
         assert specs_with_test_deps["dep_test_dep"].dag_hash() in graph.nodes
 
     def test_mark_explicit_spec_excludes_build_only_deps(
-        self,
-        specs_with_build_deps: Dict[str, Spec],
-        temporary_store: Store,
-        ctx: spack.context.SpackContext,
+        self, specs_with_build_deps: Dict[str, Spec], temporary_store: Store, ctx: SpackContext
     ):
         """An installed-implicit spec in explicit_set should only traverse link/run deps,
         not build-only deps."""
@@ -765,7 +755,7 @@ class TestExpandBuildDeps:
         assert specs["c"].dag_hash() not in pending
 
     def test_expand_build_deps_skips_installed_in_db(
-        self, temporary_store: Store, ctx: spack.context.SpackContext
+        self, temporary_store: Store, ctx: SpackContext
     ):
         """A --build--> C --link--> D. D installed in DB.
         After expand: C added, D NOT added. No edge C->D. C in pending."""
@@ -799,7 +789,7 @@ class TestExpandBuildDeps:
         assert specs["c"].dag_hash() in pending
 
     def test_expand_build_deps_reenqueues_original_when_all_deps_installed(
-        self, temporary_store: Store, ctx: spack.context.SpackContext
+        self, temporary_store: Store, ctx: SpackContext
     ):
         """A --build--> C. C installed in DB.
         After expand: C NOT added. A re-enqueued (no uninstalled children)."""
@@ -814,7 +804,7 @@ class TestExpandBuildDeps:
         assert specs["a"].dag_hash() in pending
 
     def test_expand_build_deps_no_deadlock_on_installed_dep(
-        self, temporary_store: Store, ctx: spack.context.SpackContext
+        self, temporary_store: Store, ctx: SpackContext
     ):
         """A --build--> C --link--> D. D installed in DB.
         No edge C->D in parent_to_child. C in pending."""
@@ -844,7 +834,7 @@ class TestExpandBuildDeps:
         assert not graph.has_unexpanded_build_deps(specs["a"].dag_hash())
 
     def test_expand_build_deps_does_not_mark_in_graph_spec_as_done(
-        self, temporary_store: Store, ctx: spack.context.SpackContext
+        self, temporary_store: Store, ctx: SpackContext
     ):
         """A --link--> B, A --link--> C, B --build--> C.
         C is in the graph (link dep of A) and installed in DB (simulating an overwrite build
@@ -943,7 +933,7 @@ class TestScheduleBuilds:
             lock.release_write()
 
     def test_already_installed_yields_newly_installed(
-        self, temporary_store, mock_packages, ctx: spack.context.SpackContext
+        self, temporary_store, mock_packages, ctx: SpackContext
     ):
         """A spec already in the DB is returned in newly_installed, not in to_start."""
         spec = self._make_spec("trivial-install-test-package")
@@ -995,7 +985,7 @@ class TestScheduleBuilds:
         assert len(pending) == 1
 
     def test_overwrite_installed_spec_is_started(
-        self, temporary_store, mock_packages, ctx: spack.context.SpackContext
+        self, temporary_store, mock_packages, ctx: SpackContext
     ):
         """A spec in the overwrite set is scheduled even when already installed."""
         spec = self._make_spec("trivial-install-test-package")
@@ -1034,7 +1024,7 @@ class TestScheduleBuilds:
             lock.release_write()
 
     def test_write_locked_read_locked_installed_yields_newly_installed(
-        self, temporary_store, mock_packages, monkeypatch, ctx: spack.context.SpackContext
+        self, temporary_store, mock_packages, monkeypatch, ctx: SpackContext
     ):
         """Write lock fails but read lock succeeds and spec is installed: treated as done.
 
@@ -1076,7 +1066,7 @@ class TestScheduleBuilds:
         assert pending == [spec.dag_hash()]  # spec stays in pending for retry
 
     def test_overwrite_handled_by_concurrent_process(
-        self, temporary_store, mock_packages, ctx: spack.context.SpackContext
+        self, temporary_store, mock_packages, ctx: SpackContext
     ):
         """When a spec in overwrite was installed AFTER overwrite_time, another process did it."""
         spec = self._make_spec("trivial-install-test-package")
@@ -1147,7 +1137,7 @@ class TestScheduleBuilds:
             lock.release_write()
 
     def test_overwrite_prefix_mismatch_raises(
-        self, temporary_store, mock_packages, ctx: spack.context.SpackContext
+        self, temporary_store, mock_packages, ctx: SpackContext
     ):
         """An overwrite install cannot proceed when the spec prefix differs from the DB path."""
         spec = self._make_spec("trivial-install-test-package")
@@ -1162,9 +1152,7 @@ class TestScheduleBuilds:
                 overwrite_time=time.time() + 100,
             )
 
-    def test_prefix_collision_raises(
-        self, temporary_store, mock_packages, ctx: spack.context.SpackContext
-    ):
+    def test_prefix_collision_raises(self, temporary_store, mock_packages, ctx: SpackContext):
         """A spec cannot be scheduled into a prefix already occupied by another spec."""
         installed = self._make_spec("trivial-install-test-package")
         self._mark_installed(installed, temporary_store, ctx=ctx)

@@ -5,6 +5,7 @@ import pytest
 
 import spack.audit
 from spack.config import Configuration
+from spack.context import SpackContext
 
 
 @pytest.mark.parametrize(
@@ -43,8 +44,8 @@ from spack.config import Configuration
         (["unconstrainable-conflict"], None),
     ],
 )
-def test_package_audits(packages, expected_errors, mock_packages):
-    reports = spack.audit.run_group("packages", pkgs=packages)
+def test_package_audits(packages, expected_errors, mock_packages, ctx: SpackContext):
+    reports = spack.audit.run_group("packages", pkgs=packages, repo=ctx.repo, config=ctx.config)
 
     # Check that errors were reported only for the expected failure
     actual_errors = [check for check, errors in reports if errors]
@@ -75,16 +76,23 @@ def test_package_audits(packages, expected_errors, mock_packages):
     ],
 )
 def test_config_audits(
-    mutable_config: Configuration, config_section, data, failing_check, mock_packages
+    mutable_config: Configuration,
+    config_section,
+    data,
+    failing_check,
+    mock_packages,
+    ctx: SpackContext,
 ):
     with mutable_config.override(config_section, data):
-        reports = spack.audit.run_group("configs")
+        reports = spack.audit.run_group("configs", repo=ctx.repo, config=ctx.config)
         assert any((check == failing_check) and errors for check, errors in reports)
 
 
-def test_when_combined_with_phase_callbacks(mock_packages):
+def test_when_combined_with_phase_callbacks(mock_packages, ctx: SpackContext):
     """Ensure @when on a method decorated with @run_before or @run_after is reported"""
-    errors = spack.audit.run_check("PKG-PROPERTIES", pkgs=["fail-test-audit-when-callback"])
+    errors = spack.audit.run_check(
+        "PKG-PROPERTIES", pkgs=["fail-test-audit-when-callback"], repo=ctx.repo, config=ctx.config
+    )
     details = [d for e in errors for d in e.details]
     assert any(
         "'callback_outside' is decorated with both @when and @run_before" in d for d in details

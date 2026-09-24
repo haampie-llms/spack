@@ -20,6 +20,7 @@ import pickle
 from types import ModuleType
 from typing import TYPE_CHECKING, Optional
 
+import spack.caches
 import spack.config
 import spack.paths
 import spack.platforms
@@ -125,7 +126,9 @@ class GlobalStateMarshaler:
             s3_client_cache.clear()
             return
         spack.config.CONFIG = self.config
-        spack.repo.enable_repo(spack.repo.RepoPath.from_config(self.config))
+        spack.repo.enable_repo(
+            spack.repo.RepoPath.from_config(self.config, cache=spack.caches.MISC_CACHE)
+        )
         spack.platforms.host = self.platform
         spack.store.STORE = self.store
         spack.paths.spack_working_dir = self.spack_working_dir

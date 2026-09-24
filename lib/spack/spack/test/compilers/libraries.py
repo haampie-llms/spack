@@ -14,6 +14,7 @@ import spack.util.executable
 import spack.util.file_cache
 import spack.util.filesystem as fs
 import spack.util.module_cmd
+from spack.context import SpackContext
 
 without_flag_output = "ld -L/path/to/first/lib -L/path/to/second/lib64"
 with_flag_output = "ld -L/path/to/first/with/flag/lib -L/path/to/second/lib64"
@@ -189,12 +190,14 @@ def test_detector_uses_the_cache_it_is_given(mock_packages, mock_gcc, monkeypatc
 
 
 def test_detector_reads_the_recipe_from_the_repo_it_is_given(
-    mock_packages, mock_gcc, repo_builder
+    mock_packages, mock_gcc, repo_builder, ctx: SpackContext
 ):
     """A detector reads the compiler recipe from the repositories it is given, so one given
     repositories without the compiler package cannot inspect the compiler.
     """
-    without_gcc = spack.repo.RepoPath(spack.repo.from_path(repo_builder.root))
+    without_gcc = spack.repo.RepoPath(
+        spack.repo.from_path(repo_builder.root, cache=ctx.misc_cache)
+    )
     detector = spack.compilers.libraries.CompilerPropertyDetector(mock_gcc, repo=without_gcc)
 
     with pytest.raises(spack.repo.UnknownEntityError):
