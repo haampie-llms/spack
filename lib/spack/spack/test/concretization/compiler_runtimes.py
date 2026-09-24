@@ -10,22 +10,22 @@ import pytest
 import spack.vendor.archspec.cpu
 
 import spack.concretize
-import spack.context
 import spack.database
 import spack.paths
 import spack.repo
 import spack.solver.asp
 import spack.spec
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.environment.environment import ViewDescriptor
 from spack.solver.reuse import reusable_external_specs
 from spack.version import Version
 
 
-def _concretize_with_reuse(*, root_str, reused_str):
+def _concretize_with_reuse(*, root_str, reused_str, ctx: SpackContext):
     reused_spec = spack.concretize.concretize_one(reused_str)
-    external_specs = reusable_external_specs(spack.context.default())
-    setup = spack.solver.asp.SpackSolverSetup(tests=False, context=spack.context.default())
+    external_specs = reusable_external_specs(ctx)
+    setup = spack.solver.asp.SpackSolverSetup(tests=False, context=ctx)
     driver = spack.solver.asp.PyclingoDriver()
     result, _, _ = driver.solve(
         setup, [spack.spec.Spec(f"{root_str}")], reuse=[reused_spec] + external_specs
@@ -116,14 +116,14 @@ def test_external_nodes_do_not_have_runtimes(
 )
 @pytest.mark.regression("44444")
 def test_reusing_specs_with_gcc_runtime(
-    root_str, reused_str, expected, nruntime, runtime_repo, mutable_config
+    root_str, reused_str, expected, nruntime, runtime_repo, mutable_config, ctx: SpackContext
 ):
     """Tests that we can reuse specs with a "gcc-runtime" leaf node. In particular, checks
     that the semantic for gcc-runtimes versions accounts for reused packages too.
 
     Reusable runtime versions should be lower, or equal, to that of parent nodes.
     """
-    root, reused_spec = _concretize_with_reuse(root_str=root_str, reused_str=reused_str)
+    root, reused_spec = _concretize_with_reuse(root_str=root_str, reused_str=reused_str, ctx=ctx)
 
     runtime_a = root.dependencies("gcc-runtime")[0]
     assert runtime_a.satisfies(expected["pkg-a"]), runtime_a.tree()
@@ -151,11 +151,12 @@ def test_views_can_handle_duplicate_runtime_nodes(
     tmp_path: pathlib.Path,
     monkeypatch,
     mutable_config,
+    ctx: SpackContext,
 ):
     """Tests that an environment is able to select the latest version of a runtime node to be
     linked in a view, in case more than one compatible version is in the DAG.
     """
-    root, reused_spec = _concretize_with_reuse(root_str=root_str, reused_str=reused_str)
+    root, reused_spec = _concretize_with_reuse(root_str=root_str, reused_str=reused_str, ctx=ctx)
 
     # Mock the installation status to allow selecting nodes for the view
     monkeypatch.setattr(spack.database.Database, "installed", lambda self, spec: True)
@@ -181,11 +182,15 @@ def test_runtimes_can_be_concretized_as_standalone(runtime_repo):
     assert gcc_runtime.version == gcc.version
 
 
-def test_runtimes_are_not_reused_if_compiler_not_used(runtime_repo, mutable_config):
+def test_runtimes_are_not_reused_if_compiler_not_used(
+    runtime_repo, mutable_config, ctx: SpackContext
+):
     """Tests that, if we can reuse specs with a more recent runtime version than the compiler we
     asked for, we will not end-up with a DAG using the recent runtime, and the old compiler.
     """
-    root, reused = _concretize_with_reuse(root_str="pkg-a %gcc@9", reused_str="pkg-a %gcc@10")
+    root, reused = _concretize_with_reuse(
+        root_str="pkg-a %gcc@9", reused_str="pkg-a %gcc@10", ctx=ctx
+    )
 
     assert "gcc-runtime" in root
     gcc_runtime, gcc = root["gcc-runtime"], root["gcc"]

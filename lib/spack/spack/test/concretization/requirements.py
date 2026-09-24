@@ -7,7 +7,6 @@ import pytest
 
 import spack.concretize
 import spack.config
-import spack.context
 import spack.error
 import spack.installer
 import spack.package_base
@@ -20,6 +19,7 @@ import spack.store
 import spack.util.spack_yaml as syaml
 import spack.version
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.installer import PackageInstaller
 from spack.solver.asp import InternalConcretizerError, UnsatisfiableSpecError
 from spack.solver.requirements import RequirementParser
@@ -1163,7 +1163,7 @@ def test_forward_multi_valued_variant_using_requires(
 
 
 def test_strong_preferences_higher_priority_than_reuse(
-    concretize_scope, mock_packages, mutable_config: Configuration
+    concretize_scope, mock_packages, mutable_config: Configuration, ctx: SpackContext
 ):
     """Tests that strong preferences have a higher priority than reusing specs."""
     reused_spec = spack.concretize.concretize_one("adios2~bzip2")
@@ -1172,8 +1172,8 @@ def test_strong_preferences_higher_priority_than_reuse(
 
     # Check that without further configuration adios2 is reused
     with mutable_config.override("concretizer:reuse", True):
-        solver = spack.solver.asp.Solver(context=spack.context.default())
-        setup = spack.solver.asp.SpackSolverSetup(context=spack.context.default())
+        solver = spack.solver.asp.Solver(context=ctx)
+        setup = spack.solver.asp.SpackSolverSetup(context=ctx)
         result, _, _ = solver.driver.solve(setup, root_specs, reuse=reuse_nodes)
         ascent = result.specs[0]
     assert ascent["adios2"].dag_hash() == reused_spec.dag_hash(), ascent
@@ -1188,8 +1188,8 @@ def test_strong_preferences_higher_priority_than_reuse(
 """
     )
     with mutable_config.override("concretizer:reuse", True):
-        solver = spack.solver.asp.Solver(context=spack.context.default())
-        setup = spack.solver.asp.SpackSolverSetup(context=spack.context.default())
+        solver = spack.solver.asp.Solver(context=ctx)
+        setup = spack.solver.asp.SpackSolverSetup(context=ctx)
         result, _, _ = solver.driver.solve(setup, root_specs, reuse=reuse_nodes)
         ascent = result.specs[0]
 
@@ -1198,8 +1198,8 @@ def test_strong_preferences_higher_priority_than_reuse(
 
     # A preference is still preference, so we can override from input
     with mutable_config.override("concretizer:reuse", True):
-        solver = spack.solver.asp.Solver(context=spack.context.default())
-        setup = spack.solver.asp.SpackSolverSetup(context=spack.context.default())
+        solver = spack.solver.asp.Solver(context=ctx)
+        setup = spack.solver.asp.SpackSolverSetup(context=ctx)
         result, _, _ = solver.driver.solve(
             setup, [Spec("ascent+adios2^adios2~bzip2")], reuse=reuse_nodes
         )
@@ -1317,6 +1317,7 @@ def test_requirements_on_compilers_and_reuse(
     packages_yaml,
     expected_reuse,
     expected_contraints,
+    ctx: SpackContext,
 ):
     """Tests that we can require compilers with `%` in configuration files, and still get reuse
     of specs (even though reused specs have no build dependency in the ASP encoding).
@@ -1327,11 +1328,11 @@ def test_requirements_on_compilers_and_reuse(
     reused_nodes = list(reused_spec.traverse())
     update_packages_config(packages_yaml)
     root_specs = [Spec(input_spec)]
-    external_specs = reusable_external_specs(spack.context.default())
+    external_specs = reusable_external_specs(ctx)
 
     with mutable_config.override("concretizer:reuse", True):
-        solver = spack.solver.asp.Solver(context=spack.context.default())
-        setup = spack.solver.asp.SpackSolverSetup(context=spack.context.default())
+        solver = spack.solver.asp.Solver(context=ctx)
+        setup = spack.solver.asp.SpackSolverSetup(context=ctx)
         result, _, _ = solver.driver.solve(setup, root_specs, reuse=reused_nodes + external_specs)
         pkga = result.specs[0]
     is_pkgb_reused = pkga["pkg-b"].dag_hash() == reused_spec.dag_hash()
@@ -1486,6 +1487,7 @@ def test_language_preferences_and_reuse(
     concretize_scope,
     mutable_config: Configuration,
     mock_packages,
+    ctx: SpackContext,
 ):
     """Tests that language preferences are respected when reusing specs."""
 
@@ -1510,12 +1512,12 @@ packages:
     update_packages_config(packages_yaml)
     initial_mpileaks = spack.concretize.concretize_one("mpileaks+debug")
     reused_nodes = list(initial_mpileaks.traverse())
-    external_specs = reusable_external_specs(spack.context.default())
+    external_specs = reusable_external_specs(ctx)
 
     # Ask for just "mpileaks" and check the spec is reused
     with mutable_config.override("concretizer:reuse", True):
-        solver = spack.solver.asp.Solver(context=spack.context.default())
-        setup = spack.solver.asp.SpackSolverSetup(context=spack.context.default())
+        solver = spack.solver.asp.Solver(context=ctx)
+        setup = spack.solver.asp.SpackSolverSetup(context=ctx)
         result, _, _ = solver.driver.solve(
             setup, [Spec("mpileaks")], reuse=reused_nodes + external_specs
         )
@@ -1543,8 +1545,8 @@ packages:
 """
     update_packages_config(packages_yaml)
     with mutable_config.override("concretizer:reuse", True):
-        solver = spack.solver.asp.Solver(context=spack.context.default())
-        setup = spack.solver.asp.SpackSolverSetup(context=spack.context.default())
+        solver = spack.solver.asp.Solver(context=ctx)
+        setup = spack.solver.asp.SpackSolverSetup(context=ctx)
         result, _, _ = solver.driver.solve(
             setup, [Spec("mpileaks")], reuse=reused_nodes + external_specs
         )
