@@ -6,7 +6,7 @@ import json
 import os
 import pathlib
 import tempfile
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple, Optional
 
 import spack.binary_distribution
 import spack.config
@@ -21,6 +21,9 @@ import spack.util.parallel
 import spack.util.url as url_util
 import spack.util.web as web_util
 from spack.util import tty
+
+if TYPE_CHECKING:
+    import spack.repo
 
 from .enums import InstallRecordStatus
 from .url_buildcache import (
@@ -267,6 +270,7 @@ def migrate(
     *,
     config: spack.config.Configuration,
     client: web_util.NetworkClient,
+    repo_provider: Optional["spack.repo.RepoProvider"] = None,
 ) -> None:
     """Perform migration of the given mirror
 
@@ -309,7 +313,7 @@ def migrate(
         with open(index_path, "w", encoding="utf-8") as fd:
             fd.write(contents)
 
-        db = spack.binary_distribution.BuildCacheDatabase(tmpdir)
+        db = spack.binary_distribution.BuildCacheDatabase(tmpdir, repo_provider=repo_provider)
         db._read_from_file(pathlib.Path(index_path))
 
         specs_to_migrate = [

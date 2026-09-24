@@ -26,6 +26,7 @@ import time
 from json import JSONDecoder
 from typing import (
     IO,
+    TYPE_CHECKING,
     Any,
     Callable,
     Container,
@@ -42,7 +43,6 @@ from typing import (
 )
 
 import spack
-import spack.repo
 
 try:
     import uuid
@@ -69,6 +69,9 @@ from spack.error import ExplicitDatabaseUpgradeError, SpackError
 from spack.util import tty
 from spack.util.crypto import bit_length
 from spack.util.socket import _gethostname
+
+if TYPE_CHECKING:
+    import spack.repo
 
 from .enums import InstallRecordStatus
 
@@ -572,6 +575,7 @@ class Database:
         is_upstream: bool = False,
         lock_cfg: LockConfiguration = DEFAULT_LOCK_CFG,
         layout: Optional[DirectoryLayout] = None,
+        repo_provider: Optional["spack.repo.RepoProvider"] = None,
     ) -> None:
         """Database for Spack installations.
 
@@ -591,8 +595,10 @@ class Database:
             is_upstream: whether this repository is an upstream.
             lock_cfg: configuration for the locks to be used by this repository.
                 Relevant only if the repository is not an upstream.
+            repo_provider: repositories to read records of spec formats before v6 with
         """
         self.root = root
+        self.repo_provider = repo_provider
         self.database_directory = pathlib.Path(self.root) / _DB_DIRNAME
         self.layout = layout
 
@@ -636,8 +642,8 @@ class Database:
 
         self.upstream_dbs = list(upstream_dbs) if upstream_dbs else []
 
-        self._write_transaction_impl = lk.WriteTransaction
-        self._read_transaction_impl = lk.ReadTransaction
+        self._write_transaction_impl: Callable[..., Any] = lk.WriteTransaction
+        self._read_transaction_impl: Callable[..., Any] = lk.ReadTransaction
         self._db_version: Optional[vn.ConcreteVersion] = None
 
     @property
@@ -930,8 +936,8 @@ class Database:
 
         # Pass 4: reconstruct the virtual data that spec formats before v6 omit
         if spec_reader.SPEC_VERSION < 6:
-            spack.repo.reconstruct_virtuals(
-                [rec.spec for rec in data.values()], repo=spack.repo.PATH
+            spack.spec.reconstruct_virtuals(
+                [rec.spec for rec in data.values()], self.repo_provider, spec_reader.SPEC_VERSION
             )
 
         self._data = data

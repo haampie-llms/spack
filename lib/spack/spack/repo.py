@@ -871,6 +871,14 @@ class RepoPath:
         for name in self.all_package_names():
             yield self.get_pkg_class(name)
 
+    def freeze_provided_virtuals(self, specs: Iterable["spack.spec.Spec"]) -> None:
+        """Freeze the provided virtuals of ``specs`` with these repositories."""
+        freeze_provided_virtuals(specs, repo=self)
+
+    def reconstruct_virtuals(self, specs: Iterable["spack.spec.Spec"]) -> None:
+        """Reconstruct the virtuals of ``specs`` read from spec formats before v6."""
+        reconstruct_virtuals(specs, repo=self)
+
     @property
     def provider_index(self) -> spack.provider_index.ProviderIndex:
         """Merged ProviderIndex from all Repos in the RepoPath."""
@@ -2199,6 +2207,10 @@ def _provided_specs(
             continue
         provided.append(result)
     return tuple(provided)
+
+
+#: Returns the repositories to read old spec formats with, called only when needed
+RepoProvider = Callable[[], RepoPath]
 
 
 def attach_packages(

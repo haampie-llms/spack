@@ -8,7 +8,7 @@ import re
 import shutil
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import spack.config
 import spack.error
@@ -18,6 +18,9 @@ import spack.util.filesystem as fs
 import spack.util.spack_json as sjson
 from spack.error import SpackError
 from spack.util.filesystem import readlink
+
+if TYPE_CHECKING:
+    import spack.repo
 
 default_projections = {
     "all": "{architecture.platform}-{architecture.target}/{name}-{version}-{hash}"
@@ -38,24 +41,30 @@ def _check_concrete(spec: "spack.spec.Spec") -> None:
         raise ValueError("Specs passed to a DirectoryLayout must be concrete!")
 
 
-def _get_spec(prefix: str) -> Optional["spack.spec.Spec"]:
+def _get_spec(
+    prefix: str, repo_provider: Optional["spack.repo.RepoProvider"]
+) -> Optional["spack.spec.Spec"]:
     """Returns a spec if the prefix contains a spec file in the .spack subdir"""
     for f in ("spec.json", "spec.yaml"):
         try:
-            return spack.spec.Spec.from_specfile(os.path.join(prefix, ".spack", f))
+            return spack.spec.Spec.from_specfile(
+                os.path.join(prefix, ".spack", f), repo_provider=repo_provider
+            )
         except Exception:
             continue
     return None
 
 
-def specs_from_metadata_dirs(root: str) -> List["spack.spec.Spec"]:
+def specs_from_metadata_dirs(
+    root: str, repo_provider: Optional["spack.repo.RepoProvider"] = None
+) -> List["spack.spec.Spec"]:
     stack = [root]
     specs = []
 
     while stack:
         prefix = stack.pop()
 
-        spec = _get_spec(prefix)
+        spec = _get_spec(prefix, repo_provider)
 
         if spec:
             spec.set_prefix(prefix)
@@ -96,8 +105,11 @@ class DirectoryLayout:
         projections: Optional[Dict[str, str]] = None,
         hash_length: Optional[int] = None,
         env_path: Optional[str] = None,
+        repo_provider: Optional["spack.repo.RepoProvider"] = None,
     ) -> None:
         self.root = root
+        #: Repositories to read spec files of formats before v6 with
+        self.repo_provider = repo_provider
         #: Environment of the configuration the layout is read from, for ``$env`` in projections
         self.env_path = env_path
         projections = projections or default_projections
@@ -164,10 +176,10 @@ class DirectoryLayout:
             with open(path, encoding="utf-8") as f:
                 extension = os.path.splitext(path)[-1].lower()
                 if extension == ".json":
-                    spec = spack.spec.Spec.from_json(f)
+                    spec = spack.spec.Spec.from_json(f, repo_provider=self.repo_provider)
                 elif extension == ".yaml":
                     # Too late for conversion; spec_file_path() already called.
-                    spec = spack.spec.Spec.from_yaml(f)
+                    spec = spack.spec.Spec.from_yaml(f, repo_provider=self.repo_provider)
                 else:
                     raise SpecReadError(f"Did not recognize spec file extension: {extension}")
         except Exception as e:
@@ -344,7 +356,7 @@ class DirectoryLayout:
         Their prefix is set to the directory containing the ``.spack`` directory. Note that these
         specs may follow a different layout than the current layout if it was changed after
         installation."""
-        return specs_from_metadata_dirs(self.root)
+        return specs_from_metadata_dirs(self.root, self.repo_provider)
 
     def deprecated_for(
         self, specs: List["spack.spec.Spec"]
@@ -362,7 +374,9 @@ class DirectoryLayout:
             with deprecated as entries:
                 for entry in entries:
                     try:
-                        deprecated_spec = spack.spec.Spec.from_specfile(entry.path)
+                        deprecated_spec = spack.spec.Spec.from_specfile(
+                            entry.path, repo_provider=self.repo_provider
+                        )
                         spec_with_deprecated.append((spec, deprecated_spec))
                     except Exception:
                         continue
