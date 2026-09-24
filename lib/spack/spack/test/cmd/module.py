@@ -9,12 +9,14 @@ import pytest
 
 import spack.concretize
 import spack.config
+import spack.context
 import spack.main
 import spack.modules
 import spack.modules.lmod
 import spack.repo
 import spack.store
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.installer import PackageInstaller
 
 module = spack.main.SpackCommand("module")
@@ -36,7 +38,10 @@ def ensure_module_files_are_there(mock_packages_repo, mock_store, mock_configura
 def _module_files(module_type, *specs):
     specs = [spack.concretize.concretize_one(x) for x in specs]
     writer_cls = spack.modules.module_types[module_type]
-    return [writer_cls.from_spec(spec, "default").layout.filename for spec in specs]
+    return [
+        writer_cls.from_spec(spec, "default", ctx=spack.context.default()).layout.filename
+        for spec in specs
+    ]
 
 
 @pytest.fixture(
@@ -174,7 +179,7 @@ writer_cls = spack.modules.lmod.LmodModulefileWriter
 
 
 @pytest.mark.db
-def test_setdefault_command(mutable_database, mutable_config: Configuration):
+def test_setdefault_command(mutable_database, mutable_config: Configuration, ctx: SpackContext):
     data = {
         "default": {
             "enable": ["lmod"],
@@ -192,8 +197,8 @@ def test_setdefault_command(mutable_database, mutable_config: Configuration):
     PackageInstaller([s.package for s in specs], explicit=True, fake=True).install()
 
     writers = {
-        preferred: writer_cls.from_spec(specs[1], "default"),
-        other_spec: writer_cls.from_spec(specs[0], "default"),
+        preferred: writer_cls.from_spec(specs[1], "default", ctx=ctx),
+        other_spec: writer_cls.from_spec(specs[0], "default", ctx=ctx),
     }
 
     # Create two module files for the same software

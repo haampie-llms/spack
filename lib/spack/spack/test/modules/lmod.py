@@ -18,6 +18,7 @@ import spack.modules.lmod
 import spack.spec
 import spack.util.environment
 from spack.config import Configuration
+from spack.context import SpackContext
 
 mpich_spec_string = "mpich@3.0.4"
 mpileaks_spec_string = "mpileaks"
@@ -485,14 +486,14 @@ class TestLmod:
 
         assert str(spec.os) not in path
 
-    def test_hide_implicits(self, module_configuration, temporary_store):
+    def test_hide_implicits(self, module_configuration, temporary_store, ctx: SpackContext):
         """Tests the addition and removal of hide command in modulerc."""
         module_configuration("hide_implicits")
 
         spec = spack.concretize.concretize_one("mpileaks@2.3")
 
         # mpileaks is defined as implicit, thus hide command should appear in modulerc
-        writer = writer_cls.from_spec(spec, "default", False)
+        writer = writer_cls.from_spec(spec, "default", False, ctx=ctx)
         writer.write()
         assert os.path.exists(writer.layout.modulerc)
         with open(writer.layout.modulerc, encoding="utf-8") as f:
@@ -514,7 +515,7 @@ class TestLmod:
 
         # when mpileaks becomes explicit, its file name changes (hash_length = 0), meaning an
         # extra module file is created; the old one still exists and remains hidden.
-        writer = writer_cls.from_spec(spec, "default", True)
+        writer = writer_cls.from_spec(spec, "default", True, ctx=ctx)
         writer.write()
         assert os.path.exists(writer.layout.modulerc)
         with open(writer.layout.modulerc, encoding="utf-8") as f:
@@ -524,13 +525,13 @@ class TestLmod:
 
         # after removing both the implicit and explicit module, the modulerc file would be empty
         # and should be removed.
-        writer_cls.from_spec(spec, "default", False).remove()
-        writer_cls.from_spec(spec, "default", True).remove()
+        writer_cls.from_spec(spec, "default", False, ctx=ctx).remove()
+        writer_cls.from_spec(spec, "default", True, ctx=ctx).remove()
         assert not os.path.exists(writer.layout.modulerc)
         assert not os.path.exists(writer.layout.filename)
 
         # implicit module is removed
-        writer = writer_cls.from_spec(spec, "default", False)
+        writer = writer_cls.from_spec(spec, "default", False, ctx=ctx)
         writer.write()
         assert os.path.exists(writer.layout.filename)
         assert os.path.exists(writer.layout.modulerc)
@@ -539,13 +540,13 @@ class TestLmod:
         assert not os.path.exists(writer.layout.filename)
 
         # three versions of mpileaks are implicit
-        writer = writer_cls.from_spec(spec, "default", False)
+        writer = writer_cls.from_spec(spec, "default", False, ctx=ctx)
         writer.write(overwrite=True)
         spec_alt1 = spack.concretize.concretize_one("mpileaks@2.2")
         spec_alt2 = spack.concretize.concretize_one("mpileaks@2.1")
-        writer_alt1 = writer_cls.from_spec(spec_alt1, "default", False)
+        writer_alt1 = writer_cls.from_spec(spec_alt1, "default", False, ctx=ctx)
         writer_alt1.write(overwrite=True)
-        writer_alt2 = writer_cls.from_spec(spec_alt2, "default", False)
+        writer_alt2 = writer_cls.from_spec(spec_alt2, "default", False, ctx=ctx)
         writer_alt2.write(overwrite=True)
         assert os.path.exists(writer.layout.modulerc)
         with open(writer.layout.modulerc, encoding="utf-8") as f:

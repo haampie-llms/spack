@@ -813,7 +813,7 @@ def print_setup_info(*info):
     # print roots for all module systems
     module_to_roots = {"tcl": list(), "lmod": list()}
     for name in module_to_roots.keys():
-        path = root_path(name, "default")
+        path = root_path(name, "default", spack.config.CONFIG)
         module_to_roots[name].append(path)
 
     other_spack_instances = spack.config.CONFIG.get("upstreams") or {}

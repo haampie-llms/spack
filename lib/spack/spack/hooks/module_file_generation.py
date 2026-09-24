@@ -4,25 +4,30 @@
 
 from typing import Optional, Set
 
-import spack.config
+import spack.context
 import spack.modules
 import spack.spec
 from spack.util import tty
 
 
 def _for_each_enabled(
-    spec: spack.spec.Spec, method_name: str, explicit: Optional[bool] = None
+    spec: spack.spec.Spec,
+    method_name: str,
+    ctx: spack.context.SpackContext,
+    explicit: Optional[bool] = None,
 ) -> None:
     """Calls a method for each enabled module"""
-    set_names: Set[str] = set(spack.config.CONFIG.get("modules", {}).keys())
+    set_names: Set[str] = set(ctx.config.get("modules", {}).keys())
     for name in set_names:
-        enabled = spack.config.CONFIG.get(f"modules:{name}:enable")
+        enabled = ctx.config.get(f"modules:{name}:enable")
         if not enabled:
             tty.debug("NO MODULE WRITTEN: list of enabled module files is empty")
             continue
 
         for module_type in enabled:
-            generator = spack.modules.module_types[module_type].from_spec(spec, name, explicit)
+            generator = spack.modules.module_types[module_type].from_spec(
+                spec, name, explicit, ctx=ctx
+            )
             try:
                 getattr(generator, method_name)()
             except RuntimeError as e:
@@ -32,8 +37,8 @@ def _for_each_enabled(
 
 
 def post_install(spec, explicit: bool):
-    _for_each_enabled(spec, "write", explicit)
+    _for_each_enabled(spec, "write", spack.context.default(), explicit)
 
 
 def post_uninstall(spec):
-    _for_each_enabled(spec, "remove")
+    _for_each_enabled(spec, "remove", spack.context.default())

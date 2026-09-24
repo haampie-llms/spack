@@ -157,6 +157,7 @@ def loads(module_type, specs, args, ctx, out=None):
             )
 
     cache: spack.modules.common.ModuleConfigurationCache = {}
+    upstream_index = spack.modules.common.upstream_module_index(ctx.config, ctx.store)
     modules = [
         (
             spec,
@@ -166,6 +167,8 @@ def loads(module_type, specs, args, ctx, out=None):
                 get_full_path=False,
                 module_set_name=args.module_set_name,
                 required=False,
+                ctx=ctx,
+                upstream_index=upstream_index,
                 cache=cache,
             ),
         )
@@ -209,6 +212,7 @@ def find(module_type, specs, args, ctx):
         dependency_specs_to_retrieve = []
 
     cache: spack.modules.common.ModuleConfigurationCache = {}
+    upstream_index = spack.modules.common.upstream_module_index(ctx.config, ctx.store)
     try:
         modules = [
             spack.modules.get_module(
@@ -217,6 +221,8 @@ def find(module_type, specs, args, ctx):
                 args.full_path,
                 module_set_name=args.module_set_name,
                 required=False,
+                ctx=ctx,
+                upstream_index=upstream_index,
                 cache=cache,
             )
             for spec in dependency_specs_to_retrieve
@@ -229,6 +235,8 @@ def find(module_type, specs, args, ctx):
                 args.full_path,
                 module_set_name=args.module_set_name,
                 required=True,
+                ctx=ctx,
+                upstream_index=upstream_index,
                 cache=cache,
             )
         )
@@ -250,13 +258,13 @@ def rm(module_type, specs, args, ctx):
     module_cls = spack.modules.module_types[module_type]
     cache: spack.modules.common.ModuleConfigurationCache = {}
     module_exist = lambda x: os.path.exists(
-        module_cls.from_spec(x, args.module_set_name, cache=cache).layout.filename
+        module_cls.from_spec(x, args.module_set_name, ctx=ctx, cache=cache).layout.filename
     )
 
     specs_with_modules = [spec for spec in specs if module_exist(spec)]
 
     modules = [
-        module_cls.from_spec(spec, args.module_set_name, cache=cache)
+        module_cls.from_spec(spec, args.module_set_name, ctx=ctx, cache=cache)
         for spec in specs_with_modules
     ]
 
@@ -308,7 +316,7 @@ def refresh(module_type, specs, args, ctx):
 
     # Skip unknown packages.
     writers = [
-        cls.from_spec(spec, args.module_set_name, cache=cache)
+        cls.from_spec(spec, args.module_set_name, ctx=ctx, cache=cache)
         for spec in specs
         if ctx.repo.exists(spec.name)
     ]
