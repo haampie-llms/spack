@@ -2064,6 +2064,7 @@ def test_is_extension_after_round_trip_to_dict(config, mock_packages, spec_str, 
     # round-trip to dict representation
     x = spack.concretize.concretize_one(spec_str, ctx)
     y = Spec.from_dict(x.to_dict())
+    spack.repo.attach_packages([y], ctx)
 
     # Using 'y' since the round-trip make us lose build dependencies
     for d in y.traverse():

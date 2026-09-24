@@ -498,13 +498,8 @@ def test_ci_create_buildcache(working_env, config, monkeypatch, ctx: SpackContex
     """Test that create_buildcache returns a list of objects with the correct
     keys and types."""
     monkeypatch.setattr(ci, "push_to_build_cache", lambda a, b, c, **kwargs: True)
-
     results = ci.create_buildcache(
-        Spec(),
-        destination_mirror_urls=["file:///fake-url-one", "file:///fake-url-two"],
-        config=ctx.config,
-        client=ctx.network,
-        store=ctx.store,
+        Spec(), destination_mirror_urls=["file:///fake-url-one", "file:///fake-url-two"], ctx=ctx
     )
 
     assert len(results) == 2
@@ -515,11 +510,7 @@ def test_ci_create_buildcache(working_env, config, monkeypatch, ctx: SpackContex
     assert result2.url == "file:///fake-url-two"
 
     results = ci.create_buildcache(
-        Spec(),
-        destination_mirror_urls=["file:///fake-url-one"],
-        config=ctx.config,
-        client=ctx.network,
-        store=ctx.store,
+        Spec(), destination_mirror_urls=["file:///fake-url-one"], ctx=ctx
     )
 
     assert len(results) == 1

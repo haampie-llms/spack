@@ -20,6 +20,7 @@ import spack.error
 import spack.mirrors.mirror
 import spack.oci.image
 import spack.oci.oci
+import spack.repo
 import spack.spec
 import spack.stage
 import spack.store
@@ -540,6 +541,7 @@ def push_fn(args, ctx):
     )
 
     if not args.private:
+        spack.repo.attach_packages(specs, ctx)
         specs = _skip_no_redistribute_for_public(specs)
 
     specs = _filter_specs_for_push(specs, mirror)
@@ -576,9 +578,7 @@ def push_fn(args, ctx):
         update_index=args.update_index,
         signing_key=signing_key,
         base_image=args.base_image,
-        config=ctx.config,
-        client=ctx.network,
-        store=ctx.store,
+        ctx=ctx,
     ) as uploader:
         skipped, upload_errors = uploader.push(specs=specs)
         failed.extend(upload_errors)
@@ -630,6 +630,7 @@ def install_fn(args, ctx):
         all_architectures=args.otherarch, index=ctx.binary_index, config=ctx.config
     )
     matches = spack.store.find(args.specs, multiple=args.multiple, query_fn=query)
+    spack.repo.attach_packages(matches, ctx)
     if matches:
         # Fail before extracting anything if the database cannot be modified.
         ctx.store.db.ensure_latest_db_version()

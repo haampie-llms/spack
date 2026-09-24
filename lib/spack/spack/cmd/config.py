@@ -11,6 +11,7 @@ from typing import List
 import spack.config
 import spack.environment as ev
 import spack.error
+import spack.repo
 import spack.schema
 import spack.schema.env
 import spack.spec
@@ -681,6 +682,7 @@ def config_prefer_upstream(args, ctx):
     all_specs = set(ctx.store.db.query(installed=True))
     local_specs = set(ctx.store.db.query_local(installed=True))
     pref_specs = local_specs if args.local else all_specs - local_specs
+    spack.repo.attach_packages(pref_specs, ctx)
 
     conflicting_variants = set()
 

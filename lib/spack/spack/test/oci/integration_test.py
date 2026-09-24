@@ -329,20 +329,13 @@ def test_best_effort_upload(
         return _push_blob(image_ref, spec, tmpdir, client=client, store=store)
 
     def put_manifest(
-        base_images, checksums, image_ref, tmpdir, extra_config, annotations, *specs, client
+        base_images, checksums, image_ref, tmpdir, extra_config, annotations, *specs, ctx
     ):
         # fail to upload the manifest of libdwarf
         if "libdwarf" in (s.name for s in specs):
             raise Exception("Manifest Server Error")
         return _push_manifest(
-            base_images,
-            checksums,
-            image_ref,
-            tmpdir,
-            extra_config,
-            annotations,
-            *specs,
-            client=client,
+            base_images, checksums, image_ref, tmpdir, extra_config, annotations, *specs, ctx=ctx
         )
 
     monkeypatch.setattr(spack.binary_distribution, "_oci_push_pkg_blob", push_blob)

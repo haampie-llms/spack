@@ -671,9 +671,7 @@ def push_to_build_cache(
     mirror_url: str,
     sign_binaries: bool,
     *,
-    config: cfg.Configuration,
-    client: web_util.NetworkClient,
-    store: spack.store.Store,
+    ctx: "spack.context.SpackContext",
 ) -> bool:
     """Push one or more binary packages to the mirror.
 
@@ -682,16 +680,14 @@ def push_to_build_cache(
         spec: Installed spec to push
         mirror_url: URL of target mirror
         sign_binaries: If True, spack will attempt to sign binary package before pushing.
-        config: configuration for temporary files
-        client: network client used to push
-        store: store the spec is installed in
+        ctx: context the spec is installed in
     """
     tty.debug(f"Pushing to build cache ({'signed' if sign_binaries else 'unsigned'})")
     signing_key = spack.binary_distribution.select_signing_key() if sign_binaries else None
     mirror = spack.mirrors.mirror.Mirror.from_url(mirror_url)
     try:
         with spack.binary_distribution.make_uploader(
-            mirror, signing_key=signing_key, config=config, client=client, store=store
+            mirror, signing_key=signing_key, ctx=ctx
         ) as uploader:
             uploader.push_or_raise([spec])
         return True
@@ -719,6 +715,7 @@ def copy_stage_logs_to_artifacts(
         tty.warn("Cannot copy artifacts for non-concrete specs")
         return
 
+    store.prefix_of(job_spec)
     package_metadata_root = pathlib.Path(store.layout.metadata_path(job_spec))
     if not os.path.isdir(package_metadata_root):
         # Fallback to using the stage directory
@@ -1324,9 +1321,7 @@ def create_buildcache(
     *,
     destination_mirror_urls: List[str],
     sign_binaries: bool = False,
-    config: cfg.Configuration,
-    client: web_util.NetworkClient,
-    store: spack.store.Store,
+    ctx: "spack.context.SpackContext",
 ) -> List[PushResult]:
     """Create the buildcache at the provided mirror(s).
 
@@ -1334,18 +1329,14 @@ def create_buildcache(
         input_spec: Installed spec to package and push
         destination_mirror_urls: List of urls to push to
         sign_binaries: Whether or not to sign buildcache entry
-        config: configuration for temporary files
-        client: network client used to push
-        store: store the spec is installed in
+        ctx: context the spec is installed in
 
     Returns: A list of PushResults, indicating success or failure.
     """
     results = []
 
     for mirror_url in destination_mirror_urls:
-        success = push_to_build_cache(
-            input_spec, mirror_url, sign_binaries, config=config, client=client, store=store
-        )
+        success = push_to_build_cache(input_spec, mirror_url, sign_binaries, ctx=ctx)
         results.append(PushResult(success=success, url=mirror_url))
 
     return results

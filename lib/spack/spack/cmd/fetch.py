@@ -5,6 +5,7 @@
 import argparse
 
 import spack.cmd
+import spack.repo
 import spack.traverse
 from spack.cmd.common import arguments
 
@@ -57,6 +58,7 @@ def fetch(parser, args, ctx):
         else:
             args.subparser.error("requires at least one spec argument")
 
+    spack.repo.attach_packages(specs, ctx)
     if args.dependencies or args.missing:
         to_be_fetched = spack.traverse.traverse_nodes(specs, key=spack.traverse.by_dag_hash)
     else:

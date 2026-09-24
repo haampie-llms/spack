@@ -266,6 +266,9 @@ class InstallRecord:
         if "installed" not in d:
             d["installed"] = False
 
+        if d["path"]:
+            spec.set_prefix(d["path"])
+
         return InstallRecord(spec, **d)
 
 
@@ -1250,6 +1253,8 @@ class Database:
         # Make sure the directory layout agrees whether the spec is installed
         if not spec.external and self.layout:
             path = self.layout.path_for_spec(spec)
+            if not spec.has_prefix:
+                spec.set_prefix(path)
             installed = False
             try:
                 self.layout.ensure_installed(spec)
@@ -1528,13 +1533,6 @@ class Database:
 
                 relatives.add(relative)
         return relatives
-
-    @_autospec
-    def installed_extensions_for(self, extendee_spec: "spack.spec.Spec"):
-        """Returns the specs of all packages that extend the given spec"""
-        for spec in self.query():
-            if spec.package.extends(extendee_spec):
-                yield spec.package
 
     def _get_by_hash_local(
         self,

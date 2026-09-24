@@ -24,6 +24,7 @@ import spack.environment as ev
 import spack.error
 import spack.main
 import spack.mirrors.mirror
+import spack.repo
 import spack.spec
 import spack.util.url as url_util
 import spack.util.web as web_util
@@ -381,14 +382,11 @@ def test_buildcache_create_install(
 def _mock_uploader(tmp_path: pathlib.Path):
     class DontUpload(spack.binary_distribution.Uploader):
         def __init__(self):
-            ctx = spack.context.default()
             super().__init__(
                 spack.mirrors.mirror.Mirror.from_local_path(str(tmp_path)),
                 False,
                 False,
-                config=ctx.config,
-                client=ctx.network,
-                store=ctx.store,
+                ctx=spack.context.default(),
             )
             self.pushed = []
 
@@ -553,6 +551,7 @@ def test_best_effort_vs_fail_fast_when_dep_not_installed(
 
     # Uninstall mpich so that its dependent mpileaks can't be pushed
     for s in mutable_database.query_local("mpich"):
+        spack.repo.attach_packages([s], ctx)
         s.package.do_uninstall(force=True)
 
     with pytest.raises(spack.cmd.buildcache.PackagesAreNotInstalledError, match="mpich"):
@@ -586,6 +585,7 @@ def test_allow_missing_when_dep_not_installed(
 
     # Uninstall mpich so that its dependent mpileaks can't be pushed
     for s in mutable_database.query_local("mpich"):
+        spack.repo.attach_packages([s], ctx)
         s.package.do_uninstall(force=True)
 
     # There should be warnings but no errors

@@ -8,6 +8,7 @@ import pathlib
 import pytest
 
 import spack.concretize
+import spack.repo
 from spack.context import SpackContext
 from spack.directory_layout import DirectoryLayout
 from spack.filesystem_view import SimpleFilesystemView, YamlFilesystemView
@@ -27,11 +28,15 @@ def test_remove_extensions_ordered(
     view.add_specs(e2)
 
     e1 = e2["extension1"]
-    view.remove_specs(e1, e2)
+    all_specs = view.get_all_specs()
+    spack.repo.attach_packages(all_specs, ctx)
+    view.remove_specs(e1, e2, all_specs=set(all_specs))
 
 
 @pytest.mark.regression("32456")
-def test_view_with_spec_not_contributing_files(mock_packages, tmp_path: pathlib.Path):
+def test_view_with_spec_not_contributing_files(
+    mock_packages, tmp_path: pathlib.Path, ctx: SpackContext
+):
     view_dir = str(tmp_path / "view")
     os.mkdir(view_dir)
 
@@ -43,7 +48,9 @@ def test_view_with_spec_not_contributing_files(mock_packages, tmp_path: pathlib.
     a.set_prefix(str(tmp_path / "a"))
     b.set_prefix(str(tmp_path / "b"))
     a._mark_concrete()
+    spack.repo.attach_packages([a], ctx)
     b._mark_concrete()
+    spack.repo.attach_packages([b], ctx)
 
     # Create directory structure for a and b, and view
     os.makedirs(a.prefix.subdir)
@@ -72,7 +79,9 @@ def test_view_with_spec_not_contributing_files(mock_packages, tmp_path: pathlib.
     assert os.path.lexists(os.path.join(view_dir, "subdir", "file"))
 
 
-def test_view_unique_subdir_becomes_dir_symlink(mock_packages, tmp_path: pathlib.Path):
+def test_view_unique_subdir_becomes_dir_symlink(
+    mock_packages, tmp_path: pathlib.Path, ctx: SpackContext
+):
     """With link_dirs=True, if a directory is only contributed to by a single spec, the view
     should create a symlink to that directory instead of linking individual files."""
     view_dir = str(tmp_path / "view")
@@ -86,7 +95,9 @@ def test_view_unique_subdir_becomes_dir_symlink(mock_packages, tmp_path: pathlib
     a.set_prefix(str(tmp_path / "a"))
     b.set_prefix(str(tmp_path / "b"))
     a._mark_concrete()
+    spack.repo.attach_packages([a], ctx)
     b._mark_concrete()
+    spack.repo.attach_packages([b], ctx)
 
     FsTree(
         tmp_path,
@@ -131,7 +142,7 @@ def test_view_unique_subdir_becomes_dir_symlink(mock_packages, tmp_path: pathlib
     assert os.path.islink(os.path.join(view_dir, "bin", "a"))
 
 
-def test_view_no_dir_symlinks(mock_packages, tmp_path: pathlib.Path):
+def test_view_no_dir_symlinks(mock_packages, tmp_path: pathlib.Path, ctx: SpackContext):
     """With link_dirs=False, no directies are symlinked."""
     view_dir = str(tmp_path / "view")
     os.mkdir(view_dir)
@@ -142,6 +153,7 @@ def test_view_no_dir_symlinks(mock_packages, tmp_path: pathlib.Path):
     a = Spec("pkg-a")
     a.set_prefix(str(tmp_path / "a"))
     a._mark_concrete()
+    spack.repo.attach_packages([a], ctx)
 
     FsTree(tmp_path, {"a/.spack": FsTree.dir(), "a/include/a/a.h": FsTree.file("header")})
 

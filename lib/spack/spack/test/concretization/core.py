@@ -3677,6 +3677,20 @@ def test_parallel_concretization(mutable_config, mock_packages, ctx: SpackContex
     assert {s.name for s in result} == {"pkg-a", "pkg-b"}
 
 
+@pytest.mark.parametrize("unify,others", [(True, []), (False, ["pkg-b"])])
+def test_concretize_spec_pairs_with_unknown_packages(
+    unify, others, mutable_config, mock_packages, ctx: SpackContext
+):
+    """Concrete specs whose package is no longer in the repositories, e.g. from a lockfile, are
+    returned without a package instead of raising."""
+    mutable_config.set("concretizer:unify", unify)
+    concrete = spack.concretize.concretize_one("libelf", ctx).copy()
+    concrete.namespace = "gone"
+    pairs = [(Spec("libelf"), concrete), *((Spec(x), None) for x in others)]
+    result = spack.concretize.concretize_spec_pairs(pairs, ctx)
+    assert any(x is concrete for x in result) and not concrete._package
+
+
 @pytest.mark.usefixtures("mutable_config", "mock_packages")
 @pytest.mark.parametrize(
     "spec_str, error_type",

@@ -13,6 +13,7 @@ import pytest
 import spack.cmd.verify
 import spack.concretize
 import spack.installer
+import spack.repo
 import spack.store
 import spack.util.executable
 import spack.util.filesystem as fs
@@ -151,7 +152,7 @@ def test_libraries(tmp_path: pathlib.Path, install_mockery, mock_fetch, ctx: Spa
     assert spack.cmd.verify._verify_libraries(s, ["libf.so"]) is None
 
 
-def test_verify_versions(mock_packages):
+def test_verify_versions(mock_packages, ctx: SpackContext):
     missing = "thisisnotapackage"
     unknown = "deprecated-versions@=thisisnotaversion"
     deprecated = "deprecated-versions@=1.1.0"
@@ -162,6 +163,8 @@ def test_verify_versions(mock_packages):
     specs = [Spec(c) for c in strs] + [Spec(f"deprecated-client@=1.1.0^{c}") for c in strs]
     for spec in specs:
         spec._mark_concrete()
+        spec.set_prefix(f"/opt/{spec.name}")
+        spack.repo.attach_packages([spec], ctx, skip_unknown=True)
 
     msg_lines = spack.cmd.verify._verify_version(specs)
     assert "3 installed packages have unknown/deprecated" in msg_lines[0]

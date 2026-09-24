@@ -64,6 +64,7 @@ else:
     from spack.installer.posix import create_build_channels, make_state_stream
 
 if TYPE_CHECKING:
+    import spack.context
     import spack.package_base
 
 #: Suffix for temporary backup during overwrite install
@@ -442,6 +443,8 @@ class BuildRequest(NamedTuple):
     log_path: str
     stop_before: Optional[str]
     stop_at: Optional[str]
+    #: Resources of the build
+    ctx: "spack.context.SpackContext"
 
 
 def worker_function(
@@ -469,6 +472,7 @@ def worker_function(
     spec, log_path = request.spec, request.log_path
 
     global_state.restore()
+    spack.repo.attach_packages([spec], request.ctx)
 
     # Externals are not built; post-install hooks generate their module files.
     if spec.external:

@@ -12,6 +12,7 @@ from collections import Counter
 
 import spack.cmd
 import spack.install_test
+import spack.repo
 from spack.cmd.common import arguments
 from spack.util import tty
 from spack.util.tty import colify
@@ -190,7 +191,7 @@ def test_run(args, ctx):
 
         specs_to_test.extend(matching)
 
-    # test_stage_dir
+    spack.repo.attach_packages(specs_to_test, ctx)
     test_suite = spack.install_test.TestSuite(
         specs_to_test, args.alias, stage_root=spack.install_test.get_test_stage_dir(ctx.config)
     )

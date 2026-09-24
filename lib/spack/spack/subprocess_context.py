@@ -49,6 +49,8 @@ def deserialize(serialized_pkg: io.BytesIO) -> "spack.package_base.PackageBase":
     pkg.spec._package = pkg
     # ensure overwritten package class attributes get applied
     spack.repo.PATH.get_pkg_class(pkg.spec.name)
+    # The dependencies come without packages, which setting up the build environment reads
+    spack.repo.attach_packages([pkg.spec], pkg.context)
     return pkg
 
 

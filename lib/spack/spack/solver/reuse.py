@@ -258,7 +258,7 @@ class ReusableSpecsSelector:
                                 include=include,
                                 exclude=exclude,
                                 env=spack.environment.environment_from_name_or_dir(
-                                    env_dir, ctx=spack.context.default()
+                                    env_dir, ctx=context
                                 ),
                             )
                         )

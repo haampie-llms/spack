@@ -273,10 +273,11 @@ def test_git_url_top_level_conflicts(version_str):
         spack.package_base.for_package_version(pkg_factory("git-url-top-level"), version_str)
 
 
-def test_rpath_args(mutable_database):
+def test_rpath_args(mutable_database, ctx: SpackContext):
     """Test a package's rpath_args property."""
 
     rec = mutable_database.get_record("mpich")
+    spack.repo.attach_packages([rec.spec], ctx)
 
     rpath_args = rec.spec.package.rpath_args
     assert "-rpath" in rpath_args

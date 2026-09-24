@@ -9,6 +9,7 @@ import sys
 import pytest
 
 import spack.error
+import spack.repo
 import spack.spec
 from spack.config import Configuration
 from spack.context import SpackContext
@@ -30,59 +31,72 @@ from spack.test.installer.conftest import (
 class TestPackageInstallerConstructor:
     """Tests for PackageInstaller constructor, especially capacity initialization."""
 
-    def test_capacity_explicit_concurrent_packages(self, temporary_store, mock_packages):
+    def test_capacity_explicit_concurrent_packages(
+        self, temporary_store, mock_packages, ctx: SpackContext
+    ):
         """Test that capacity is set correctly when concurrent_packages is explicitly provided."""
         spec = spack.spec.Spec("trivial-install-test-package")
         spec._mark_concrete()
+        spack.repo.attach_packages([spec], ctx)
         assert PackageInstaller([spec.package], concurrent_packages=5).capacity == 5
         assert PackageInstaller([spec.package], concurrent_packages=1).capacity == 1
 
     def test_capacity_from_config_default_one(
-        self, temporary_store, mock_packages, mutable_config
+        self, temporary_store, mock_packages, mutable_config, ctx: SpackContext
     ):
         """Test that config value of 0 is treated as unlimited."""
         mutable_config.set("config:concurrent_packages", 0)
         spec = spack.spec.Spec("trivial-install-test-package")
         spec._mark_concrete()
+        spack.repo.attach_packages([spec], ctx)
         assert PackageInstaller([spec.package]).capacity == sys.maxsize
 
-    def test_capacity_from_config_non_zero(self, temporary_store, mock_packages, mutable_config):
+    def test_capacity_from_config_non_zero(
+        self, temporary_store, mock_packages, mutable_config, ctx: SpackContext
+    ):
         """Test that non-0 config values are used as-is."""
         mutable_config.set("config:concurrent_packages", 1)
         spec = spack.spec.Spec("trivial-install-test-package")
         spec._mark_concrete()
+        spack.repo.attach_packages([spec], ctx)
         assert PackageInstaller([spec.package]).capacity == 1
 
     def test_no_binary_mirrors_forces_source_only(
-        self, temporary_store, mock_packages, mutable_config
+        self, temporary_store, mock_packages, mutable_config, ctx: SpackContext
     ):
         """With no binary mirrors configured, has_mirrors is False so auto resolves to
         source_only at scheduling time."""
         spec = spack.spec.Spec("trivial-install-test-package")
         spec._mark_concrete()
+        spack.repo.attach_packages([spec], ctx)
         installer = PackageInstaller([spec.package], root_policy="auto")
         assert not installer.has_mirrors
 
     def test_no_binary_mirrors_preserves_cache_only(
-        self, temporary_store, mock_packages, mutable_config
+        self, temporary_store, mock_packages, mutable_config, ctx: SpackContext
     ):
         """Without binary mirrors, an explicit cache_only shouldn't turn into source_only."""
         spec = spack.spec.Spec("trivial-install-test-package")
         spec._mark_concrete()
+        spack.repo.attach_packages([spec], ctx)
         installer = PackageInstaller(
             [spec.package], root_policy="cache_only", dependencies_policy="cache_only"
         )
         assert installer.root_policy == "cache_only"
         assert installer.dependencies_policy == "cache_only"
 
-    def test_older_readable_db_fails_before_building(self, mutable_database, bumped_db_version):
+    def test_older_readable_db_fails_before_building(
+        self, mutable_database, bumped_db_version, ctx: SpackContext
+    ):
         """Nothing is built when the database needs an explicit reindex to be modified, but
         an installer with nothing to do does not complain."""
         installed = mutable_database.query_local("libelf")[0]
+        spack.repo.attach_packages([installed], ctx)
         PackageInstaller([installed.package])
 
         spec = spack.spec.Spec("trivial-install-test-package")
         spec._mark_concrete()
+        spack.repo.attach_packages([spec], ctx)
         with pytest.raises(spack.error.ExplicitDatabaseUpgradeError):
             PackageInstaller([spec.package])
 

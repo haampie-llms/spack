@@ -374,6 +374,7 @@ def ci_rebuild(args, ctx):
         job_spec = env.get_one_by_hash(job_spec_dag_hash)
     except AssertionError:
         tty.die("Could not find environment spec with hash {0}".format(job_spec_dag_hash))
+    spack.repo.attach_packages([job_spec], ctx)
 
     job_spec_json_file = "{0}.json".format(job_spec_pkg_name)
     job_spec_json_path = os.path.join(repro_dir, job_spec_json_file)
@@ -608,9 +609,7 @@ def ci_rebuild(args, ctx):
             input_spec=job_spec,
             destination_mirror_urls=[buildcache_destination.push_url],
             sign_binaries=spack_ci.can_sign_binaries(),
-            config=ctx.config,
-            client=ctx.network,
-            store=ctx.store,
+            ctx=ctx,
         ):
             if not result.success:
                 install_exit_code = FAILED_CREATE_BUILDCACHE_CODE

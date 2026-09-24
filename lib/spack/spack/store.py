@@ -158,6 +158,12 @@ class Store:
         """Returns True if the store layout includes path padding."""
         return self.root != self.unpadded_root
 
+    def prefix_of(self, spec: "spack.spec.Spec") -> str:
+        """The prefix of a concrete spec, assigned from this store if it has none yet."""
+        if not spec.has_prefix:
+            self.assign_prefix(spec)
+        return spec.prefix
+
     def assign_prefix(self, spec: "spack.spec.Spec") -> None:
         """Set the prefix of a concrete spec: where it is installed, else where it would be."""
         _, record = self.db.query_by_spec_hash(spec.dag_hash())

@@ -4,13 +4,18 @@
 import os
 import re
 import sys
+from typing import TYPE_CHECKING
 
 import spack.build_environment
 import spack.config
+import spack.repo
 import spack.spec
 from spack import traverse
 from spack.enums import Context
 from spack.util import environment
+
+if TYPE_CHECKING:
+    import spack.context
 
 #: Environment variable name Spack uses to track individually loaded packages
 spack_loaded_hashes_var = "SPACK_LOADED_HASHES"
@@ -85,7 +90,7 @@ def project_env_mods(
 
 def modifications_for_specs(
     *specs: spack.spec.Spec,
-    config: spack.config.Configuration,
+    ctx: "spack.context.SpackContext",
     view=None,
     set_package_py_globals: bool = True,
 ):
@@ -96,12 +101,14 @@ def modifications_for_specs(
 
     Args:
         specs: spec(s) for which to list the environment modifications
-        config: configuration to read the prefix inspections from
+        ctx: context the packages of the specs are attached from
         view: view associated with the spec passed as first argument
         set_package_py_globals: whether or not to set the global variables in the
             package.py files (this may be problematic when using buildcaches that have
             been built on a different but compatible OS)
     """
+    config = ctx.config
+    spack.repo.attach_packages(specs, ctx)
     env = environment.EnvironmentModifications()
     topo_ordered = list(
         traverse.traverse_nodes(specs, root=True, deptype=("run", "link"), order="topo")
@@ -130,13 +137,15 @@ def modifications_for_specs(
 def environment_modifications_for_specs(
     *specs: spack.spec.Spec, view=None, set_package_py_globals: bool = True
 ):
-    """Same as :func:`modifications_for_specs`, with the current configuration.
+    """Same as :func:`modifications_for_specs`, in the context of the package of the first spec.
 
     This is part of the package API; library code calls :func:`modifications_for_specs`.
     """
+    if not specs:
+        return environment.EnvironmentModifications()
     return modifications_for_specs(
         *specs,
-        config=spack.config.CONFIG,
+        ctx=specs[0].package.context,
         view=view,
         set_package_py_globals=set_package_py_globals,
     )

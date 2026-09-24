@@ -27,6 +27,7 @@ import spack.config
 import spack.context
 import spack.error
 import spack.hash_lookup
+import spack.repo
 import spack.solver.core
 import spack.traverse
 import spack.util.parallel
@@ -94,7 +95,9 @@ def _concretize_specs_together(
         factory: optional factory to produce a list of specs to be reused
     """
     result = _solver(ctx, factory=factory).solve(abstract_specs, tests=tests)
-    return [s.copy() for s in result.specs]
+    concrete_specs = [s.copy() for s in result.specs]
+    spack.repo.attach_packages(concrete_specs, ctx, skip_unknown=True)
+    return concrete_specs
 
 
 def _concretize_together(
@@ -178,6 +181,8 @@ def _concretize_together_when_possible(
         result_by_user_spec.update(result.specs_by_input)
         start = now
 
+    spack.repo.attach_packages(result_by_user_spec.values(), ctx, skip_unknown=True)
+
     # If the "abstract" spec is a concrete spec from the previous concretization
     # translate it back to an abstract spec. Otherwise, keep the abstract spec
     return [
@@ -260,6 +265,10 @@ def _concretize_separately(
     # passed in as pairs
     ret.sort(key=lambda x: x[0])
 
+    spack.repo.attach_packages((concrete for _, concrete in ret), ctx, skip_unknown=True)
+    spack.repo.attach_packages(
+        (concrete for _, concrete in spec_list if concrete), ctx, skip_unknown=True
+    )
     return [(abstract, concrete) for abstract, (_, concrete) in zip(to_concretize, ret)] + [
         (abstract, concrete) for abstract, concrete in spec_list if concrete
     ]
@@ -320,10 +329,13 @@ def _concretize_one(
         processes=1,
     ):
         if spec.concrete:
-            return spec.copy()
+            concrete = spec.copy()
+            spack.repo.attach_packages([concrete], ctx, skip_unknown=True)
+            return concrete
 
         start = time.monotonic()
         concrete = _solve_one(spec, ctx, tests=tests, factory=factory)
+        spack.repo.attach_packages([concrete], ctx, skip_unknown=True)
         ui.on_spec_concretized(spec, concrete=concrete, count=1, duration=time.monotonic() - start)
         return concrete
 
@@ -436,7 +448,9 @@ def concretize_spec_pairs(
     """
     ui = ui or HeadlessUI()
     with concretization_span(ui):
-        return _dispatch_concretization(to_concretize, ctx, tests=tests, ui=ui)
+        concrete_specs = _dispatch_concretization(to_concretize, ctx, tests=tests, ui=ui)
+    spack.repo.attach_packages(concrete_specs, ctx, skip_unknown=True)
+    return concrete_specs
 
 
 def _dispatch_concretization(

@@ -214,6 +214,7 @@ class BuildcacheBootstrapper(Bootstrapper):
             config=spack.config.CONFIG,
         )
         for match in spack.store.find([f"/{pkg_hash}"], multiple=False, query_fn=query):
+            spack.repo.attach_packages([match], spack.context.default())
             spack.binary_distribution.install_root_node(
                 # allow_missing is true since when bootstrapping clingo we truncate runtime
                 # deps such as gcc-runtime, since we link libstdc++ statically, and the other
@@ -442,8 +443,8 @@ def ensure_executables_in_path_or_raise(
     )
     # Additional environment variables needed to run the command
     found.command.add_default_envmod(
-        spack.user_environment.environment_modifications_for_specs(
-            found.spec, set_package_py_globals=False
+        spack.user_environment.modifications_for_specs(
+            found.spec, ctx=spack.context.default(), set_package_py_globals=False
         )
     )
     return found.command
@@ -490,11 +491,13 @@ def _concretize_clingo(abstract_spec: spack.spec.Spec) -> spack.spec.Spec:
     The ``abstract_spec`` argument is discarded, so a change to ``clingo_root_spec()`` has
     no effect on what is built from sources.
     """
-    return ClingoBootstrapConcretizer(
+    concrete = ClingoBootstrapConcretizer(
         spack.config.CONFIG,
         repo=spack.repo.PATH,
         compiler_cache=spack.compilers.libraries.process_compiler_cache(),
     ).concretize()
+    spack.repo.attach_packages([concrete], spack.context.default())
+    return concrete
 
 
 def ensure_clingo_importable_or_raise() -> None:

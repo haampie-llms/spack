@@ -894,9 +894,7 @@ spack:
                 ypfd.write(spec_json)
 
             for s in concrete_spec.traverse():
-                ci.push_to_build_cache(
-                    s, mirror_url, True, store=ctx.store, config=ctx.config, client=ctx.network
-                )
+                ci.push_to_build_cache(s, mirror_url, True, ctx=ctx)
 
             # Now test the --prune-dag (default) option of spack ci generate
             mirror_cmd("add", "test-ci", mirror_url)
@@ -976,9 +974,7 @@ def test_push_to_build_cache_exceptions(
 
     # Input doesn't matter, as we are faking exceptional output
     url = tmp_path.as_uri()
-    ci.push_to_build_cache(
-        spack.spec.Spec(), url, False, store=ctx.store, config=ctx.config, client=ctx.network
-    )
+    ci.push_to_build_cache(spack.spec.Spec(), url, False, ctx=ctx)
     assert f"Problem writing to {url}: Error: Access Denied" in capfd.readouterr().err
 
 

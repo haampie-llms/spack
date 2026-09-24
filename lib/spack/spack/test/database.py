@@ -15,6 +15,7 @@ import sys
 import pytest
 
 import spack.config
+import spack.context
 import spack.subprocess_context
 from spack.config import Configuration
 from spack.context import SpackContext
@@ -430,15 +431,17 @@ def _mock_remove(spec, db):
     specs = db.query(spec)
     assert len(specs) == 1
     spec = specs[0]
+    spack.repo.attach_packages([spec], spack.context.default())
     spec.package.do_uninstall(spec)
 
 
-def test_default_queries(database):
+def test_default_queries(database, ctx: SpackContext):
     # Testing a package whose name *doesn't* start with 'lib'
     # to ensure the library has 'lib' prepended to the name
     rec = database.get_record("zmpi")
 
     spec = rec.spec
+    spack.repo.attach_packages([spec], ctx)
 
     libraries = spec["zmpi"].libs
     assert len(libraries) == 1
@@ -458,6 +461,7 @@ def test_default_queries(database):
     rec = database.get_record("libelf")
 
     spec = rec.spec
+    spack.repo.attach_packages([spec], ctx)
 
     libraries = spec["libelf"].libs
     assert len(libraries) == 1
@@ -812,7 +816,7 @@ def test_115_reindex_with_packages_not_in_repo(
         _check_db_sanity(mutable_database_store.db)
 
 
-def test_external_entries_in_db(mutable_database):
+def test_external_entries_in_db(mutable_database, ctx: SpackContext):
     rec = mutable_database.get_record("mpileaks ^zmpi")
     assert rec.spec.external_path is None
     assert not rec.spec.external_modules
@@ -822,6 +826,7 @@ def test_external_entries_in_db(mutable_database):
     assert not rec.spec.external_modules
     assert rec.explicit is False
 
+    spack.repo.attach_packages([rec.spec], ctx)
     PackageInstaller([rec.spec.package], fake=True, explicit=True).install()
     rec = mutable_database.get_record("externaltool")
     assert rec.spec.external_path == os.path.sep + os.path.join("path", "to", "external_tool")
@@ -1191,7 +1196,9 @@ def test_consistency_of_dependents_upon_remove(mutable_database):
 
 
 @pytest.mark.regression("30187")
-def test_query_installed_when_package_unknown(database, repo_builder: RepoBuilder):
+def test_query_installed_when_package_unknown(
+    database, repo_builder: RepoBuilder, ctx: SpackContext
+):
     """Test that we can query the installation status of a spec
     when we don't know its package.py
     """
@@ -1203,7 +1210,7 @@ def test_query_installed_when_package_unknown(database, repo_builder: RepoBuilde
             assert database.installed(s)
             assert not database.installed_upstream(s)
             with pytest.raises(spack.repo.UnknownNamespaceError):
-                s.package
+                spack.repo.attach_packages([s], ctx)
 
 
 def test_error_message_when_using_too_new_db(database: Database, monkeypatch):
