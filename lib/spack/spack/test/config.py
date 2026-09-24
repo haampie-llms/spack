@@ -29,7 +29,6 @@ import spack.schema.mirrors
 import spack.schema.repos
 import spack.spec
 import spack.store
-import spack.test.harness
 import spack.util.executable
 import spack.util.filesystem as fs
 import spack.util.git
@@ -429,6 +428,27 @@ def test_substitute_tempdir(mock_low_high_config, ctx: SpackContext):
     assert os.path.join(tempdir, "foo", "bar", "baz") == spack.config.canonicalize_path(
         os.path.join("$tempdir", "foo", "bar", "baz"), config=ctx.config
     )
+
+
+def test_tests_ignore_user_configuration_and_caches(ctx: SpackContext):
+    """Neither the mock configuration nor the one of ``spack.config.create()`` reads the user and
+    system configuration, and the mock configuration keeps its caches out of the user's."""
+    user_and_system = [
+        pathlib.Path(os.path.expanduser(f"~{os.sep}.spack")),
+        pathlib.Path(os.sep, "etc", "spack"),
+    ]
+    for config in (ctx.config, spack.config.create()):
+        for scope in config.scopes.values():
+            path = getattr(scope, "path", None)
+            if path is None:
+                continue
+            path = pathlib.Path(path)
+            assert not any(path == p or p in path.parents for p in user_and_system), scope.name
+
+    user_cache = pathlib.Path(spack.paths.user_cache_path)
+    for key in ("config:misc_cache", "config:source_cache", "config:test_stage"):
+        path = pathlib.Path(spack.config.canonicalize_path(ctx.config.get(key), config=ctx.config))
+        assert user_cache not in path.parents, key
 
 
 def test_substitute_date(mock_low_high_config, ctx: SpackContext):
