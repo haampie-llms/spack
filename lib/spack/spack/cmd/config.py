@@ -228,18 +228,21 @@ def _print_configuration_helper(args, ctx, *, blame: bool) -> None:
         ctx.config.print_section(args.section, yaml=yaml, blame=blame, scope=args.scope)
         return
 
-    print_flattened_configuration(ctx.environment, blame=blame, yaml=yaml)
+    print_flattened_configuration(ctx.config, ctx.environment, blame=blame, yaml=yaml)
 
 
-def print_flattened_configuration(env, *, blame: bool, yaml: bool) -> None:
+def print_flattened_configuration(
+    config: spack.config.Configuration, env, *, blame: bool, yaml: bool
+) -> None:
     """Prints to stdout a flattened version of the configuration.
 
     Args:
+        config: configuration to print
         env: environment whose manifest is merged in, if any
         blame: if True, shows file provenance for each entry in the configuration.
     """
     manifest = env.manifest.yaml_content if env is not None else None
-    flattened = spack.config.flattened_configuration(manifest)
+    flattened = spack.config.flattened_configuration(config, manifest)
 
     if blame or yaml:
         syaml.dump_config(flattened, stream=sys.stdout, default_flow_style=False, blame=blame)

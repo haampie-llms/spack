@@ -12,6 +12,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 from spack.vendor.macholib.MachO import LC_ID_DYLIB, MachO
 
 import spack.builder
+import spack.config
 import spack.util.tty as _tty
 from spack.archspec import microarchitecture_flags, microarchitecture_flags_from_target
 from spack.build_environment import (
@@ -35,7 +36,7 @@ from spack.builder import (
 )
 from spack.compilers.libraries import CompilerPropertyDetector as _CompilerPropertyDetector
 from spack.compilers.libraries import compiler_spec
-from spack.config import determine_number_of_jobs, get_user
+from spack.config import get_user
 from spack.deptypes import ALL_TYPES as all_deptypes
 from spack.directives import (
     build_system,
@@ -233,6 +234,25 @@ def filter_system_paths(paths: Iterable[str]) -> List[str]:
         "spack.package.filter_system_paths is deprecated", category=SpackAPIWarning, stacklevel=2
     )
     return _filter_system_paths(paths)
+
+
+def determine_number_of_jobs(
+    *,
+    parallel: bool = False,
+    max_cpus: Optional[int] = None,
+    config: Optional["spack.config.Configuration"] = None,
+) -> int:
+    """Number of jobs for a build: 1 when ``parallel`` is false, otherwise ``config:build_jobs``
+    capped to ``max_cpus`` (default: the available CPUs). Without a configuration, the one of the
+    process is used."""
+    # Local import to avoid polluting the package API
+    import spack.context
+
+    return spack.config.determine_number_of_jobs(
+        parallel=parallel,
+        max_cpus=spack.config.cpus_available() if max_cpus is None else max_cpus,
+        config=config if config is not None else spack.context.default().config,
+    )
 
 
 def find_compilers(path_hints: Optional[List[str]] = None) -> List[Spec]:

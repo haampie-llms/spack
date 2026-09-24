@@ -694,20 +694,21 @@ def subcommands(args: Namespace, out: IO, config: spack.config.Configuration) ->
         out: File object to write to.
         config: Configuration of the command.
     """
-    parser = get_all_spack_commands(out)
+    parser = get_all_spack_commands(out, config)
     writer = SubcommandWriter(parser.prog, out, args.aliases)
     writer.write(parser)
 
 
-def rst_index(out: IO) -> None:
+def rst_index(out: IO, config: spack.config.Configuration) -> None:
     """Generate an index of all commands.
 
     Args:
         out: File object to write to.
+        config: Configuration listing the extension commands.
     """
     out.write("\n")
 
-    index = spack.main.index_commands()
+    index = spack.main.index_commands(config)
     sections = index["long"]
 
     dmax = max(len(section_descriptions.get(s, s)) for s in sections) + 2
@@ -741,7 +742,7 @@ def rst(args: Namespace, out: IO, config: spack.config.Configuration) -> None:
         config: Configuration of the command.
     """
     # create a parser with all commands
-    parser = get_all_spack_commands(out)
+    parser = get_all_spack_commands(out, config)
 
     # extract cross-refs of the form `_cmd-spack-<cmd>:` from rst files
     documented_commands: Set[str] = set()
@@ -753,7 +754,7 @@ def rst(args: Namespace, out: IO, config: spack.config.Configuration) -> None:
                     documented_commands.add(match.group(1).strip())
 
     # print an index to each command
-    rst_index(out)
+    rst_index(out, config)
     out.write("\n")
 
     # print sections for each command and subcommand
@@ -770,7 +771,7 @@ def names(args: Namespace, out: IO, config: spack.config.Configuration) -> None:
         out: File object to write to.
         config: Configuration of the command.
     """
-    commands = copy.copy(spack.cmd.all_commands())
+    commands = copy.copy(spack.cmd.all_commands(config))
 
     if args.aliases:
         aliases = config.get("config:aliases")
@@ -780,7 +781,7 @@ def names(args: Namespace, out: IO, config: spack.config.Configuration) -> None:
     colify(commands, output=out)
 
 
-def get_all_spack_commands(out: IO) -> SpackArgumentParser:
+def get_all_spack_commands(out: IO, config: spack.config.Configuration) -> SpackArgumentParser:
     is_tty = hasattr(out, "isatty") and out.isatty()
     # Argparse python 3.14 adds a default color argument that
     # adds color control characters to argparse output
@@ -790,6 +791,7 @@ def get_all_spack_commands(out: IO) -> SpackArgumentParser:
     parser = spack.main.make_argument_parser(
         **({"color": False} if sys.version_info[:2] >= (3, 14) and not is_tty else {})
     )
+    parser.config = config
     spack.main.add_all_commands(parser)
     return parser
 
@@ -803,7 +805,7 @@ def bash(args: Namespace, out: IO, config: spack.config.Configuration) -> None:
         out: File object to write to.
         config: Configuration of the command.
     """
-    parser = get_all_spack_commands(out)
+    parser = get_all_spack_commands(out, config)
     aliases_config = config.get("config:aliases")
     if aliases_config:
         aliases = ";".join(f"{key}:{val}" for key, val in aliases_config.items())
@@ -815,7 +817,7 @@ def bash(args: Namespace, out: IO, config: spack.config.Configuration) -> None:
 
 @formatter
 def fish(args, out, config):
-    parser = get_all_spack_commands(out)
+    parser = get_all_spack_commands(out, config)
     writer = FishCompletionWriter(parser.prog, out, args.aliases, config.scopes.keys())
     writer.write(parser)
 

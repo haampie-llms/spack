@@ -2173,7 +2173,7 @@ def test_env_substitution_follows_activation(
 
 def test_flattened_configuration_has_every_section(mutable_config: Configuration):
     """Tests that flattening the configuration gives the merged content of every section."""
-    flattened = spack.config.flattened_configuration()
+    flattened = spack.config.flattened_configuration(mutable_config)
 
     assert list(flattened) == [spack.schema.env.TOP_LEVEL_KEY]
     sections = flattened[spack.schema.env.TOP_LEVEL_KEY]
@@ -2192,7 +2192,9 @@ spack:
   view: true
 """
     )
-    flattened = spack.config.flattened_configuration(manifest)[spack.schema.env.TOP_LEVEL_KEY]
+    flattened = spack.config.flattened_configuration(mutable_config, manifest)[
+        spack.schema.env.TOP_LEVEL_KEY
+    ]
 
     assert flattened["specs"] == ["mpileaks"]
     assert flattened["view"] is True
