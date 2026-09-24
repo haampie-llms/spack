@@ -17,6 +17,7 @@ from spack.archspec import microarchitecture_flags, microarchitecture_flags_from
 from spack.build_environment import (
     MakeExecutable,
     ModuleChangePropagator,
+    environment_modifications_for_specs,
     get_cmake_prefix_path,
     get_effective_jobs,
     shared_library_suffix,
@@ -88,7 +89,6 @@ from spack.phase_callbacks import run_after, run_before
 from spack.platforms import host as host_platform
 from spack.spec import Spec
 from spack.url import substitute_version as substitute_version_in_url
-from spack.user_environment import environment_modifications_for_specs
 from spack.util.elf import delete_needed_from_elf, delete_rpath, get_elf_compat, parse_elf
 from spack.util.environment import EnvironmentModifications, set_env
 from spack.util.environment import filter_system_paths as _filter_system_paths
@@ -245,7 +245,7 @@ def find_compilers(path_hints: Optional[List[str]] = None) -> List[Spec]:
     """
     # Local imports to avoid polluting the package API
     import spack.context
-    from spack.compilers.config import find_compilers as _find_compilers
+    from spack.detection import find_compilers as _find_compilers
 
     ctx = spack.context.default()
     return _find_compilers(path_hints, config=ctx.config, repo=ctx.repo)

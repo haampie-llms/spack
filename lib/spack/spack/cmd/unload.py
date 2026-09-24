@@ -6,6 +6,7 @@ import argparse
 import os
 import sys
 
+import spack.build_environment
 import spack.cmd
 import spack.cmd.common
 import spack.user_environment as uenv
@@ -87,7 +88,7 @@ def unload(parser, args, ctx):
         )
         return 1
 
-    env_mod = uenv.modifications_for_specs(*specs, ctx=ctx).reversed()
+    env_mod = spack.build_environment.modifications_for_specs(*specs, ctx=ctx).reversed()
     for spec in specs:
         env_mod.remove_path(uenv.spack_loaded_hashes_var, spec.dag_hash())
     cmds = env_mod.shell_modifications(args.shell)

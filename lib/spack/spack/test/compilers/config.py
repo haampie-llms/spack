@@ -9,6 +9,7 @@ import spack.caches
 import spack.compilers.config
 import spack.compilers.libraries
 import spack.config
+import spack.detection
 import spack.repo
 import spack.spec
 from spack.test.utilities import UnusableGlobal
@@ -44,7 +45,7 @@ done
         with monkeypatch.context() as detection:
             detection.setattr(spack.repo, "PATH", UnusableGlobal("spack.repo.PATH"))
 
-            new_compilers = spack.compilers.config.find_compilers(
+            new_compilers = spack.detection.find_compilers(
                 [str(prefix)],
                 config=mutable_config,
                 repo=mock_packages,

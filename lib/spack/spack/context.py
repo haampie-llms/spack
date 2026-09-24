@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     import spack.relocate
     import spack.repo
     import spack.store
+    import spack.util.executable
     import spack.util.file_cache
     import spack.util.web
 
@@ -140,6 +141,42 @@ class SpackContext:
         import spack.relocate
 
         return spack.relocate.patchelf_finder(self)
+
+    def environment_dir(self, name_or_dir: str) -> str:
+        """Directory of the environment with the given name, or in the given directory."""
+        import spack.environment
+
+        return spack.environment.as_env_dir(name_or_dir, config=self.config)
+
+    def read_environment(self, name_or_dir: str) -> "spack.environment.Environment":
+        """Read the environment with the given name, or in the given directory."""
+        import spack.environment
+
+        return spack.environment.environment_from_name_or_dir(name_or_dir, ctx=self)
+
+    def ensure_clingo(self) -> None:
+        """Make the clingo module importable, bootstrapping it if needed."""
+        import spack.bootstrap
+
+        spack.bootstrap.ensure_clingo_importable_or_raise(self)
+
+    def ensure_patchelf(self) -> "spack.util.executable.Executable":
+        """Return patchelf, bootstrapping it if needed."""
+        import spack.bootstrap
+
+        return spack.bootstrap.ensure_patchelf_in_path_or_raise(self)
+
+    def ensure_gpg(self) -> "spack.util.executable.Executable":
+        """Return gpg, bootstrapping it if needed."""
+        import spack.bootstrap
+
+        return spack.bootstrap.ensure_gpg_in_path_or_raise(self)
+
+    def ensure_windows_sdk(self) -> None:
+        """Add the Windows SDK and WGL to the configuration as externals, if missing."""
+        import spack.bootstrap
+
+        spack.bootstrap.ensure_winsdk_external_or_raise(self)
 
     def share(self, other: "SpackContext", *members: str) -> None:
         """Use the given members of ``other`` instead of building them from ``config``."""

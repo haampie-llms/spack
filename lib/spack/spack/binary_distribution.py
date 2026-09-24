@@ -44,6 +44,7 @@ from typing import (
     cast,
 )
 
+import spack.build_environment
 import spack.caches
 import spack.config
 import spack.database
@@ -60,7 +61,6 @@ import spack.platforms
 import spack.spec
 import spack.stage
 import spack.store
-import spack.user_environment
 import spack.util.archive
 import spack.util.crypto
 import spack.util.filesystem as fsys
@@ -1543,7 +1543,7 @@ def _oci_put_manifest(
         base_manifest_mediaType == "application/vnd.docker.distribution.manifest.v2+json"
     )
 
-    spack.user_environment.modifications_for_specs(*specs, ctx=ctx).apply_modifications(env)
+    spack.build_environment.modifications_for_specs(*specs, ctx=ctx).apply_modifications(env)
 
     # Create an oci.image.config file
     config = copy.deepcopy(base_config)

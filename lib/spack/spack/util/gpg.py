@@ -526,9 +526,9 @@ class Gpg:
         self, finder: Callable[..., Optional[Tuple[Executable, spack.version.VersionType]]]
     ) -> Optional[Executable]:
         """Create a GPG function wrapper"""
-        import spack.bootstrap
+        import spack.context
 
-        spack.bootstrap.ensure_gpg_in_path_or_raise()
+        spack.context.default().ensure_gpg()
         result = finder()
 
         if result is None:

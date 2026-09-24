@@ -18,6 +18,7 @@ import spack.vendor.archspec.cpu
 
 import spack.compilers.config
 import spack.compilers.libraries
+import spack.detection
 import spack.package_base
 import spack.platforms
 import spack.repo
@@ -45,7 +46,7 @@ def _select_best_version(
 def _add_compilers_if_missing(config: Configuration, *, repo: spack.repo.RepoPath) -> None:
     arch = spack.spec.ArchSpec.default_arch()
     if not spack.compilers.config.compilers_for_arch(arch, config=config, repo=repo):
-        spack.compilers.config.find_compilers(config=config, repo=repo)
+        spack.detection.find_compilers(config=config, repo=repo)
 
 
 class ClingoBootstrapConcretizer:

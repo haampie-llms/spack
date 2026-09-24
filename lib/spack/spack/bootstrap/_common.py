@@ -11,11 +11,10 @@ import re
 import sys
 import sysconfig
 import warnings
-from typing import NamedTuple, Optional, Sequence, Union
+from typing import TYPE_CHECKING, NamedTuple, Optional, Sequence, Union
 
 import spack.vendor.archspec.cpu
 
-import spack.context
 import spack.platforms
 import spack.repo
 import spack.spec
@@ -25,6 +24,9 @@ import spack.util.filesystem as fs
 from spack.util import tty
 
 from .config import spec_for_current_python
+
+if TYPE_CHECKING:
+    import spack.context
 
 
 class ExecutableInfo(NamedTuple):
@@ -43,7 +45,7 @@ def _python_import(module: str) -> bool:
 
 
 def _try_import_from_store(
-    module: str, query_spec: Union[str, "spack.spec.Spec"], ctx: spack.context.SpackContext
+    module: str, query_spec: Union[str, "spack.spec.Spec"], ctx: "spack.context.SpackContext"
 ) -> bool:
     """Return True if the module can be imported from an already
     installed spec, False otherwise.
@@ -186,7 +188,7 @@ def _fix_ext_suffix(candidate_spec: "spack.spec.Spec"):
 def _executables_in_store(
     executables: Sequence[str],
     query_spec: Union["spack.spec.Spec", str],
-    ctx: spack.context.SpackContext,
+    ctx: "spack.context.SpackContext",
 ) -> Optional[ExecutableInfo]:
     """Return the first of the executables that can be retrieved from a spec in the
     store, together with the spec providing it, or None if there is no such spec.

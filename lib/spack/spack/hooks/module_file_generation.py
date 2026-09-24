@@ -2,18 +2,20 @@
 #
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
-from typing import Optional, Set
+from typing import TYPE_CHECKING, Optional, Set
 
-import spack.context
 import spack.modules
 import spack.spec
 from spack.util import tty
+
+if TYPE_CHECKING:
+    import spack.context
 
 
 def _for_each_enabled(
     spec: spack.spec.Spec,
     method_name: str,
-    ctx: spack.context.SpackContext,
+    ctx: "spack.context.SpackContext",
     explicit: Optional[bool] = None,
 ) -> None:
     """Calls a method for each enabled module"""
@@ -37,8 +39,8 @@ def _for_each_enabled(
 
 
 def post_install(spec, explicit: bool):
-    _for_each_enabled(spec, "write", spack.context.default(), explicit)
+    _for_each_enabled(spec, "write", spec.package.context, explicit)
 
 
 def post_uninstall(spec):
-    _for_each_enabled(spec, "remove", spack.context.default())
+    _for_each_enabled(spec, "remove", spec.package.context)
