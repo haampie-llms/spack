@@ -5,7 +5,6 @@ import os
 import shutil
 
 import spack.database
-import spack.store
 from spack.util import tty
 
 description = "rebuild Spack's package database"
@@ -13,8 +12,8 @@ section = "admin"
 level = "long"
 
 
-def reindex(parser, args):
-    current_index = spack.store.STORE.db._index_path
+def reindex(parser, args, ctx):
+    current_index = ctx.store.db._index_path
     needs_backup = os.path.isfile(current_index)
 
     if needs_backup:
@@ -22,7 +21,7 @@ def reindex(parser, args):
         shutil.copy(current_index, backup)
         tty.msg("Created a backup copy of the DB at", backup)
 
-    spack.store.STORE.reindex()
+    ctx.store.reindex()
 
     extra = ["If you need to restore, replace it with the backup."] if needs_backup else []
     tty.msg(

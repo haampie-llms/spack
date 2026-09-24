@@ -95,7 +95,7 @@ def test_dump_logs(
     with concrete_spec.package.stage:
         _write_string_to_path(stage_log_content, concrete_spec.package.log_path)
         with stdout_as_buffered_text_stream() as redirected_stdout:
-            spack.cmd.logs._logs(cmdline_spec, concrete_spec)
+            spack.cmd.logs._logs(cmdline_spec, concrete_spec, temporary_store)
             assert _rewind_collect_and_decode(redirected_stdout) == stage_log_content
 
     install("--fake", "libelf")
@@ -110,7 +110,7 @@ def test_dump_logs(
         compressed_file.writelines(bstream)
 
     with stdout_as_buffered_text_stream() as redirected_stdout:
-        spack.cmd.logs._logs(cmdline_spec, concrete_spec)
+        spack.cmd.logs._logs(cmdline_spec, concrete_spec, temporary_store)
         assert _rewind_collect_and_decode(redirected_stdout) == installed_log_content
 
     with concrete_spec.package.stage:
@@ -118,5 +118,5 @@ def test_dump_logs(
         # We re-create the stage, but "spack log" should ignore that
         # if the package is installed
         with stdout_as_buffered_text_stream() as redirected_stdout:
-            spack.cmd.logs._logs(cmdline_spec, concrete_spec)
+            spack.cmd.logs._logs(cmdline_spec, concrete_spec, temporary_store)
             assert _rewind_collect_and_decode(redirected_stdout) == installed_log_content

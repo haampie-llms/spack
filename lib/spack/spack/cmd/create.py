@@ -11,6 +11,7 @@ from typing import List, Optional, Tuple
 import spack.config
 import spack.repo
 import spack.stage
+import spack.util.file_cache
 from spack.spec import Spec
 from spack.url import (
     UndetectableNameError,
@@ -939,7 +940,9 @@ def get_url(url: Optional[str]) -> str:
     return url or "https://www.example.com/example-1.2.3.tar.gz"
 
 
-def get_versions(args: argparse.Namespace, name: str) -> Tuple[str, BuildSystemAndLanguageGuesser]:
+def get_versions(
+    args: argparse.Namespace, name: str, config: spack.config.Configuration
+) -> Tuple[str, BuildSystemAndLanguageGuesser]:
     """Returns a list of versions and hashes for a package.
 
     Also returns a BuildSystemAndLanguageGuesser object.
@@ -949,6 +952,7 @@ def get_versions(args: argparse.Namespace, name: str) -> Tuple[str, BuildSystemA
     Args:
         args: The arguments given to ``spack create``
         name: The name of the package
+        config: Configuration for fetching and checksumming
 
     Returns: Tuple of versions and hashes, and a BuildSystemAndLanguageGuesser object
     """
@@ -979,9 +983,7 @@ def get_versions(args: argparse.Namespace, name: str) -> Tuple[str, BuildSystemA
         try:
             url_dict = find_versions_of_archive(args.url)
             if len(url_dict) > 1 and not args.batch and sys.stdin.isatty():
-                url_dict_filtered = spack.stage.interactive_version_filter(
-                    url_dict, config=spack.config.CONFIG
-                )
+                url_dict_filtered = spack.stage.interactive_version_filter(url_dict, config=config)
                 if url_dict_filtered is None:
                     exit(0)
                 url_dict = url_dict_filtered
@@ -996,11 +998,7 @@ def get_versions(args: argparse.Namespace, name: str) -> Tuple[str, BuildSystemA
             url_dict = {version: args.url}
 
         version_hashes = spack.stage.get_checksums_for_versions(
-            url_dict,
-            name,
-            first_stage_function=guesser,
-            keep_stage=args.keep_stage,
-            config=spack.config.CONFIG,
+            url_dict, name, first_stage_function=guesser, keep_stage=args.keep_stage, config=config
         )
 
         versions = get_version_lines(version_hashes)
@@ -1047,13 +1045,20 @@ def get_build_system(
     return selected_template
 
 
-def get_repository(args: argparse.Namespace, name: str) -> spack.repo.Repo:
+def get_repository(
+    args: argparse.Namespace,
+    name: str,
+    repos: spack.repo.RepoPath,
+    cache: spack.util.file_cache.FileCache,
+) -> spack.repo.Repo:
     """Returns a Repo object that will allow us to determine the path where
     the new package file should be created.
 
     Args:
         args: The arguments given to ``spack create``
         name: The name of the package to create
+        repos: The configured package repositories
+        cache: Cache for the index of a repository given by path
 
     Returns:
         A Repo object capable of determining the path to the package file
@@ -1069,7 +1074,7 @@ def get_repository(args: argparse.Namespace, name: str) -> spack.repo.Repo:
     # Figure out where the new package should live
     repo_path = args.repo
     if repo_path is not None:
-        repo = spack.repo.from_path(repo_path)
+        repo = spack.repo.Repo(repo_path, cache=cache)
         if spec.namespace and spec.namespace != repo.namespace:
             tty.die(
                 "Can't create package with namespace {0} in repo with namespace {1}".format(
@@ -1078,9 +1083,9 @@ def get_repository(args: argparse.Namespace, name: str) -> spack.repo.Repo:
             )
     else:
         if spec.namespace:
-            repo = spack.repo.PATH.get_repo(spec.namespace)
+            repo = repos.get_repo(spec.namespace)
         else:
-            _repo = spack.repo.PATH.first_repo()
+            _repo = repos.first_repo()
             assert _repo is not None, "No package repository found"
             repo = _repo
 
@@ -1091,11 +1096,11 @@ def get_repository(args: argparse.Namespace, name: str) -> spack.repo.Repo:
     return repo
 
 
-def create(parser, args):
+def create(parser, args, ctx):
     # Gather information about the package to be created
     name = get_name(args.name, args.url)
     url = get_url(args.url)
-    versions, guesser = get_versions(args, name)
+    versions, guesser = get_versions(args, name, ctx.config)
     build_system = get_build_system(args.template, url, guesser)
 
     # Create the package template object
@@ -1107,7 +1112,7 @@ def create(parser, args):
     tty.msg("Created template for {0} package".format(package.name))
 
     # Create a directory for the new package
-    repo = get_repository(args, name)
+    repo = get_repository(args, name, ctx.repo, ctx.misc_cache)
     pkg_path = repo.filename_for_package_name(package.name)
     if os.path.exists(pkg_path) and not args.force:
         tty.die(

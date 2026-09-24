@@ -10,13 +10,10 @@ import shutil
 import sys
 
 import spack.cmd
-import spack.config
 import spack.error
 import spack.modules
 import spack.modules.common
 import spack.modules.error
-import spack.repo
-import spack.store
 from spack.cmd import MultipleSpecsMatch, NoSpecMatches
 from spack.cmd.common import arguments
 from spack.util import filesystem, tty
@@ -106,8 +103,8 @@ def one_spec_or_raise(specs):
     return specs[0]
 
 
-def check_module_set_name(name):
-    modules = spack.config.CONFIG.get("modules")
+def check_module_set_name(name, config):
+    modules = config.get("modules")
     if name != "prefix_inspections" and name in modules:
         return
 
@@ -135,9 +132,9 @@ _missing_modules_warning = (
 )
 
 
-def loads(module_type, specs, args, out=None):
+def loads(module_type, specs, args, ctx, out=None):
     """Prompt the list of modules associated with a list of specs"""
-    check_module_set_name(args.module_set_name)
+    check_module_set_name(args.module_set_name, ctx.config)
     out = sys.stdout if out is None else out
 
     # Get a comprehensive list of specs
@@ -198,9 +195,9 @@ def loads(module_type, specs, args, out=None):
         tty.warn(_missing_modules_warning)
 
 
-def find(module_type, specs, args):
+def find(module_type, specs, args, ctx):
     """Retrieve paths or use names of module files"""
-    check_module_set_name(args.module_set_name)
+    check_module_set_name(args.module_set_name, ctx.config)
 
     single_spec = one_spec_or_raise(specs)
 
@@ -244,11 +241,11 @@ def find(module_type, specs, args):
     print(" ".join(modules))
 
 
-def rm(module_type, specs, args):
+def rm(module_type, specs, args, ctx):
     """Deletes the module files associated with every spec in specs, for every
     module type in module types.
     """
-    check_module_set_name(args.module_set_name)
+    check_module_set_name(args.module_set_name, ctx.config)
 
     module_cls = spack.modules.module_types[module_type]
     cache: spack.modules.common.ModuleConfigurationCache = {}
@@ -281,11 +278,11 @@ def rm(module_type, specs, args):
         s.remove()
 
 
-def refresh(module_type, specs, args):
+def refresh(module_type, specs, args, ctx):
     """Regenerates the module files for every spec in specs and every module
     type in module types.
     """
-    check_module_set_name(args.module_set_name)
+    check_module_set_name(args.module_set_name, ctx.config)
 
     # Prompt a message to the user about what is going to change
     if not specs:
@@ -293,7 +290,7 @@ def refresh(module_type, specs, args):
         return
 
     if not args.upstream_modules:
-        specs = [s for s in specs if not spack.store.STORE.db.installed_upstream(s)]
+        specs = [s for s in specs if not ctx.store.db.installed_upstream(s)]
 
     if not args.yes_to_all:
         msg = "You are about to regenerate {types} module files for:\n"
@@ -313,7 +310,7 @@ def refresh(module_type, specs, args):
     writers = [
         cls.from_spec(spec, args.module_set_name, cache=cache)
         for spec in specs
-        if spack.repo.PATH.exists(spec.name)
+        if ctx.repo.exists(spec.name)
     ]
 
     # Filter excluded packages early
@@ -370,29 +367,27 @@ def refresh(module_type, specs, args):
 
 
 #: Dictionary populated with the list of sub-commands.
-#: Each sub-command must be callable and accept 3 arguments:
+#: Each sub-command must be callable and accept 4 arguments:
 #:
 #: - module_type: the type of module it refers to
 #: - specs : the list of specs to be processed
 #: - args : namespace containing the parsed command line arguments
+#: - ctx : context of the command
 callbacks = {"refresh": refresh, "rm": rm, "find": find, "loads": loads}
 
 
-def modules_cmd(parser, args, module_type, callbacks=callbacks):
+def modules_cmd(parser, args, ctx, module_type, callbacks=callbacks):
     # Qualifiers to be used when querying the db for specs
     constraint_qualifiers = {
-        "refresh": {
-            "installed": True,
-            "predicate_fn": lambda x: spack.repo.PATH.exists(x.spec.name),
-        }
+        "refresh": {"installed": True, "predicate_fn": lambda x: ctx.repo.exists(x.spec.name)}
     }
     query_args = constraint_qualifiers.get(args.subparser_name, {})
 
     # Get the specs that match the query from the DB
-    specs = args.specs(**query_args)
+    specs = args.specs(ctx, **query_args)
 
     try:
-        callbacks[args.subparser_name](module_type, specs, args)
+        callbacks[args.subparser_name](module_type, specs, args, ctx)
 
     except MultipleSpecsMatch:
         query = " ".join(str(s) for s in args.constraint_specs)

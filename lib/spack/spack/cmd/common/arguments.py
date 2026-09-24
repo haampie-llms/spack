@@ -5,6 +5,7 @@
 import argparse
 import os
 import textwrap
+from typing import TYPE_CHECKING
 
 import spack.cmd
 import spack.config
@@ -14,11 +15,13 @@ import spack.mirrors.mirror
 import spack.mirrors.utils
 import spack.reporters
 import spack.spec
-import spack.store
 import spack.util.web
 from spack.active_environment import active_environment
 from spack.util.lang import stable_partition
 from spack.util.pattern import Args
+
+if TYPE_CHECKING:
+    from spack.context import SpackContext
 
 __all__ = ["add_common_arguments"]
 
@@ -70,24 +73,24 @@ class ConstraintAction(argparse.Action):
         self.constraint_specs = namespace.constraint_specs = []
         namespace.specs = self._specs
 
-    def _specs(self, **kwargs):
+    def _specs(self, ctx: "SpackContext", **kwargs):
         # store parsed specs in spec.constraint after a call to specs()
-        self.constraint_specs[:] = spack.cmd.parse_specs(self.constraint)
+        self.constraint_specs[:] = spack.cmd.parse_specs(self.constraint, ctx)
 
         # If an environment is provided, we'll restrict the search to
         # only its installed packages.
-        env = active_environment()
+        env = ctx.environment
         if env:
             kwargs["hashes"] = set(env.all_hashes())
 
         # return everything for an empty query.
         if not self.constraint_specs:
-            return spack.store.STORE.db.query(**kwargs)
+            return ctx.store.db.query(**kwargs)
 
         # Return only matching stuff otherwise.
         specs = {}
         for spec in self.constraint_specs:
-            for s in spack.store.STORE.db.query(spec, **kwargs):
+            for s in ctx.store.db.query(spec, **kwargs):
                 # This is fast for already-concrete specs
                 specs[s.dag_hash()] = s
 

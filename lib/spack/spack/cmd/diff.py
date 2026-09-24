@@ -7,10 +7,9 @@ import argparse
 import sys
 
 import spack.cmd
+import spack.context
 import spack.hash_lookup
-import spack.repo
 import spack.util.spack_json as sjson
-from spack.active_environment import active_environment
 from spack.cmd.common import arguments
 from spack.solver import asp, clauses
 from spack.util import tty
@@ -57,7 +56,7 @@ def shift(asp_function: asp.AspFunction) -> asp.AspFunction:
     return asp.AspFunction(args[0], args[1:])
 
 
-def compare_specs(a, b, to_string=False, color=None, ignore_packages=None):
+def compare_specs(a, b, repo, to_string=False, color=None, ignore_packages=None):
     """
     Generate a comparison, including diffs (for each side) and an intersection.
 
@@ -68,6 +67,7 @@ def compare_specs(a, b, to_string=False, color=None, ignore_packages=None):
     Arguments:
         a (spack.spec.Spec): the first spec to compare
         b (spack.spec.Spec): the second spec to compare
+        repo (spack.repo.RepoPath): package repositories to generate facts with
         a_name (str): the name of spec a
         b_name (str): the name of spec b
         to_string (bool): return an object that can be json dumped
@@ -85,7 +85,7 @@ def compare_specs(a, b, to_string=False, color=None, ignore_packages=None):
             b.trim(pkg_name)
 
     # Prepare a clause generator to parse differences
-    generator = clauses.SpecClauseGenerator(repo=spack.repo.PATH)
+    generator = clauses.SpecClauseGenerator(repo=repo)
 
     # get facts for specs, making sure to include build dependencies of concrete
     # specs and to descend into dependency hashes so we include all facts.
@@ -207,24 +207,28 @@ def print_difference(c, attributes="all", out=None):
             cprint("@G{+  %s}" % addition.pop(0))
 
 
-def diff(parser, args):
-    env = active_environment()
+def diff(parser, args, ctx: spack.context.SpackContext):
+    env = ctx.environment
 
     if len(args.specs) != 2:
         args.subparser.error("you must provide two specs to diff")
 
     specs = []
-    for spec in spack.cmd.parse_specs(args.specs):
+    for spec in spack.cmd.parse_specs(args.specs, ctx):
         # If the spec has a hash, check it before disambiguating
-        spack.hash_lookup.replace_hash(spec)
+        spack.hash_lookup.replace_hash(spec, context=ctx)
         if spec.concrete:
             specs.append(spec)
         else:
-            specs.append(spack.cmd.disambiguate_spec(spec, env, first=args.load_first))
+            specs.append(
+                spack.cmd.disambiguate_spec(spec, env, store=ctx.store, first=args.load_first)
+            )
 
     # Calculate the comparison (c)
     color = False if args.dump_json else get_color_when()
-    c = compare_specs(specs[0], specs[1], to_string=True, color=color, ignore_packages=args.ignore)
+    c = compare_specs(
+        specs[0], specs[1], ctx.repo, to_string=True, color=color, ignore_packages=args.ignore
+    )
 
     # Default to all attributes
     attributes = args.attribute or ["all"]

@@ -14,6 +14,7 @@ from spack.vendor.jsonschema import exceptions
 import spack.cmd
 import spack.compilers.config
 import spack.config
+import spack.context
 import spack.deptypes as dt
 import spack.error
 import spack.platforms
@@ -175,7 +176,7 @@ def spec_from_entry(entry):
                     )
         spec_str += " " + " ".join(variant_strs)
 
-    (spec,) = spack.cmd.parse_specs(spec_str.split())
+    (spec,) = spack.cmd.parse_specs(spec_str.split(), spack.context.default())
 
     spec._hash = entry["hash"]
     spec._concrete = True

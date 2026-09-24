@@ -10,9 +10,8 @@ import spack.binary_distribution
 import spack.cmd
 import spack.compilers.config
 import spack.config
-import spack.repo
+import spack.context
 import spack.spec
-import spack.store
 from spack.cmd.common import arguments
 from spack.spec import Spec
 from spack.util import tty
@@ -79,36 +78,30 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     )
 
 
-def compiler_find(args):
+def compiler_find(args, ctx):
     """Search either $PATH or a list of paths OR MODULES for compilers and
     add them to Spack's configuration.
     """
     paths = args.add_paths or None
     new_compilers = spack.compilers.config.find_compilers(
-        path_hints=paths,
-        config=spack.config.CONFIG,
-        repo=spack.repo.PATH,
-        scope=args.scope,
-        max_workers=args.jobs,
+        path_hints=paths, config=ctx.config, repo=ctx.repo, scope=args.scope, max_workers=args.jobs
     )
     if new_compilers:
         n = len(new_compilers)
         s = "s" if n > 1 else ""
-        filename = spack.config.CONFIG.get_config_filename(args.scope, "packages")
+        filename = ctx.config.get_config_filename(args.scope, "packages")
         tty.msg(f"Added {n:d} new compiler{s} to {filename}")
         compiler_strs = sorted(f"{spec.name}@{spec.versions}" for spec in new_compilers)
         colify(reversed(compiler_strs), indent=4)
     else:
         tty.msg("Found no new compilers")
     tty.msg("Compilers are defined in the following files:")
-    config_files = spack.compilers.config.compiler_config_files(
-        spack.config.CONFIG, repo=spack.repo.PATH
-    )
+    config_files = spack.compilers.config.compiler_config_files(ctx.config, repo=ctx.repo)
     colify(config_files, indent=4)
 
 
-def compiler_remove(args):
-    remover = spack.compilers.config.CompilerRemover(spack.config.CONFIG, repo=spack.repo.PATH)
+def compiler_remove(args, ctx):
+    remover = spack.compilers.config.CompilerRemover(ctx.config, repo=ctx.repo)
     candidates = remover.mark_compilers(match=args.compiler_spec, scope=args.scope)
     if not candidates:
         tty.die(f"No compiler matches '{args.compiler_spec}'")
@@ -133,9 +126,9 @@ def compiler_remove(args):
     print()
 
 
-def compiler_info(args):
+def compiler_info(args, ctx):
     """Print info about all compilers matching a spec."""
-    all_compilers = _all_available_compilers(scope=args.scope, remote=args.remote)
+    all_compilers = _all_available_compilers(ctx, scope=args.scope, remote=args.remote)
     query = spack.spec.Spec(args.compiler_spec)
     compilers = [x for x in all_compilers if x.satisfies(query)]
 
@@ -157,9 +150,7 @@ def compiler_info(args):
             )
             continue
 
-        print(
-            f"{c.tree(recurse_dependencies=False, status_fn=spack.store.STORE.db.install_status)}"
-        )
+        print(f"{c.tree(recurse_dependencies=False, status_fn=ctx.store.db.install_status)}")
         print(f"  prefix: {c.prefix}")
         print("  compilers:")
         for language, exe in exes.items():
@@ -188,8 +179,8 @@ def compiler_info(args):
         print()
 
 
-def compiler_list(args):
-    compilers = _all_available_compilers(scope=args.scope, remote=args.remote)
+def compiler_list(args, ctx):
+    compilers = _all_available_compilers(ctx, scope=args.scope, remote=args.remote)
 
     if not sys.stdout.isatty():
         for c in sorted(compilers):  # type: ignore
@@ -197,9 +188,9 @@ def compiler_list(args):
         return
 
     status_fn = (
-        spack.cmd.buildcache_status_fn(spack.binary_distribution.BINARY_INDEX)
+        spack.cmd.buildcache_status_fn(ctx.binary_index, store=ctx.store)
         if args.remote
-        else spack.store.STORE.db.install_status
+        else ctx.store.db.install_status
     )
 
     # If there are no compilers in any scope, and we're outputting to a tty, give a
@@ -237,27 +228,29 @@ def compiler_list(args):
         colify(reversed(sorted(result)))
 
 
-def _all_available_compilers(scope: Optional[str], remote: bool) -> List[Spec]:
-    supported_compilers = spack.compilers.config.supported_compilers(repo=spack.repo.PATH)
+def _all_available_compilers(
+    ctx: spack.context.SpackContext, scope: Optional[str], remote: bool
+) -> List[Spec]:
+    supported_compilers = spack.compilers.config.supported_compilers(repo=ctx.repo)
 
     def _is_compiler(x):
         return x.name in supported_compilers and x.package.supported_languages and not x.external
 
-    compilers_from_store = [x for x in spack.store.STORE.db.query() if _is_compiler(x)]
+    compilers_from_store = [x for x in ctx.store.db.query() if _is_compiler(x)]
     compilers_from_yaml = spack.compilers.config.all_compilers(
-        spack.config.CONFIG, repo=spack.repo.PATH, scope=scope, init_config=False
+        ctx.config, repo=ctx.repo, scope=scope, init_config=False
     )
     compilers = compilers_from_yaml + compilers_from_store
 
     if remote:
         candidates = spack.binary_distribution.update_cache_and_get_specs(
-            config=spack.config.CONFIG
+            ctx.binary_index, config=ctx.config
         )
         compilers.extend([x for x in candidates if _is_compiler(x)])
     return compilers
 
 
-def compiler(parser, args):
+def compiler(parser, args, ctx):
     action = {
         "add": compiler_find,
         "find": compiler_find,
@@ -267,4 +260,4 @@ def compiler(parser, args):
         "list": compiler_list,
         "ls": compiler_list,
     }
-    action[args.compiler_command](args)
+    action[args.compiler_command](args, ctx)

@@ -32,8 +32,8 @@ def _dump_byte_stream_to_stdout(instream: io.BufferedIOBase) -> None:
     shutil.copyfileobj(instream, outstream)
 
 
-def _logs(cmdline_spec: spack.spec.Spec, concrete_spec: spack.spec.Spec):
-    if spack.store.STORE.db.installed(concrete_spec):
+def _logs(cmdline_spec: spack.spec.Spec, concrete_spec: spack.spec.Spec, store: spack.store.Store):
+    if store.db.installed(concrete_spec):
         log_path = concrete_spec.package.install_log_path
     elif os.path.exists(concrete_spec.package.stage.path):
         # TODO: `spack logs` can currently not show the logs while a package is being built, as the
@@ -58,8 +58,8 @@ def _logs(cmdline_spec: spack.spec.Spec, concrete_spec: spack.spec.Spec):
         _dump_byte_stream_to_stdout(gzip.GzipFile(fileobj=f) if ext == "gz" else f)
 
 
-def logs(parser, args):
-    specs = spack.cmd.parse_specs(args.spec)
+def logs(parser, args, ctx):
+    specs = spack.cmd.parse_specs(args.spec, ctx)
 
     if not specs:
         args.subparser.error("requires a spec")
@@ -67,6 +67,6 @@ def logs(parser, args):
     if len(specs) != 1:
         args.subparser.error("too many specs, supply only one")
 
-    concrete_spec = spack.cmd.matching_spec_from_env(specs[0])
+    concrete_spec = spack.cmd.matching_spec_from_env(specs[0], ctx)
 
-    _logs(specs[0], concrete_spec)
+    _logs(specs[0], concrete_spec, ctx.store)

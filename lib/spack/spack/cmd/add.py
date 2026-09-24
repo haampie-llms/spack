@@ -5,6 +5,7 @@
 import argparse
 
 import spack.cmd
+import spack.context
 from spack.cmd.common import arguments
 from spack.util import tty
 
@@ -24,11 +25,11 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     arguments.add_common_arguments(subparser, ["specs"])
 
 
-def add(parser, args):
-    env = spack.cmd.require_active_env(args.subparser)
+def add(parser, args, ctx: spack.context.SpackContext):
+    env = spack.cmd.require_active_env(args.subparser, ctx.environment)
 
     with env.write_transaction():
-        for spec in spack.cmd.parse_specs(args.specs):
+        for spec in spack.cmd.parse_specs(args.specs, ctx):
             if not env.add(spec, args.list_name):
                 tty.msg("Package {0} was already added to {1}".format(spec.name, env.name))
             else:

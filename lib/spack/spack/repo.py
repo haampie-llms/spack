@@ -227,12 +227,12 @@ package_file_name = "package.py"  # Filename for packages in a repository.
 NOT_PROVIDED = object()
 
 
-def builtin_repo() -> "Repo":
+def builtin_repo(repos: "RepoPath") -> "Repo":
     """Get the test repo if it is active, otherwise the builtin repo."""
     try:
-        return PATH.get_repo("builtin_mock")
+        return repos.get_repo("builtin_mock")
     except UnknownNamespaceError:
-        return PATH.get_repo("builtin")
+        return repos.get_repo("builtin")
 
 
 class GitExe:

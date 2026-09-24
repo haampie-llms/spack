@@ -214,12 +214,12 @@ def test_check_module_set_name(mutable_config: Configuration):
     )
 
     # Valid module set name
-    spack.cmd.modules.check_module_set_name("first")
+    spack.cmd.modules.check_module_set_name("first", mutable_config)
 
     # Invalid module set names
     msg = "Valid module set names are"
     with pytest.raises(spack.error.ConfigError, match=msg):
-        spack.cmd.modules.check_module_set_name("prefix_inspections")
+        spack.cmd.modules.check_module_set_name("prefix_inspections", mutable_config)
 
     with pytest.raises(spack.error.ConfigError, match=msg):
-        spack.cmd.modules.check_module_set_name("third")
+        spack.cmd.modules.check_module_set_name("third", mutable_config)

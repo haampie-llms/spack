@@ -8,7 +8,6 @@ import shutil
 
 import spack
 import spack.cmd
-import spack.config
 import spack.paths
 import spack.util.git
 import spack.util.gpg
@@ -40,7 +39,7 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     arguments.add_common_arguments(subparser, ["yes_to_all"])
 
 
-def tutorial(parser, args):
+def tutorial(parser, args, ctx):
     if not spack.cmd.spack_is_git_repo():
         tty.die("This command requires a git installation of Spack!")
 
@@ -72,7 +71,7 @@ def tutorial(parser, args):
     )
     mirror_config = syaml_dict()
     mirror_config["tutorial"] = tutorial_mirror
-    spack.config.CONFIG.set("mirrors", mirror_config, scope="user")
+    ctx.config.set("mirrors", mirror_config, scope="user")
 
     tty.msg("Ensuring that we trust tutorial binaries", f"spack gpg trust {tutorial_key}")
     spack.util.gpg.trust(tutorial_key)

@@ -17,6 +17,7 @@ import spack.mirrors.layout
 import spack.mirrors.mirror
 import spack.mirrors.utils
 import spack.patch
+import spack.repo
 import spack.stage
 import spack.util.url as url_util
 from spack.cmd.common.arguments import mirror_name_or_url
@@ -70,7 +71,7 @@ def check_mirror(mutable_config: Configuration):
         with mutable_config.override("mirrors", mirrors):
             with mutable_config.override("config:checksum", False):
                 specs = [spack.concretize.concretize_one(x) for x in repos]
-                spack.cmd.mirror.create(mirror_root, specs)
+                spack.cmd.mirror.create(mirror_root, specs, spack.repo.PATH)
 
             # Stage directory exists
             assert os.path.isdir(mirror_root)
@@ -211,7 +212,7 @@ def test_mirror_with_url_patches(mock_packages, monkeypatch, mutable_config: Con
         )
 
         with mutable_config.override("config:checksum", False):
-            spack.cmd.mirror.create(mirror_root, list(spec.traverse()))
+            spack.cmd.mirror.create(mirror_root, list(spec.traverse()), spack.repo.PATH)
 
         assert {
             "abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234",

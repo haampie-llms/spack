@@ -5,11 +5,9 @@
 import argparse
 
 import spack.cmd
-import spack.config
 import spack.environment as ev
 import spack.package_base
 import spack.traverse
-from spack.active_environment import active_environment
 from spack.cmd.common import arguments
 from spack.util import tty
 
@@ -23,18 +21,18 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     arguments.add_concretizer_args(subparser)
 
 
-def patch(parser, args):
+def patch(parser, args, ctx):
     if not args.specs:
-        env = active_environment()
+        env = ctx.environment
         if not env:
             args.subparser.error("requires a spec or an active environment")
         return _patch_env(env)
 
     if args.no_checksum:
-        spack.config.CONFIG.set("config:checksum", False, scope="command_line")
+        ctx.config.set("config:checksum", False, scope="command_line")
 
-    specs = spack.cmd.parse_specs(args.specs, concretize=False)
-    specs = spack.cmd.matching_specs_from_env(specs)
+    specs = spack.cmd.parse_specs(args.specs, ctx, concretize=False)
+    specs = spack.cmd.matching_specs_from_env(specs, ctx)
     for spec in specs:
         _patch(spec.package)
 

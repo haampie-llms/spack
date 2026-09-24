@@ -94,19 +94,19 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     hash_parser.set_defaults(subparser=hash_parser)
 
 
-def pkg_add(args):
+def pkg_add(args, ctx):
     """add a package to the git stage with ``git add``"""
-    spack.repo.add_package_to_git_stage(args.packages, spack.repo.builtin_repo())
+    spack.repo.add_package_to_git_stage(args.packages, spack.repo.builtin_repo(ctx.repo))
 
 
-def pkg_list(args):
+def pkg_list(args, ctx):
     """list packages associated with a particular spack git revision"""
-    colify(spack.repo.list_packages(args.rev, spack.repo.builtin_repo()))
+    colify(spack.repo.list_packages(args.rev, spack.repo.builtin_repo(ctx.repo)))
 
 
-def pkg_diff(args):
+def pkg_diff(args, ctx):
     """compare packages available in two different git revisions"""
-    u1, u2 = spack.repo.diff_packages(args.rev1, args.rev2, spack.repo.builtin_repo())
+    u1, u2 = spack.repo.diff_packages(args.rev1, args.rev2, spack.repo.builtin_repo(ctx.repo))
 
     if u1:
         print("%s:" % args.rev1)
@@ -119,43 +119,43 @@ def pkg_diff(args):
         colify(sorted(u2), indent=4)
 
 
-def pkg_removed(args):
+def pkg_removed(args, ctx):
     """show packages removed since a commit"""
-    u1, u2 = spack.repo.diff_packages(args.rev1, args.rev2, spack.repo.builtin_repo())
+    u1, u2 = spack.repo.diff_packages(args.rev1, args.rev2, spack.repo.builtin_repo(ctx.repo))
     if u1:
         colify(sorted(u1))
 
 
-def pkg_added(args):
+def pkg_added(args, ctx):
     """show packages added since a commit"""
-    u1, u2 = spack.repo.diff_packages(args.rev1, args.rev2, spack.repo.builtin_repo())
+    u1, u2 = spack.repo.diff_packages(args.rev1, args.rev2, spack.repo.builtin_repo(ctx.repo))
     if u2:
         colify(sorted(u2))
 
 
-def pkg_changed(args):
+def pkg_changed(args, ctx):
     """show packages changed since a commit"""
     packages = spack.repo.get_all_package_diffs(
-        args.type, spack.repo.builtin_repo(), args.rev1, args.rev2
+        args.type, spack.repo.builtin_repo(ctx.repo), args.rev1, args.rev2
     )
 
     if packages:
         colify(sorted(packages))
 
 
-def pkg_source(args):
+def pkg_source(args, ctx):
     """dump source code for a package"""
-    specs = spack.cmd.parse_specs(args.spec, concretize=False)
+    specs = spack.cmd.parse_specs(args.spec, ctx, concretize=False)
     if len(specs) != 1:
         args.subparser.error("requires exactly one spec")
 
     spec = specs[0]
-    filename = spack.repo.PATH.filename_for_package_name(spec.name)
+    filename = ctx.repo.filename_for_package_name(spec.name)
 
     # regular source dump -- just get the package and print its contents
     if args.canonical:
         message = "Canonical source for %s:" % filename
-        content = ph.canonical_source(spec, repo=spack.repo.PATH)
+        content = ph.canonical_source(spec, repo=ctx.repo)
     else:
         message = "Source for %s:" % filename
         with open(filename, encoding="utf-8") as f:
@@ -166,12 +166,12 @@ def pkg_source(args):
     sys.stdout.write(content)
 
 
-def pkg_hash(args):
+def pkg_hash(args, ctx):
     """dump canonical source code hash for a package spec"""
-    specs = spack.cmd.parse_specs(args.spec, concretize=False)
+    specs = spack.cmd.parse_specs(args.spec, ctx, concretize=False)
 
     for spec in specs:
-        print(ph.package_hash(spec, repo=spack.repo.PATH))
+        print(ph.package_hash(spec, repo=ctx.repo))
 
 
 def get_grep(required=False):
@@ -182,7 +182,7 @@ def get_grep(required=False):
     return grep
 
 
-def pkg_grep(args, unknown_args):
+def pkg_grep(args, unknown_args, ctx):
     """grep for strings in package.py files from all repositories"""
     grep = get_grep(required=True)
 
@@ -190,7 +190,7 @@ def pkg_grep(args, unknown_args):
     if "GNU" in grep("--version", output=str):
         grep.add_default_arg("--color=auto")
 
-    all_paths = spack.repo.PATH.all_package_paths()
+    all_paths = ctx.repo.all_package_paths()
     if not all_paths:
         return 0  # no packages to search
 
@@ -242,7 +242,7 @@ def pkg_grep(args, unknown_args):
     return return_code
 
 
-def pkg(parser, args, unknown_args):
+def pkg(parser, args, unknown_args, ctx):
     if not spack.cmd.spack_is_git_repo():
         tty.die("This spack is not a git clone. Can't use 'spack pkg'")
 
@@ -259,8 +259,8 @@ def pkg(parser, args, unknown_args):
 
     # grep is special as it passes unknown arguments through
     if args.pkg_command == "grep":
-        return pkg_grep(args, unknown_args)
+        return pkg_grep(args, unknown_args, ctx)
     elif unknown_args:
         args.subparser.error("unrecognized arguments: %s" % " ".join(unknown_args))
     else:
-        return action[args.pkg_command](args)
+        return action[args.pkg_command](args, ctx)

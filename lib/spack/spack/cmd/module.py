@@ -22,5 +22,5 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     spack.cmd.modules.tcl.add_command(sp, _subcommands)
 
 
-def module(parser, args):
-    _subcommands[args.module_command](parser, args)
+def module(parser, args, ctx):
+    _subcommands[args.module_command](parser, args, ctx)

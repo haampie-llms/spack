@@ -3521,20 +3521,20 @@ def test_reuse_prefers_standard_over_git_versions(
 
 
 @pytest.mark.parametrize("unify", [True, "when_possible", False])
-def test_spec_unification(unify, mutable_config: Configuration, mock_packages):
+def test_spec_unification(unify, mutable_config: Configuration, mock_packages, ctx: SpackContext):
     mutable_config.set("concretizer:unify", unify)
     a = "pkg-a"
     a_restricted = "pkg-a^pkg-b foo=baz"
     b = "pkg-b foo=none"
 
-    unrestricted = spack.cmd.parse_specs([a, b], concretize=True)
+    unrestricted = spack.cmd.parse_specs([a, b], ctx, concretize=True)
     a_concrete_unrestricted = [s for s in unrestricted if s.name == "pkg-a"][0]
     b_concrete_unrestricted = [s for s in unrestricted if s.name == "pkg-b"][0]
     assert (a_concrete_unrestricted["pkg-b"] == b_concrete_unrestricted) == (unify is not False)
 
     maybe_fails = pytest.raises if unify is True else spack.util.lang.nullcontext
     with maybe_fails(spack.solver.asp.UnsatisfiableSpecError):
-        _ = spack.cmd.parse_specs([a_restricted, b], concretize=True)
+        _ = spack.cmd.parse_specs([a_restricted, b], ctx, concretize=True)
 
 
 @pytest.mark.not_on_windows("parallelism unsupported on Windows")

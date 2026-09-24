@@ -21,7 +21,6 @@ import spack.environment.environment
 import spack.environment.shell
 import spack.tengine
 import spack.util.filesystem as fs
-from spack.active_environment import active_environment
 from spack.cmd.common import arguments
 from spack.environment import depfile
 from spack.traverse import traverse_nodes
@@ -98,7 +97,7 @@ def env_create_setup_parser(subparser):
     )
 
 
-def env_create(args):
+def env_create(args, ctx):
     if args.with_view:
         # Expand relative paths provided on the command line to the current working directory
         # This way we interpret `spack env create --with-view ./view --dir ./env` as
@@ -297,7 +296,7 @@ def _tty_info(msg):
     print(f"{executor} {shlex.quote(decorated)};")
 
 
-def env_activate(args):
+def env_activate(args, ctx):
     if not args.shell:
         spack.cmd.common.shell_init_instructions(
             "spack env activate", "    eval `spack env activate {sh_arg} [...]`"
@@ -347,16 +346,16 @@ def env_activate(args):
     # create if user requested, and then recall recursively
     elif args.create:
         tty.set_msg_enabled(False)
-        env_create(args)
+        env_create(args, ctx)
         tty.set_msg_enabled(True)
-        env_activate(args)
+        env_activate(args, ctx)
         return
 
     else:
         tty.die("No such environment: '%s'" % args.env_name)
 
     # We only support one active environment at a time, so deactivate the current one.
-    if active_environment() is None:
+    if ctx.environment is None:
         cmds = ""
         env_mods = EnvironmentModifications()
     else:
@@ -426,7 +425,7 @@ def env_deactivate_setup_parser(subparser):
     )
 
 
-def env_deactivate(args):
+def env_deactivate(args, ctx):
     if not args.shell:
         spack.cmd.common.shell_init_instructions(
             "spack env deactivate", "    eval `spack env deactivate {sh_arg}`"
@@ -437,7 +436,7 @@ def env_deactivate(args):
     if args.env or args.no_env or args.env_dir:
         tty.die("Calling spack env deactivate with --env, --env-dir and --no-env is ambiguous")
 
-    if active_environment() is None:
+    if ctx.environment is None:
         tty.die("No environment is currently active.")
 
     cmds = spack.environment.shell.deactivate_header(args.shell)
@@ -456,7 +455,7 @@ def env_track_setup_parser(subparser):
     arguments.add_common_arguments(subparser, ["yes_to_all"])
 
 
-def env_track(args):
+def env_track(args, ctx):
     src_path = os.path.abspath(args.dir)
     if not ev.is_env_dir(src_path):
         tty.die("Cannot track environment. Path doesn't contain an environment")
@@ -628,7 +627,7 @@ def env_untrack_setup_parser(subparser):
     arguments.add_common_arguments(subparser, ["yes_to_all"])
 
 
-def env_untrack(args):
+def env_untrack(args, ctx):
     _env_untrack_or_remove(
         env_names=args.env, force=args.force, yes_to_all=args.yes_to_all, remove=False
     )
@@ -658,7 +657,7 @@ def env_remove_setup_parser(subparser):
     )
 
 
-def env_remove(args):
+def env_remove(args, ctx):
     """remove existing environment(s)"""
     _env_untrack_or_remove(
         env_names=args.rm_env, remove=True, force=args.force, yes_to_all=args.yes_to_all
@@ -694,7 +693,7 @@ def env_rename_setup_parser(subparser):
     )
 
 
-def env_rename(args):
+def env_rename(args, ctx):
     """rename or move an existing environment"""
 
     # Directory option has been specified
@@ -727,7 +726,7 @@ def env_rename(args):
         tty.die("The specified name does not correspond to a managed spack environment")
 
     # Guard against renaming from or to an active environment
-    active_env = active_environment()
+    active_env = ctx.environment
     if active_env:
         from_env = ev.Environment(from_path)
         if from_env.path == active_env.path:
@@ -747,7 +746,7 @@ def env_list_setup_parser(subparser):
     """list all managed environments"""
 
 
-def env_list(args):
+def env_list(args, ctx):
     names = ev.all_environment_names()
 
     color_names = []
@@ -791,8 +790,8 @@ def env_view_setup_parser(subparser):
     subparser.add_argument("view_path", nargs="?", help="view's non-default path when enabling it")
 
 
-def env_view(args):
-    env = active_environment()
+def env_view(args, ctx):
+    env = ctx.environment
 
     if not env:
         tty.msg("No active environment")
@@ -819,8 +818,8 @@ def env_status_setup_parser(subparser):
     """print active environment status"""
 
 
-def env_status(args):
-    env = active_environment()
+def env_status(args, ctx):
+    env = ctx.environment
     if env:
         if env.path == os.getcwd():
             tty.msg("Using %s in current directory: %s" % (ev.manifest_name, env.path))
@@ -853,8 +852,8 @@ def env_loads_setup_parser(subparser):
     spack.cmd.modules.add_loads_arguments(subparser)
 
 
-def env_loads(args):
-    env = spack.cmd.require_active_env(args.subparser)
+def env_loads(args, ctx):
+    env = spack.cmd.require_active_env(args.subparser, ctx.environment)
 
     # Set the module types that have been selected
     module_type = args.module_type
@@ -871,7 +870,7 @@ def env_loads(args):
             specs = [env.specs_by_hash[x.hash] for x in env.concretized_roots]
         else:
             specs = list(traverse_nodes(env.concrete_roots(), deptype=("link", "run")))
-        spack.cmd.modules.loads(module_type, specs, args, f)
+        spack.cmd.modules.loads(module_type, specs, args, ctx, f)
 
     print("To load this environment, type:")
     print("   source %s" % loads_file)
@@ -893,7 +892,7 @@ def env_update_setup_parser(subparser):
     spack.cmd.common.arguments.add_common_arguments(subparser, ["yes_to_all"])
 
 
-def env_update(args):
+def env_update(args, ctx):
     """update the manifest to the latest format"""
     manifest_file = ev.manifest_file(args.update_env)
     backup_file = manifest_file + ".bkp"
@@ -939,7 +938,7 @@ def env_revert_setup_parser(subparser):
     spack.cmd.common.arguments.add_common_arguments(subparser, ["yes_to_all"])
 
 
-def env_revert(args):
+def env_revert(args, ctx):
     """restore the environment manifest to its previous format"""
     manifest_file = ev.manifest_file(args.revert_env)
     backup_file = manifest_file + ".bkp"
@@ -1026,15 +1025,13 @@ def env_depfile_setup_parser(subparser):
     )
 
 
-def env_depfile(args):
+def env_depfile(args, ctx):
     # Currently only make is supported.
-    spack.cmd.require_active_env(args.subparser)
-
-    env = active_environment()
+    env = spack.cmd.require_active_env(args.subparser, ctx.environment)
 
     # What things do we build when running make? By default, we build the
     # root specs. If specific specs are provided as input, we build those.
-    filter_specs = spack.cmd.parse_specs(args.specs) if args.specs else None
+    filter_specs = spack.cmd.parse_specs(args.specs, ctx) if args.specs else None
     template = spack.tengine.make_environment().get_template(os.path.join("depfile", "Makefile"))
     model = depfile.MakefileModel.from_env(
         env,
@@ -1097,7 +1094,7 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
         setup_parser_cmd(subsubparser)
 
 
-def env(parser, args):
+def env(parser, args, ctx):
     """Look for a function called environment_<name> and call it."""
     action = subcommand_functions[args.env_command]
-    action(args)
+    action(args, ctx)

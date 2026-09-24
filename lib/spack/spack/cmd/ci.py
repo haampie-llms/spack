@@ -242,7 +242,7 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     verify_versions.set_defaults(func=ci_verify_versions, subparser=verify_versions)
 
 
-def ci_generate(args):
+def ci_generate(args, ctx):
     """\
     generate jobs file from a CI-aware spack file
 
@@ -250,18 +250,18 @@ def ci_generate(args):
     before invoking this command. the value must be the CDash authorization token needed to create
     a build group and register all generated jobs under it
     """
-    env = spack.cmd.require_active_env(args.subparser)
+    env = spack.cmd.require_active_env(args.subparser, ctx.environment)
     spack_ci.generate_pipeline(env, args)
 
 
-def ci_reindex(args):
+def ci_reindex(args, ctx):
     """\
     rebuild the buildcache index for the remote mirror
 
     use the active, gitlab-enabled environment to rebuild the buildcache index for the associated
     mirror
     """
-    env = spack.cmd.require_active_env(args.subparser)
+    env = spack.cmd.require_active_env(args.subparser, ctx.environment)
     yaml_root = env.manifest[ev.TOP_LEVEL_KEY]
 
     if "mirrors" not in yaml_root or len(yaml_root["mirrors"].values()) < 1:
@@ -272,10 +272,10 @@ def ci_reindex(args):
     remote_mirror_url = mirror_urls[0]
     mirror = spack.mirrors.mirror.Mirror(remote_mirror_url)
 
-    buildcache.update_index(mirror, update_keys=True)
+    buildcache.update_index(mirror, ctx.config, update_keys=True)
 
 
-def ci_rebuild(args):
+def ci_rebuild(args, ctx):
     """\
     rebuild a spec if it is not on the remote mirror
 
@@ -284,11 +284,11 @@ def ci_rebuild(args):
     """
     rebuild_timer = timer.Timer()
 
-    env = spack.cmd.require_active_env(args.subparser)
+    env = spack.cmd.require_active_env(args.subparser, ctx.environment)
 
     # Make sure the environment is "gitlab-enabled", or else there's nothing
     # to do.
-    ci_config = cfg.CONFIG.get("ci")
+    ci_config = ctx.config.get("ci")
     if not ci_config:
         tty.die("spack ci rebuild requires an env containing ci cfg")
 
@@ -334,10 +334,10 @@ def ci_rebuild(args):
     # Query the environment manifest to find out whether we're reporting to a
     # CDash instance, and if so, gather some information from the manifest to
     # support that task.
-    cdash_config = cfg.CONFIG.get("cdash")
+    cdash_config = ctx.config.get("cdash")
     cdash_handler = None
     if "build-group" in cdash_config:
-        client = web_util.NetworkClient.from_config(cfg.CONFIG)
+        client = web_util.NetworkClient.from_config(ctx.config)
         cdash_handler = spack_ci.CDashHandler(cdash_config, urlopen=client.urlopen)
         tty.debug("cdash url = {0}".format(cdash_handler.url))
         tty.debug("cdash project = {0}".format(cdash_handler.project))
@@ -360,7 +360,7 @@ def ci_rebuild(args):
 
     full_rebuild = True if rebuild_everything and rebuild_everything.lower() == "true" else False
 
-    pipeline_mirrors = spack.mirrors.mirror.MirrorCollection.from_config(cfg.CONFIG, binary=True)
+    pipeline_mirrors = spack.mirrors.mirror.MirrorCollection.from_config(ctx.config, binary=True)
     buildcache_destination = None
     if "buildcache-destination" not in pipeline_mirrors:
         tty.die("spack ci rebuild requires a mirror named 'buildcache-destination")
@@ -465,7 +465,7 @@ def ci_rebuild(args):
     # Start with spack arguments
     spack_cmd = [SPACK_COMMAND, "--color=always", "install"]
 
-    config = cfg.CONFIG.get("config")
+    config = ctx.config.get("config")
     if not config["verify_ssl"]:
         spack_cmd.append("-k")
 
@@ -530,7 +530,7 @@ def ci_rebuild(args):
     spack_ci.copy_stage_logs_to_artifacts(job_spec, job_log_dir)
 
     # Clear the stage directory
-    spack.stage.purge(config=cfg.CONFIG)
+    spack.stage.purge(config=ctx.config)
 
     # If the installation succeeded and we're running stand-alone tests for
     # the package, run them and copy the output. Failures of any kind should
@@ -554,7 +554,7 @@ def ci_rebuild(args):
                 test_stage = fs.join_path(stage_root, "spack-standalone-tests")
                 tty.debug("Configuring test_stage to {0}".format(test_stage))
                 config_test_path = "config:test_stage:{0}".format(test_stage)
-                cfg.CONFIG.add(config_test_path, scope=cfg.CONFIG.default_modify_scope())
+                ctx.config.add(config_test_path, scope=ctx.config.default_modify_scope())
 
                 # Run the tests, resorting to junit results if not using cdash
                 log_file = (
@@ -613,7 +613,7 @@ def ci_rebuild(args):
             broken_specs_url = ci_config["broken-specs-url"]
             just_built_hash = job_spec.dag_hash()
             broken_spec_path = url_util.join(broken_specs_url, just_built_hash)
-            client = web_util.NetworkClient.from_config(cfg.CONFIG)
+            client = web_util.NetworkClient.from_config(ctx.config)
             if web_util.url_exists(broken_spec_path, client=client):
                 tty.msg("Removing {0} from the list of broken specs".format(broken_spec_path))
                 try:
@@ -664,7 +664,7 @@ If this project does not have public pipelines, you will need to first:
     return install_exit_code
 
 
-def ci_reproduce(args):
+def ci_reproduce(args, ctx):
     """\
     generate instructions for reproducing the spec rebuild job
 
@@ -728,12 +728,13 @@ def _gitlab_artifacts_url(url: str) -> str:
 
 
 def validate_standard_versions(
-    pkg: spack.package_base.PackageBase, versions: List[StandardVersion]
+    pkg: spack.package_base.PackageBase, versions: List[StandardVersion], config: cfg.Configuration
 ) -> bool:
     """Get and test the checksum of a package version based on a tarball.
     Args:
       pkg: Spack package for which to validate a version checksum
       versions: list of package versions to validate
+      config: configuration used to fetch the tarballs
     Returns: True if all versions are valid, False if any version is invalid.
     """
     url_dict: Dict[StandardVersion, str] = {}
@@ -752,7 +753,7 @@ def validate_standard_versions(
             url_dict[version] = url
 
     version_hashes = spack.stage.get_checksums_for_versions(
-        url_dict, pkg.name, fetch_options=pkg.fetch_options, config=cfg.CONFIG
+        url_dict, pkg.name, fetch_options=pkg.fetch_options, config=config
     )
 
     for version, sha in version_hashes.items():
@@ -770,19 +771,20 @@ def validate_standard_versions(
 
 
 def validate_git_versions(
-    pkg: spack.package_base.PackageBase, versions: List[StandardVersion]
+    pkg: spack.package_base.PackageBase, versions: List[StandardVersion], config: cfg.Configuration
 ) -> bool:
     """Get and test the commit and tag of a package version based on a git repository.
     Args:
       pkg: Spack package for which to validate a version
       versions: list of package versions to validate
+      config: configuration used to stage the repository
     Returns: True if all versions are valid, False if any version is invalid.
     """
     valid_commit = True
     for version in versions:
         fetcher = spack.package_base.for_package_version(pkg, version)
         assert isinstance(fetcher, spack.fetch_strategy.GitFetchStrategy)
-        with spack.stage.stage_from_config(fetcher, config=cfg.CONFIG) as stage:
+        with spack.stage.stage_from_config(fetcher, config=config) as stage:
             known_commit = pkg.versions[version]["commit"]
             try:
                 stage.fetch()
@@ -826,7 +828,7 @@ def validate_git_versions(
     return valid_commit
 
 
-def ci_verify_versions(args):
+def ci_verify_versions(args, ctx):
     """\
     validate version checksum & commits between git refs
     This command takes a from_ref and to_ref arguments and
@@ -836,14 +838,14 @@ def ci_verify_versions(args):
     # Get a list of all packages that have been changed or added
     # between from_ref and to_ref
     pkgs = spack.repo.get_all_package_diffs(
-        "AC", spack.repo.builtin_repo(), args.from_ref, args.to_ref
+        "AC", spack.repo.builtin_repo(ctx.repo), args.from_ref, args.to_ref
     )
 
     success = True
     for pkg_name in pkgs:
         spec = spack.spec.Spec(pkg_name)
-        pkg = spack.repo.PATH.get_pkg_class(spec.name)(spec)
-        path = spack.repo.PATH.package_path(pkg_name)
+        pkg = ctx.repo.get_pkg_class(spec.name)(spec)
+        path = ctx.repo.package_path(pkg_name)
 
         # Skip checking manual download packages and trust the maintainers
         if pkg.manual_download:
@@ -878,15 +880,15 @@ def ci_verify_versions(args):
             new_git_versions = filter_added_versions(git_version_to_checksum)
 
         if new_url_versions:
-            success &= validate_standard_versions(pkg, new_url_versions)
+            success &= validate_standard_versions(pkg, new_url_versions, ctx.config)
 
         if new_git_versions:
-            success &= validate_git_versions(pkg, new_git_versions)
+            success &= validate_git_versions(pkg, new_git_versions, ctx.config)
 
     if not success:
         sys.exit(1)
 
 
-def ci(parser, args):
+def ci(parser, args, ctx):
     if args.func:
-        return args.func(args)
+        return args.func(args, ctx)

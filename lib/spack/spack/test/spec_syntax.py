@@ -21,6 +21,7 @@ import spack.solver.asp
 import spack.spec
 import spack.util.filesystem as fs
 import spack.version
+from spack.context import SpackContext
 from spack.externals import (
     ExternalSpecsParser,
     complete_variants_and_architecture,
@@ -1333,13 +1334,13 @@ def test_parse_multiple_specs(text, tokens, expected_specs):
         (["zlib", '"-g', '-O2"'], SpecTokenizationError),
     ],
 )
-def test_cli_spec_roundtrip(args, expected):
+def test_cli_spec_roundtrip(args, expected, ctx: SpackContext):
     if isinstance(expected, type) and issubclass(expected, BaseException):
         with pytest.raises(expected):
-            spack.cmd.parse_specs(args)
+            spack.cmd.parse_specs(args, ctx)
         return
 
-    specs = spack.cmd.parse_specs(args)
+    specs = spack.cmd.parse_specs(args, ctx)
     output_string = " ".join(str(spec) for spec in specs)
     assert expected == output_string
 
@@ -2101,13 +2102,13 @@ expected a single spec, but got more:
         ),
     ],
 )
-def test_parse_multiple_edge_attributes(input_args, expected):
+def test_parse_multiple_edge_attributes(input_args, expected, ctx: SpackContext):
     """Tests that we can parse correctly multiple edge attributes within square brackets,
     from the command line.
 
     The input are strings as they would be parsed from argparse.REMAINDER
     """
-    s, *_ = spack.cmd.parse_specs(input_args)
+    s, *_ = spack.cmd.parse_specs(input_args, ctx)
     for c in expected:
         assert s.satisfies(c)
 

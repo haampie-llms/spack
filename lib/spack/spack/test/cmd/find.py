@@ -19,12 +19,12 @@ import spack.paths
 import spack.repo
 import spack.spec
 import spack.user_environment as uenv
+from spack.context import SpackContext
 from spack.database import Database
 from spack.enums import InstallRecordStatus
 from spack.main import SpackCommand
 from spack.test.utilities import SpackCommandArgs
 from spack.util.filesystem import working_dir
-from spack.util.pattern import Bunch
 from spack.version.git_ref_lookup import GitRefLookup
 
 find = SpackCommand("find")
@@ -58,11 +58,11 @@ def mock_display(monkeypatch, specs):
     monkeypatch.setattr(spack.cmd, "display_specs", display)
 
 
-def test_query_arguments():
+def test_query_arguments(ctx: SpackContext):
     query_arguments = spack.cmd.find.query_arguments
 
     # Default arguments
-    args = Bunch(
+    args = argparse.Namespace(
         only_missing=False,
         missing=False,
         only_deprecated=False,
@@ -75,7 +75,7 @@ def test_query_arguments():
         install_tree="all",
     )
 
-    q_args = query_arguments(args)
+    q_args = query_arguments(args, ctx)
     assert "installed" in q_args
     assert "predicate_fn" in q_args
     assert "explicit" in q_args
@@ -88,20 +88,20 @@ def test_query_arguments():
 
     # Check that explicit works correctly
     args.explicit = True
-    q_args = query_arguments(args)
+    q_args = query_arguments(args, ctx)
     assert q_args["explicit"] is True
 
     args.explicit = False
     args.implicit = True
-    q_args = query_arguments(args)
+    q_args = query_arguments(args, ctx)
     assert q_args["explicit"] is False
 
 
 @pytest.mark.db
 @pytest.mark.usefixtures("database", "mock_display")
-def test_tag1(parser, specs):
+def test_tag1(parser, specs, ctx: SpackContext):
     args = parser.parse_args(["--tag", "tag1"])
-    spack.cmd.find.find(parser, args)
+    spack.cmd.find.find(parser, args, ctx)
 
     assert len(specs) == 2
     assert "mpich" in [x.name for x in specs]
@@ -110,9 +110,9 @@ def test_tag1(parser, specs):
 
 @pytest.mark.db
 @pytest.mark.usefixtures("database", "mock_display")
-def test_tag2(parser, specs):
+def test_tag2(parser, specs, ctx: SpackContext):
     args = parser.parse_args(["--tag", "tag2"])
-    spack.cmd.find.find(parser, args)
+    spack.cmd.find.find(parser, args, ctx)
 
     assert len(specs) == 1
     assert "mpich" in [x.name for x in specs]
@@ -120,9 +120,9 @@ def test_tag2(parser, specs):
 
 @pytest.mark.db
 @pytest.mark.usefixtures("database", "mock_display")
-def test_tag2_tag3(parser, specs):
+def test_tag2_tag3(parser, specs, ctx: SpackContext):
     args = parser.parse_args(["--tag", "tag2", "--tag", "tag3"])
-    spack.cmd.find.find(parser, args)
+    spack.cmd.find.find(parser, args, ctx)
 
     assert len(specs) == 0
 
@@ -474,7 +474,7 @@ def test_repo(mock_stage):
 
 
 def test_find_concretized_not_installed(
-    mutable_mock_env_path, install_mockery, mock_fetch, test_repo, mock_archive
+    mutable_mock_env_path, install_mockery, mock_fetch, test_repo, mock_archive, ctx: SpackContext
 ):
     """Test queries against installs of specs against fake repo.
 
@@ -487,18 +487,18 @@ def test_find_concretized_not_installed(
     concretize = SpackCommand("concretize")
     uninstall = SpackCommand("uninstall")
 
-    def _query(_e, *args):
-        return spack.cmd.find._find_query(SpackCommandArgs("find")(*args), _e)
+    def _query(*args):
+        return spack.cmd.find._find_query(SpackCommandArgs("find")(*args), ctx)
 
     def _nresults(_qresult):
         return len(_qresult[0]), len(_qresult[1])
 
     env("create", "test")
-    with ev.read("test") as e:
+    with ev.read("test"):
         install("--fake", "--add", "a0")
 
-        assert _nresults(_query(e)) == (3, 0)
-        assert _nresults(_query(e, "--explicit")) == (1, 0)
+        assert _nresults(_query()) == (3, 0)
+        assert _nresults(_query("--explicit")) == (1, 0)
 
         add("d0")
         concretize("--reuse")
@@ -509,29 +509,29 @@ def test_find_concretized_not_installed(
         # --explicit, --deprecated, --start-date, etc. are all
         # filters on records, and therefore don't apply to
         # concretized-but-not-installed results
-        assert _nresults(_query(e, "--explicit")) == (1, 2)
+        assert _nresults(_query("--explicit")) == (1, 2)
 
-        assert _nresults(_query(e)) == (3, 2)
-        assert _nresults(_query(e, "-c", "d0")) == (0, 1)
+        assert _nresults(_query()) == (3, 2)
+        assert _nresults(_query("-c", "d0")) == (0, 1)
 
         uninstall("-f", "-y", "b0")
 
         # b0 is now missing (it is not installed, but has an
         # installed parent)
 
-        assert _nresults(_query(e)) == (2, 3)
+        assert _nresults(_query()) == (2, 3)
         # b0 is "double-counted" here: it meets the --missing
         # criteria, and also now qualifies as a
         # concretized-but-not-installed spec
-        assert _nresults(_query(e, "--missing")) == (3, 3)
-        assert _nresults(_query(e, "--only-missing")) == (1, 3)
+        assert _nresults(_query("--missing")) == (3, 3)
+        assert _nresults(_query("--only-missing")) == (1, 3)
 
         # Tags are not attached to install records, so they
         # can modify the concretized-but-not-installed results
 
-        assert _nresults(_query(e, "--tag=tag0")) == (1, 0)
-        assert _nresults(_query(e, "--tag=tag1")) == (1, 1)
-        assert _nresults(_query(e, "--tag=tag2")) == (0, 1)
+        assert _nresults(_query("--tag=tag0")) == (1, 0)
+        assert _nresults(_query("--tag=tag1")) == (1, 1)
+        assert _nresults(_query("--tag=tag2")) == (0, 1)
 
 
 @pytest.mark.usefixtures("install_mockery", "mock_fetch")

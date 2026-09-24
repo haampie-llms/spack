@@ -7,9 +7,7 @@ import sys
 
 import spack.cmd
 import spack.cmd.common
-import spack.store
 import spack.user_environment as uenv
-from spack.active_environment import active_environment
 from spack.cmd.common import arguments
 
 description = "add package to the user environment"
@@ -75,19 +73,20 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     )
 
 
-def load(parser, args):
-    env = active_environment()
+def load(parser, args, ctx):
+    env = ctx.environment
 
     if args.list:
-        results = spack.cmd.filter_loaded_specs(args.specs())
+        results = spack.cmd.filter_loaded_specs(args.specs(ctx))
         if sys.stdout.isatty():
             spack.cmd.print_how_many_pkgs(results, "loaded")
         spack.cmd.display_specs(results)
         return
 
-    constraint_specs = spack.cmd.parse_specs(args.constraint)
+    constraint_specs = spack.cmd.parse_specs(args.constraint, ctx)
     specs = [
-        spack.cmd.disambiguate_spec(spec, env, first=args.load_first) for spec in constraint_specs
+        spack.cmd.disambiguate_spec(spec, env, store=ctx.store, first=args.load_first)
+        for spec in constraint_specs
     ]
 
     if not args.shell:
@@ -97,7 +96,7 @@ def load(parser, args):
         )
         return 1
 
-    with spack.store.STORE.db.read_transaction():
+    with ctx.store.db.read_transaction():
         env_mod = uenv.environment_modifications_for_specs(*specs)
         for spec in specs:
             env_mod.prepend_path(uenv.spack_loaded_hashes_var, spec.dag_hash())
