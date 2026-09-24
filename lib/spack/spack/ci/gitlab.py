@@ -145,7 +145,9 @@ def generate_gitlab_yaml(pipeline: PipelineDag, spack_ci: SpackCIConfig, options
             )
 
         def _rewrite_include(path, orig_root, new_root):
-            expanded_path = spack.config.substitute_path_variables(path)
+            expanded_path = spack.config.substitute_path_variables(
+                path, config=spack.config.CONFIG
+            )
 
             # Skip non-local paths
             parsed = urllib.parse.urlparse(expanded_path)
@@ -155,7 +157,7 @@ def generate_gitlab_yaml(pipeline: PipelineDag, spack_ci: SpackCIConfig, options
 
             if os.path.isabs(parsed.path):
                 return path
-            abs_path = spack.config.canonicalize_path(path, orig_root)
+            abs_path = spack.config.canonicalize_path(path, orig_root, config=spack.config.CONFIG)
             return pathlib.Path(os.path.relpath(abs_path, new_root)).as_posix()
 
         # If there are no includes, just copy

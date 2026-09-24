@@ -27,6 +27,7 @@ import spack.store
 import spack.util.executable
 import spack.version
 from spack.active_environment import active_environment
+from spack.context import SpackContext
 
 CLINGO_METADATA = sorted(pathlib.Path(spack.paths.share_path).glob("bootstrap/*/clingo.json"))
 if not CLINGO_METADATA:
@@ -117,13 +118,13 @@ def test_install_tree_customization_is_respected(mutable_config, tmp_path: pathl
         ("$spack/opt/bootstrap", "$spack/opt/bootstrap/store"),
     ],
 )
-def test_store_path_customization(config_value, expected, mutable_config):
+def test_store_path_customization(config_value, expected, mutable_config, ctx: SpackContext):
     # Set the current configuration to a specific value
     spack.config.CONFIG.set("bootstrap:root", config_value)
 
     # Check the store path
     current = spack.bootstrap.config.store_path()
-    assert current == spack.config.canonicalize_path(expected)
+    assert current == spack.config.canonicalize_path(expected, config=ctx.config)
 
 
 def test_raising_exception_if_bootstrap_disabled(mutable_config):

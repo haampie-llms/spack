@@ -711,7 +711,9 @@ def package_attributes_overrides(config: spack.config.Configuration) -> Dict[str
     """Extract per-package attribute overrides from the packages config section."""
     return {
         pkg_name: {
-            k: spack.config.substitute_path_variables(v) if isinstance(v, str) else v
+            k: spack.config.substitute_path_variables(v, config=config)
+            if isinstance(v, str)
+            else v
             for k, v in data["package_attributes"].items()
         }
         for pkg_name, data in config.get_config("packages").items()
@@ -1163,7 +1165,7 @@ class Repo:
         """
         # Root directory, containing _repo.yaml and package dirs
         # Allow roots to by spack-relative by starting with '$spack'
-        self.root = spack.config.canonicalize_path(root)
+        self.root = spack.config.canonicalize_path(root, config=spack.config.CONFIG)
 
         # check and raise BadRepoError on fail.
         def check(condition, msg):
@@ -1687,7 +1689,7 @@ def create_repo(
     If the namespace is not provided, use basename of root.
     Return the canonicalized path and namespace of the created repository.
     """
-    root = spack.config.canonicalize_path(root)
+    root = spack.config.canonicalize_path(root, config=spack.config.CONFIG)
     repo_yaml_dir, namespace = get_repo_yaml_dir(os.path.abspath(root), namespace, package_api)
 
     existed = True
@@ -2090,7 +2092,9 @@ def parse_config_descriptor(
 
     """
     if isinstance(descriptor, str):
-        return LocalRepoDescriptor(name, spack.config.canonicalize_path(descriptor))
+        return LocalRepoDescriptor(
+            name, spack.config.canonicalize_path(descriptor, config=spack.config.CONFIG)
+        )
 
     # Should be the case due to config validation.
     assert isinstance(descriptor, dict), "Repository descriptor must be a string or a dictionary"
@@ -2113,7 +2117,7 @@ def parse_config_descriptor(
         dir_name = spack.util.hash.b32_hash(repository)[-7:]
         destination = os.path.join(spack.paths.package_repos_path, dir_name)
     else:
-        destination = spack.config.canonicalize_path(destination)
+        destination = spack.config.canonicalize_path(destination, config=spack.config.CONFIG)
 
     return RemoteRepoDescriptor(
         name=name,
@@ -2281,7 +2285,9 @@ def use_repositories(
         x
         if isinstance(x, Repo)
         else Repo(
-            spack.config.canonicalize_path(x), cache=spack.caches.MISC_CACHE, overrides=overrides
+            spack.config.canonicalize_path(x, config=spack.config.CONFIG),
+            cache=spack.caches.MISC_CACHE,
+            overrides=overrides,
         )
         for x in paths_and_repos
     ]

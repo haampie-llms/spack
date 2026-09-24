@@ -14,7 +14,9 @@ def get_projection(projections, spec):
         # "all" is a catch-all, not a spec: satisfies("all") would trigger a package lookup
         # to check whether "all" is a virtual provided by the spec.
         if spec_like == "all":
-            all_projection = spack.config.substitute_path_variables(projection)
+            all_projection = spack.config.substitute_path_variables(
+                projection, config=spack.config.CONFIG
+            )
         elif spec.satisfies(spec_like):
-            return spack.config.substitute_path_variables(projection)
+            return spack.config.substitute_path_variables(projection, config=spack.config.CONFIG)
     return all_projection

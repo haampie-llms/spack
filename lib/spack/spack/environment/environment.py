@@ -109,7 +109,8 @@ MARKER_FILE = ".spack-view"
 def env_root_path() -> str:
     """Override default root path if the user specified it"""
     return spack.config.canonicalize_path(
-        spack.config.CONFIG.get("config:environments_root", default=default_env_path)
+        spack.config.CONFIG.get("config:environments_root", default=default_env_path),
+        config=spack.config.CONFIG,
     )
 
 
@@ -317,13 +318,13 @@ def active(name):
 
 def is_env_dir(path):
     """Whether a directory contains a spack environment."""
-    path = substitute_path_variables(path)
+    path = substitute_path_variables(path, config=spack.config.CONFIG)
     return os.path.isdir(path) and os.path.exists(os.path.join(path, manifest_name))
 
 
 def as_env_dir(name_or_dir):
     """Translate an environment name or directory to the environment directory"""
-    path = substitute_path_variables(name_or_dir)
+    path = substitute_path_variables(name_or_dir, config=spack.config.CONFIG)
     if is_env_dir(path):
         return path
     else:
@@ -463,8 +464,10 @@ def _rewrite_relative_dev_paths_on_relocation(env, init_file_dir, copied_env=Fal
         if not dev_specs:
             return
         for name, entry in dev_specs.items():
-            dev_path = substitute_path_variables(entry["path"])
-            expanded_path = spack.config.canonicalize_path(dev_path, default_wd=init_file_dir)
+            dev_path = substitute_path_variables(entry["path"], config=spack.config.CONFIG)
+            expanded_path = spack.config.canonicalize_path(
+                dev_path, default_wd=init_file_dir, config=spack.config.CONFIG
+            )
 
             # Skip if the substituted and expanded path is the same (e.g. when absolute)
             if entry["path"] == expanded_path:
@@ -498,8 +501,10 @@ def _rewrite_relative_repos_paths_on_relocation(env, init_file_dir, copied_env=F
             # only rewrite when we have a path-based repository
             if not isinstance(entry, str):
                 continue
-            repo_path = substitute_path_variables(entry)
-            expanded_path = spack.config.canonicalize_path(repo_path, default_wd=init_file_dir)
+            repo_path = substitute_path_variables(entry, config=spack.config.CONFIG)
+            expanded_path = spack.config.canonicalize_path(
+                repo_path, default_wd=init_file_dir, config=spack.config.CONFIG
+            )
 
             # Skip if the substituted and expanded path is the same (e.g. when absolute)
             if entry == expanded_path:
@@ -740,7 +745,9 @@ class ViewDescriptor:
     ) -> None:
         self.base = base_path
         self.raw_root = root
-        self.root = spack.config.canonicalize_path(root, default_wd=base_path)
+        self.root = spack.config.canonicalize_path(
+            root, default_wd=base_path, config=spack.config.CONFIG
+        )
         self.projections = projections or {}
         self.select = select or []
         self.exclude = exclude or []
@@ -759,7 +766,9 @@ class ViewDescriptor:
 
     def update_root(self, new_path: str) -> None:
         self.raw_root = new_path
-        self.root = spack.config.canonicalize_path(new_path, default_wd=self.base)
+        self.root = spack.config.canonicalize_path(
+            new_path, default_wd=self.base, config=spack.config.CONFIG
+        )
 
     def __eq__(self, other: object) -> bool:
         return (
@@ -1292,7 +1301,7 @@ class Environment:
         self.included_concrete_env_root_dirs = []
 
         for entry in includes:
-            include = spack.config.included_path(entry)
+            include = spack.config.included_path(entry, config=spack.config.CONFIG)
             if isinstance(include, spack.config.GitIncludePaths):
                 # Git includes must be cloned first; paths are relative to the
                 # clone destination, not to the manifest directory.
@@ -1302,7 +1311,10 @@ class Environment:
                 resolved = [os.path.join(destination, p) for p in include.paths]
             else:
                 resolved = [
-                    spack.config.canonicalize_path(p, default_wd=self.path) for p in include.paths
+                    spack.config.canonicalize_path(
+                        p, default_wd=self.path, config=spack.config.CONFIG
+                    )
+                    for p in include.paths
                 ]
 
             for path in resolved:
@@ -3227,7 +3239,7 @@ def initialize_environment_dir(
 
     # TODO: make this recursive
     includes = manifest[TOP_LEVEL_KEY].get(manifest_include_name, [])
-    paths = spack.config.paths_from_includes(includes)
+    paths = spack.config.paths_from_includes(includes, config=spack.config.CONFIG)
     for path in paths:
         if os.path.isabs(path):
             continue
