@@ -13,7 +13,7 @@ import spack.main
 import spack.spec
 import spack.traverse
 from spack.database import Database
-from spack.old_installer import PackageInstaller
+from spack.installer import PackageInstaller
 
 gc = spack.main.SpackCommand("gc")
 add = spack.main.SpackCommand("add")

@@ -39,7 +39,7 @@ from spack.binary_distribution import CannotListKeys, GenerateIndexError
 from spack.config import Configuration
 from spack.database import INDEX_JSON_FILE
 from spack.hooks import sbang
-from spack.old_installer import PackageInstaller
+from spack.installer import PackageInstaller
 from spack.spec import Spec
 from spack.url_buildcache import (
     INDEX_MANIFEST_FILE,
@@ -260,7 +260,7 @@ def test_spec_needs_rebuild(monkeypatch, tmp_path: pathlib.Path):
     s = spack.concretize.concretize_one("libdwarf")
 
     # Install a package
-    install_cmd("--fake", s.name)
+    install_cmd("--fake", "--include-build-deps", s.name)
 
     # Put installed package in the buildcache
     buildcache_cmd("push", "-u", str(mirror_dir), s.name)
@@ -1238,7 +1238,7 @@ def test_url_buildcache_entry_v3(monkeypatch, tmp_path: pathlib.Path):
     s = spack.concretize.concretize_one("libdwarf")
 
     # Install libdwarf
-    install_cmd("--fake", s.name)
+    install_cmd("--fake", "--include-build-deps", s.name)
 
     # Push libdwarf to buildcache
     buildcache_cmd("push", "-u", str(mirror_dir), s.name)

@@ -11,7 +11,7 @@ import spack.concretize
 import spack.database
 import spack.deptypes as dt
 import spack.error
-import spack.old_installer
+import spack.installer
 import spack.repo
 import spack.solver.asp
 import spack.util.hash as hashutil
@@ -118,7 +118,7 @@ def test_installed_deps(monkeypatch, install_mockery):
     c_spec = spack.concretize.concretize_one(c)
     assert c_spec[d].version == spack.version.Version("2")
 
-    spack.old_installer.PackageInstaller([c_spec.package], fake=True, explicit=True).install()
+    spack.installer.PackageInstaller([c_spec.package], fake=True, explicit=True).install()
 
     # install A, which depends on B, C, D, and E, and force A to
     # use the installed C.  It should *not* force A to use the installed D
