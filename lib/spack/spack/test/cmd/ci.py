@@ -23,7 +23,7 @@ import spack.repo
 import spack.reporters.cdash
 import spack.spec
 import spack.stage
-import spack.test.utilities
+import spack.test.harness
 import spack.util.spack_yaml as syaml
 import spack.util.web
 import spack.version
@@ -38,14 +38,14 @@ from spack.schema.database_index import schema as db_idx_schema
 from spack.test.conftest import MockHTTPResponse, RepoBuilder
 from spack.util.filesystem import mkdirp, working_dir
 
-config_cmd = spack.main.SpackCommand("config")
-ci_cmd = spack.main.SpackCommand("ci")
-env_cmd = spack.main.SpackCommand("env")
-mirror_cmd = spack.main.SpackCommand("mirror")
-gpg_cmd = spack.main.SpackCommand("gpg")
-install_cmd = spack.main.SpackCommand("install")
-uninstall_cmd = spack.main.SpackCommand("uninstall")
-buildcache_cmd = spack.main.SpackCommand("buildcache")
+config_cmd = spack.test.harness.SpackCommand("config")
+ci_cmd = spack.test.harness.SpackCommand("ci")
+env_cmd = spack.test.harness.SpackCommand("env")
+mirror_cmd = spack.test.harness.SpackCommand("mirror")
+gpg_cmd = spack.test.harness.SpackCommand("gpg")
+install_cmd = spack.test.harness.SpackCommand("install")
+uninstall_cmd = spack.test.harness.SpackCommand("uninstall")
+buildcache_cmd = spack.test.harness.SpackCommand("buildcache")
 
 pytestmark = [
     pytest.mark.usefixtures("mock_packages"),
@@ -1203,7 +1203,7 @@ def test_ci_generate_prune_untouched(
     monkeypatch.setattr(ci, "stack_changed", fake_stack_changed)
     monkeypatch.setattr(ci, "get_change_revisions", fake_change_revisions)
 
-    with spack.test.utilities.use_repositories(repo_builder.root, override=False):
+    with spack.test.harness.use_repositories(ctx, repo_builder.root, override=False):
         spack_yaml, outputfile, _ = ci_generate_test(
             f"""\
 spack:
@@ -1617,7 +1617,7 @@ def test_reproduce_build_url_validation_fails():
 )
 def test_ci_help(subcmd):
     """Make sure `spack ci` --help describes the (sub)command help."""
-    out = spack.main.SpackCommand("ci")(subcmd, "--help", fail_on_error=False)
+    out = spack.test.harness.SpackCommand("ci")(subcmd, "--help", fail_on_error=False)
 
     usage = " ci {0}{1}[".format(subcmd, " " if subcmd else "")
     assert usage in out
@@ -2354,9 +2354,10 @@ def test_ci_verify_versions_valid(
     mock_git_package_changes,
     verify_standard_versions_valid,
     verify_git_versions_valid,
+    ctx: SpackContext,
 ):
     repo, _, commits = mock_git_package_changes
-    with spack.test.utilities.use_repositories(repo):
+    with spack.test.harness.use_repositories(ctx, repo):
         monkeypatch.setattr(spack.repo, "builtin_repo", lambda repos: repo)
 
         out = ci_cmd("verify-versions", commits[-2], commits[-4])
@@ -2371,9 +2372,10 @@ def test_ci_verify_versions_invalid(
     mock_git_package_changes,
     verify_standard_versions_invalid,
     verify_git_versions_invalid,
+    ctx: SpackContext,
 ):
     repo, _, commits = mock_git_package_changes
-    with spack.test.utilities.use_repositories(repo):
+    with spack.test.harness.use_repositories(ctx, repo):
         monkeypatch.setattr(spack.repo, "builtin_repo", lambda repos: repo)
 
         out = ci_cmd("verify-versions", commits[-2], commits[-4], fail_on_error=False)
@@ -2387,9 +2389,10 @@ def test_ci_verify_versions_standard_duplicates(
     mock_packages,
     mock_git_package_changes,
     verify_standard_versions_invalid_duplicates,
+    ctx: SpackContext,
 ):
     repo, _, commits = mock_git_package_changes
-    with spack.test.utilities.use_repositories(repo):
+    with spack.test.harness.use_repositories(ctx, repo):
         monkeypatch.setattr(spack.repo, "builtin_repo", lambda repos: repo)
 
         out = ci_cmd("verify-versions", commits[-4], commits[-5], fail_on_error=False)
@@ -2399,9 +2402,11 @@ def test_ci_verify_versions_standard_duplicates(
         assert "Invalid checksum found diff-test@2.1.8" in out
 
 
-def test_ci_verify_versions_manual_package(monkeypatch, mock_packages, mock_git_package_changes):
+def test_ci_verify_versions_manual_package(
+    monkeypatch, mock_packages, mock_git_package_changes, ctx: SpackContext
+):
     repo, _, commits = mock_git_package_changes
-    with spack.test.utilities.use_repositories(repo) as repos:
+    with spack.test.harness.use_repositories(ctx, repo) as repos:
         monkeypatch.setattr(spack.repo, "builtin_repo", lambda repos: repo)
 
         pkg_class = repos.get_pkg_class("diff-test")

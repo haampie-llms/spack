@@ -1,6 +1,7 @@
 # Copyright Spack Project Developers. See COPYRIGHT file for details.
 #
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
+import io
 import os
 import stat
 import types
@@ -9,7 +10,6 @@ import pytest
 
 import spack.cmd.modules
 import spack.concretize
-import spack.context
 import spack.error
 import spack.modules
 import spack.modules.common
@@ -156,7 +156,7 @@ module_index:
         upstream_index.upstream_module(s4, "tcl")
 
 
-def test_get_module_upstream(monkeypatch):
+def test_get_module_upstream(monkeypatch, ctx: SpackContext):
     s1 = MockSpec("spec-1")
 
     tcl_module_index = """\
@@ -166,16 +166,23 @@ module_index:
     use_name: a
 """.format(s1.dag_hash())
 
-    module_indices = [{}, {"tcl": spack.modules.common._read_module_index(tcl_module_index)}]
+    tcl_index = spack.modules.common._read_module_index(io.StringIO(tcl_module_index))
+    module_indices = [{}, {"tcl": tcl_index}]
 
     dbs = ["d0", "d1"]
 
     mock_db = MockDb(dbs, {s1.dag_hash(): "d1"})
     upstream_index = UpstreamModuleIndex(mock_db, module_indices)
 
-    ctx = SpackContext(spack.context.default().config)
-    ctx.store = types.SimpleNamespace(db=mock_db)
-    m1_path = spack.modules.get_module("tcl", s1, True, ctx=ctx, upstream_index=upstream_index)
+    module_ctx = SpackContext(ctx.config)
+    module_ctx.store = types.SimpleNamespace(db=mock_db)  # type: ignore[assignment]
+    m1_path = spack.modules.get_module(
+        "tcl",
+        s1,  # type: ignore[arg-type]
+        True,
+        ctx=module_ctx,
+        upstream_index=upstream_index,
+    )
     assert m1_path == "/path/to/a"
 
 

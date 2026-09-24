@@ -8,10 +8,10 @@ from typing import List
 import pytest
 
 import spack.concretize
-import spack.context
 import spack.deptypes as dt
 import spack.repo
 import spack.spec
+import spack.test.harness
 from spack.context import SpackContext
 from spack.installer import PackageInstaller
 from spack.solver.asp import UnsatisfiableSpecError
@@ -41,7 +41,7 @@ def install_specs(
 
 
 def _enable_splicing():
-    spack.context.default().config.set("concretizer:splice", {"automatic": True})
+    spack.test.harness.current().config.set("concretizer:splice", {"automatic": True})
 
 
 @pytest.mark.parametrize("spec_str", ["splice-z", "splice-h@1"])

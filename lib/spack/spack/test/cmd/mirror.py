@@ -21,8 +21,9 @@ import spack.util.url as url_util
 import spack.version
 from spack.config import Configuration
 from spack.context import SpackContext
-from spack.main import SpackCommand, SpackCommandError
+from spack.main import SpackCommandError
 from spack.mirrors.utils import MirrorStatsForAllSpecs, MirrorStatsForOneSpec
+from spack.test.harness import SpackCommand
 
 config = SpackCommand("config")
 mirror = SpackCommand("mirror")

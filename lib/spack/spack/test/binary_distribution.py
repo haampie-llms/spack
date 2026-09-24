@@ -22,14 +22,12 @@ import pytest
 
 import spack.binary_distribution
 import spack.concretize
-import spack.context
 import spack.environment as ev
-import spack.main
 import spack.mirrors.mirror
 import spack.oci.image
 import spack.spec
 import spack.stage
-import spack.test.utilities
+import spack.test.harness
 import spack.url_buildcache
 import spack.util.gpg
 import spack.util.spack_yaml as syaml
@@ -61,15 +59,15 @@ from spack.util.filesystem import join_path, readlink, working_dir
 
 pytestmark = pytest.mark.not_on_windows("does not run on windows")
 
-mirror_cmd = spack.main.SpackCommand("mirror")
-install_cmd = spack.main.SpackCommand("install")
-uninstall_cmd = spack.main.SpackCommand("uninstall")
-buildcache_cmd = spack.main.SpackCommand("buildcache")
+mirror_cmd = spack.test.harness.SpackCommand("mirror")
+install_cmd = spack.test.harness.SpackCommand("install")
+uninstall_cmd = spack.test.harness.SpackCommand("uninstall")
+buildcache_cmd = spack.test.harness.SpackCommand("buildcache")
 
 
 def _net():
     """Configuration and network client of the current process."""
-    ctx = spack.context.default()
+    ctx = spack.test.harness.current()
     return {"config": ctx.config, "client": ctx.network}
 
 
@@ -617,7 +615,7 @@ def test_update_sbang(
     buildcache_cmd("push", "--update-index", "--unsigned", temporary_mirror, f"/{s.dag_hash()}")
 
     # Switch the store to the new install tree locations
-    with spack.test.utilities.use_store(str(tmp_path)):
+    with spack.test.harness.use_store(ctx, str(tmp_path)):
         s._prefix = None  # clear the cached old prefix
         new_prefix, new_sbang_shebang = s.prefix, sbang.sbang_shebang_line_for(ctx.store)
         assert old_prefix != new_prefix

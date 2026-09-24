@@ -8,10 +8,9 @@ import os
 import pytest
 
 import spack.concretize
-import spack.context
 import spack.directives_meta
 import spack.paths
-import spack.test.utilities
+import spack.test.harness
 import spack.util.package_hash as ph
 from spack.context import SpackContext
 from spack.repo import RepoPath
@@ -26,9 +25,9 @@ datadir = os.path.join(spack.paths.test_path, "data", "unparse")
 
 
 def compare_sans_name(repo, eq, spec1, spec2):
-    content1 = ph.canonical_source(spec1, repo=spack.context.default().repo)
+    content1 = ph.canonical_source(spec1, repo=spack.test.harness.current().repo)
     content1 = content1.replace(repo.get_pkg_class(spec1.name).__name__, "TestPackage")
-    content2 = ph.canonical_source(spec2, repo=spack.context.default().repo)
+    content2 = ph.canonical_source(spec2, repo=spack.test.harness.current().repo)
     content2 = content2.replace(repo.get_pkg_class(spec2.name).__name__, "TestPackage")
     if eq:
         assert content1 == content2
@@ -37,15 +36,15 @@ def compare_sans_name(repo, eq, spec1, spec2):
 
 
 def compare_hash_sans_name(repo, eq, spec1, spec2):
-    content1 = ph.canonical_source(spec1, repo=spack.context.default().repo)
+    content1 = ph.canonical_source(spec1, repo=spack.test.harness.current().repo)
     pkg_cls1 = repo.get_pkg_class(spec1.name)
     content1 = content1.replace(pkg_cls1.__name__, "TestPackage")
-    hash1 = pkg_cls1(spec1).content_hash(content=content1, repo=spack.context.default().repo)
+    hash1 = pkg_cls1(spec1).content_hash(content=content1, repo=spack.test.harness.current().repo)
 
-    content2 = ph.canonical_source(spec2, repo=spack.context.default().repo)
+    content2 = ph.canonical_source(spec2, repo=spack.test.harness.current().repo)
     pkg_cls2 = repo.get_pkg_class(spec2.name)
     content2 = content2.replace(pkg_cls2.__name__, "TestPackage")
-    hash2 = pkg_cls2(spec2).content_hash(content=content2, repo=spack.context.default().repo)
+    hash2 = pkg_cls2(spec2).content_hash(content=content2, repo=spack.test.harness.current().repo)
 
     assert (hash1 == hash2) == eq
 
@@ -131,7 +130,7 @@ def test_package_hash_of_shadowed_package(
     """The package hash must describe the package.py of the repository the spec names, also when
     a repository of higher precedence has a package of the same name."""
     repo_builder.add_package("pkg-c")
-    with spack.test.utilities.use_repositories(repo_builder.root, override=False):
+    with spack.test.harness.use_repositories(ctx, repo_builder.root, override=False):
         shadowing = Spec(f"{repo_builder.namespace}.pkg-c")
         shadowed = Spec("builtin_mock.pkg-c")
 

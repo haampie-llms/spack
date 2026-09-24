@@ -9,11 +9,11 @@ import pytest
 
 import spack.cmd.list
 import spack.paths
-import spack.test.utilities
+import spack.test.harness
 from spack.context import SpackContext
-from spack.main import SpackCommand
 from spack.repo import RepoPath
 from spack.test.conftest import RepoBuilder
+from spack.test.harness import SpackCommand
 
 pytestmark = [pytest.mark.usefixtures("mock_packages")]
 
@@ -94,10 +94,10 @@ def test_list_format_html():
         "https://user:token@github.com/spack/spack-packages.git",
     ],
 )
-def test_list_url_schemes(mock_git_packages_repo, url):
+def test_list_url_schemes(mock_git_packages_repo, url, ctx: SpackContext):
     """Confirm the official spack-packages repo is recognized in any url scheme."""
     repo = mock_git_packages_repo(url)
-    with spack.test.utilities.use_repositories(repo):
+    with spack.test.harness.use_repositories(ctx, repo):
         output = list("--format", "version_json", "hdf5")
 
     assert (
@@ -116,10 +116,10 @@ def test_list_format_local_repo():
     assert "packages/hdf5/package.py" in output
 
 
-def test_list_format_non_github_repo(mock_git_packages_repo):
+def test_list_format_non_github_repo(mock_git_packages_repo, ctx: SpackContext):
     """Confirm a file path is returned for a non-github (e.g. gitlab) repository."""
     repo = mock_git_packages_repo("https://gitlab.com/username/my-packages.git")
-    with spack.test.utilities.use_repositories(repo):
+    with spack.test.harness.use_repositories(ctx, repo):
         output = list("--format", "version_json", "hdf5")
         assert "github.com" not in output
         assert "file://" in output
@@ -176,8 +176,9 @@ def test_list_count(mock_packages: RepoPath):
     )
 
 
-def test_list_repos():
-    with spack.test.utilities.use_repositories(
+def test_list_repos(ctx: SpackContext):
+    with spack.test.harness.use_repositories(
+        ctx,
         os.path.join(spack.paths.test_repos_path, "spack_repo", "builtin_mock"),
         os.path.join(spack.paths.test_repos_path, "spack_repo", "builder_test"),
     ):
@@ -192,7 +193,7 @@ def test_list_repos():
 
 @pytest.mark.usefixtures("config")
 def test_list_github_url_fails(repo_builder: RepoBuilder, monkeypatch, ctx: SpackContext):
-    with spack.test.utilities.use_repositories(repo_builder.root):
+    with spack.test.harness.use_repositories(ctx, repo_builder.root):
         repo_builder.add_package("pkg-a")
         repo = ctx.repo.repos[0]
         pkg = repo.get_pkg_class("pkg-a")

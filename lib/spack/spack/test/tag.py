@@ -10,8 +10,8 @@ import pytest
 import spack.cmd.tags
 import spack.tag
 from spack.context import SpackContext
-from spack.main import SpackCommand
 from spack.repo import RepoPath
+from spack.test.harness import SpackCommand
 
 install = SpackCommand("install")
 

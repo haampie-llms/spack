@@ -44,7 +44,7 @@ import spack.solver.result
 import spack.solver.reuse
 import spack.spec
 import spack.spec_filter
-import spack.test.utilities
+import spack.test.harness
 import spack.traverse
 import spack.util.file_cache
 import spack.util.filesystem
@@ -87,7 +87,7 @@ def check_spec(abstract, concrete):
             cflag = concrete.compiler_flags[flag]
             assert set(aflag) <= set(cflag)
 
-    for name in spack.context.default().repo.get_pkg_class(abstract.name).variant_names():
+    for name in spack.test.harness.current().repo.get_pkg_class(abstract.name).variant_names():
         assert name in concrete.variants
 
     for flag in concrete.compiler_flags.valid_compiler_flags():
@@ -212,7 +212,9 @@ def fuzz_dep_order(request, monkeypatch, ctx: SpackContext):
 
 
 @pytest.fixture()
-def repo_with_changing_recipe(tmp_path_factory: pytest.TempPathFactory, mutable_mock_repo):
+def repo_with_changing_recipe(
+    tmp_path_factory: pytest.TempPathFactory, mutable_mock_repo, ctx: SpackContext
+):
     repos_dir: pathlib.Path = tmp_path_factory.mktemp("repos_dir")
     root, _ = spack.repo.create_repo(str(repos_dir), "changing")
     packages_dir = pathlib.Path(root, "packages")
@@ -274,7 +276,7 @@ class Changing(Package):
 {% endif %}
 """
 
-    with spack.test.utilities.use_repositories(root, override=False) as repos:
+    with spack.test.harness.use_repositories(ctx, root, override=False) as repos:
 
         class _ChangingPackage:
             default_context = [
@@ -688,7 +690,7 @@ spack:
 
     def concretize_multi_provider(self):
         s = Spec("mpileaks ^multi-provider-mpi@3.0")
-        s = spack.concretize.concretize_one(s, spack.context.default())
+        s = spack.concretize.concretize_one(s, spack.test.harness.current())
         assert s["mpi"].version == ver("1.10.3")
 
     def test_concretize_dependent_with_singlevalued_variant_type(self, ctx: SpackContext):
@@ -700,7 +702,7 @@ spack:
         """Test a couple of large packages that are often broken due
         to current limitations in the concretizer"""
         s = Spec(a + "@" + b)
-        s = spack.concretize.concretize_one(s, spack.context.default())
+        s = spack.concretize.concretize_one(s, spack.test.harness.current())
         assert s[a].version == ver(b)
 
     def test_concretize_two_virtuals(self, ctx: SpackContext):
@@ -2032,7 +2034,7 @@ spack:
         mutable_config: Configuration,
         ctx: SpackContext,
     ):
-        with spack.test.utilities.use_repositories(mock_custom_repository, override=False):
+        with spack.test.harness.use_repositories(ctx, mock_custom_repository, override=False):
             s = spack.concretize.concretize_one("pkg-c", ctx)
             assert s.namespace != "builtin_mock"
             PackageInstaller([s.package], fake=True, explicit=True).install()
@@ -2055,7 +2057,7 @@ spack:
         builtin = spack.concretize.concretize_one("zlib", ctx)
         PackageInstaller([builtin.package], fake=True, explicit=True).install()
 
-        with spack.test.utilities.use_repositories(repo_builder.root, override=False):
+        with spack.test.harness.use_repositories(ctx, repo_builder.root, override=False):
             with mutable_config.override("concretizer:reuse", True):
                 zlib = spack.concretize.concretize_one(f"{repo_builder.namespace}.zlib", ctx)
 
@@ -2071,13 +2073,13 @@ spack:
         ctx: SpackContext,
     ):
         repo_builder.add_package("pkg-c")
-        with spack.test.utilities.use_repositories(repo_builder.root, override=False):
+        with spack.test.harness.use_repositories(ctx, repo_builder.root, override=False):
             s = spack.concretize.concretize_one("pkg-c", ctx)
             assert s.namespace == repo_builder.namespace
             PackageInstaller([s.package], fake=True, explicit=True).install()
         del sys.modules[f"spack_repo.{repo_builder.namespace}.packages.pkg_c"]
         repo_builder.remove("pkg-c")
-        with spack.test.utilities.use_repositories(repo_builder.root, override=False) as repos:
+        with spack.test.harness.use_repositories(ctx, repo_builder.root, override=False) as repos:
             repos.repos[0]._pkg_checker.invalidate()
             with mutable_config.override("concretizer:reuse", True):
                 s = spack.concretize.concretize_one("pkg-c", ctx)
@@ -2813,7 +2815,7 @@ packages:
         additional_repo = os.path.join(
             spack.paths.test_repos_path, "spack_repo", "duplicates_test"
         )
-        with spack.test.utilities.use_repositories(additional_repo, override=False):
+        with spack.test.harness.use_repositories(ctx, additional_repo, override=False):
             s = spack.concretize.concretize_one(spec_str, ctx)
 
         for name, namespace in expected_namespaces.items():
@@ -3080,9 +3082,9 @@ packages:
 
 
 @pytest.fixture()
-def duplicates_test_repository():
+def duplicates_test_repository(ctx: SpackContext):
     repository_path = os.path.join(spack.paths.test_repos_path, "spack_repo", "duplicates_test")
-    with spack.test.utilities.use_repositories(repository_path) as mock_repo:
+    with spack.test.harness.use_repositories(ctx, repository_path) as mock_repo:
         yield mock_repo
 
 
@@ -3337,9 +3339,9 @@ class TestConcreteSpecsByHash:
 
 
 @pytest.fixture()
-def edges_test_repository():
+def edges_test_repository(ctx: SpackContext):
     repository_path = os.path.join(spack.paths.test_repos_path, "spack_repo", "edges_test")
-    with spack.test.utilities.use_repositories(repository_path) as mock_repo:
+    with spack.test.harness.use_repositories(ctx, repository_path) as mock_repo:
         yield mock_repo
 
 
@@ -6131,7 +6133,8 @@ def break_globals(monkeypatch, ctx: SpackContext):
 
     It is a context manager rather than a plain fixture so a test can break the globals after
     every other fixture is set up, and restore them before those fixtures are torn down: the
-    database and mock package fixtures use ``spack.context.default().repo`` while tearing down.
+    database and mock package fixtures use the repositories of the test context while tearing
+    down.
     """
 
     @contextlib.contextmanager

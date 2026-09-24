@@ -10,13 +10,13 @@ import pytest
 
 import spack.caches
 import spack.cmd.clean
-import spack.main
 import spack.package_base
 import spack.stage
+import spack.test.harness
 import spack.util.filesystem as fs
 from spack.context import SpackContext
 
-clean = spack.main.SpackCommand("clean")
+clean = spack.test.harness.SpackCommand("clean")
 
 
 @pytest.fixture()

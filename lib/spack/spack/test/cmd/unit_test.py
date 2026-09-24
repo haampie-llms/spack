@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-from spack.main import SpackCommand
+from spack.test.harness import SpackCommand
 
 pytest.skip("Recursive pytest is brittle", allow_module_level=True)
 

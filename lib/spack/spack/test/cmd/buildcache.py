@@ -18,13 +18,13 @@ import spack.buildcache_migrate as migrate
 import spack.buildcache_prune
 import spack.cmd.buildcache
 import spack.concretize
-import spack.context
 import spack.environment as ev
 import spack.error
 import spack.main
 import spack.mirrors.mirror
 import spack.repo
 import spack.spec
+import spack.test.harness
 import spack.util.url as url_util
 import spack.util.web as web_util
 from spack.context import SpackContext
@@ -40,19 +40,19 @@ from spack.url_buildcache import (
 from spack.util.filesystem import copy_tree, find, getuid
 from spack.util.lang import nullcontext
 
-buildcache = spack.main.SpackCommand("buildcache")
-install = spack.main.SpackCommand("install")
-env = spack.main.SpackCommand("env")
-add = spack.main.SpackCommand("add")
-gpg = spack.main.SpackCommand("gpg")
-mirror = spack.main.SpackCommand("mirror")
-uninstall = spack.main.SpackCommand("uninstall")
+buildcache = spack.test.harness.SpackCommand("buildcache")
+install = spack.test.harness.SpackCommand("install")
+env = spack.test.harness.SpackCommand("env")
+add = spack.test.harness.SpackCommand("add")
+gpg = spack.test.harness.SpackCommand("gpg")
+mirror = spack.test.harness.SpackCommand("mirror")
+uninstall = spack.test.harness.SpackCommand("uninstall")
 
 pytestmark = pytest.mark.not_on_windows("does not run on windows")
 
 
 def _entry_resources():
-    ctx = spack.context.default()
+    ctx = spack.test.harness.current()
     return {"config": ctx.config, "client": ctx.network}
 
 
@@ -384,7 +384,7 @@ def _mock_uploader(tmp_path: pathlib.Path):
                 spack.mirrors.mirror.Mirror.from_local_path(str(tmp_path)),
                 False,
                 False,
-                ctx=spack.context.default(),
+                ctx=spack.test.harness.current(),
             )
             self.pushed = []
 
@@ -1118,19 +1118,19 @@ def create_env_from_concrete_spec(spec: spack.spec.Spec, *, ctx: SpackContext):
 
 def args_for_active_env(spec: spack.spec.Spec):
     """Build cache index view source is an active environment"""
-    env = create_env_from_concrete_spec(spec, ctx=spack.context.default())
+    env = create_env_from_concrete_spec(spec, ctx=spack.test.harness.current())
     return [env, []]
 
 
 def args_for_env_by_path(spec: spack.spec.Spec):
     """Build cache index view source is an environment path"""
-    env = create_env_from_concrete_spec(spec, ctx=spack.context.default())
+    env = create_env_from_concrete_spec(spec, ctx=spack.test.harness.current())
     return [nullcontext(), [env.path]]
 
 
 def args_for_env_by_name(spec: spack.spec.Spec):
     """Build cache index view source is a managed environment name"""
-    env = create_env_from_concrete_spec(spec, ctx=spack.context.default())
+    env = create_env_from_concrete_spec(spec, ctx=spack.test.harness.current())
     return [nullcontext(), [env.name]]
 
 
@@ -1143,12 +1143,12 @@ def read_specs_in_index(mirror_directory, view):
     mirror_metadata = spack.binary_distribution.MirrorMetadata(
         f"file://{mirror_directory}", spack.mirrors.mirror.SUPPORTED_URL_LAYOUT_VERSIONS[0], view
     )
-    client = web_util.NetworkClient.from_config(spack.context.default().config)
+    client = web_util.NetworkClient.from_config(spack.test.harness.current().config)
     fetcher = spack.binary_distribution.DefaultIndexHandler(
         mirror_metadata,
         None,
         urlopen=client.urlopen,
-        config=spack.context.default().config,
+        config=spack.test.harness.current().config,
         client=client,
     )
     result = fetcher.conditional_fetch()

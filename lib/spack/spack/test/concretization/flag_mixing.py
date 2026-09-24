@@ -36,26 +36,25 @@ import pathlib
 import pytest
 
 import spack.concretize
-import spack.context
 import spack.environment as ev
 import spack.paths
 import spack.spec
-import spack.test.utilities
+import spack.test.harness
 import spack.util.spack_yaml as syaml
 from spack.concretize_ui import HeadlessUI
 from spack.context import SpackContext
 
 
 @pytest.fixture
-def test_repo(mutable_config, monkeypatch, mock_stage):
+def test_repo(mutable_config, monkeypatch, mock_stage, ctx: SpackContext):
     repo_dir = pathlib.Path(spack.paths.test_repos_path) / "spack_repo" / "flags_test"
-    with spack.test.utilities.use_repositories(str(repo_dir)) as mock_packages_repo:
+    with spack.test.harness.use_repositories(ctx, str(repo_dir)) as mock_packages_repo:
         yield mock_packages_repo
 
 
 def update_concretize_scope(conf_str, section):
     conf = syaml.load_config(conf_str)
-    spack.context.default().config.set(section, conf[section], scope="concretize")
+    spack.test.harness.current().config.set(section, conf[section], scope="concretize")
 
 
 def test_mix_spec_and_requirements(concretize_scope, test_repo, ctx: SpackContext):

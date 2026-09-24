@@ -10,7 +10,7 @@ import pytest
 import spack.concretize
 import spack.user_environment as uenv
 from spack.context import SpackContext
-from spack.main import SpackCommand
+from spack.test.harness import SpackCommand
 
 load = SpackCommand("load")
 unload = SpackCommand("unload")

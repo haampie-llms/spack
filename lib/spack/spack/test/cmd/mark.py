@@ -4,8 +4,9 @@
 
 import pytest
 
-from spack.main import SpackCommand, SpackCommandError
+from spack.main import SpackCommandError
 from spack.store import Store
+from spack.test.harness import SpackCommand
 
 gc = SpackCommand("gc")
 mark = SpackCommand("mark")

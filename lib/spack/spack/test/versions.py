@@ -14,9 +14,9 @@ import re
 import pytest
 
 import spack.concretize
-import spack.context
 import spack.package_base
 import spack.spec
+import spack.test.harness
 from spack.context import SpackContext
 from spack.util.filesystem import working_dir
 from spack.version import (
@@ -39,9 +39,9 @@ def assign_versions(spec_str: str) -> spack.spec.Spec:
     fixtures of the calling test have set up."""
     return assign_git_versions(
         spack.spec.Spec(spec_str),
-        repo=spack.context.default().repo,
-        misc_cache=spack.context.default().misc_cache,
-        config=spack.context.default().config,
+        repo=spack.test.harness.current().repo,
+        misc_cache=spack.test.harness.current().misc_cache,
+        config=spack.test.harness.current().config,
     )
 
 

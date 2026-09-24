@@ -13,8 +13,9 @@ import spack.paths
 import spack.util.spack_json as sjson
 from spack.cmd.blame import ensure_full_history, git_prefix, package_repo_root
 from spack.context import SpackContext
-from spack.main import SpackCommand, SpackCommandError
+from spack.main import SpackCommandError
 from spack.repo import RepoDescriptors
+from spack.test.harness import SpackCommand
 from spack.util.executable import ProcessError
 from spack.util.filesystem import mkdirp, working_dir
 

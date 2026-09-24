@@ -9,18 +9,18 @@ import pytest
 
 import spack.concretize
 import spack.config
-import spack.context
 import spack.environment as ev
 import spack.package_base
 import spack.spec
 import spack.stage
+import spack.test.harness
 import spack.util.filesystem as fs
 import spack.util.git
 from spack.config import Configuration
 from spack.context import SpackContext
 from spack.error import SpackError
 from spack.fetch_strategy import URLFetchStrategy
-from spack.main import SpackCommand
+from spack.test.harness import SpackCommand
 from spack.version.git_ref_lookup import GitRefLookup
 
 add = SpackCommand("add")
@@ -40,7 +40,7 @@ class TestDevelop:
         assert dev_specs_entry["spec"] == str(spec)
 
         # check yaml representation
-        dev_config = spack.context.default().config.get("develop", {})
+        dev_config = spack.test.harness.current().config.get("develop", {})
         assert spec.name in dev_config
         yaml_entry = dev_config[spec.name]
         assert yaml_entry["spec"] == str(spec)
@@ -52,7 +52,7 @@ class TestDevelop:
 
         if build_dir is not None:
             scope = env.scope_name
-            assert build_dir == spack.context.default().config.get(
+            assert build_dir == spack.test.harness.current().config.get(
                 "packages:{}:package_attributes:build_directory".format(spec.name), scope
             )
 

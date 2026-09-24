@@ -15,7 +15,7 @@ import spack.install_test
 import spack.paths
 from spack.context import SpackContext
 from spack.install_test import TestStatus
-from spack.main import SpackCommand
+from spack.test.harness import SpackCommand
 from spack.util.filesystem import copy_tree, working_dir
 
 install = SpackCommand("install")

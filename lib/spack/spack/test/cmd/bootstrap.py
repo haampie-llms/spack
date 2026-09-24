@@ -11,12 +11,12 @@ import spack.bootstrap.core
 import spack.cmd.mirror
 import spack.concretize
 import spack.environment as ev
-import spack.main
 import spack.spec
+import spack.test.harness
 from spack.config import Configuration
 from spack.context import SpackContext
 
-_bootstrap = spack.main.SpackCommand("bootstrap")
+_bootstrap = spack.test.harness.SpackCommand("bootstrap")
 
 
 @pytest.mark.parametrize("scope", [None, "site", "system", "user"])
@@ -62,7 +62,7 @@ def test_reset_in_file_scopes(mutable_config, scopes):
 def test_reset_in_environment(
     mutable_mock_env_path, mutable_config: Configuration, ctx: SpackContext
 ):
-    env = spack.main.SpackCommand("env")
+    env = spack.test.harness.SpackCommand("env")
     env("create", "bootstrap-test")
     current_environment = ev.read("bootstrap-test", ctx=ctx)
 

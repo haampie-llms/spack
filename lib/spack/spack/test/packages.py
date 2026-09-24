@@ -10,14 +10,13 @@ import sys
 import pytest
 
 import spack.concretize
-import spack.context
 import spack.directives
 import spack.error
 import spack.fetch_strategy
 import spack.package
 import spack.package_base
 import spack.repo
-import spack.test.utilities
+import spack.test.harness
 from spack.context import SpackContext
 from spack.paths import mock_packages_path
 from spack.repo import RepoPath
@@ -36,7 +35,7 @@ class MyPrependFileLoader(spack.repo._PrependFileLoader):
 
 def pkg_factory(name):
     """Return a package object tied to an abstract spec"""
-    pkg_cls = spack.context.default().repo.get_pkg_class(name)
+    pkg_cls = spack.test.harness.current().repo.get_pkg_class(name)
     return pkg_cls(Spec(name))
 
 
@@ -73,14 +72,14 @@ class TestPackage:
         assert "Finally" == pkg_name_to_class_name("finally")  # `Finally` is not reserved
 
     # Below tests target direct imports of spack packages from the spack.pkg namespace
-    def test_import_package(self, tmp_path: pathlib.Path, monkeypatch):
+    def test_import_package(self, tmp_path: pathlib.Path, monkeypatch, ctx: SpackContext):
         monkeypatch.setattr(spack.repo, "_PrependFileLoader", MyPrependFileLoader)
         root, _ = spack.repo.create_repo(str(tmp_path), "testing_repo", package_api=(1, 0))
         pkg_path = pathlib.Path(root) / "packages" / "mpich" / "package.py"
         pkg_path.parent.mkdir(parents=True)
         pkg_path.write_text("foo = 1")
 
-        with spack.test.utilities.use_repositories(root):
+        with spack.test.harness.use_repositories(ctx, root):
             importlib.import_module("spack.pkg.testing_repo")
             assert importlib.import_module("spack.pkg.testing_repo.mpich").foo == 1
 

@@ -8,7 +8,7 @@ import sys
 import pytest
 
 import spack
-from spack.main import SpackCommand
+from spack.test.harness import SpackCommand
 
 python = SpackCommand("python")
 

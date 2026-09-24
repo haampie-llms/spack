@@ -3,28 +3,19 @@
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
 import spack.config
 import spack.context
-import spack.test.utilities
 
 
-def test_process_context_is_one_instance(config):
-    ctx = spack.context.default()
-    assert spack.context.default() is ctx
-    assert ctx.network is spack.context.default().network
-
-
-def test_set_default_replaces_the_process_context(config):
+def test_set_default_replaces_the_process_context(ctx):
     previous = spack.context.default()
-    ctx = spack.context.SpackContext(spack.config.create_from())
-    assert spack.context.set_default(ctx) is previous
+    other = spack.context.SpackContext(spack.config.create_from())
+    assert spack.context.set_default(other) is previous
     try:
-        assert spack.context.default() is ctx
+        assert spack.context.default() is other
     finally:
         spack.context.set_default(previous)
     assert spack.context.default() is previous
 
 
-def test_use_configuration_swaps_the_process_context(config):
-    previous = spack.context.default()
-    with spack.test.utilities.use_configuration() as cfg:
-        assert spack.context.default().config is cfg
-    assert spack.context.default() is previous
+def test_the_test_context_is_the_process_context(ctx):
+    """Package API functions read the context of the process outside package code"""
+    assert spack.context.default() is ctx
