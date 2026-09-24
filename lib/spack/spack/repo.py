@@ -331,7 +331,7 @@ def add_package_to_git_stage(packages: List[str], repo: "Repo") -> None:
     git = GitExe(repo.packages_path)
 
     for pkg_name in packages:
-        filename = PATH.filename_for_package_name(pkg_name)
+        filename = repo.filename_for_package_name(pkg_name)
         if not os.path.isfile(filename):
             tty.die(f"No such package: {pkg_name}.  Path does not exist:", filename)
 
@@ -711,9 +711,7 @@ def package_attributes_overrides(config: spack.config.Configuration) -> Dict[str
     """Extract per-package attribute overrides from the packages config section."""
     return {
         pkg_name: {
-            k: spack.config.substitute_path_variables(v, config=config)
-            if isinstance(v, str)
-            else v
+            k: spack.config.substitute_path_variables(v, config) if isinstance(v, str) else v
             for k, v in data["package_attributes"].items()
         }
         for pkg_name, data in config.get_config("packages").items()
@@ -761,20 +759,14 @@ class RepoPath:
 
     @staticmethod
     def from_config(
-        config: spack.config.Configuration,
-        *,
-        cache: Optional[spack.util.file_cache.FileCache] = None,
+        config: spack.config.Configuration, *, cache: spack.util.file_cache.FileCache
     ) -> "RepoPath":
         """Create a RepoPath from a configuration object.
 
         Args:
             config: configuration describing the repositories to load.
-            cache: file cache backing the package indexes. If None, the global
-                ``spack.caches.MISC_CACHE`` is used.
+            cache: file cache backing the package indexes.
         """
-        if cache is None:
-            cache = spack.caches.MISC_CACHE
-
         return RepoPath.from_descriptors(
             descriptors=RepoDescriptors.from_config(config),
             cache=cache,
@@ -947,7 +939,9 @@ class RepoPath:
             if spec.name in all_packages
         ]
         if not providers:
-            raise UnknownPackageError(virtual if isinstance(virtual, str) else virtual.fullname)
+            raise UnknownPackageError(
+                virtual if isinstance(virtual, str) else virtual.fullname, self
+            )
         return providers
 
     @autospec
@@ -996,7 +990,7 @@ class RepoPath:
         # that can operate on packages that don't exist yet.
         selected = self.first_repo()
         if selected is None:
-            raise UnknownPackageError(name)
+            raise UnknownPackageError(name, self)
         return selected
 
     def get(self, spec: "spack.spec.Spec") -> "spack.package_base.PackageBase":
@@ -1159,13 +1153,12 @@ class Repo:
         """Instantiate a package repository from a filesystem path.
 
         Args:
-            root: the root directory of the repository
+            root: the root directory of the repository, with path variables already substituted
             cache: file cache associated with this repository
             overrides: dict mapping package name to class attribute overrides for that package
         """
         # Root directory, containing _repo.yaml and package dirs
-        # Allow roots to by spack-relative by starting with '$spack'
-        self.root = spack.config.canonicalize_path(root, config=spack.config.CONFIG)
+        self.root = os.path.abspath(root)
 
         # check and raise BadRepoError on fail.
         def check(condition, msg):
@@ -1419,7 +1412,9 @@ class Repo:
     def providers_for(self, virtual: Union[str, "spack.spec.Spec"]) -> List["spack.spec.Spec"]:
         providers = self.provider_index.providers_for(virtual)
         if not providers:
-            raise UnknownPackageError(virtual if isinstance(virtual, str) else virtual.fullname)
+            raise UnknownPackageError(
+                virtual if isinstance(virtual, str) else virtual.fullname, self
+            )
         return providers
 
     @autospec
@@ -1686,11 +1681,11 @@ def create_repo(
 ) -> Tuple[str, str]:
     """Create a new repository in root with the specified namespace.
 
-    If the namespace is not provided, use basename of root.
-    Return the canonicalized path and namespace of the created repository.
+    If the namespace is not provided, use basename of root, whose path variables must already be
+    substituted. Return the absolute path and namespace of the created repository.
     """
-    root = spack.config.canonicalize_path(root, config=spack.config.CONFIG)
-    repo_yaml_dir, namespace = get_repo_yaml_dir(os.path.abspath(root), namespace, package_api)
+    root = os.path.abspath(root)
+    repo_yaml_dir, namespace = get_repo_yaml_dir(root, namespace, package_api)
 
     existed = True
     try:
@@ -1736,14 +1731,15 @@ def create_repo(
     return repo_yaml_dir, namespace
 
 
-def from_path(path: str) -> Repo:
-    """Constructs a Repo using global misc cache."""
-    return Repo(path, cache=spack.caches.MISC_CACHE)
+def from_path(path: str, *, cache: spack.util.file_cache.FileCache) -> Repo:
+    """Constructs a Repo from its root directory."""
+    return Repo(path, cache=cache)
 
 
 def namespace_of(path: str, config: spack.config.Configuration) -> str:
     """The namespace of the repository at ``path``, canonicalized with ``config``."""
-    return from_path(spack.config.canonicalize_path(path, config=config)).namespace
+    root = spack.config.canonicalize_path(path, config=config)
+    return from_path(root, cache=spack.caches.misc_cache(config=config)).namespace
 
 
 MaybeExecutable = Optional[spack.util.executable.Executable]
@@ -2037,7 +2033,7 @@ class RepoDescriptors(Mapping[str, RepoDescriptor]):
         lock = package_repository_lock(config)
         return RepoDescriptors(
             {
-                name: parse_config_descriptor(name, cfg, lock)
+                name: parse_config_descriptor(name, cfg, lock, config=config)
                 for name, cfg in config.get_config("repos", scope=scope).items()
             }
         )
@@ -2078,7 +2074,11 @@ class RepoDescriptors(Mapping[str, RepoDescriptor]):
 
 
 def parse_config_descriptor(
-    name: Optional[str], descriptor: Any, lock: spack.util.lock.Lock
+    name: Optional[str],
+    descriptor: Any,
+    lock: spack.util.lock.Lock,
+    *,
+    config: spack.config.Configuration,
 ) -> RepoDescriptor:
     """Parse a repository descriptor from validated configuration. This does not instantiate Repo
     objects, but merely turns the config into a more useful RepoDescriptor instance.
@@ -2087,6 +2087,8 @@ def parse_config_descriptor(
         name: the name of the repository, used for error messages
         descriptor: the configuration for the repository, which can be a string (local path),
             or a dictionary with ``git`` key containing git URL and other options.
+        lock: lock guarding clones of remote repositories
+        config: configuration used to substitute path variables
 
     Returns:
         A RepoDescriptor instance, either LocalRepoDescriptor or RemoteRepoDescriptor.
@@ -2097,9 +2099,7 @@ def parse_config_descriptor(
 
     """
     if isinstance(descriptor, str):
-        return LocalRepoDescriptor(
-            name, spack.config.canonicalize_path(descriptor, config=spack.config.CONFIG)
-        )
+        return LocalRepoDescriptor(name, spack.config.canonicalize_path(descriptor, config=config))
 
     # Should be the case due to config validation.
     assert isinstance(descriptor, dict), "Repository descriptor must be a string or a dictionary"
@@ -2122,7 +2122,7 @@ def parse_config_descriptor(
         dir_name = spack.util.hash.b32_hash(repository)[-7:]
         destination = os.path.join(spack.paths.package_repos_path, dir_name)
     else:
-        destination = spack.config.canonicalize_path(destination, config=spack.config.CONFIG)
+        destination = spack.config.canonicalize_path(destination, config=config)
 
     return RemoteRepoDescriptor(
         name=name,
@@ -2140,17 +2140,19 @@ def create_or_construct(
     root: str,
     namespace: Optional[str] = None,
     package_api: Tuple[int, int] = spack.package_api_version,
+    *,
+    cache: spack.util.file_cache.FileCache,
 ) -> Repo:
     """Create a repository, or just return a Repo if it already exists."""
     repo_yaml_dir, _ = get_repo_yaml_dir(root, namespace, package_api)
     if not os.path.exists(repo_yaml_dir):
         fs.mkdirp(root)
         create_repo(root, namespace=namespace, package_api=package_api)
-    return from_path(repo_yaml_dir)
+    return from_path(repo_yaml_dir, cache=cache)
 
 
 def create_and_enable(
-    config: spack.config.Configuration, *, cache: Optional[spack.util.file_cache.FileCache] = None
+    config: spack.config.Configuration, *, cache: spack.util.file_cache.FileCache
 ) -> RepoPath:
     """Immediately call enable() on the created RepoPath instance."""
     repo_path = RepoPath.from_config(config, cache=cache)
@@ -2159,7 +2161,10 @@ def create_and_enable(
 
 
 #: Global package repository instance.
-PATH = cast(RepoPath, Singleton(lambda: create_and_enable(spack.config.CONFIG)))
+PATH = cast(
+    RepoPath,
+    Singleton(lambda: create_and_enable(spack.config.CONFIG, cache=spack.caches.MISC_CACHE)),
+)
 
 
 # Add the finder to sys.meta_path
@@ -2376,9 +2381,6 @@ class UnknownPackageError(UnknownEntityError):
                 long_msg = long_msg.format(name)
             else:
                 long_msg = "Use 'spack create' to create a new package."
-
-                if not repo:
-                    repo = ensure_unwrapped(PATH)
 
                 # We need to compare the base package name
                 pkg_name = name_from_fullname(name)

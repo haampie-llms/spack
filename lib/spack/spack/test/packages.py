@@ -16,6 +16,7 @@ import spack.fetch_strategy
 import spack.package
 import spack.package_base
 import spack.repo
+from spack.context import SpackContext
 from spack.paths import mock_packages_path
 from spack.repo import RepoPath
 from spack.spec import Spec
@@ -46,13 +47,13 @@ class TestPackage:
         pkg_cls = mock_packages.get_pkg_class("mpich")
         assert pkg_cls.name == "mpich"
 
-    def test_package_filename(self):
-        repo = spack.repo.from_path(mock_packages_path)
+    def test_package_filename(self, ctx: SpackContext):
+        repo = spack.repo.from_path(mock_packages_path, cache=ctx.misc_cache)
         filename = repo.filename_for_package_name("mpich")
         assert filename == os.path.join(mock_packages_path, "packages", "mpich", "package.py")
 
-    def test_nonexisting_package_filename(self):
-        repo = spack.repo.from_path(mock_packages_path)
+    def test_nonexisting_package_filename(self, ctx: SpackContext):
+        repo = spack.repo.from_path(mock_packages_path, cache=ctx.misc_cache)
         filename = repo.filename_for_package_name("some-nonexisting-package")
         assert filename == os.path.join(
             mock_packages_path, "packages", "some_nonexisting_package", "package.py"

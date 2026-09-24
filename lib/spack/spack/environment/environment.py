@@ -31,6 +31,7 @@ from typing import (
 
 import spack
 import spack.active_environment
+import spack.caches
 import spack.concretize
 import spack.config
 import spack.deptypes as dt
@@ -258,7 +259,9 @@ def activate(env, use_env_repo=False):
         if repos_before != repos_after:
             setattr(env, "repo_token", repo_before)
             repo_before.disable()
-            new_repo = spack.repo.RepoPath.from_config(spack.config.CONFIG)
+            new_repo = spack.repo.RepoPath.from_config(
+                spack.config.CONFIG, cache=spack.caches.MISC_CACHE
+            )
             if use_env_repo:
                 new_repo.put_first(env.repo)
             spack.repo.enable_repo(new_repo)
@@ -2631,6 +2634,7 @@ class Environment:
             root=os.path.join(self.repos_path, namespace),
             namespace=namespace,
             package_api=spack.repo.PATH.get_repo(namespace).package_api,
+            cache=spack.caches.MISC_CACHE,
         )
         pkg_dir = repository.dirname_for_package_name(spec_node.name)
         fs.mkdirp(pkg_dir)
@@ -3056,7 +3060,7 @@ def display_specs(
 def make_repo_path(root):
     """Make a RepoPath from the repo subdirectories in an environment."""
     repos = (
-        spack.repo.from_path(os.path.dirname(p))
+        spack.repo.from_path(os.path.dirname(p), cache=spack.caches.MISC_CACHE)
         for p in glob.glob(os.path.join(root, "**", "repo.yaml"), recursive=True)
     )
     return spack.repo.RepoPath(*repos)

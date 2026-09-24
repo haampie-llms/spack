@@ -17,7 +17,6 @@ import tempfile
 import pytest
 
 import spack.config
-import spack.context
 import spack.store
 import spack.util.filesystem as fs
 import spack.util.spack_yaml as syaml
@@ -371,13 +370,13 @@ def run_test_install_sbang(store: spack.store.Store, group, *, ctx: SpackContext
 
 
 def test_install_group_sbang(
-    temporary_store: Store, install_mockery, configure_group_perms, ctx: spack.context.SpackContext
+    temporary_store: Store, install_mockery, configure_group_perms, ctx: SpackContext
 ):
     run_test_install_sbang(temporary_store, True, ctx=ctx)
 
 
 def test_install_user_sbang(
-    temporary_store: Store, install_mockery, configure_user_perms, ctx: spack.context.SpackContext
+    temporary_store: Store, install_mockery, configure_user_perms, ctx: SpackContext
 ):
     run_test_install_sbang(temporary_store, False, ctx=ctx)
 

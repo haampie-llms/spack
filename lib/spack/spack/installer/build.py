@@ -28,6 +28,7 @@ from spack.vendor.typing_extensions import Protocol
 import spack.binary_distribution
 import spack.build_environment
 import spack.builder
+import spack.caches
 import spack.config
 import spack.error
 import spack.hooks
@@ -213,7 +214,7 @@ def dump_packages(spec: spack.spec.Spec, path: str) -> None:
 
             # Create a source repo and get the pkg directory out of it.
             try:
-                source_repo = spack.repo.from_path(source_repo_root)
+                source_repo = spack.repo.from_path(source_repo_root, cache=spack.caches.MISC_CACHE)
                 source_pkg_dir = source_repo.dirname_for_package_name(node.name)
             except spack.repo.RepoError as err:
                 spack.util.tty.debug(f"Failed to create source repo for {node.name}: {str(err)}")
@@ -224,7 +225,7 @@ def dump_packages(spec: spack.spec.Spec, path: str) -> None:
         pkg_api = spack.repo.PATH.get_repo(node.namespace).package_api
         repo_root = os.path.join(path, node.namespace) if pkg_api < (2, 0) else path
         repo = spack.repo.create_or_construct(
-            repo_root, namespace=node.namespace, package_api=pkg_api
+            repo_root, namespace=node.namespace, package_api=pkg_api, cache=spack.caches.MISC_CACHE
         )
 
         # Get the location of the package in the dest repo.

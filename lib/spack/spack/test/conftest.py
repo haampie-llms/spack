@@ -782,7 +782,7 @@ def _load_clingo():
 #
 @pytest.fixture(scope="session")
 def mock_packages_repo():
-    yield spack.repo.from_path(spack.paths.mock_packages_path)
+    yield spack.repo.from_path(spack.paths.mock_packages_path, cache=spack.caches.MISC_CACHE)
 
 
 @pytest.fixture
@@ -849,10 +849,10 @@ def mock_packages(mock_packages_repo, mock_pkg_install, request):
 
 
 @pytest.fixture(scope="function")
-def mutable_mock_repo(mock_packages_repo, request):
+def mutable_mock_repo(mock_packages_repo, request, ctx: SpackContext):
     """Function-scoped mock packages, for tests that need to modify them."""
     ensure_configuration_fixture_run_before(request)
-    mock_repo = spack.repo.from_path(spack.paths.mock_packages_path)
+    mock_repo = spack.repo.from_path(spack.paths.mock_packages_path, cache=ctx.misc_cache)
     with spack.repo.use_repositories(mock_repo) as mock_packages_repo:
         yield mock_packages_repo
 
