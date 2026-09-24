@@ -12,7 +12,6 @@ import spack.installer
 import spack.package_base
 import spack.paths
 import spack.platforms
-import spack.repo
 import spack.solver.asp
 import spack.spec
 import spack.test.utilities
@@ -36,7 +35,7 @@ def update_packages_config(conf_str):
 @pytest.fixture
 def test_repo(mutable_config, monkeypatch, mock_stage):
     repo_dir = pathlib.Path(spack.paths.test_repos_path) / "spack_repo" / "requirements_test"
-    with spack.repo.use_repositories(str(repo_dir)) as mock_packages_repo:
+    with spack.test.utilities.use_repositories(str(repo_dir)) as mock_packages_repo:
         yield mock_packages_repo
 
 
@@ -1717,7 +1716,7 @@ packages:
 
 
 @pytest.mark.regression("52636")
-def test_compiler_in_all_from_internal_scope_warns(mock_packages):
+def test_compiler_in_all_from_internal_scope_warns(mock_packages, ctx: SpackContext):
     """Tests that building a warning on an InternalConfigScope doesn't raise because
     there's no "line" attribute.
     """
@@ -1726,7 +1725,7 @@ def test_compiler_in_all_from_internal_scope_warns(mock_packages):
     )
     config = spack.config.Configuration()
     config.push_scope(scope)
-    parser = RequirementParser(configuration=config, repo=spack.repo.PATH)
+    parser = RequirementParser(configuration=config, repo=ctx.repo)
 
     require = config.get("packages:all:require")
     # The mark on the requirement string has a name but no line number.

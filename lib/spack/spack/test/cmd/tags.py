@@ -4,7 +4,7 @@
 
 import spack.concretize
 import spack.main
-import spack.repo
+import spack.test.utilities
 from spack.context import SpackContext
 from spack.installer import PackageInstaller
 
@@ -40,7 +40,7 @@ def test_tags_all_mock_tag_packages(mock_packages):
 
 def test_tags_no_tags(repo_builder):
     repo_builder.add_package("pkg-a")
-    with spack.repo.use_repositories(repo_builder.root):
+    with spack.test.utilities.use_repositories(repo_builder.root):
         out = tags()
     assert "No tagged" in out
 

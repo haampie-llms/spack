@@ -11,8 +11,8 @@ import spack.concretize
 import spack.environment as ev
 import spack.main
 import spack.paths
-import spack.repo
 import spack.stage
+import spack.test.utilities
 from spack.context import SpackContext
 from spack.main import SpackCommand
 from spack.util.filesystem import mkdirp
@@ -237,20 +237,17 @@ def test_location_stages(mock_spec, mutable_config):
     assert location("--stages").strip() == spack.stage.stage_root(mutable_config)
 
 
-def test_location_specified_repo():
+def test_location_specified_repo(ctx: SpackContext):
     """Tests spack location --repo <repo>."""
-    with spack.repo.use_repositories(
+    with spack.test.utilities.use_repositories(
         os.path.join(spack.paths.test_repos_path, "spack_repo", "builtin_mock"),
         os.path.join(spack.paths.test_repos_path, "spack_repo", "builder_test"),
     ):
-        assert location("--repo").strip() == spack.repo.PATH.get_repo("builtin_mock").root
-        assert (
-            location("--repo", "builtin_mock").strip()
-            == spack.repo.PATH.get_repo("builtin_mock").root
-        )
+        assert location("--repo").strip() == ctx.repo.get_repo("builtin_mock").root
+        assert location("--repo", "builtin_mock").strip() == ctx.repo.get_repo("builtin_mock").root
         assert (
             location("--packages", "builder_test").strip()
-            == spack.repo.PATH.get_repo("builder_test").root
+            == ctx.repo.get_repo("builder_test").root
         )
         assert (
             location("--repo", "nonexistent", fail_on_error=False).strip()

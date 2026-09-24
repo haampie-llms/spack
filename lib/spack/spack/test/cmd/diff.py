@@ -10,7 +10,7 @@ import spack.cmd.diff
 import spack.concretize
 import spack.main
 import spack.paths
-import spack.repo
+import spack.test.utilities
 import spack.util.spack_json as sjson
 import spack.version
 from spack.context import SpackContext
@@ -35,7 +35,7 @@ find_cmd = spack.main.SpackCommand("find")
 @pytest.fixture
 def test_repo(config):
     builder_test_path = os.path.join(spack.paths.test_repos_path, "spack_repo", "diff")
-    with spack.repo.use_repositories(builder_test_path) as mock_repo:
+    with spack.test.utilities.use_repositories(builder_test_path) as mock_repo:
         yield mock_repo
 
 
@@ -43,7 +43,7 @@ def test_diff_ignore(test_repo, ctx: SpackContext):
     specA = spack.concretize.concretize_one("p1+usev1", ctx)
     specB = spack.concretize.concretize_one("p1~usev1", ctx)
 
-    c1 = spack.cmd.diff.compare_specs(specA, specB, spack.repo.PATH, to_string=False)
+    c1 = spack.cmd.diff.compare_specs(specA, specB, ctx.repo, to_string=False)
 
     def match(function, name, args):
         limit = len(args)
@@ -55,7 +55,7 @@ def test_diff_ignore(test_repo, ctx: SpackContext):
     assert find(c1["a_not_b"], "node_os", ["p4"])
 
     c2 = spack.cmd.diff.compare_specs(
-        specA, specB, spack.repo.PATH, ignore_packages=["v1"], to_string=False
+        specA, specB, ctx.repo, ignore_packages=["v1"], to_string=False
     )
 
     assert not find(c2["a_not_b"], "node_os", ["p4"])
@@ -66,11 +66,11 @@ def test_diff_ignore(test_repo, ctx: SpackContext):
     specA = spack.concretize.concretize_one("p1+usev1 ^p3+p3var", ctx)
     specA = spack.concretize.concretize_one("p1~usev1 ^p3~p3var", ctx)
 
-    c3 = spack.cmd.diff.compare_specs(specA, specB, spack.repo.PATH, to_string=False)
+    c3 = spack.cmd.diff.compare_specs(specA, specB, ctx.repo, to_string=False)
     assert find(c3["a_not_b"], "variant_value", ["p3", "p3var"])
 
     c4 = spack.cmd.diff.compare_specs(
-        specA, specB, spack.repo.PATH, ignore_packages=["v1", "p3"], to_string=False
+        specA, specB, ctx.repo, ignore_packages=["v1", "p3"], to_string=False
     )
     assert not find(c4["a_not_b"], "node_os", ["p4"])
     assert not find(c4["a_not_b"], "variant_value", ["p3"])
@@ -83,12 +83,12 @@ def test_diff_cmd(install_mockery, mock_fetch, mock_archive, mock_packages, ctx:
     specB = spack.concretize.concretize_one("mpileaks+debug", ctx)
 
     # Specs should be the same as themselves
-    c = spack.cmd.diff.compare_specs(specA, specA, spack.repo.PATH, to_string=True)
+    c = spack.cmd.diff.compare_specs(specA, specA, ctx.repo, to_string=True)
     assert len(c["a_not_b"]) == 0
     assert len(c["b_not_a"]) == 0
 
     # Calculate the comparison (c)
-    c = spack.cmd.diff.compare_specs(specA, specB, spack.repo.PATH, to_string=True)
+    c = spack.cmd.diff.compare_specs(specA, specB, ctx.repo, to_string=True)
 
     # these particular diffs should have the same length b/c there aren't
     # any node differences -- just value differences.
@@ -113,7 +113,7 @@ def test_diff_runtimes(
     specB["gcc-runtime"].versions = spack.version.VersionList([spack.version.Version("0.0.0")])
 
     # Specs should be the same as themselves
-    c = spack.cmd.diff.compare_specs(specA, specB, spack.repo.PATH, to_string=True)
+    c = spack.cmd.diff.compare_specs(specA, specB, ctx.repo, to_string=True)
     assert ["version", "gcc-runtime 0.0.0"] in c["b_not_a"]
 
 

@@ -44,6 +44,7 @@ import spack.solver.result
 import spack.solver.reuse
 import spack.spec
 import spack.spec_filter
+import spack.test.utilities
 import spack.traverse
 import spack.util.file_cache
 import spack.util.filesystem
@@ -86,7 +87,7 @@ def check_spec(abstract, concrete):
             cflag = concrete.compiler_flags[flag]
             assert set(aflag) <= set(cflag)
 
-    for name in spack.repo.PATH.get_pkg_class(abstract.name).variant_names():
+    for name in spack.context.default().repo.get_pkg_class(abstract.name).variant_names():
         assert name in concrete.variants
 
     for flag in concrete.compiler_flags.valid_compiler_flags():
@@ -198,12 +199,12 @@ def current_host(request, monkeypatch):
 
 
 @pytest.fixture(scope="function", params=[True, False])
-def fuzz_dep_order(request, monkeypatch):
+def fuzz_dep_order(request, monkeypatch, ctx: SpackContext):
     """Meta-function that tweaks the order of iteration over dependencies in a package."""
 
     def reverser(pkg_name):
         if request.param:
-            pkg_cls = spack.repo.PATH.get_pkg_class(pkg_name)
+            pkg_cls = ctx.repo.get_pkg_class(pkg_name)
             reversed_dict = dict(reversed(list(pkg_cls.dependencies.items())))
             monkeypatch.setattr(pkg_cls, "dependencies", reversed_dict)
 
@@ -273,7 +274,7 @@ class Changing(Package):
 {% endif %}
 """
 
-    with spack.repo.use_repositories(root, override=False) as repos:
+    with spack.test.utilities.use_repositories(root, override=False) as repos:
 
         class _ChangingPackage:
             default_context = [
@@ -2031,7 +2032,7 @@ spack:
         mutable_config: Configuration,
         ctx: SpackContext,
     ):
-        with spack.repo.use_repositories(mock_custom_repository, override=False):
+        with spack.test.utilities.use_repositories(mock_custom_repository, override=False):
             s = spack.concretize.concretize_one("pkg-c", ctx)
             assert s.namespace != "builtin_mock"
             PackageInstaller([s.package], fake=True, explicit=True).install()
@@ -2054,7 +2055,7 @@ spack:
         builtin = spack.concretize.concretize_one("zlib", ctx)
         PackageInstaller([builtin.package], fake=True, explicit=True).install()
 
-        with spack.repo.use_repositories(repo_builder.root, override=False):
+        with spack.test.utilities.use_repositories(repo_builder.root, override=False):
             with mutable_config.override("concretizer:reuse", True):
                 zlib = spack.concretize.concretize_one(f"{repo_builder.namespace}.zlib", ctx)
 
@@ -2070,13 +2071,13 @@ spack:
         ctx: SpackContext,
     ):
         repo_builder.add_package("pkg-c")
-        with spack.repo.use_repositories(repo_builder.root, override=False):
+        with spack.test.utilities.use_repositories(repo_builder.root, override=False):
             s = spack.concretize.concretize_one("pkg-c", ctx)
             assert s.namespace == repo_builder.namespace
             PackageInstaller([s.package], fake=True, explicit=True).install()
         del sys.modules[f"spack_repo.{repo_builder.namespace}.packages.pkg_c"]
         repo_builder.remove("pkg-c")
-        with spack.repo.use_repositories(repo_builder.root, override=False) as repos:
+        with spack.test.utilities.use_repositories(repo_builder.root, override=False) as repos:
             repos.repos[0]._pkg_checker.invalidate()
             with mutable_config.override("concretizer:reuse", True):
                 s = spack.concretize.concretize_one("pkg-c", ctx)
@@ -2812,7 +2813,7 @@ packages:
         additional_repo = os.path.join(
             spack.paths.test_repos_path, "spack_repo", "duplicates_test"
         )
-        with spack.repo.use_repositories(additional_repo, override=False):
+        with spack.test.utilities.use_repositories(additional_repo, override=False):
             s = spack.concretize.concretize_one(spec_str, ctx)
 
         for name, namespace in expected_namespaces.items():
@@ -3081,7 +3082,7 @@ packages:
 @pytest.fixture()
 def duplicates_test_repository():
     repository_path = os.path.join(spack.paths.test_repos_path, "spack_repo", "duplicates_test")
-    with spack.repo.use_repositories(repository_path) as mock_repo:
+    with spack.test.utilities.use_repositories(repository_path) as mock_repo:
         yield mock_repo
 
 
@@ -3338,7 +3339,7 @@ class TestConcreteSpecsByHash:
 @pytest.fixture()
 def edges_test_repository():
     repository_path = os.path.join(spack.paths.test_repos_path, "spack_repo", "edges_test")
-    with spack.repo.use_repositories(repository_path) as mock_repo:
+    with spack.test.utilities.use_repositories(repository_path) as mock_repo:
         yield mock_repo
 
 
@@ -3384,7 +3385,7 @@ class TestConcretizeEdges:
         assert not s.satisfies("^[virtuals=blas,lapack] openblas")
 
 
-def test_reusable_externals_match(mock_packages, tmp_path: pathlib.Path):
+def test_reusable_externals_match(mock_packages, tmp_path: pathlib.Path, ctx: SpackContext):
     spec = Spec("mpich@4.1~debug build_system=generic arch=linux-ubuntu23.04-zen2 %gcc@13.1.0")
     spec.external_path = str(tmp_path)
     spec.external_modules = ["mpich/4.1"]
@@ -3399,11 +3400,13 @@ def test_reusable_externals_match(mock_packages, tmp_path: pathlib.Path):
             }
         },
         local=False,
-        repo=spack.repo.PATH,
+        repo=ctx.repo,
     )
 
 
-def test_reusable_externals_match_virtual(mock_packages, tmp_path: pathlib.Path):
+def test_reusable_externals_match_virtual(
+    mock_packages, tmp_path: pathlib.Path, ctx: SpackContext
+):
     spec = Spec("mpich@4.1~debug build_system=generic arch=linux-ubuntu23.04-zen2 %gcc@13.1.0")
     spec.external_path = str(tmp_path)
     spec.external_modules = ["mpich/4.1"]
@@ -3418,11 +3421,13 @@ def test_reusable_externals_match_virtual(mock_packages, tmp_path: pathlib.Path)
             }
         },
         local=False,
-        repo=spack.repo.PATH,
+        repo=ctx.repo,
     )
 
 
-def test_reusable_externals_different_prefix(mock_packages, tmp_path: pathlib.Path):
+def test_reusable_externals_different_prefix(
+    mock_packages, tmp_path: pathlib.Path, ctx: SpackContext
+):
     spec = Spec("mpich@4.1~debug build_system=generic arch=linux-ubuntu23.04-zen2 %gcc@13.1.0")
     spec.external_path = "/other/path"
     spec.external_modules = ["mpich/4.1"]
@@ -3437,12 +3442,14 @@ def test_reusable_externals_different_prefix(mock_packages, tmp_path: pathlib.Pa
             }
         },
         local=False,
-        repo=spack.repo.PATH,
+        repo=ctx.repo,
     )
 
 
 @pytest.mark.parametrize("modules", [None, ["mpich/4.1", "libfabric/1.19"]])
-def test_reusable_externals_different_modules(mock_packages, tmp_path: pathlib.Path, modules):
+def test_reusable_externals_different_modules(
+    mock_packages, tmp_path: pathlib.Path, modules, ctx: SpackContext
+):
     spec = Spec("mpich@4.1~debug build_system=generic arch=linux-ubuntu23.04-zen2 %gcc@13.1.0")
     spec.external_path = str(tmp_path)
     spec.external_modules = modules
@@ -3457,11 +3464,13 @@ def test_reusable_externals_different_modules(mock_packages, tmp_path: pathlib.P
             }
         },
         local=False,
-        repo=spack.repo.PATH,
+        repo=ctx.repo,
     )
 
 
-def test_reusable_externals_different_spec(mock_packages, tmp_path: pathlib.Path):
+def test_reusable_externals_different_spec(
+    mock_packages, tmp_path: pathlib.Path, ctx: SpackContext
+):
     spec = Spec("mpich@4.1~debug build_system=generic arch=linux-ubuntu23.04-zen2 %gcc@13.1.0")
     spec.external_path = str(tmp_path)
     spec._mark_concrete()
@@ -3469,7 +3478,7 @@ def test_reusable_externals_different_spec(mock_packages, tmp_path: pathlib.Path
         spec,
         {"mpich": {"externals": [{"spec": "mpich@4.1 +debug", "prefix": str(tmp_path)}]}},
         local=False,
-        repo=spack.repo.PATH,
+        repo=ctx.repo,
     )
 
 
@@ -4810,7 +4819,7 @@ def test_concretization_cache_store_skips_spliced_results(
     assert abstract_dep._hash is None
     assert root._hash is None
 
-    result = Result(specs=[Spec("pkg-a")], repo=spack.repo.PATH)
+    result = Result(specs=[Spec("pkg-a")], repo=ctx.repo)
     result.answers = [([0], 0, {nid: root})]
 
     cache = spack.solver.asp.ConcretizationCache(str(use_concretization_cache))
@@ -5040,15 +5049,17 @@ def _gzip_json(obj) -> bytes:
         "bad-spec-data",
     ],
 )
-def test_concretization_cache_removes_corrupt_entries(use_concretization_cache, corrupt):
+def test_concretization_cache_removes_corrupt_entries(
+    use_concretization_cache, corrupt, ctx: SpackContext
+):
     """A corrupt concretization cache entry is a cache miss and the entry is deleted."""
     cache = spack.solver.asp.ConcretizationCache(str(use_concretization_cache))
     problem = "corrupt entry test"
-    cache.store(problem, Result(specs=[], repo=spack.repo.PATH), statistics=[])
+    cache.store(problem, Result(specs=[], repo=ctx.repo), statistics=[])
     cache_path = cache._cache_path_from_problem(problem)
     cache_path.write_bytes(corrupt(cache_path.read_bytes()))
 
-    assert cache.fetch(problem, [], repo=spack.repo.PATH) == (None, None)
+    assert cache.fetch(problem, [], repo=ctx.repo) == (None, None)
     assert not cache_path.exists()
 
 
@@ -5422,7 +5433,7 @@ def test_imposed_spec_dependency_duplication(mock_packages: spack.repo.Repo, ctx
     pkg = mock_packages.get_pkg_class("trigger-and-effect-deps")
     setup = spack.solver.asp.SpackSolverSetup(context=ctx)
     setup.gen = spack.solver.asp.ProblemInstanceBuilder()
-    setup.clauses = spack.solver.clauses.SpecClauseGenerator(repo=spack.repo.PATH)
+    setup.clauses = spack.solver.clauses.SpecClauseGenerator(repo=ctx.repo)
     setup.package_dependencies_rules(pkg)
     setup.trigger_rules()
     setup.effect_rules()
@@ -5628,7 +5639,9 @@ def test_concretization_cache_remove_entry_oserror(tmp_path):
     spack.solver.asp.ConcretizationCache._remove_entry(gone)
 
 
-def test_concretization_cache_store_cleans_temp_on_error(use_concretization_cache, monkeypatch):
+def test_concretization_cache_store_cleans_temp_on_error(
+    use_concretization_cache, monkeypatch, ctx: SpackContext
+):
     """store() swallows OSError, logs, and cleans up the temp file.
 
     A failed cache store must not propagate as a concretization failure -- the cache is an
@@ -5643,7 +5656,7 @@ def test_concretization_cache_store_cleans_temp_on_error(use_concretization_cach
     monkeypatch.setattr(spack.util.filesystem, "rename", failing_rename)
 
     # store() must not raise even though os.replace did
-    cache.store(problem, Result(specs=[], repo=spack.repo.PATH), statistics=[])
+    cache.store(problem, Result(specs=[], repo=ctx.repo), statistics=[])
 
     # The final cache path should not exist
     cache_path = cache._cache_path_from_problem(problem)
@@ -5654,7 +5667,7 @@ def test_concretization_cache_store_cleans_temp_on_error(use_concretization_cach
     assert temps == []
 
 
-def test_concretization_cache_fetch_updates_lru_time(use_concretization_cache):
+def test_concretization_cache_fetch_updates_lru_time(use_concretization_cache, ctx: SpackContext):
     """A cache hit refreshes the entry's mtime, so cleanup() sees it as recently used.
 
     cleanup() prunes in ascending mtime order; if fetch() stopped touching entries,
@@ -5662,21 +5675,21 @@ def test_concretization_cache_fetch_updates_lru_time(use_concretization_cache):
     """
     cache = spack.solver.asp.ConcretizationCache(str(use_concretization_cache))
     problem = "lru update test"
-    cache.store(problem, Result(specs=[], repo=spack.repo.PATH), statistics=["stats"])
+    cache.store(problem, Result(specs=[], repo=ctx.repo), statistics=["stats"])
     cache_path = cache._cache_path_from_problem(problem)
 
     # backdate the entry, then check that a hit brings its mtime back to the present
     old_time = cache_path.stat().st_mtime - 3600
     os.utime(cache_path, (old_time, old_time))
 
-    result, _ = cache.fetch(problem, [], repo=spack.repo.PATH)
+    result, _ = cache.fetch(problem, [], repo=ctx.repo)
     assert result is not None
     assert cache_path.stat().st_mtime > old_time + 1800
 
 
 @pytest.mark.not_on_windows("test manipulates POSIX permissions")
 @pytest.mark.skipif(getuid() == 0, reason="user is root")
-def test_concretization_cache_store_readonly_cache(use_concretization_cache):
+def test_concretization_cache_store_readonly_cache(use_concretization_cache, ctx: SpackContext):
     """store() silently skips caching when the cache directory isn't writable.
 
     The cache is an optimization: not being able to write to it (e.g. a shared
@@ -5689,19 +5702,19 @@ def test_concretization_cache_store_readonly_cache(use_concretization_cache):
     os.chmod(cache.root, 0o555)
     try:
         # existing but read-only cache root
-        cache.store("read-only store test", Result(specs=[], repo=spack.repo.PATH), statistics=[])
+        cache.store("read-only store test", Result(specs=[], repo=ctx.repo), statistics=[])
         assert not cache._cache_path_from_problem("read-only store test").exists()
 
         # missing cache root that can't be created because its parent is read-only
         nested = spack.solver.asp.ConcretizationCache(str(cache.root / "sub"))
-        nested.store("read-only mkdir test", Result(specs=[], repo=spack.repo.PATH), statistics=[])
+        nested.store("read-only mkdir test", Result(specs=[], repo=ctx.repo), statistics=[])
         assert not nested.root.exists()
     finally:
         os.chmod(cache.root, old_mode)
 
 
 @pytest.mark.not_on_windows("test checks POSIX permissions")
-def test_concretization_cache_entries_follow_umask(use_concretization_cache):
+def test_concretization_cache_entries_follow_umask(use_concretization_cache, ctx: SpackContext):
     """Cache directories and entries follow the umask, so a shared read/write
     cache gets group-usable entries without external fixups."""
     cache = spack.solver.asp.ConcretizationCache(str(use_concretization_cache))
@@ -5709,7 +5722,7 @@ def test_concretization_cache_entries_follow_umask(use_concretization_cache):
     # typical umask for a setgid, group-writable shared cache
     old_umask = os.umask(0o007)
     try:
-        cache.store("umask problem", Result(specs=[], repo=spack.repo.PATH), statistics=[])
+        cache.store("umask problem", Result(specs=[], repo=ctx.repo), statistics=[])
     finally:
         os.umask(old_umask)
 
@@ -6109,8 +6122,6 @@ def test_concretize_one_reports_an_already_concrete_spec_as_no_work(
 
 
 #: The process globals a SpackContext replaces, as (module, attribute) pairs.
-#: ``spack.repo.PATH`` is missing: ``Spec`` resolves virtuals and computes package hashes
-#: through it, so a solve still reads it.
 _CONTEXT_GLOBALS = [(spack.config, "CONFIG")]
 
 
@@ -6120,7 +6131,7 @@ def break_globals(monkeypatch):
 
     It is a context manager rather than a plain fixture so a test can break the globals after
     every other fixture is set up, and restore them before those fixtures are torn down: the
-    database and mock package fixtures use ``spack.repo.PATH`` while tearing down.
+    database and mock package fixtures use ``spack.context.default().repo`` while tearing down.
     """
 
     @contextlib.contextmanager
@@ -6140,8 +6151,8 @@ def injected_context(mutable_config, mock_packages, mock_packages_repo):
 
     It is built once every fixture that pushes a configuration scope has run, so the store
     points at the right install tree. It depends on ``mock_packages`` so that the process-wide
-    repositories are the mock ones too: ``Spec`` resolves virtuals through ``spack.repo.PATH``,
-    which would otherwise raise ``UnknownNamespaceError`` for ``builtin_mock``.
+    repositories are the mock ones too: ``Spec`` resolves virtuals through the repositories of the
+    process context, which would otherwise raise ``UnknownNamespaceError`` for ``builtin_mock``.
     """
     mutable_config.set("repos", {"builtin_mock": str(mock_packages_repo.root)})
     return SpackContext(mutable_config)
@@ -6342,7 +6353,7 @@ def test_concrete_input_specs_skip_the_dependency_precheck(
     assert "pkg-b" in spec
 
     # the recipe stops declaring the dependency after the spec was concretized
-    pkg_cls = spack.repo.PATH.get_pkg_class("pkg-a")
+    pkg_cls = ctx.repo.get_pkg_class("pkg-a")
     monkeypatch.setattr(
         pkg_cls,
         "dependencies",

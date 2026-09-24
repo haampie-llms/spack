@@ -11,10 +11,8 @@ import spack.config
 import spack.detection
 import spack.detection.common
 import spack.detection.path
-import spack.repo
 import spack.spec
 from spack.config import Configuration
-from spack.test.utilities import UnusableGlobal
 
 
 def test_detection_update_config(mutable_config: Configuration):
@@ -172,8 +170,7 @@ def test_detect_specs_validates_variants_with_injected_repo(tmp_path, monkeypatc
 
     monkeypatch.setattr(gcc_cls, "determine_spec_details", _determine_spec_details)
 
-    with monkeypatch.context() as m:
-        m.setattr(spack.repo, "PATH", UnusableGlobal("spack.repo.PATH"))
+    with monkeypatch.context():
         detected = spack.detection.path.ExecutablesFinder().detect_specs(
             pkg=gcc_cls,
             paths=[str(p / "bin" / "gcc") for p in prefixes.values()],

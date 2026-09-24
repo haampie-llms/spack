@@ -793,7 +793,7 @@ class TestSpecSemantics:
         concrete = spack.concretize.concretize_one("mpileaks ^mpich", ctx)
 
         # Reset the index, will raise if the `_provider_index` is ever removed as an attribute
-        monkeypatch.setattr(spack.repo.PATH, "_provider_index", None)
+        monkeypatch.setattr(ctx.repo, "_provider_index", None)
 
         # Basic match and mismatch cases.
         assert concrete.satisfies("mpileaks")
@@ -817,7 +817,7 @@ class TestSpecSemantics:
         assert mpich.satisfies("mpi")
 
         # We should not create again the index
-        assert spack.repo.PATH._provider_index is None
+        assert ctx.repo._provider_index is None
 
     def test_concrete_contains_does_not_consult_repo(self, monkeypatch, ctx: SpackContext):
         """Tests that `foo in spec` on a concrete spec doesn't need the provider index, when the
@@ -826,13 +826,13 @@ class TestSpecSemantics:
         concrete = spack.concretize.concretize_one("mpileaks ^mpich", ctx)
 
         # Reset the index, will raise if the `_provider_index` is ever removed as an attribute
-        monkeypatch.setattr(spack.repo.PATH, "_provider_index", None)
+        monkeypatch.setattr(ctx.repo, "_provider_index", None)
 
         assert "mpi" in concrete
         assert "c" in concrete
 
         # We should not create again the index
-        assert spack.repo.PATH._provider_index is None
+        assert ctx.repo._provider_index is None
 
     def test_abstract_satisfies_with_lhs_provider_rhs_virtual(self):
         """If the left-hand side mentions a provider among dependencies and the right-hand side
@@ -849,7 +849,6 @@ class TestSpecSemantics:
         concrete = spack.concretize.concretize_one("mpileaks ^mpich", ctx)
 
         # We don't need the repo
-        monkeypatch.setattr(spack.repo, "PATH", None)
 
         assert concrete.satisfies("%mpi")
         assert concrete.satisfies("%c")
@@ -892,7 +891,7 @@ class TestSpecSemantics:
         package classes, and its stored dag hash is used verbatim."""
         concrete = spack.concretize.concretize_one("mpileaks ^mpich", ctx)
         as_dict = self._old_spec_dict(concrete)
-        spack.repo.PATH.provider_index  # build the index before class loads are forbidden
+        ctx.repo.provider_index  # build the index before class loads are forbidden
 
         def no_class_loads(self, name):
             raise AssertionError(
@@ -946,7 +945,7 @@ class TestSpecSemantics:
     def test_disjoint_provides_clauses_provide_nothing(self, monkeypatch, ctx: SpackContext):
         """Matching clauses with disjoint versions provide no version of the virtual, and the
         spec file stays readable. The solver ignores a virtual nothing depends on."""
-        pkg_cls = spack.repo.PATH.get_pkg_class("pkg-a")
+        pkg_cls = ctx.repo.get_pkg_class("pkg-a")
         monkeypatch.setattr(
             pkg_cls,
             "provided",
@@ -969,8 +968,8 @@ class TestSpecSemantics:
         with pytest.raises(SpecError):
             provider.provided_virtuals
 
-        spack.repo.freeze_provided_virtuals([concrete], repo=spack.repo.PATH)
-        spack.spec.assign_hashes([concrete], repo=spack.repo.PATH)
+        spack.repo.freeze_provided_virtuals([concrete], repo=ctx.repo)
+        spack.spec.assign_hashes([concrete], repo=ctx.repo)
         assert provider.provided_virtuals == frozen
 
     def test_versioned_virtual_queries_on_concrete_specs_are_stateless(
@@ -979,7 +978,6 @@ class TestSpecSemantics:
         """Versioned virtual queries are resolved with the frozen versions, without a repo."""
         concrete = spack.concretize.concretize_one("mpileaks ^mpich", ctx)
         provider = concrete["mpich"]  # provides mpi@:3
-        monkeypatch.setattr(spack.repo, "PATH", None)
 
         assert provider.satisfies("mpi@:3")
         assert not provider.satisfies("mpi@4:")
@@ -3321,8 +3319,8 @@ def test_mark_concrete_roundtrip_preserves_hashes(
     assert all(node._hash is None for node in s.traverse())
 
     # Re-hash the DAG: the cleared hashes must recompute to the original values.
-    spack.repo.freeze_provided_virtuals([s], repo=spack.repo.PATH)
-    spack.spec.assign_hashes([s], repo=spack.repo.PATH)
+    spack.repo.freeze_provided_virtuals([s], repo=ctx.repo)
+    spack.spec.assign_hashes([s], repo=ctx.repo)
     roundtrip = {node.name: node.dag_hash() for node in s.traverse()}
     assert roundtrip == original
 

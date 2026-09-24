@@ -39,8 +39,8 @@ import spack.concretize
 import spack.config
 import spack.environment as ev
 import spack.paths
-import spack.repo
 import spack.spec
+import spack.test.utilities
 import spack.util.spack_yaml as syaml
 from spack.concretize_ui import HeadlessUI
 from spack.context import SpackContext
@@ -49,7 +49,7 @@ from spack.context import SpackContext
 @pytest.fixture
 def test_repo(mutable_config, monkeypatch, mock_stage):
     repo_dir = pathlib.Path(spack.paths.test_repos_path) / "spack_repo" / "flags_test"
-    with spack.repo.use_repositories(str(repo_dir)) as mock_packages_repo:
+    with spack.test.utilities.use_repositories(str(repo_dir)) as mock_packages_repo:
         yield mock_packages_repo
 
 

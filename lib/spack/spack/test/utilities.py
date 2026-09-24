@@ -11,6 +11,7 @@ from typing import Any, Dict, Generator, List, Optional, Tuple, Union
 
 import spack.config
 import spack.context
+import spack.repo
 import spack.store
 from spack.concretize_ui import ConcretizerUI, SolveKind
 from spack.main import make_argument_parser
@@ -123,3 +124,56 @@ def use_store(
         if saved is not None:
             ctx.__dict__["store"] = saved
         config.remove_scope(scope_name=scope_name)
+
+
+@contextlib.contextmanager
+def use_repositories(
+    *paths_and_repos: Union[str, spack.repo.Repo], override: bool = True
+) -> Generator[spack.repo.RepoPath, None, None]:
+    """Use the repositories passed as arguments in the process context within the context
+    manager.
+
+    ``Repo`` instances are used as-is; paths are constructed into fresh ``Repo`` instances,
+    with ``package_attributes`` overrides from the configuration applied.
+
+    Args:
+        *paths_and_repos: paths to the repositories to be used, or
+            already constructed Repo objects
+        override: if True use only the repositories passed as input,
+            if False add them to the top of the list of current repositories.
+    Returns:
+        Corresponding RepoPath object
+    """
+    ctx = spack.context.default()
+    config = ctx.config
+    old_repo = ctx.repo
+    overrides = spack.repo.package_attributes_overrides(config)
+    new_repos = [
+        x
+        if isinstance(x, spack.repo.Repo)
+        else spack.repo.Repo(
+            spack.config.canonicalize_path(x, config=config),
+            cache=ctx.misc_cache,
+            overrides=overrides,
+        )
+        for x in paths_and_repos
+    ]
+    paths = {r.root: r.root for r in new_repos}
+    if not override:
+        new_repos.extend(r for r in old_repo.repos if r.root not in paths)
+    new_repo = spack.repo.RepoPath(*new_repos)
+    # The scope keeps the repos config section in sync with the enabled repositories: child
+    # processes and environment activation read it.
+    scope_name = f"use-repo-{uuid.uuid4()}"
+    repos_key = "repos:" if override else "repos"
+    config.push_scope(spack.config.InternalConfigScope(name=scope_name, data={repos_key: paths}))
+    old_repo.disable()
+    ctx.__dict__["repo"] = new_repo
+    new_repo.enable()
+    try:
+        yield new_repo
+    finally:
+        config.remove_scope(scope_name=scope_name)
+        new_repo.disable()
+        ctx.__dict__["repo"] = old_repo
+        old_repo.enable()

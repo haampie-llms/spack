@@ -4,8 +4,6 @@
 import enum
 from typing import TYPE_CHECKING, Dict, List
 
-import spack.compilers.libraries
-import spack.repo
 import spack.spec
 from spack.util import lang
 
@@ -81,7 +79,8 @@ class CompilerAdaptor:
         return next(iter(self.compilers.values())).version
 
     def implicit_rpaths(self) -> List[str]:
-        repo, cache = spack.repo.PATH, spack.compilers.libraries.process_compiler_cache()
+        ctx = self.compiled_spec.context
+        repo, cache = ctx.repo, ctx.compiler_cache
         result, seen = [], set()
         for compiler in self.compilers.values():
             if compiler in seen:

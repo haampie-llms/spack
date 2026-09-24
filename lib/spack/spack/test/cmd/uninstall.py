@@ -48,7 +48,7 @@ def test_uninstall_package_not_in_repo(mutable_database, monkeypatch, ctx: Spack
     def find_nothing(*args):
         raise spack.repo.UnknownPackageError("Repo package access is disabled for test")
 
-    monkeypatch.setattr(spack.repo.PATH, "get", find_nothing)
+    monkeypatch.setattr(ctx.repo, "get", find_nothing)
     spec = mutable_database.query_local("libelf")[0]
     spack.cmd.uninstall.do_uninstall([spec], ctx, force=True)
     assert not mutable_database.query_local("libelf")

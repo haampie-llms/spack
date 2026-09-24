@@ -11,6 +11,7 @@ import spack.concretize
 import spack.error
 import spack.paths
 import spack.repo
+import spack.test.utilities
 from spack.context import SpackContext
 from spack.util.filesystem import touch
 
@@ -18,7 +19,7 @@ from spack.util.filesystem import touch
 @pytest.fixture()
 def builder_test_repository(config):
     builder_test_path = os.path.join(spack.paths.test_repos_path, "spack_repo", "builder_test")
-    with spack.repo.use_repositories(builder_test_path) as mock_repo:
+    with spack.test.utilities.use_repositories(builder_test_path) as mock_repo:
         yield mock_repo
 
 
@@ -248,7 +249,7 @@ def test_builder_when_inheriting_just_package(working_env, ctx: SpackContext):
 @pytest.mark.usefixtures("builder_test_repository", "config")
 def test_get_builder_class_accepts_objects_and_classes(ctx: SpackContext):
     """Tests that get_builder_class works on both package objects and package classes."""
-    pkg_cls = spack.repo.PATH.get_pkg_class("callbacks")
+    pkg_cls = ctx.repo.get_pkg_class("callbacks")
     builder_cls = spack.builder.get_builder_class(pkg_cls, "GenericBuilder")
 
     # The builder is defined in the package module, so it is found from the class
@@ -260,7 +261,7 @@ def test_get_builder_class_accepts_objects_and_classes(ctx: SpackContext):
     assert spack.builder.get_builder_class(pkg, "GenericBuilder") is builder_cls
 
     # Derived packages that don't redefine a builder get it from the base package module
-    derived_cls = spack.repo.PATH.get_pkg_class("inheritance-only-package")
+    derived_cls = ctx.repo.get_pkg_class("inheritance-only-package")
     assert spack.builder.get_builder_class(derived_cls, "GenericBuilder") is builder_cls
 
     # Names that are not defined in any package module are not builders

@@ -15,10 +15,11 @@ import spack.environment as ev
 import spack.error
 import spack.paths
 import spack.reporters.cdash
+import spack.test.utilities
 import spack.util.filesystem as fs
 import spack.util.git
 import spack.util.web
-from spack import ci, repo
+from spack import ci
 from spack.context import SpackContext
 from spack.spec import Spec
 from spack.test.conftest import MockHTTPResponse, RepoBuilder
@@ -143,7 +144,7 @@ def test_pipeline_dag(config, repo_builder: RepoBuilder, ctx: SpackContext):
     repo_builder.add_package("pkg-b", dependencies=[("pkg-d", None, None), ("pkg-e", None, None)])
     repo_builder.add_package("pkg-a", dependencies=[("pkg-b", None, None), ("pkg-c", None, None)])
 
-    with repo.use_repositories(repo_builder.root):
+    with spack.test.utilities.use_repositories(repo_builder.root):
         spec_a = spack.concretize.concretize_one("pkg-a", ctx)
 
         key_a = ci.common.PipelineDag.key(spec_a)

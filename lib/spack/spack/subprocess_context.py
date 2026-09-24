@@ -46,7 +46,7 @@ def deserialize(serialized_pkg: io.BytesIO) -> "spack.package_base.PackageBase":
     pkg = pickle.load(serialized_pkg)
     pkg.spec._package = pkg
     # ensure overwritten package class attributes get applied
-    spack.repo.PATH.get_pkg_class(pkg.spec.name)
+    pkg.context.repo.get_pkg_class(pkg.spec.name)
     # The dependencies come without packages, which setting up the build environment reads
     spack.repo.attach_packages([pkg.spec], pkg.context)
     return pkg
@@ -117,10 +117,9 @@ class GlobalStateMarshaler:
         if self.is_forked:
             return
         spack.config.CONFIG = self.config
-        spack.repo.enable_repo(
-            spack.repo.RepoPath.from_config(
-                self.config, cache=spack.caches.misc_cache(config=self.config)
-            )
+        # Enable the repositories of the configuration, to import package modules
+        spack.repo.create_and_enable(
+            self.config, cache=spack.caches.misc_cache(config=self.config)
         )
         spack.platforms.host = self.platform
         spack.paths.spack_working_dir = self.spack_working_dir

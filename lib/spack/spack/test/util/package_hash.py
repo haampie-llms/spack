@@ -8,9 +8,10 @@ import os
 import pytest
 
 import spack.concretize
+import spack.context
 import spack.directives_meta
 import spack.paths
-import spack.repo
+import spack.test.utilities
 import spack.util.package_hash as ph
 from spack.context import SpackContext
 from spack.repo import RepoPath
@@ -25,9 +26,9 @@ datadir = os.path.join(spack.paths.test_path, "data", "unparse")
 
 
 def compare_sans_name(repo, eq, spec1, spec2):
-    content1 = ph.canonical_source(spec1, repo=spack.repo.PATH)
+    content1 = ph.canonical_source(spec1, repo=spack.context.default().repo)
     content1 = content1.replace(repo.get_pkg_class(spec1.name).__name__, "TestPackage")
-    content2 = ph.canonical_source(spec2, repo=spack.repo.PATH)
+    content2 = ph.canonical_source(spec2, repo=spack.context.default().repo)
     content2 = content2.replace(repo.get_pkg_class(spec2.name).__name__, "TestPackage")
     if eq:
         assert content1 == content2
@@ -36,29 +37,27 @@ def compare_sans_name(repo, eq, spec1, spec2):
 
 
 def compare_hash_sans_name(repo, eq, spec1, spec2):
-    content1 = ph.canonical_source(spec1, repo=spack.repo.PATH)
+    content1 = ph.canonical_source(spec1, repo=spack.context.default().repo)
     pkg_cls1 = repo.get_pkg_class(spec1.name)
     content1 = content1.replace(pkg_cls1.__name__, "TestPackage")
-    hash1 = pkg_cls1(spec1).content_hash(content=content1, repo=spack.repo.PATH)
+    hash1 = pkg_cls1(spec1).content_hash(content=content1, repo=spack.context.default().repo)
 
-    content2 = ph.canonical_source(spec2, repo=spack.repo.PATH)
+    content2 = ph.canonical_source(spec2, repo=spack.context.default().repo)
     pkg_cls2 = repo.get_pkg_class(spec2.name)
     content2 = content2.replace(pkg_cls2.__name__, "TestPackage")
-    hash2 = pkg_cls2(spec2).content_hash(content=content2, repo=spack.repo.PATH)
+    hash2 = pkg_cls2(spec2).content_hash(content=content2, repo=spack.context.default().repo)
 
     assert (hash1 == hash2) == eq
 
 
-def test_hash(mock_packages, config):
-    ph.package_hash(Spec("hash-test1@=1.2"), repo=spack.repo.PATH)
+def test_hash(mock_packages, config, ctx: SpackContext):
+    ph.package_hash(Spec("hash-test1@=1.2"), repo=ctx.repo)
 
 
-def test_different_variants(mock_packages, config):
+def test_different_variants(mock_packages, config, ctx: SpackContext):
     spec1 = Spec("hash-test1@=1.2 +variantx")
     spec2 = Spec("hash-test1@=1.2 +varianty")
-    assert ph.package_hash(spec1, repo=spack.repo.PATH) == ph.package_hash(
-        spec2, repo=spack.repo.PATH
-    )
+    assert ph.package_hash(spec1, repo=ctx.repo) == ph.package_hash(spec2, repo=ctx.repo)
 
 
 def test_all_same_but_name(mock_packages: RepoPath, config):
@@ -126,16 +125,18 @@ def test_content_hash_not_concretized(mock_packages: RepoPath, config):
     compare_hash_sans_name(mock_packages, False, spec1, spec2)
 
 
-def test_package_hash_of_shadowed_package(mock_packages: RepoPath, config, repo_builder):
+def test_package_hash_of_shadowed_package(
+    mock_packages: RepoPath, config, repo_builder, ctx: SpackContext
+):
     """The package hash must describe the package.py of the repository the spec names, also when
     a repository of higher precedence has a package of the same name."""
     repo_builder.add_package("pkg-c")
-    with spack.repo.use_repositories(repo_builder.root, override=False):
+    with spack.test.utilities.use_repositories(repo_builder.root, override=False):
         shadowing = Spec(f"{repo_builder.namespace}.pkg-c")
         shadowed = Spec("builtin_mock.pkg-c")
 
-        assert ph.package_hash(shadowing, repo=spack.repo.PATH) != ph.package_hash(
-            shadowed, repo=spack.repo.PATH
+        assert ph.package_hash(shadowing, repo=ctx.repo) != ph.package_hash(
+            shadowed, repo=ctx.repo
         )
 
 
@@ -172,7 +173,7 @@ def test_content_hash_all_same_but_archive_hash(
 
 def test_content_hash_parse_dynamic_function_call(mock_packages, config, ctx: SpackContext):
     spec = spack.concretize.concretize_one("hash-test4", ctx)
-    spec.package.content_hash(repo=spack.repo.PATH)
+    spec.package.content_hash(repo=ctx.repo)
 
 
 many_strings = '''\
@@ -383,7 +384,7 @@ def test_remove_complex_package_logic_filtered():
         ("trilinos", "ojbtbu3p6gpa42sbilblo2ioanvhouxu"),
     ],
 )
-def test_package_hash_consistency(package_spec, expected_hash):
+def test_package_hash_consistency(package_spec, expected_hash, ctx: SpackContext):
     """Ensure that that package hash is consistent python version to version.
 
     We assume these tests run across all supported Python versions in CI, and we ensure
@@ -399,7 +400,7 @@ def test_package_hash_consistency(package_spec, expected_hash):
     filename = os.path.join(datadir, "%s.txt" % spec.name)
     with open(filename, "rb") as f:
         source = f.read()
-    h = ph.package_hash(spec, source=source, repo=spack.repo.PATH)
+    h = ph.package_hash(spec, source=source, repo=ctx.repo)
     assert expected_hash == h
 
 
@@ -478,8 +479,8 @@ class Pkg:
         ("pkg@2.0", more_dynamic_multimethods, ["ONE", "THREE", "FIVE"], ["TWO", "FOUR"]),
     ],
 )
-def test_multimethod_resolution(spec_str, source, expected, not_expected):
-    filtered = ph.canonical_source(Spec(spec_str), source=source, repo=spack.repo.PATH)
+def test_multimethod_resolution(spec_str, source, expected, not_expected, ctx: SpackContext):
+    filtered = ph.canonical_source(Spec(spec_str), source=source, repo=ctx.repo)
     for item in expected:
         assert item in filtered
     for item in not_expected:

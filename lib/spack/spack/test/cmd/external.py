@@ -12,8 +12,8 @@ import spack.config
 import spack.cray_manifest
 import spack.detection
 import spack.detection.path
-import spack.repo
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.main import SpackCommand
 from spack.spec import Spec
 from spack.util.filesystem import getuid, touch
@@ -141,11 +141,11 @@ def test_find_external_cmd_not_buildable(
         (["hwloc"], ["detectable"], [], []),
     ],
 )
-def test_package_selection(names, tags, exclude, expected):
+def test_package_selection(names, tags, exclude, expected, ctx: SpackContext):
     """Tests various cases of selecting packages"""
     # In the mock repo we only have 'find-externals1' that is detectable
     result = spack.cmd.external.packages_to_search_for(
-        spack.repo.PATH, names=names, tags=tags, exclude=exclude
+        ctx.repo, names=names, tags=tags, exclude=exclude
     )
     assert set(result) == set(expected)
 

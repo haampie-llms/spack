@@ -9,7 +9,6 @@ import pytest
 import spack.cmd.compiler
 import spack.compilers.config
 import spack.main
-import spack.repo
 import spack.util.pattern
 import spack.version
 from spack.config import Configuration
@@ -159,7 +158,9 @@ done
 
 @pytest.mark.not_on_windows("Cannot execute bash script on Windows")
 @pytest.mark.regression("17590")
-def test_compiler_find_prefer_no_suffix(no_packages_yaml, working_env, compilers_dir):
+def test_compiler_find_prefer_no_suffix(
+    no_packages_yaml, working_env, compilers_dir, ctx: SpackContext
+):
     """Ensure that we'll pick 'clang' over 'clang-gpu' when there is a choice."""
     clang_path = compilers_dir / "clang"
     shutil.copy(clang_path, clang_path.parent / "clang-gpu")
@@ -172,7 +173,7 @@ def test_compiler_find_prefer_no_suffix(no_packages_yaml, working_env, compilers
     assert "gcc@8.4.0" in output
 
     compilers = spack.compilers.config.all_compilers_from(
-        no_packages_yaml, scope="site", repo=spack.repo.PATH
+        no_packages_yaml, scope="site", repo=ctx.repo
     )
     clang = [x for x in compilers if x.satisfies("llvm@11")]
 

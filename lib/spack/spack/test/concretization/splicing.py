@@ -340,6 +340,6 @@ def test_spliced_spec_keeps_package_hash(install_specs, mutable_config, ctx: Spa
     # package hashes from the repo
     recomputed = spliced.copy()
     recomputed._mark_concrete(False)
-    spack.repo.freeze_provided_virtuals([recomputed], repo=spack.repo.PATH)
-    spack.spec.assign_hashes([recomputed], repo=spack.repo.PATH)
+    spack.repo.freeze_provided_virtuals([recomputed], repo=ctx.repo)
+    spack.spec.assign_hashes([recomputed], repo=ctx.repo)
     assert recomputed.dag_hash() == spliced.dag_hash()

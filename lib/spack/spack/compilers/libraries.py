@@ -12,8 +12,6 @@ import sys
 import tempfile
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-import spack.caches
-import spack.config
 import spack.repo
 import spack.schema.environment
 import spack.spec
@@ -456,8 +454,3 @@ class FileCompilerCache(CompilerCache):
     def _key(self, compiler: spack.spec.Spec) -> str:
         as_bytes = json.dumps(compiler.to_dict(), separators=(",", ":")).encode("utf-8")
         return hashlib.sha256(as_bytes).hexdigest()
-
-
-def process_compiler_cache() -> CompilerCache:
-    """Compiler cache in the misc cache of the process (transitional)."""
-    return FileCompilerCache(spack.caches.misc_cache(config=spack.config.CONFIG))

@@ -24,6 +24,7 @@ import spack.repo
 import spack.reporters.cdash
 import spack.spec
 import spack.stage
+import spack.test.utilities
 import spack.util.spack_yaml as syaml
 import spack.util.web
 import spack.version
@@ -1203,7 +1204,7 @@ def test_ci_generate_prune_untouched(
     monkeypatch.setattr(ci, "stack_changed", fake_stack_changed)
     monkeypatch.setattr(ci, "get_change_revisions", fake_change_revisions)
 
-    with spack.repo.use_repositories(repo_builder.root, override=False):
+    with spack.test.utilities.use_repositories(repo_builder.root, override=False):
         spack_yaml, outputfile, _ = ci_generate_test(
             f"""\
 spack:
@@ -2110,11 +2111,11 @@ def fetch_url_maybe_exists(monkeypatch):
 
 
 @pytest.fixture
-def fetch_versions_match(monkeypatch):
+def fetch_versions_match(monkeypatch, ctx: SpackContext):
     """Fake successful checksums returned from downloaded tarballs."""
 
     def get_checksums_for_versions(url_by_version, package_name, **kwargs):
-        pkg_cls = spack.repo.PATH.get_pkg_class(package_name)
+        pkg_cls = ctx.repo.get_pkg_class(package_name)
         return {v: pkg_cls.versions[v]["sha256"] for v in url_by_version}
 
     monkeypatch.setattr(spack.stage, "get_checksums_for_versions", get_checksums_for_versions)
@@ -2175,7 +2176,7 @@ def test_ci_validate_standard_versions_invalid_url(
     capfd, mock_packages, fetch_url_maybe_exists, fetch_versions_match, versions, ctx: SpackContext
 ):
     spec = spack.spec.Spec("diff-test")
-    pkg = spack.repo.PATH.get_pkg_class(spec.name)(spec)
+    pkg = ctx.repo.get_pkg_class(spec.name)(spec)
     version_list = [spack.version.StandardVersion.from_string(v) for v in versions]
 
     assert (
@@ -2196,7 +2197,7 @@ def test_ci_validate_standard_versions_invalid_both(
     capfd, mock_packages, fetch_url_maybe_exists, fetch_versions_invalid, ctx: SpackContext
 ):
     spec = spack.spec.Spec("diff-test")
-    pkg = spack.repo.PATH.get_pkg_class(spec.name)(spec)
+    pkg = ctx.repo.get_pkg_class(spec.name)(spec)
     versions = ["2.1.4", "2.1.5"]
     version_list = [spack.version.StandardVersion.from_string(v) for v in versions]
 
@@ -2368,7 +2369,7 @@ def test_ci_verify_versions_valid(
     verify_git_versions_valid,
 ):
     repo, _, commits = mock_git_package_changes
-    with spack.repo.use_repositories(repo):
+    with spack.test.utilities.use_repositories(repo):
         monkeypatch.setattr(spack.repo, "builtin_repo", lambda repos: repo)
 
         out = ci_cmd("verify-versions", commits[-2], commits[-4])
@@ -2385,7 +2386,7 @@ def test_ci_verify_versions_invalid(
     verify_git_versions_invalid,
 ):
     repo, _, commits = mock_git_package_changes
-    with spack.repo.use_repositories(repo):
+    with spack.test.utilities.use_repositories(repo):
         monkeypatch.setattr(spack.repo, "builtin_repo", lambda repos: repo)
 
         out = ci_cmd("verify-versions", commits[-2], commits[-4], fail_on_error=False)
@@ -2401,7 +2402,7 @@ def test_ci_verify_versions_standard_duplicates(
     verify_standard_versions_invalid_duplicates,
 ):
     repo, _, commits = mock_git_package_changes
-    with spack.repo.use_repositories(repo):
+    with spack.test.utilities.use_repositories(repo):
         monkeypatch.setattr(spack.repo, "builtin_repo", lambda repos: repo)
 
         out = ci_cmd("verify-versions", commits[-4], commits[-5], fail_on_error=False)
@@ -2413,7 +2414,7 @@ def test_ci_verify_versions_standard_duplicates(
 
 def test_ci_verify_versions_manual_package(monkeypatch, mock_packages, mock_git_package_changes):
     repo, _, commits = mock_git_package_changes
-    with spack.repo.use_repositories(repo) as repos:
+    with spack.test.utilities.use_repositories(repo) as repos:
         monkeypatch.setattr(spack.repo, "builtin_repo", lambda repos: repo)
 
         pkg_class = repos.get_pkg_class("diff-test")

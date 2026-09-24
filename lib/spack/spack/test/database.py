@@ -17,6 +17,7 @@ import pytest
 import spack.config
 import spack.context
 import spack.subprocess_context
+import spack.test.utilities
 from spack.config import Configuration
 from spack.context import SpackContext
 from spack.database import Database
@@ -98,7 +99,7 @@ def test_installed_upstream(
     repo_builder.add_package("y", dependencies=[("z", None, None)])
     repo_builder.add_package("w", dependencies=[("x", None, None), ("y", None, None)])
 
-    with spack.repo.use_repositories(repo_builder.root):
+    with spack.test.utilities.use_repositories(repo_builder.root):
         spec = spack.concretize.concretize_one("w", ctx)
         with writable(upstream_db):
             for dep in spec.traverse(root=False):
@@ -148,7 +149,7 @@ def test_missing_upstream_build_dep(
 
     monkeypatch.setattr(ctx.store, "db", downstream_db)
 
-    with spack.repo.use_repositories(repo_builder.root):
+    with spack.test.utilities.use_repositories(repo_builder.root):
         y = spack.concretize.concretize_one("y", ctx)
         z_y = y["z"]
         z_y.set_prefix(z_y_prefix)
@@ -186,7 +187,7 @@ def test_removed_upstream_dep(
     repo_builder.add_package("z")
     repo_builder.add_package("y", dependencies=[("z", None, None)])
 
-    with spack.repo.use_repositories(repo_builder.root):
+    with spack.test.utilities.use_repositories(repo_builder.root):
         y = spack.concretize.concretize_one("y", ctx)
         z = y["z"]
 
@@ -221,7 +222,7 @@ def test_add_to_upstream_after_downstream(
 
     repo_builder.add_package("x")
 
-    with spack.repo.use_repositories(repo_builder.root):
+    with spack.test.utilities.use_repositories(repo_builder.root):
         spec = spack.concretize.concretize_one("x", ctx)
 
         downstream_db.add(spec)
@@ -271,7 +272,7 @@ def test_recursive_upstream_dbs(
     repo_builder.add_package("y", dependencies=[("z", None, None)])
     repo_builder.add_package("x", dependencies=[("y", None, None)])
 
-    with spack.repo.use_repositories(repo_builder.root):
+    with spack.test.utilities.use_repositories(repo_builder.root):
         spec = spack.concretize.concretize_one("x", ctx)
         db_c = Database(roots[2], layout=layouts[2])
         db_c.add(spec["z"])
@@ -811,7 +812,7 @@ def test_115_reindex_with_packages_not_in_repo(
     # Dont add any package definitions to this repository, the idea is that
     # packages should not have to be defined in the repository once they
     # are installed
-    with spack.repo.use_repositories(repo_builder.root):
+    with spack.test.utilities.use_repositories(repo_builder.root):
         mutable_database_store.reindex()
         _check_db_sanity(mutable_database_store.db)
 
@@ -1200,7 +1201,7 @@ def test_query_installed_when_package_unknown(
     """Test that we can query the installation status of a spec
     when we don't know its package.py
     """
-    with spack.repo.use_repositories(repo_builder.root):
+    with spack.test.utilities.use_repositories(repo_builder.root):
         specs = database.query("mpileaks")
         for s in specs:
             # Assert that we can query the installation methods even though we
@@ -1381,7 +1382,7 @@ def test_reindex_with_upstreams(
 
 
 @pytest.mark.regression("47101")
-def test_query_with_predicate_fn(database):
+def test_query_with_predicate_fn(database, ctx: SpackContext):
     all_specs = database.query()
 
     # Name starts with a string
@@ -1390,10 +1391,10 @@ def test_query_with_predicate_fn(database):
     assert len(specs) < len(all_specs)
 
     # Recipe is currently known/unknown
-    specs = database.query(predicate_fn=lambda x: spack.repo.PATH.exists(x.spec.name))
+    specs = database.query(predicate_fn=lambda x: ctx.repo.exists(x.spec.name))
     assert specs == all_specs
 
-    specs = database.query(predicate_fn=lambda x: not spack.repo.PATH.exists(x.spec.name))
+    specs = database.query(predicate_fn=lambda x: not ctx.repo.exists(x.spec.name))
     assert not specs
 
 
@@ -1447,7 +1448,7 @@ def test_database_installed(
     """Test the owner-side Database.installed / installed_upstream API."""
     upstream_db, downstream_db = upstream_and_downstream_db
 
-    with spack.repo.use_repositories(mock_custom_repository):
+    with spack.test.utilities.use_repositories(mock_custom_repository):
         spec = spack.concretize.concretize_one("pkg-c", ctx)
 
         # a concrete but not-yet-installed spec is not installed anywhere

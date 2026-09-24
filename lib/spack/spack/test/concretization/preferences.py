@@ -12,7 +12,7 @@ import spack.config
 import spack.context
 import spack.package_prefs
 import spack.paths
-import spack.repo
+import spack.test.utilities
 import spack.util.module_cmd
 import spack.util.spack_yaml as syaml
 from spack.config import Configuration
@@ -182,7 +182,7 @@ class TestConcretizePreferences:
         """Test setting an existing attribute in the package class"""
         monkeypatch.setenv("SOMEPATH", "file:///some/where/else")
         update_packages("mpileaks", "package_attributes", update)
-        with spack.repo.use_repositories(spack.paths.mock_packages_path):
+        with spack.test.utilities.use_repositories(spack.paths.mock_packages_path):
             spec = concretize("mpileaks", ctx=ctx)
             assert spec.package.fetcher.url == expected
 
@@ -205,7 +205,7 @@ mpileaks:
 """
         )
         mutable_config.set("packages", conf, scope="concretize")
-        with spack.repo.use_repositories(spack.paths.mock_packages_path):
+        with spack.test.utilities.use_repositories(spack.paths.mock_packages_path):
             spec = concretize("mpileaks", ctx=ctx)
             assert spec.package.v1 == 1
             assert spec.package.v2 is True
@@ -215,7 +215,7 @@ mpileaks:
             assert list(spec.package.v6) == [1, 2]
 
         update_packages("mpileaks", "package_attributes", {})
-        with spack.repo.use_repositories(spack.paths.mock_packages_path):
+        with spack.test.utilities.use_repositories(spack.paths.mock_packages_path):
             spec = concretize("mpileaks", ctx=ctx)
             with pytest.raises(AttributeError):
                 spec.package.v1

@@ -9,7 +9,6 @@ import spack.compilers.config
 import spack.compilers.libraries
 import spack.config
 import spack.detection
-import spack.repo
 import spack.spec
 from spack.test.utilities import UnusableGlobal
 
@@ -40,10 +39,7 @@ done
         for module, attribute in [(spack.config, "CONFIG")]:
             m.setattr(module, attribute, UnusableGlobal(f"{module.__name__}.{attribute}"))
 
-        # spack.repo.PATH is broken only for detection: CompilerRemover reads it in satisfies
-        with monkeypatch.context() as detection:
-            detection.setattr(spack.repo, "PATH", UnusableGlobal("spack.repo.PATH"))
-
+        with monkeypatch.context():
             new_compilers = spack.detection.find_compilers(
                 [str(prefix)],
                 config=mutable_config,
