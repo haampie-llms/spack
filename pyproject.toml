@@ -117,8 +117,6 @@ spack = ["spack"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "spack.config.CONFIG".msg = "take a configuration argument"
-"spack.active_environment.active_environment".msg = "take an environment argument"
-"spack.environment.active_environment".msg = "take an environment argument"
 "spack.context.default".msg = "take a context argument"
 
 

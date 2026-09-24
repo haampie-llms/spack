@@ -14,7 +14,7 @@ import spack.subprocess_context
 
 
 def show_config(serialized_state):
-    _ = serialized_state.restore()
+    serialized_state.restore()
     result = spack.config.CONFIG.get("config:ccache")
     if result is not True:
         raise RuntimeError(f"Expected config:ccache:true, but got {result}")
@@ -23,14 +23,14 @@ def show_config(serialized_state):
 if __name__ == "__main__":
     print("Testing spawn")
     ctx = mp.get_context("spawn")
-    serialized_state = spack.subprocess_context.PackageInstallContext(None, ctx=ctx)
+    serialized_state = spack.subprocess_context.GlobalStateMarshaler(ctx=ctx)
     p = ctx.Process(target=show_config, args=(serialized_state,))
     p.start()
     p.join()
 
     print("Testing fork")
     ctx = mp.get_context("fork")
-    serialized_state = spack.subprocess_context.PackageInstallContext(None, ctx=ctx)
+    serialized_state = spack.subprocess_context.GlobalStateMarshaler(ctx=ctx)
     p = ctx.Process(target=show_config, args=(serialized_state,))
     p.start()
     p.join()

@@ -7,9 +7,12 @@ import multiprocessing
 import os
 import sys
 import traceback
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from spack.util.cpus import cpus_available
+
+if TYPE_CHECKING:
+    import spack.environment
 
 #: Used in tests to disable parallelism, as tests themselves are parallelized
 ENABLE_PARALLELISM = sys.platform != "win32"
@@ -80,7 +83,7 @@ def imap_unordered(
     processes: int,
     maxtaskperchild: Optional[int] = None,
     debug=False,
-    serialize_env: bool = False,
+    env: Optional["spack.environment.Environment"] = None,
     shared: Any = None,
 ):
     """Wrapper around multiprocessing.Pool.imap_unordered.
@@ -88,6 +91,7 @@ def imap_unordered(
     Args:
         f: function to apply, called as ``f(shared, args)``
         list_of_args: list of tuples of args for the task
+        env: environment to activate in the worker processes
         shared: object sent once to each worker process, and passed to every task
         processes: maximum number of processes allowed
         debug: if False, raise an exception containing just the error messages
@@ -105,7 +109,7 @@ def imap_unordered(
 
     from spack.subprocess_context import GlobalStateMarshaler
 
-    marshaler = GlobalStateMarshaler(serialize_env=serialize_env)
+    marshaler = GlobalStateMarshaler(env=env)
     with multiprocessing.Pool(
         processes,
         initializer=_init_worker,
@@ -147,12 +151,15 @@ class _SharedProcessPoolExecutor(concurrent.futures.ProcessPoolExecutor):
 
 
 def make_concurrent_executor(
-    jobs: Optional[int] = None, *, serialize_env: bool = False, shared: Any = None
+    jobs: Optional[int] = None,
+    *,
+    env: Optional["spack.environment.Environment"] = None,
+    shared: Any = None,
 ):
     """Create a concurrent executor.
 
-    If serialize_env is False (default), the active Spack environment is not transmitted to the
-    worker processes, which avoids the cost of pickling potentially large environment state.
+    The worker processes activate ``env``, if given. It is not sent by default, which avoids the
+    cost of pickling potentially large environment state.
 
     The ``shared`` object is sent once to each worker process, instead of with every task: tasks
     submitted with ``submit_shared`` receive it as first argument."""
@@ -163,7 +170,7 @@ def make_concurrent_executor(
     from spack.subprocess_context import GlobalStateMarshaler
 
     jobs = jobs or min(cpus_available(), 16)
-    marshaler = GlobalStateMarshaler(serialize_env=serialize_env)
+    marshaler = GlobalStateMarshaler(env=env)
     return _SharedProcessPoolExecutor(  # novermin
         jobs, initializer=_init_worker, initargs=(marshaler, shared)
     )

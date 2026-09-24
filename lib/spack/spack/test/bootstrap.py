@@ -26,7 +26,6 @@ import spack.spec
 import spack.test.utilities
 import spack.util.executable
 import spack.version
-from spack.active_environment import active_environment
 from spack.context import SpackContext
 
 CLINGO_METADATA = sorted(pathlib.Path(spack.paths.share_path).glob("bootstrap/*/clingo.json"))
@@ -259,7 +258,7 @@ spack:
 """.format(install_root)
     )
     with spack.environment.Environment(str(tmp_path), ctx=ctx) as env:
-        assert active_environment()
+        assert ctx.environment
         assert env.ctx.config.get("config:install_tree:root") == str(install_root)
         # Don't trigger evaluation here
         _ = env.ctx.bootstrap

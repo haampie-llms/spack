@@ -34,7 +34,6 @@ import spack.util.filesystem as fs
 import spack.util.link_tree
 import spack.util.spack_json as sjson
 import spack.util.spack_yaml
-from spack.active_environment import active_environment
 from spack.cmd.env import _env_create
 from spack.concretize_ui import SolveKind
 from spack.config import Configuration, substitute_path_variables
@@ -1326,7 +1325,7 @@ spack:
     with pytest.raises(ValueError, match="does not exist"):
         ev.Environment(env_root, ctx=ctx).activate()
 
-    assert active_environment() is None
+    assert ctx.environment is None
 
 
 def test_env_with_include_config_files_same_basename(
@@ -3965,12 +3964,12 @@ def test_activate_parser_conflicts_with_temp(conflict_arg):
         env("activate", "--sh", "--temp", *conflict_arg)
 
 
-def test_create_and_activate_managed(tmp_path: pathlib.Path):
+def test_create_and_activate_managed(tmp_path: pathlib.Path, ctx: SpackContext):
     with fs.working_dir(str(tmp_path)):
         shell = env("activate", "--without-view", "--create", "--sh", "foo")
         active_env_var = next(line for line in shell.splitlines() if ev.spack_env_var in line)
         assert str(tmp_path) in active_env_var
-        active_ev = active_environment()
+        active_ev = ctx.environment
         assert active_ev and "foo" == active_ev.name
         env("deactivate")
 
