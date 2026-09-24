@@ -2689,13 +2689,13 @@ packages:
     def test_explicit_splices(
         self,
         mutable_config: Configuration,
-        database_mutable_config: Database,
+        database,
         mock_packages,
         transitive,
         capfd,
         ctx: SpackContext,
     ):
-        mpich_spec = database_mutable_config.query("mpich")[0]
+        mpich_spec = database.query("mpich")[0]
         splice_info = {
             "target": "mpi",
             "replacement": f"/{mpich_spec.dag_hash()}",
@@ -2717,7 +2717,7 @@ packages:
         assert str(spec) in captured.err
 
     def test_explicit_splice_fails_nonexistent(
-        self, mutable_config: Configuration, mock_packages, mock_store, ctx: SpackContext
+        self, mutable_config: Configuration, mock_packages, mock_store_path, ctx: SpackContext
     ):
         splice_info = {"target": "mpi", "replacement": "mpich/doesnotexist"}
         mutable_config.set("concretizer", {"splice": {"explicit": [splice_info]}})
@@ -2726,7 +2726,7 @@ packages:
             _ = spack.concretize.concretize_one("hdf5^zmpi", ctx)
 
     def test_explicit_splice_fails_no_hash(
-        self, mutable_config: Configuration, mock_packages, mock_store, ctx: SpackContext
+        self, mutable_config: Configuration, mock_packages, mock_store_path, ctx: SpackContext
     ):
         splice_info = {"target": "mpi", "replacement": "mpich"}
         mutable_config.set("concretizer", {"splice": {"explicit": [splice_info]}})
@@ -2735,7 +2735,7 @@ packages:
             _ = spack.concretize.concretize_one("hdf5^zmpi", ctx)
 
     def test_explicit_splice_non_match_nonexistent_succeeds(
-        self, mutable_config: Configuration, mock_packages, mock_store, ctx: SpackContext
+        self, mutable_config: Configuration, mock_packages, mock_store_path, ctx: SpackContext
     ):
         """When we have a nonexistent splice configured but are not using it, don't fail."""
         splice_info = {"target": "will_not_match", "replacement": "nonexistent/doesnotexist"}
@@ -3530,7 +3530,7 @@ def test_concretization_version_order():
         ),
     ],
 )
-@pytest.mark.usefixtures("mutable_database", "mock_store")
+@pytest.mark.usefixtures("mutable_database", "mock_store_path")
 @pytest.mark.not_on_windows("Expected length is different on Windows")
 def test_filtering_reused_specs(
     roots, reuse_yaml, expected, not_expected, expected_length, mutable_config, ctx: SpackContext
@@ -3558,7 +3558,7 @@ def test_filtering_reused_specs(
         assert all(not x.satisfies(constraint) for x in specs if not x.external)
 
 
-@pytest.mark.usefixtures("mutable_database", "mock_store")
+@pytest.mark.usefixtures("mutable_database", "mock_store_path")
 @pytest.mark.parametrize(
     "reuse_yaml,expected_length",
     [

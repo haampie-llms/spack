@@ -82,7 +82,6 @@ from spack.enums import ConfigScopePriority
 from spack.fetch_strategy import URLFetchStrategy
 from spack.installer import PackageInstaller
 from spack.repo import RepoPath
-from spack.store import Store
 from spack.test.harness import SpackCommand
 from spack.test.utilities import UnusableGlobal
 from spack.util import tty
@@ -570,7 +569,7 @@ def mock_stage(tmp_path_factory: pytest.TempPathFactory, monkeypatch, request):
 
 @pytest.fixture(scope="session")
 def mock_stage_for_database(tmp_path_factory: pytest.TempPathFactory, monkeypatch_session):
-    """A session-scoped analog of mock_stage, so that the mock_store
+    """A session-scoped analog of mock_stage, so that the mock store
     fixture uses its own stage vs. the global stage root for spack.
     """
     new_stage = tmp_path_factory.mktemp("mock-stage")
@@ -1321,25 +1320,18 @@ def _populate(ctx: SpackContext) -> None:
 
 
 @pytest.fixture(scope="session")
-def _store_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """Returns the directory where to build the mock database."""
-    return tmp_path_factory.mktemp("mock_store")
-
-
-@pytest.fixture(scope="session")
-def mock_store(
+def mock_store_path(
     tmp_path_factory: pytest.TempPathFactory,
     mock_packages_repo: spack.repo.Repo,
     configuration_dir: Path,
-    _store_dir: Path,
     mock_stage_for_database,
-):
+) -> Generator[Path, None, None]:
     """Directory of a read-only store with some mock packages installed. Note that the ref
     count for dyninst here will be 3, as it's recycled across each install.
 
-    The ``database`` fixtures make it the store of the test context.
+    The ``database`` and ``mutable_database`` fixtures make it the store of the test context.
     """
-    store_path = _store_dir
+    store_path = tmp_path_factory.mktemp("mock_store")
     ctx = SpackContext(mock_configuration(configuration_dir))
     spack.test.harness.set_store(ctx, store_path)
     spack.test.harness.set_repositories(ctx, mock_packages_repo)
@@ -1361,68 +1353,46 @@ def mock_store(
 
 
 @pytest.fixture(scope="session")
-def _mock_store_tarball(mock_store) -> bytes:
+def _mock_store_tarball(mock_store_path: Path) -> bytes:
     """Pristine copy of the mock store as an in-memory uncompressed tarball, so that
     ``mutable_database`` can restore the store without walking or reading a source tree."""
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w") as tar:
-        tar.add(str(mock_store), arcname=".")
+        tar.add(str(mock_store_path), arcname=".")
     return buf.getvalue()
 
 
 @pytest.fixture(scope="function")
-def database_store(ctx: SpackContext, mock_store: Path, mock_packages, config):
-    """Makes the read-only mock store the store of the test context. Returns the Store."""
-    return spack.test.harness.set_store(ctx, mock_store)
+def database(
+    ctx: SpackContext, mock_store_path: Path, mock_packages: spack.repo.RepoPath
+) -> spack.database.Database:
+    """Makes the read-only mock store the store of the test context, and returns its
+    database."""
+    return spack.test.harness.set_store(ctx, mock_store_path).db
 
 
 @pytest.fixture(scope="function")
-def database(database_store: Store):
-    """This activates the mock store, packages, AND config. Yields store.db."""
-    return database_store.db
-
-
-@pytest.fixture(scope="function")
-def database_mutable_config_store(
-    ctx: SpackContext, mock_store: Path, mock_packages, mutable_config
-):
-    """Like database_store, but with a mutable config. Returns the Store."""
-    return spack.test.harness.set_store(ctx, mock_store)
-
-
-@pytest.fixture(scope="function")
-def database_mutable_config(database_mutable_config_store: Store):
-    """This activates the mock store, packages, AND config. Yields store.db."""
-    return database_mutable_config_store.db
-
-
-@pytest.fixture(scope="function")
-def mutable_database_store(
-    database_mutable_config_store: Store, _store_dir: Path, _mock_store_tarball: bytes
-):
-    """Writeable version of database_store, restored to its initial state after each
-    test. Yields the Store."""
+def mutable_database(
+    ctx: SpackContext,
+    mock_store_path: Path,
+    _mock_store_tarball: bytes,
+    mock_packages: spack.repo.RepoPath,
+    mutable_config: Configuration,
+) -> Generator[spack.database.Database, None, None]:
+    """Like ``database``, but the test can modify the store, which is restored to its initial
+    state afterwards."""
     # Make the database writeable, as we are going to modify it
-    store_path = _store_dir
-    _recursive_chmod(store_path, 0o755)
+    _recursive_chmod(mock_store_path, 0o755)
 
-    yield database_mutable_config_store
+    yield spack.test.harness.set_store(ctx, mock_store_path).db
 
     # Restore the initial state from the pristine tarball; modes recorded in the tar
     # make the database read-only again.
-    shutil.rmtree(store_path)
-    store_path.mkdir()
+    shutil.rmtree(mock_store_path)
+    mock_store_path.mkdir()
     with tarfile.open(fileobj=io.BytesIO(_mock_store_tarball), mode="r") as tar:
         tar.extraction_filter = lambda member, path: member
-        tar.extractall(str(store_path))
-
-
-@pytest.fixture(scope="function")
-def mutable_database(mutable_database_store: Store):
-    """Writeable version of the fixture, restored to its initial state
-    after each test. Yields store.db.
-    """
-    return mutable_database_store.db
+        tar.extractall(str(mock_store_path))
 
 
 @pytest.fixture()
