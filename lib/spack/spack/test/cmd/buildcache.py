@@ -559,16 +559,12 @@ def test_best_effort_vs_fail_fast_when_dep_not_installed(
 
     # nothing should be pushed due to --fail-fast.
     assert not os.listdir(tmp_path)
-    assert not spack.binary_distribution.update_cache_and_get_specs(
-        ctx.binary_index, config=spack.config.CONFIG
-    )
+    assert not spack.binary_distribution.update_cache_and_get_specs(ctx.binary_index)
 
     with pytest.raises(spack.cmd.buildcache.PackageNotInstalledError):
         buildcache("push", "--update-index", "my-mirror", "mpileaks^mpich")
 
-    specs = spack.binary_distribution.update_cache_and_get_specs(
-        ctx.binary_index, config=spack.config.CONFIG
-    )
+    specs = spack.binary_distribution.update_cache_and_get_specs(ctx.binary_index)
 
     # everything but mpich should be pushed
     mpileaks = mutable_database.query_local("mpileaks^mpich")[0]
@@ -591,9 +587,7 @@ def test_allow_missing_when_dep_not_installed(
     # There should be warnings but no errors
     buildcache("push", "--update-index", "--allow-missing", "my-mirror", "mpileaks^mpich")
 
-    specs = spack.binary_distribution.update_cache_and_get_specs(
-        ctx.binary_index, config=spack.config.CONFIG
-    )
+    specs = spack.binary_distribution.update_cache_and_get_specs(ctx.binary_index)
 
     # Everything but mpich should be pushed
     mpileaks = mutable_database.query_local("mpileaks^mpich")[0]
@@ -622,9 +616,7 @@ def test_push_without_build_deps(
     buildcache(
         "push", "--update-index", "--without-build-dependencies", "my-mirror", f"/{s.dag_hash()}"
     )
-    assert spack.binary_distribution.update_cache_and_get_specs(
-        ctx.binary_index, config=spack.config.CONFIG
-    ) == [s]
+    assert spack.binary_distribution.update_cache_and_get_specs(ctx.binary_index) == [s]
 
 
 @pytest.fixture(scope="function")

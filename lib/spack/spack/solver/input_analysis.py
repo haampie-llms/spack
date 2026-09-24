@@ -316,7 +316,7 @@ class StaticAnalysis(NoStaticAnalysis):
     def buildcache_specs(self) -> List[spack.spec.Spec]:
         if self._buildcache_specs is None:
             self._buildcache_specs = spack.binary_distribution.update_cache_and_get_specs(
-                self.binary_index, config=self.configuration
+                self.binary_index
             )
         return self._buildcache_specs
 

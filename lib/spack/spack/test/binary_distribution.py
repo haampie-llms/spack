@@ -394,9 +394,9 @@ def test_use_bin_index(
     instantiates it, and a second operation that reconstructs it.
     """
     index_cache_root = str(tmp_path / "index_cache")
-    monkeypatch.setattr(
-        spack.binary_distribution,
-        "BINARY_INDEX",
+    monkeypatch.setitem(
+        ctx.__dict__,
+        "binary_index",
         spack.binary_distribution.BinaryIndexCache(
             index_cache_root,
             config=mutable_config,
@@ -416,7 +416,7 @@ def test_use_bin_index(
 
     # Now the test
     buildcache_cmd("list", "-al")
-    spack.binary_distribution.BINARY_INDEX = spack.binary_distribution.BinaryIndexCache(
+    ctx.__dict__["binary_index"] = spack.binary_distribution.BinaryIndexCache(
         index_cache_root,
         config=mutable_config,
         client=web_util.NetworkClient.from_config(mutable_config),
@@ -437,9 +437,9 @@ def test_use_bin_index_active_env_with_view(
     instantiates it, and a second operation that reconstructs it.
     """
     index_cache_root = str(tmp_path / "index_cache")
-    monkeypatch.setattr(
-        spack.binary_distribution,
-        "BINARY_INDEX",
+    monkeypatch.setitem(
+        ctx.__dict__,
+        "binary_index",
         spack.binary_distribution.BinaryIndexCache(
             index_cache_root,
             config=mutable_config,
@@ -463,7 +463,7 @@ def test_use_bin_index_active_env_with_view(
 
     # Now the test
     buildcache_cmd("list", "-al")
-    spack.binary_distribution.BINARY_INDEX = spack.binary_distribution.BinaryIndexCache(
+    ctx.__dict__["binary_index"] = spack.binary_distribution.BinaryIndexCache(
         index_cache_root,
         config=mutable_config,
         client=web_util.NetworkClient.from_config(mutable_config),
@@ -484,9 +484,9 @@ def test_use_bin_index_with_view(
     instantiates it, and a second operation that reconstructs it.
     """
     index_cache_root = str(tmp_path / "index_cache")
-    monkeypatch.setattr(
-        spack.binary_distribution,
-        "BINARY_INDEX",
+    monkeypatch.setitem(
+        ctx.__dict__,
+        "binary_index",
         spack.binary_distribution.BinaryIndexCache(
             index_cache_root,
             config=mutable_config,
@@ -511,7 +511,7 @@ def test_use_bin_index_with_view(
 
     # Now the test
     buildcache_cmd("list", "-al")
-    spack.binary_distribution.BINARY_INDEX = spack.binary_distribution.BinaryIndexCache(
+    ctx.__dict__["binary_index"] = spack.binary_distribution.BinaryIndexCache(
         index_cache_root,
         config=mutable_config,
         client=web_util.NetworkClient.from_config(mutable_config),
@@ -1836,7 +1836,7 @@ def test_update_does_not_warn_on_mirror_with_no_index(monkeypatch, tmp_path, mut
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        binary_index.update(config=mutable_config)
+        binary_index.update()
 
     concretization_warnings = [
         w for w in caught if "cannot be used in concretization" in str(w.message)
@@ -1854,7 +1854,7 @@ def test_load_buildcache_index(monkeypatch, tmp_path):
     def fake_regenerate(clear_existing=False):
         regenerate_calls.append(clear_existing)
 
-    def fake_update(with_cooldown=False, *, config=None):
+    def fake_update(with_cooldown=False):
         update_calls.append(with_cooldown)
 
     monkeypatch.setattr(mock_index, "regenerate_spec_cache", fake_regenerate)

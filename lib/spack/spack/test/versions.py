@@ -13,9 +13,9 @@ import re
 
 import pytest
 
-import spack.caches
 import spack.concretize
 import spack.config
+import spack.context
 import spack.package_base
 import spack.repo
 import spack.spec
@@ -42,7 +42,7 @@ def assign_versions(spec_str: str) -> spack.spec.Spec:
     return assign_git_versions(
         spack.spec.Spec(spec_str),
         repo=spack.repo.PATH,
-        misc_cache=spack.caches.MISC_CACHE,
+        misc_cache=spack.context.default().misc_cache,
         config=spack.config.CONFIG,
     )
 

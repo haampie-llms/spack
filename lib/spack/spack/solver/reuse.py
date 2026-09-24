@@ -38,9 +38,7 @@ def spec_filter_from_buildcache(
     *, context: "spack.context.SpackContext", is_reusable, include=None, exclude=None
 ) -> SpecFilter:
     """Constructs a filter that takes the specs from the configured buildcaches."""
-    factory = functools.partial(
-        _specs_from_mirror, binary_index=context.binary_index, config=context.config
-    )
+    factory = functools.partial(_specs_from_mirror, binary_index=context.binary_index)
     return SpecFilter(factory=factory, is_usable=is_reusable, include=include, exclude=exclude)
 
 
@@ -148,9 +146,9 @@ def _specs_from_store(store):
         return store.db.query(installed=True, sort=False)
 
 
-def _specs_from_mirror(binary_index, config: spack.config.Configuration):
+def _specs_from_mirror(binary_index):
     try:
-        specs = spack.binary_distribution.update_cache_and_get_specs(binary_index, config=config)
+        specs = spack.binary_distribution.update_cache_and_get_specs(binary_index)
     except (spack.binary_distribution.FetchCacheError, IndexError):
         # this is raised when no mirrors had indices.
         # TODO: update mirror configuration so it can indicate that the

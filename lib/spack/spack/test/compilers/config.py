@@ -5,7 +5,6 @@ import sys
 
 import pytest
 
-import spack.caches
 import spack.compilers.config
 import spack.compilers.libraries
 import spack.config
@@ -38,7 +37,7 @@ done
     mock_packages.packages_with_tags("compiler")
 
     with monkeypatch.context() as m:
-        for module, attribute in [(spack.config, "CONFIG"), (spack.caches, "MISC_CACHE")]:
+        for module, attribute in [(spack.config, "CONFIG")]:
             m.setattr(module, attribute, UnusableGlobal(f"{module.__name__}.{attribute}"))
 
         # spack.repo.PATH is broken only for detection: CompilerRemover reads it in satisfies

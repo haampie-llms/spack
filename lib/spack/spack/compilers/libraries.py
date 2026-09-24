@@ -13,6 +13,7 @@ import tempfile
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import spack.caches
+import spack.config
 import spack.repo
 import spack.schema.environment
 import spack.spec
@@ -459,4 +460,4 @@ class FileCompilerCache(CompilerCache):
 
 def process_compiler_cache() -> CompilerCache:
     """Compiler cache in the misc cache of the process (transitional)."""
-    return FileCompilerCache(spack.caches.MISC_CACHE)
+    return FileCompilerCache(spack.caches.misc_cache(config=spack.config.CONFIG))

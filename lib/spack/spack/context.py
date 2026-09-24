@@ -366,12 +366,6 @@ class _ProcessContext(SpackContext):
         return active_environment()
 
     @property  # type: ignore[override]
-    def misc_cache(self) -> "spack.util.file_cache.FileCache":
-        import spack.caches
-
-        return spack.caches.MISC_CACHE
-
-    @property  # type: ignore[override]
     def store(self) -> "spack.store.Store":
         import spack.store
 
@@ -382,18 +376,6 @@ class _ProcessContext(SpackContext):
         import spack.repo
 
         return spack.repo.PATH
-
-    @property  # type: ignore[override]
-    def binary_index(self) -> "spack.binary_distribution.BinaryIndexCache":
-        import spack.binary_distribution
-
-        return spack.binary_distribution.BINARY_INDEX
-
-    @property  # type: ignore[override]
-    def compiler_cache(self) -> "spack.compilers.libraries.CompilerCache":
-        import spack.compilers.libraries
-
-        return spack.compilers.libraries.process_compiler_cache()
 
     def __reduce__(self):
         return default, ()
