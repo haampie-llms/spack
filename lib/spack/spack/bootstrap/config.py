@@ -10,6 +10,7 @@ import sys
 from typing import Any, Dict, Generator, MutableSequence, Sequence
 
 import spack.config
+import spack.context
 import spack.environment
 import spack.modules
 import spack.paths
@@ -153,9 +154,9 @@ def _ensure_bootstrap_configuration() -> Generator:
     spack.store.ensure_singleton_created()
     bootstrap_store_path = store_path()
     user_configuration = _read_and_sanitize_configuration()
-    with spack.environment.no_active_environment(), spack.platforms.use_platform(
-        spack.platforms.real_host()
-    ), spack.config.use_configuration(
+    with spack.environment.no_active_environment(
+        spack.context.default()
+    ), spack.platforms.use_platform(spack.platforms.real_host()), spack.config.use_configuration(
         # Default configuration scopes excluding command line and builtin
         *_bootstrap_config_scopes()
     ), spack.store.use_store(bootstrap_store_path, extra_data={"padded_length": 0}):

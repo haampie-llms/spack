@@ -1324,7 +1324,7 @@ spack:
 
     os.remove(include1)
     with pytest.raises(ValueError, match="does not exist"):
-        ev.activate(ev.Environment(env_root, ctx=ctx))
+        ev.Environment(env_root, ctx=ctx).activate()
 
     assert active_environment() is None
 
@@ -1564,7 +1564,7 @@ def test_env_with_included_config_file_url(
         f.write("spack:\n  include:\n    - {0}\n".format(packages_file.as_uri()))
 
     env = ev.Environment(str(tmp_path), ctx=ctx)
-    ev.activate(env)
+    env.activate()
 
     cfg = mutable_empty_config.get("packages")
     assert cfg["mpileaks"]["version"] == ["2.2"]
@@ -4591,7 +4591,7 @@ spack:
 
     with mutable_empty_config.override("config:url_fetch_method", "curl"):
         env = ev.Environment(str(tmp_path), ctx=ctx)
-        ev.activate(env)
+        env.activate()
 
         # Make sure a setting from test/data/config/packages.yaml is present
         cfg = mutable_empty_config.get("packages")
