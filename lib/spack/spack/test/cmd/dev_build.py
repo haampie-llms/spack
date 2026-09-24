@@ -15,9 +15,9 @@ import spack.repo
 import spack.spec
 import spack.util.filesystem as fs
 from spack.context import SpackContext
-from spack.main import SpackCommand
 from spack.repo import RepoPath
 from spack.store import Store
+from spack.test.harness import SpackCommand
 
 dev_build = SpackCommand("dev-build")
 install = SpackCommand("install")

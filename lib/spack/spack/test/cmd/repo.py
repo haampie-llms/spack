@@ -15,15 +15,15 @@ import spack.environment as ev
 import spack.main
 import spack.repo
 import spack.repo_migrate
-import spack.test.utilities
+import spack.test.harness
 from spack.config import Configuration
 from spack.context import SpackContext
 from spack.error import SpackError
 from spack.util.executable import Executable
 from spack.util.filesystem import working_dir
 
-repo = spack.main.SpackCommand("repo")
-env = spack.main.SpackCommand("env")
+repo = spack.test.harness.SpackCommand("repo")
+env = spack.test.harness.SpackCommand("env")
 
 
 @pytest.mark.usefixtures("config")
@@ -986,11 +986,11 @@ def test_repo_update_invalid_flags(monkeypatch, mutable_config, flags):
         repo("update", *flags)
 
 
-def test_repo_show_version_updates_no_changes(mock_git_package_changes):
+def test_repo_show_version_updates_no_changes(mock_git_package_changes, ctx: SpackContext):
     """Test that show-version-updates handles empty results gracefully"""
     test_repo, _, commits = mock_git_package_changes
 
-    with spack.test.utilities.use_repositories(test_repo):
+    with spack.test.harness.use_repositories(ctx, test_repo):
         # Use the same commit for both refs - no changes
         output = repo("show-version-updates", test_repo.root, commits[-1], commits[-1])
 
@@ -1001,11 +1001,11 @@ def test_repo_show_version_updates_no_changes(mock_git_package_changes):
         assert "diff-test@" not in output
 
 
-def test_repo_show_version_updates_success(mock_git_package_changes):
+def test_repo_show_version_updates_success(mock_git_package_changes, ctx: SpackContext):
     """Test that show-version-updates successfully outputs the correct specs"""
     test_repo, _, commits = mock_git_package_changes
 
-    with spack.test.utilities.use_repositories(test_repo):
+    with spack.test.harness.use_repositories(ctx, test_repo):
         # commits are ordered from newest to oldest after reversal
         # commits[-3] = add v2.1.5, commits[-5] = add v2.1.7 and v2.1.8
         # Find versions added between these commits
@@ -1033,7 +1033,7 @@ def test_repo_show_version_updates_excludes_manual_packages(
     """Test --no-manual-packages flag excludes packages with manual_download=True"""
     test_repo, _, commits = mock_git_package_changes
 
-    with spack.test.utilities.use_repositories(test_repo):
+    with spack.test.harness.use_repositories(ctx, test_repo):
         # Set manual_download=True on the package
         pkg_class = ctx.repo.get_pkg_class("diff-test")
         monkeypatch.setattr(pkg_class, "manual_download", True)
@@ -1058,7 +1058,7 @@ def test_repo_show_version_updates_excludes_non_redistributable(
     """Test --only-redistributable flag excludes packages if redistribute_source returns False"""
     test_repo, _, commits = mock_git_package_changes
 
-    with spack.test.utilities.use_repositories(test_repo):
+    with spack.test.harness.use_repositories(ctx, test_repo):
         # Set redistribute_source to return False
         pkg_class = ctx.repo.get_pkg_class("diff-test")
         monkeypatch.setattr(pkg_class, "redistribute_source", classmethod(lambda cls, spec: False))
@@ -1077,11 +1077,13 @@ def test_repo_show_version_updates_excludes_non_redistributable(
         assert "No new package versions found" in output
 
 
-def test_repo_show_version_updates_excludes_git_versions(mock_git_package_changes):
+def test_repo_show_version_updates_excludes_git_versions(
+    mock_git_package_changes, ctx: SpackContext
+):
     """Test --no-git-versions flag excludes versions from git (tag/commit)"""
     test_repo, _, commits = mock_git_package_changes
 
-    with spack.test.utilities.use_repositories(test_repo):
+    with spack.test.harness.use_repositories(ctx, test_repo):
         # commits[-4] = add v2.1.6 (git version), commits[-5] = add v2.1.7 and v2.1.8 (sha256)
         # Without --no-git-versions, v2.1.6 would be included
         output = repo(
@@ -1103,7 +1105,7 @@ def test_repo_show_version_updates_excludes_deprecated(
     """Test --no-deprecated flag excludes versions marked with deprecated=True"""
     test_repo, _, commits = mock_git_package_changes
 
-    with spack.test.utilities.use_repositories(test_repo):
+    with spack.test.harness.use_repositories(ctx, test_repo):
         # Mark version 2.1.7 as deprecated
         pkg_class = ctx.repo.get_pkg_class("diff-test")
         for v in pkg_class.versions:

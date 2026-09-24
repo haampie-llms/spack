@@ -4,7 +4,7 @@
 import os
 import sys
 
-from spack.main import SpackCommand
+from spack.test.harness import SpackCommand
 
 resource = SpackCommand("resource")
 

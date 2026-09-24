@@ -14,13 +14,13 @@ import spack.vendor.archspec.cpu
 
 import spack.error
 import spack.repo
-import spack.test.utilities
+import spack.test.harness
 import spack.util.file_cache
 import spack.util.spack_yaml as syaml
 from spack.concretize import concretize_one
 from spack.config import Configuration
 from spack.context import SpackContext
-from spack.main import SpackCommand
+from spack.test.harness import SpackCommand
 
 solve = SpackCommand("solve")
 
@@ -377,8 +377,8 @@ def _create_test_repo(tmp_path, mutable_config):
 
 
 @pytest.fixture
-def test_repo(_create_test_repo, monkeypatch, mock_stage):
-    with spack.test.utilities.use_repositories(_create_test_repo) as mock_repo_path:
+def test_repo(_create_test_repo, monkeypatch, mock_stage, ctx: SpackContext):
+    with spack.test.harness.use_repositories(ctx, _create_test_repo) as mock_repo_path:
         yield mock_repo_path
 
 

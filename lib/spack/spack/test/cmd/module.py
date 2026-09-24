@@ -11,25 +11,25 @@ import spack.concretize
 import spack.main
 import spack.modules
 import spack.modules.lmod
-import spack.test.utilities
+import spack.test.harness
 from spack.config import Configuration
 from spack.context import SpackContext
 from spack.installer import PackageInstaller
+from spack.test.conftest import mock_configuration
 
-module = spack.main.SpackCommand("module")
+module = spack.test.harness.SpackCommand("module")
 
 pytestmark = pytest.mark.not_on_windows("does not run on windows")
 
 
 #: make sure module files are generated for all the tests here
 @pytest.fixture(scope="module", autouse=True)
-def ensure_module_files_are_there(mock_packages_repo, mock_store, mock_configuration_scopes):
+def ensure_module_files_are_there(mock_packages_repo, mock_store, configuration_dir):
     """Generate module files for module tests."""
-    module = spack.main.SpackCommand("module")
-    with spack.test.utilities.use_configuration(*mock_configuration_scopes):
-        with spack.test.utilities.use_store(str(mock_store)):
-            with spack.test.utilities.use_repositories(mock_packages_repo):
-                module("tcl", "refresh", "-y")
+    module_ctx = SpackContext(mock_configuration(configuration_dir))
+    spack.test.harness.set_store(module_ctx, mock_store)
+    spack.test.harness.set_repositories(module_ctx, mock_packages_repo)
+    module("tcl", "refresh", "-y", ctx=module_ctx)
 
 
 def _module_files(module_type, *specs, ctx: SpackContext):

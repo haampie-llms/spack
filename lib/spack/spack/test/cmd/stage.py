@@ -13,8 +13,9 @@ import spack.traverse
 from spack.cmd.stage import StageFilter
 from spack.config import Configuration
 from spack.context import SpackContext
-from spack.main import SpackCommand, SpackCommandError
+from spack.main import SpackCommandError
 from spack.spec import Spec
+from spack.test.harness import SpackCommand
 from spack.version import Version
 
 stage = SpackCommand("stage")

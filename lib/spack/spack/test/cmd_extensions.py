@@ -13,6 +13,7 @@ import pytest
 import spack.cmd
 import spack.extensions
 import spack.main
+import spack.test.harness
 from spack.config import Configuration
 from spack.context import SpackContext
 
@@ -97,7 +98,7 @@ def hello_world(parser, args):
 @pytest.fixture(scope="function")
 def hello_world_cmd(hello_world_extension):
     """Create and return an invocable "hello-world" extension command."""
-    yield spack.main.SpackCommand("hello-world")
+    yield spack.test.harness.SpackCommand("hello-world")
 
 
 @pytest.fixture(scope="function")
@@ -160,7 +161,7 @@ def hello_folks():
     print('Hello folks!')
 """
             )
-            yield spack.main.SpackCommand("hello")
+            yield spack.test.harness.SpackCommand("hello")
 
     yield _hwwmir
 
@@ -177,7 +178,7 @@ def test_multi_extension_search(hello_world_extension, extension_creator):
     """
 
     with extension_creator("testcommand2"):
-        assert ("Hello world") in spack.main.SpackCommand("hello-world")()
+        assert ("Hello world") in spack.test.harness.SpackCommand("hello-world")()
 
 
 def test_duplicate_module_load(hello_world_cmd, capfd, ctx: SpackContext):

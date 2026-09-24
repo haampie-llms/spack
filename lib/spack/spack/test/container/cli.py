@@ -4,10 +4,10 @@
 import pytest
 
 import spack.container.images
-import spack.main
+import spack.test.harness
 import spack.util.filesystem as fs
 
-containerize = spack.main.SpackCommand("containerize")
+containerize = spack.test.harness.SpackCommand("containerize")
 
 
 def test_command(default_config, container_config_dir):

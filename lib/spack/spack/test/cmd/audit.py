@@ -5,8 +5,8 @@ import pytest
 
 import spack.audit
 import spack.paths
-from spack.main import SpackCommand
 from spack.test.conftest import MockHTTPResponse
+from spack.test.harness import SpackCommand
 
 audit = SpackCommand("audit")
 

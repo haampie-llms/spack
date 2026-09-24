@@ -12,8 +12,8 @@ import spack.platforms
 import spack.repo
 import spack.spec
 from spack.context import SpackContext
-from spack.main import SpackCommand
 from spack.test.conftest import _return_none
+from spack.test.harness import SpackCommand
 
 debug = SpackCommand("debug")
 

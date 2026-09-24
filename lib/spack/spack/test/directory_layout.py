@@ -15,7 +15,7 @@ import pytest
 import spack.concretize
 import spack.paths
 import spack.repo
-import spack.test.utilities
+import spack.test.harness
 import spack.util.file_cache
 from spack.context import SpackContext
 from spack.directory_layout import DirectoryLayout, InvalidDirectoryLayoutParametersError
@@ -185,7 +185,7 @@ def test_handle_unknown_package(
         layout.create_install_directory(spec, config=config)
         installed_specs[spec] = layout.path_for_spec(spec)
 
-    with spack.test.utilities.use_repositories(spack.paths.mock_packages_path):
+    with spack.test.harness.use_repositories(ctx, spack.paths.mock_packages_path):
         # Now check that even without the package files, we know
         # enough to read a spec from the spec file.
         for spec, path in installed_specs.items():

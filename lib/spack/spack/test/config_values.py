@@ -7,7 +7,7 @@ import pathlib
 import pytest
 
 import spack.concretize
-import spack.test.utilities
+import spack.test.harness
 from spack.context import SpackContext
 
 
@@ -17,7 +17,7 @@ def test_set_install_hash_length(
     hash_length, mutable_config, tmp_path: pathlib.Path, ctx: SpackContext
 ):
     mutable_config.set("config:install_hash_length", hash_length)
-    with spack.test.utilities.use_store(str(tmp_path)):
+    with spack.test.harness.use_store(ctx, str(tmp_path)):
         spec = spack.concretize.concretize_one("libelf", ctx)
         prefix = spec.prefix
         hash_str = prefix.rsplit("-")[-1]
@@ -29,8 +29,8 @@ def test_set_install_hash_length_upper_case(
     mutable_config, tmp_path: pathlib.Path, ctx: SpackContext
 ):
     mutable_config.set("config:install_hash_length", 5)
-    with spack.test.utilities.use_store(
-        str(tmp_path), extra_data={"projections": {"all": "{name}-{HASH}"}}
+    with spack.test.harness.use_store(
+        ctx, str(tmp_path), extra_data={"projections": {"all": "{name}-{HASH}"}}
     ):
         spec = spack.concretize.concretize_one("libelf", ctx)
         prefix = spec.prefix

@@ -14,8 +14,9 @@ import spack.repo
 from spack.context import SpackContext
 from spack.database import Database
 from spack.enums import InstallRecordStatus
-from spack.main import SpackCommand, SpackCommandError
+from spack.main import SpackCommandError
 from spack.store import Store
+from spack.test.harness import SpackCommand
 from spack.util import tty
 
 uninstall = SpackCommand("uninstall")

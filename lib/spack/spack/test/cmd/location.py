@@ -12,9 +12,9 @@ import spack.environment as ev
 import spack.main
 import spack.paths
 import spack.stage
-import spack.test.utilities
+import spack.test.harness
 from spack.context import SpackContext
-from spack.main import SpackCommand
+from spack.test.harness import SpackCommand
 from spack.util.filesystem import mkdirp
 
 # Everything here uses (or can use) the mock config and database.
@@ -239,7 +239,8 @@ def test_location_stages(mock_spec, mutable_config):
 
 def test_location_specified_repo(ctx: SpackContext):
     """Tests spack location --repo <repo>."""
-    with spack.test.utilities.use_repositories(
+    with spack.test.harness.use_repositories(
+        ctx,
         os.path.join(spack.paths.test_repos_path, "spack_repo", "builtin_mock"),
         os.path.join(spack.paths.test_repos_path, "spack_repo", "builder_test"),
     ):

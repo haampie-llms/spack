@@ -11,7 +11,7 @@ import spack.concretize
 import spack.error
 import spack.operating_systems
 import spack.platforms
-import spack.test.utilities
+import spack.test.harness
 from spack.context import SpackContext
 from spack.spec import ArchSpec, Spec
 
@@ -220,7 +220,7 @@ def test_instantiate_non_default_macos(mock_packages, ctx: SpackContext):
     else:
         assert False, "Failed to find non-default macos version in test"
 
-    with spack.test.utilities.use_platform(darwin):
+    with spack.test.harness.use_platform(darwin):
         # zlib isn't important but we need a spec with no compiler because our test environment
         # has no macos compilers
         target = str(spack.vendor.archspec.cpu.host().family)

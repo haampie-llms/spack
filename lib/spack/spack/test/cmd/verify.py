@@ -19,8 +19,9 @@ import spack.util.filesystem as fs
 import spack.util.spack_json as sjson
 import spack.verify
 from spack.context import SpackContext
-from spack.main import SpackCommand, SpackCommandError
+from spack.main import SpackCommandError
 from spack.spec import Spec
+from spack.test.harness import SpackCommand
 
 verify = SpackCommand("verify")
 install = SpackCommand("install")

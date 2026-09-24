@@ -30,9 +30,9 @@ from spack.config import Configuration
 from spack.context import SpackContext
 from spack.error import SpackError, SpecSyntaxError
 from spack.installer import PackageInstaller
-from spack.main import SpackCommand
 from spack.spec import Spec
 from spack.store import Store
+from spack.test.harness import SpackCommand
 from spack.util import tty
 
 install = SpackCommand("install")

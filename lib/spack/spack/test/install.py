@@ -26,7 +26,7 @@ import spack.package_base
 import spack.patch
 import spack.repo
 import spack.store
-import spack.test.utilities
+import spack.test.harness
 import spack.util.filesystem as fs
 import spack.util.spack_json as sjson
 from spack import binary_distribution
@@ -34,7 +34,6 @@ from spack.config import Configuration
 from spack.context import SpackContext
 from spack.error import InstallError
 from spack.installer import PackageInstaller
-from spack.main import SpackCommand
 from spack.package_base import (
     PackageBase,
     PackageStillNeededError,
@@ -46,6 +45,7 @@ from spack.package_base import (
 from spack.repo import RepoPath
 from spack.spec import Spec
 from spack.store import Store
+from spack.test.harness import SpackCommand
 
 #: Deprecation policy that allows anything, used to concretize a deprecated spec on purpose
 ALLOW_ANY_DEPRECATION = [{"severity": "critical"}]
@@ -250,7 +250,7 @@ def test_installed_upstream_external(install_upstream, mock_fetch, ctx: SpackCon
     an upstream database that it is not reinstalled.
     """
     store_root, _ = install_upstream("externaltool")
-    with spack.test.utilities.use_store(store_root):
+    with spack.test.harness.use_store(ctx, store_root):
         dependent = spack.concretize.concretize_one("externaltest", ctx)
 
         new_dependency = dependent["externaltool"]
@@ -268,7 +268,7 @@ def test_installed_upstream(install_upstream, mock_fetch, ctx: SpackContext):
     an upstream database that it is not reinstalled.
     """
     store_root, upstream_layout = install_upstream("dependency-install")
-    with spack.test.utilities.use_store(store_root):
+    with spack.test.harness.use_store(ctx, store_root):
         dependency = spack.concretize.concretize_one("dependency-install", ctx)
         dependent = spack.concretize.concretize_one("dependent-install", ctx)
 
@@ -357,7 +357,7 @@ def test_install_prefix_collision_fails(
     to install.
     """
     projections = {"projections": {"all": "one-prefix-per-package-{name}"}}
-    with spack.test.utilities.use_store(str(tmp_path), extra_data=projections):
+    with spack.test.harness.use_store(ctx, str(tmp_path), extra_data=projections):
         with config.override("config:checksum", False):
             pkg_a = spack.concretize.concretize_one("libelf@0.8.13", ctx).package
             pkg_b = spack.concretize.concretize_one("libelf@0.8.12", ctx).package

@@ -16,6 +16,7 @@ import spack.cmd.commands
 import spack.config
 import spack.main
 import spack.paths
+import spack.test.harness
 from spack.cmd.commands import _dest_to_fish_complete, _positional_to_subroutine
 from spack.context import SpackContext
 from spack.util.executable import Executable
@@ -136,7 +137,7 @@ _cmd-spack-install:
 
 @pytest.mark.usefixtures("config")
 def test_rst_with_header(tmp_path: pathlib.Path):
-    local_commands = spack.main.SpackCommand("commands")
+    local_commands = spack.test.harness.SpackCommand("commands")
     fake_header = "this is a header!\n\n"
 
     filename = tmp_path / "header.txt"
@@ -267,7 +268,7 @@ def test_update_completion_arg(shell, tmp_path: pathlib.Path, monkeypatch):
 
     monkeypatch.setattr(spack.cmd.commands, "update_completion_args", mock_args)
 
-    local_commands = spack.main.SpackCommand("commands")
+    local_commands = spack.test.harness.SpackCommand("commands")
     # ensure things fail if --update-completion isn't specified alone
     with pytest.raises(spack.main.SpackCommandError):
         local_commands("--update-completion", "-a")

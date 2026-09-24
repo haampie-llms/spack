@@ -666,13 +666,20 @@ class SpackCommand:
         #: Decoded output captured from the last command invocation
         self.output = ""
 
-    def __call__(self, *argv: str, capture: bool = True, fail_on_error: bool = True) -> str:
+    def __call__(
+        self,
+        *argv: str,
+        ctx: Optional[spack.context.SpackContext] = None,
+        capture: bool = True,
+        fail_on_error: bool = True,
+    ) -> str:
         """Invoke this SpackCommand. Returns the combined stdout/stderr.
 
         Args:
             argv: command line arguments.
 
         Keyword Args:
+            ctx: context to run the command in, by default that of the process (transitional)
             capture: Capture output from the command
             fail_on_error: Don't raise an exception on error
 
@@ -685,7 +692,7 @@ class SpackCommand:
 
         try:
             with self.capture_output(enable=capture):
-                ctx = spack.context.default()
+                ctx = ctx or spack.context.default()
                 self.parser.config = ctx.config
                 command = self.parser.add_command(self.command_name)
                 args, unknown = self.parser.parse_known_args([self.command_name, *argv])

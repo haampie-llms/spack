@@ -13,8 +13,8 @@ import spack.detection
 import spack.detection.path
 from spack.config import Configuration
 from spack.context import SpackContext
-from spack.main import SpackCommand
 from spack.spec import Spec
+from spack.test.harness import SpackCommand
 from spack.util.filesystem import getuid, touch
 
 pytestmark = [pytest.mark.usefixtures("mock_packages")]

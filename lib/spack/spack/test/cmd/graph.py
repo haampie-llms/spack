@@ -6,7 +6,8 @@ import pytest
 
 import spack.concretize
 from spack.context import SpackContext
-from spack.main import SpackCommand, SpackCommandError
+from spack.main import SpackCommandError
+from spack.test.harness import SpackCommand
 
 graph = SpackCommand("graph")
 

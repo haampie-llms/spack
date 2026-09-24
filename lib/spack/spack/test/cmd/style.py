@@ -12,9 +12,9 @@ import sys
 import pytest
 
 import spack.cmd.style
-import spack.main
 import spack.paths
 import spack.repo
+import spack.test.harness
 from spack.cmd.style import _run_import_check, changed_files
 from spack.context import SpackContext
 from spack.repo import RepoPath
@@ -25,7 +25,7 @@ from spack.util.filesystem import FileFilter, working_dir
 style_data = os.path.join(spack.paths.test_path, "data", "style")
 
 
-style = spack.main.SpackCommand("style")
+style = spack.test.harness.SpackCommand("style")
 
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32", reason="CI uses cross drive paths that raise errors with relpath"

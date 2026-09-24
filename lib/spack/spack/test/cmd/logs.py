@@ -17,8 +17,8 @@ import spack.error
 import spack.main
 import spack.spec
 from spack.context import SpackContext
-from spack.main import SpackCommand
 from spack.store import Store
+from spack.test.harness import SpackCommand
 
 logs = SpackCommand("logs")
 install = SpackCommand("install")

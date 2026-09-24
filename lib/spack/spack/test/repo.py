@@ -12,7 +12,7 @@ import spack.paths
 import spack.repo
 import spack.schema.repos
 import spack.spec
-import spack.test.utilities
+import spack.test.harness
 import spack.util.executable
 import spack.util.file_cache
 import spack.util.lock
@@ -129,7 +129,7 @@ def test_use_repositories_doesnt_change_class(mock_packages, ctx: SpackContext):
     """
     zlib_cls_outer = ctx.repo.get_pkg_class("zlib")
     current_paths = [r.root for r in ctx.repo.repos]
-    with spack.test.utilities.use_repositories(*current_paths):
+    with spack.test.harness.use_repositories(ctx, *current_paths):
         zlib_cls_inner = ctx.repo.get_pkg_class("zlib")
     assert id(zlib_cls_inner) == id(zlib_cls_outer)
 
@@ -159,14 +159,16 @@ def test_get_all_mock_packages(mock_packages):
         mock_packages.get_pkg_class(name)
 
 
-def test_repo_path_handles_package_removal(mock_packages, repo_builder: RepoBuilder):
+def test_repo_path_handles_package_removal(
+    mock_packages, repo_builder: RepoBuilder, ctx: SpackContext
+):
     repo_builder.add_package("pkg-c")
-    with spack.test.utilities.use_repositories(repo_builder.root, override=False) as repos:
+    with spack.test.harness.use_repositories(ctx, repo_builder.root, override=False) as repos:
         r = repos.repo_for_pkg("pkg-c")
         assert r.namespace == repo_builder.namespace
 
     repo_builder.remove("pkg-c")
-    with spack.test.utilities.use_repositories(repo_builder.root, override=False) as repos:
+    with spack.test.harness.use_repositories(ctx, repo_builder.root, override=False) as repos:
         r = repos.repo_for_pkg("pkg-c")
         assert r.namespace == "builtin_mock"
 
@@ -227,17 +229,17 @@ def test_path_computation_with_names(method_name, mock_packages_repo):
     assert qualified == unqualified
 
 
-def test_use_repositories_and_import():
+def test_use_repositories_and_import(ctx: SpackContext):
     """Tests that use_repositories changes the import search too"""
     import spack.paths
 
     repo_dir = pathlib.Path(spack.paths.test_repos_path)
-    with spack.test.utilities.use_repositories(
-        str(repo_dir / "spack_repo" / "compiler_runtime_test")
+    with spack.test.harness.use_repositories(
+        ctx, str(repo_dir / "spack_repo" / "compiler_runtime_test")
     ):
         import spack_repo.compiler_runtime_test.packages.gcc_runtime.package  # type: ignore[import]  # noqa: E501
 
-    with spack.test.utilities.use_repositories(str(repo_dir / "spack_repo" / "builtin_mock")):
+    with spack.test.harness.use_repositories(ctx, str(repo_dir / "spack_repo" / "builtin_mock")):
         import spack_repo.builtin_mock.packages.cmake.package  # type: ignore[import]  # noqa: F401
 
 
@@ -445,7 +447,7 @@ def test_mod_to_pkg_name_and_reverse():
     assert spack.util.naming.pkg_name_to_pkg_dir("none", package_api=(2, 0)) == "none"
 
 
-def test_repo_v2_invalid_module_name(tmp_path: pathlib.Path, capfd):
+def test_repo_v2_invalid_module_name(tmp_path: pathlib.Path, capfd, ctx: SpackContext):
     # Create a repo with a v2 structure
     root, _ = spack.repo.create_repo(str(tmp_path), namespace="repo_1", package_api=(2, 0))
     repo_dir = pathlib.Path(root)
@@ -470,7 +472,7 @@ class Uppercase(PackageBase):
 """
     )
 
-    with spack.test.utilities.use_repositories(str(repo_dir)) as repo:
+    with spack.test.harness.use_repositories(ctx, str(repo_dir)) as repo:
         assert len(repo.all_package_names()) == 0
 
     stderr = capfd.readouterr().err
@@ -478,7 +480,7 @@ class Uppercase(PackageBase):
     assert "cannot be used because `UPPERCASE` is not a valid Spack package module name" in stderr
 
 
-def test_repo_v2_module_and_class_to_package_name(tmp_path: pathlib.Path):
+def test_repo_v2_module_and_class_to_package_name(tmp_path: pathlib.Path, ctx: SpackContext):
     # Create a repo with a v2 structure
     root, _ = spack.repo.create_repo(str(tmp_path), namespace="repo_2", package_api=(2, 0))
     repo_dir = pathlib.Path(root)
@@ -494,7 +496,7 @@ class _1example2Test(PackageBase):
 """
     )
 
-    with spack.test.utilities.use_repositories(str(repo_dir)) as repo:
+    with spack.test.harness.use_repositories(ctx, str(repo_dir)) as repo:
         assert repo.exists("1example-2-test")
         pkg_cls = repo.get_pkg_class("1example-2-test")
         assert pkg_cls.name == "1example-2-test"
@@ -996,7 +998,7 @@ class Importer(PackageBase):
         encoding="utf-8",
     )
 
-    with spack.test.utilities.use_repositories(repo_builder.root):
+    with spack.test.harness.use_repositories(ctx, repo_builder.root):
         with pytest.raises(spack.repo.RepoError, match="cannot load"):
             ctx.repo.get_pkg_class("importer")
 
@@ -1007,7 +1009,7 @@ def test_repo_use_bad_syntax(config, repo_builder: RepoBuilder, ctx: SpackContex
     package_py.parent.mkdir(parents=True)
     package_py.write_text("class 123: pass", encoding="utf-8")
 
-    with spack.test.utilities.use_repositories(repo_builder.root):
+    with spack.test.harness.use_repositories(ctx, repo_builder.root):
         with pytest.raises(spack.repo.RepoError):
             ctx.repo.get_pkg_class("erroneous")
 
