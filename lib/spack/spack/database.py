@@ -1869,10 +1869,6 @@ class Database:
         _, record = self.query_by_spec_hash(key)
         return record and not record.installed
 
-    def is_occupied_install_prefix(self, path):
-        with self.read_transaction():
-            return path in self._installed_prefixes
-
     def all_hashes(self):
         """Return dag hash of every spec in the database."""
         with self.read_transaction():

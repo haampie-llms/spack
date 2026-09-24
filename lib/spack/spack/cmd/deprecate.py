@@ -14,10 +14,16 @@ installation and its deprecator.
 """
 
 import argparse
+import os
+import shutil
 
 import spack.cmd
 import spack.concretize
-import spack.old_installer
+import spack.installer_dispatch
+import spack.package_base
+import spack.spec
+import spack.store
+import spack.util.filesystem as fs
 from spack.cmd.common import arguments
 from spack.util import tty
 from spack.util.filesystem import symlink
@@ -142,4 +148,44 @@ def deprecate(parser, args, ctx):
     ctx.store.db.ensure_latest_db_version()
 
     for dcate, dcator in zip(all_deprecate, all_deprecators):
-        spack.old_installer.deprecate(dcate, dcator, symlink, store=ctx.store)
+        deprecate_spec(dcate, dcator, symlink, ctx.store)
+
+
+def deprecate_spec(
+    spec: spack.spec.Spec, deprecator: spack.spec.Spec, link_fn, store: spack.store.Store
+) -> None:
+    """Deprecate ``spec`` in favor of ``deprecator``"""
+    # Here we assume we don't deprecate across different stores, and that same hash
+    # means same binary artifacts
+    if spec.dag_hash() == deprecator.dag_hash():
+        return
+
+    # We can't really have control over external specs, and cannot link anything in their place
+    if spec.external:
+        return
+
+    # Install deprecator if it isn't installed already
+    if not store.db.query(deprecator):
+        spack.installer_dispatch.create_installer([deprecator.package], explicit=True).install()
+
+    old_deprecator = store.db.deprecator(spec)
+    if old_deprecator:
+        # Find this spec file from its old deprecation
+        specfile = store.layout.deprecated_file_path(spec, old_deprecator)
+    else:
+        specfile = store.layout.spec_file_path(spec)
+
+    # copy spec metadata to "deprecated" dir of deprecator
+    depr_specfile = store.layout.deprecated_file_path(spec, deprecator)
+    fs.mkdirp(os.path.dirname(depr_specfile))
+    shutil.copy2(specfile, depr_specfile)
+
+    # Any specs deprecated in favor of this spec are re-deprecated in favor of its new deprecator
+    for deprecated in store.db.specs_deprecated_by(spec):
+        deprecate_spec(deprecated, deprecator, link_fn, store)
+
+    # Now that we've handled metadata, uninstall and replace with link
+    spack.package_base.PackageBase.uninstall_by_spec(
+        spec, store, force=True, deprecator=deprecator
+    )
+    link_fn(deprecator.prefix, spec.prefix)

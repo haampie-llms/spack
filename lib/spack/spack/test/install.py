@@ -10,7 +10,6 @@ from typing import Dict
 
 import pytest
 
-import spack.builder
 import spack.concretize
 import spack.config
 import spack.database
@@ -21,7 +20,6 @@ import spack.installer.build
 import spack.installer_dispatch
 import spack.mirrors.mirror
 import spack.mirrors.utils
-import spack.old_installer
 import spack.package_base
 import spack.patch
 import spack.repo
@@ -132,16 +130,6 @@ def test_pkg_attributes(install_mockery, mock_fetch, monkeypatch, ctx: SpackCont
 
 def mock_remove_prefix(*args):
     raise MockInstallError("Intentional error", "Mock remove_prefix method intentionally fails")
-
-
-class RemovePrefixChecker:
-    def __init__(self, wrapped_rm_prefix):
-        self.removed = False
-        self.wrapped_rm_prefix = wrapped_rm_prefix
-
-    def remove_prefix(self):
-        self.removed = True
-        self.wrapped_rm_prefix()
 
 
 @pytest.mark.not_on_windows("Fails spuriously on Windows")
@@ -280,32 +268,6 @@ def test_installed_upstream(install_upstream, mock_fetch, ctx: SpackContext):
 
         assert not os.path.exists(new_dependency.prefix)
         assert os.path.exists(dependent.prefix)
-
-
-def test_partial_install_delete_prefix_and_stage(
-    temporary_store: Store, install_mockery, mock_fetch, working_env, ctx: SpackContext
-):
-    s = spack.concretize.concretize_one("canfail", ctx)
-    s.package.succeed = False
-
-    instance_rm_prefix = s.package.remove_prefix
-
-    s.package.remove_prefix = mock_remove_prefix
-    with pytest.raises(MockInstallError):
-        spack.old_installer.PackageInstaller([s.package], explicit=True).install()
-    assert os.path.isdir(s.package.prefix)
-    rm_prefix_checker = RemovePrefixChecker(instance_rm_prefix)
-    s.package.remove_prefix = rm_prefix_checker.remove_prefix
-
-    # must clear failure markings for the package before re-installing it
-    temporary_store.failure_tracker.clear(s, True)
-
-    s.package.succeed = True
-    spack.builder._BUILDERS.clear()  # the builder is cached with a copy of the pkg's __dict__.
-
-    spack.old_installer.PackageInstaller([s.package], explicit=True, restage=True).install()
-    assert rm_prefix_checker.removed
-    assert temporary_store.db.installed(s.package.spec)
 
 
 @pytest.mark.disable_clean_stage_check
@@ -492,75 +454,6 @@ def test_pkg_install_paths(install_mockery, ctx: SpackContext):
         last_env = "build.env"
         fs.rename(last_log, last_env)
         assert spec.package.install_env_path.endswith(last_env)
-
-    # Cleanup
-    shutil.rmtree(log_dir)
-
-
-def test_log_install_without_build_files(install_mockery, ctx: SpackContext):
-    """Test the installer log function when no build files are present."""
-    # Get a basic concrete spec for the trivial install package.
-    spec = spack.concretize.concretize_one("trivial-install-test-package", ctx)
-
-    # Attempt installing log without the build log file
-    with pytest.raises(OSError, match="No such file or directory"):
-        spack.old_installer.log(spec.package)
-
-
-def test_log_install_with_build_files(install_mockery, monkeypatch, ctx: SpackContext):
-    """Test the installer's log function when have build files."""
-    config_log = "config.log"
-
-    # Retain the original function for use in the monkey patch that is used
-    # to raise an exception under the desired condition for test coverage.
-    orig_install_fn = fs.install
-
-    def _install(src, dest):
-        orig_install_fn(src, dest)
-        if src.endswith(config_log):
-            raise Exception("Mock log install error")
-
-    monkeypatch.setattr(fs, "install", _install)
-
-    spec = spack.concretize.concretize_one("trivial-install-test-package", ctx)
-
-    # Set up mock build files and try again to include archive failure
-    log_path = spec.package.log_path
-    log_dir = os.path.dirname(log_path)
-    fs.mkdirp(log_dir)
-    with fs.working_dir(log_dir):
-        fs.touch(log_path)
-        fs.touch(spec.package.env_path)
-        fs.touch(spec.package.env_mods_path)
-        fs.touch(spec.package.configure_args_path)
-
-    install_path = os.path.dirname(spec.package.install_log_path)
-    fs.mkdirp(install_path)
-
-    source = spec.package.stage.source_path
-    config = os.path.join(source, "config.log")
-    fs.touchp(config)
-    monkeypatch.setattr(
-        type(spec.package), "archive_files", ["missing", "..", config], raising=False
-    )
-
-    spack.old_installer.log(spec.package)
-
-    assert os.path.exists(spec.package.install_log_path)
-    assert os.path.exists(spec.package.install_env_path)
-    assert os.path.exists(spec.package.install_configure_args_path)
-
-    archive_dir = os.path.join(install_path, "archived-files")
-    source_dir = os.path.dirname(source)
-    rel_config = os.path.relpath(config, source_dir)
-
-    assert os.path.exists(os.path.join(archive_dir, rel_config))
-    assert not os.path.exists(os.path.join(archive_dir, "missing"))
-
-    expected_errs = ["OUTSIDE SOURCE PATH", "FAILED TO ARCHIVE"]  # for '..'  # for rel_config
-    with open(os.path.join(archive_dir, "errors.txt"), "r", encoding="utf-8") as fd:
-        for ln, expected in zip(fd, expected_errs):
-            assert expected in ln
 
     # Cleanup
     shutil.rmtree(log_dir)

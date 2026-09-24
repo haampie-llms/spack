@@ -8,12 +8,9 @@ import gzip
 import os
 import time
 import traceback
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 import spack.error
-
-if TYPE_CHECKING:
-    import spack.store
 
 reporter = None
 report_file = None
@@ -64,16 +61,6 @@ class RequestRecord(Record):
             # Property("compiler", spec.compiler),
         ]
         self.packages = []
-
-    def skip_installed(self, store: "spack.store.Store"):
-        """Insert records for all nodes in the DAG that are no-ops for this request"""
-        with store.db.read_transaction():
-            for dep in filter(
-                lambda x: store.db.installed(x) or x.external, self._spec.traverse()
-            ):
-                record = InstallRecord(dep)
-                record.skip(msg="Spec external or already installed")
-                self.packages.append(record)
 
     def append_record(self, record):
         self.packages.append(record)
@@ -162,42 +149,6 @@ class InstallRecord(SpecRecord):
     def succeed(self, log_path: Optional[str] = None):
         super().succeed(log_path)
         self.installed_from_binary_cache = self._package.installed_from_binary_cache
-
-
-class NullInstallRecord(InstallRecord):
-    """No-op drop-in for InstallRecord when no reporter is configured.
-
-    Avoids reading log files from disk on every completed build."""
-
-    def start(self) -> None:
-        pass
-
-    def succeed(self, log_path: Optional[str] = None) -> None:
-        pass
-
-    def fail(self, exc, log_path: Optional[str] = None) -> None:
-        pass
-
-    def skip(self, msg: str = "") -> None:
-        pass
-
-
-class NullRequestRecord(RequestRecord):
-    """No-op drop-in for RequestRecord when no reporter is configured.
-
-    Avoids traversing the DAG and accumulating data that will not be reported."""
-
-    def __init__(self) -> None:
-        dict.__init__(self)
-
-    def skip_installed(self, store: "spack.store.Store") -> None:
-        pass
-
-    def append_record(self, record) -> None:
-        pass
-
-    def summarize(self) -> None:
-        pass
 
 
 class TestRecord(SpecRecord):
