@@ -193,7 +193,7 @@ def update_env(
 
         # If we are automatically mutating the concrete specs for dev provenance, do so
         if apply_changes:
-            env.apply_develop([spec], [_abs_code_path(env, spec, specified_path)])
+            env.apply_develop([spec], [_abs_code_path(env, spec, specified_path, config)])
 
 
 def _clone(spec: spack.spec.Spec, abspath: str, repo: spack.repo.RepoPath, force: bool = False):
@@ -212,12 +212,13 @@ def _clone(spec: spack.spec.Spec, abspath: str, repo: spack.repo.RepoPath, force
 
 
 def _abs_code_path(
-    env: spack.environment.Environment, spec: spack.spec.Spec, path: Optional[str] = None
+    env: spack.environment.Environment,
+    spec: spack.spec.Spec,
+    path: Optional[str],
+    config: spack.config.Configuration,
 ):
     src_path = path if path else spec.name
-    return spack.config.canonicalize_path(
-        src_path, default_wd=env.path, config=spack.config.CONFIG
-    )
+    return spack.config.canonicalize_path(src_path, default_wd=env.path, config=config)
 
 
 def _dev_spec_generator(args, env, ctx):
@@ -258,9 +259,9 @@ def _dev_spec_generator(args, env, ctx):
                         for node_spec in s.traverse(direction="parents", root=True):
                             tty.debug(f"Recursive develop for {node_spec.name}")
                             dev_spec = spack.spec.Spec(node_spec.format("{name}@{versions}"))
-                            yield dev_spec, _abs_code_path(env, node_spec, args.path)
+                            yield dev_spec, _abs_code_path(env, node_spec, args.path, ctx.config)
             else:
-                yield spec, _abs_code_path(env, spec, args.path)
+                yield spec, _abs_code_path(env, spec, args.path, ctx.config)
 
 
 def develop(parser, args, ctx):

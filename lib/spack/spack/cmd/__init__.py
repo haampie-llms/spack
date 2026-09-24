@@ -75,11 +75,11 @@ def require_cmd_name(cname):
 
 
 #: global, cached list of all commands -- access through all_commands()
-_all_commands = None
+_all_commands: Optional[List[str]] = None
 
 
-def all_commands():
-    """Get a sorted list of all spack commands.
+def all_commands(config: spack.config.Configuration):
+    """Get a sorted list of all spack commands, including the extension commands of ``config``.
 
     This will list the lib/spack/spack/cmd directory and find the
     commands there to construct the list.  It does not actually import
@@ -89,7 +89,7 @@ def all_commands():
     if _all_commands is None:
         _all_commands = []
         command_paths = [spack.paths.command_path]  # Built-in commands
-        command_paths += spack.extensions.get_command_paths(spack.config.CONFIG)  # Extensions
+        command_paths += spack.extensions.get_command_paths(config)
         for path in command_paths:
             for file in os.listdir(path):
                 if file.endswith(".py") and not re.search(ignore_files, file):
@@ -110,12 +110,13 @@ def remove_options(parser, *options):
                 break
 
 
-def get_module(cmd_name):
+def get_module(cmd_name, config: spack.config.Configuration):
     """Imports the module for a particular command name and returns it.
 
     Args:
         cmd_name (str): name of the command for which to get a module
             (contains ``-``, not ``_``).
+        config: configuration listing the extensions
     """
     require_cmd_name(cmd_name)
     pname = python_name(cmd_name)
@@ -126,9 +127,9 @@ def get_module(cmd_name):
         module = importlib.import_module(module_name)
         tty.debug("Imported {0} from built-in commands".format(pname))
     except ImportError:
-        module = spack.extensions.get_module(cmd_name, spack.config.CONFIG)
+        module = spack.extensions.get_module(cmd_name, config)
         if not module:
-            raise CommandNotFoundError(cmd_name)
+            raise CommandNotFoundError(cmd_name, all_commands(config))
 
     attr_setdefault(module, SETUP_PARSER, lambda *args: None)  # null-op
     attr_setdefault(module, DESCRIPTION, "")
@@ -142,17 +143,18 @@ def get_module(cmd_name):
     return module
 
 
-def get_command(cmd_name):
+def get_command(cmd_name, config: spack.config.Configuration):
     """Imports the command function associated with cmd_name.
 
     The function's name is derived from cmd_name using python_name().
 
     Args:
         cmd_name (str): name of the command (contains ``-``, not ``_``).
+        config: configuration listing the extensions
     """
     require_cmd_name(cmd_name)
     pname = python_name(cmd_name)
-    return getattr(get_module(cmd_name), pname)
+    return getattr(get_module(cmd_name, config), pname)
 
 
 def quote_kvp(string: str) -> str:
@@ -793,14 +795,14 @@ class CommandNotFoundError(spack.error.SpackError):
     such.
     """
 
-    def __init__(self, cmd_name):
+    def __init__(self, cmd_name, commands: List[str]):
         msg = (
             f"{cmd_name} is not a recognized Spack command or extension command; "
             "check with `spack commands`."
         )
         long_msg = None
 
-        similar = difflib.get_close_matches(cmd_name, all_commands())
+        similar = difflib.get_close_matches(cmd_name, commands)
 
         if 1 <= len(similar) <= 5:
             long_msg = "\nDid you mean one of the following commands?\n  "

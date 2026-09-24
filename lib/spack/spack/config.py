@@ -1756,13 +1756,16 @@ def writable_scopes() -> List[ConfigScope]:
     return scopes
 
 
-def flattened_configuration(manifest: Optional[YamlConfigDict] = None) -> YamlConfigDict:
+def flattened_configuration(
+    config: Configuration, manifest: Optional[YamlConfigDict] = None
+) -> YamlConfigDict:
     """Return every configuration section, merged across scopes, as a single document.
 
     The sections are written under the top level key of an environment manifest, so that the
     result can be read back by the same code that reads a ``spack.yaml``.
 
     Args:
+        config: configuration to read the sections from
         manifest: content of an environment manifest to merge the sections into. Its other
             keys, like ``specs`` and ``view``, are kept as they are. Passing the manifest of
             the active environment is what makes the result describe that environment.
@@ -1776,7 +1779,7 @@ def flattened_configuration(manifest: Optional[YamlConfigDict] = None) -> YamlCo
         flattened[top_level_key] = syaml.syaml_dict()
 
     for section in SECTION_SCHEMAS:
-        flattened[top_level_key][section] = CONFIG.get(section)
+        flattened[top_level_key][section] = config.get(section)
 
     return flattened
 
@@ -2218,10 +2221,7 @@ def create_from(*scopes_or_paths: Union[ScopeWithOptionalPriority, str]) -> Conf
 
 
 def determine_number_of_jobs(
-    *,
-    parallel: bool = False,
-    max_cpus: int = cpus_available(),
-    config: Optional[Configuration] = None,
+    *, parallel: bool = False, max_cpus: int = cpus_available(), config: Configuration
 ) -> int:
     """
     Packages that require sequential builds need 1 job. Otherwise we use the
@@ -2232,22 +2232,20 @@ def determine_number_of_jobs(
     Parameters:
         parallel: true when package supports parallel builds
         max_cpus: maximum number of CPUs to use (defaults to cpus_available())
-        config: configuration object (defaults to global config)
+        config: configuration to read ``build_jobs`` from
     """
     if not parallel:
         return 1
 
-    cfg = config or CONFIG
-
     # Command line overrides all
     try:
-        command_line = cfg.get("config:build_jobs", default=None, scope="command_line")
+        command_line = config.get("config:build_jobs", default=None, scope="command_line")
         if command_line is not None:
             return command_line
     except ValueError:
         pass
 
-    return min(max_cpus, cfg.get("config:build_jobs", 16))
+    return min(max_cpus, config.get("config:build_jobs", 16))
 
 
 def architecture():

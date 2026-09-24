@@ -6,6 +6,7 @@ import contextlib
 import os
 import pathlib
 import sys
+from typing import List
 
 import pytest
 
@@ -179,15 +180,15 @@ def test_multi_extension_search(hello_world_extension, extension_creator):
         assert ("Hello world") in spack.main.SpackCommand("hello-world")()
 
 
-def test_duplicate_module_load(hello_world_cmd, capfd):
+def test_duplicate_module_load(hello_world_cmd, capfd, ctx: SpackContext):
     """Ensure duplicate module load attempts are successful.
 
     The command module will already have been loaded once by the
     hello_world_cmd fixture.
     """
     parser = spack.main.make_argument_parser()
-    args = []
-    hw_cmd = spack.cmd.get_command(hello_world_cmd.command_name)
+    args: List[str] = []
+    hw_cmd = spack.cmd.get_command(hello_world_cmd.command_name, ctx.config)
     hw_cmd(parser, args)
     captured = capfd.readouterr()
     assert captured == ("Hello world!\n", "")
@@ -209,12 +210,12 @@ def test_command_with_import(extension_name, hello_world_with_module_in_root):
         assert "bar" in output
 
 
-def test_missing_command():
+def test_missing_command(ctx: SpackContext):
     """Ensure that we raise the expected exception if the desired command is
     not present.
     """
     with pytest.raises(spack.cmd.CommandNotFoundError):
-        spack.cmd.get_module("no-such-command")
+        spack.cmd.get_module("no-such-command", ctx.config)
 
 
 @pytest.mark.parametrize(
@@ -243,17 +244,17 @@ def test_extension_naming(
     with fs.working_dir(str(tmp_path)):
         with config.override("config:extensions", [extension_path]):
             with pytest.raises(expected_exception):
-                spack.cmd.get_module("no-such-command")
+                spack.cmd.get_module("no-such-command", config)
 
 
-def test_missing_command_function(extension_creator, capfd):
+def test_missing_command_function(extension_creator, capfd, ctx: SpackContext):
     """Ensure we die as expected if a command module does not have the
     expected command function defined.
     """
     with extension_creator() as extension:
         extension.add_command("bad-cmd", """\ndescription = "Empty command implementation"\n""")
         with pytest.raises(SystemExit):
-            spack.cmd.get_module("bad-cmd")
+            spack.cmd.get_module("bad-cmd", ctx.config)
         capture = capfd.readouterr()
         assert "must define function 'bad_cmd'." in capture[1]
 

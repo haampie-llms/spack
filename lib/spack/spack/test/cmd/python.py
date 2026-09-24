@@ -20,6 +20,15 @@ def test_python():
     assert out.strip() == spack.spack_version
 
 
+def test_python_exposes_the_context(tmp_path):
+    out = python("-c", "print(ctx.config.get('config:build_jobs'))")
+    assert out.strip() != ""
+
+    script = tmp_path / "script.py"
+    script.write_text("print(type(ctx).__name__)")
+    assert "Context" in python(str(script))
+
+
 def test_python_interpreter_path():
     out = python("--path")
     assert out.strip() == sys.executable

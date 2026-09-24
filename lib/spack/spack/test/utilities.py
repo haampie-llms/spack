@@ -6,6 +6,7 @@
 
 from typing import List, Tuple
 
+import spack.context
 from spack.concretize_ui import ConcretizerUI, SolveKind
 from spack.main import make_argument_parser
 from spack.spec import Spec
@@ -29,6 +30,7 @@ class SpackCommandArgs:
         self.command_name = command_name
 
     def __call__(self, *argv, **kwargs):
+        self.parser.config = spack.context.default().config
         self.parser.add_command(self.command_name)
         args, unknown = self.parser.parse_known_args([self.command_name] + list(argv))
         return args
