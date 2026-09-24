@@ -1422,7 +1422,9 @@ def test_querying_reindexed_database_specfilev5(tmp_path: pathlib.Path, mock_pac
     assert len([x for x in specs if x.original_spec_format() < 5]) == 8
 
 
-def test_database_v8_reconstructs_provided_virtuals(database, tmp_path: pathlib.Path):
+def test_database_v8_reconstructs_provided_virtuals(
+    database, tmp_path: pathlib.Path, ctx: SpackContext
+):
     """A v8 database does not record provided virtuals, so they are reconstructed on read."""
     data = json.loads(pathlib.Path(database._index_path).read_text(encoding="utf-8"))
     data["database"]["version"] = "8"
@@ -1434,7 +1436,7 @@ def test_database_v8_reconstructs_provided_virtuals(database, tmp_path: pathlib.
     index_json.parent.mkdir(parents=True)
     index_json.write_text(json.dumps(data))
 
-    db = Database(str(tmp_path))
+    db = Database(str(tmp_path), repo_provider=ctx.repo_provider)
     mpich = db.query_one("mpich")
     assert mpich is not None and mpich.provided_virtuals == (spack.spec.Spec("mpi@:3"),)
     expected = {s.dag_hash() for s in database.query("mpi")}

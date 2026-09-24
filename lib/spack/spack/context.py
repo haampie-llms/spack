@@ -80,7 +80,7 @@ class SpackContext:
         """Installed-spec store."""
         import spack.store
 
-        return spack.store.create(self.config)
+        return spack.store.create(self.config, repo_provider=self.repo_provider)
 
     @_member
     def repo(self) -> "spack.repo.RepoPath":
@@ -89,12 +89,18 @@ class SpackContext:
 
         return spack.repo.create_and_enable(self.config, cache=self.misc_cache)
 
+    def repo_provider(self) -> "spack.repo.RepoPath":
+        """Return ``repo``: pass the bound method where the repositories may be needed later."""
+        return self.repo
+
     @_member
     def binary_index(self) -> "spack.binary_distribution.BinaryIndexCache":
         """Buildcache index."""
         import spack.binary_distribution
 
-        return spack.binary_distribution.BinaryIndexCache(config=self.config, client=self.network)
+        return spack.binary_distribution.BinaryIndexCache(
+            config=self.config, client=self.network, repo_provider=self.repo_provider
+        )
 
     @_member
     def compiler_cache(self) -> "spack.compilers.libraries.CompilerCache":

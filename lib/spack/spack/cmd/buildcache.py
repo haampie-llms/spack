@@ -944,6 +944,7 @@ def update_index(
     client: web_util.NetworkClient,
     update_keys=False,
     timer=timer_mod.NULL_TIMER,
+    repo_provider: Optional[spack.repo.RepoProvider] = None,
 ):
     timer.start()
     # Special case OCI images for now.
@@ -957,7 +958,13 @@ def update_index(
             dir=spack.stage.stage_root(config)
         ) as tmpdir, spack.util.parallel.make_concurrent_executor() as executor:
             spack.binary_distribution._oci_update_index(
-                image_ref, tmpdir, executor, timer=timer, config=config, client=client
+                image_ref,
+                tmpdir,
+                executor,
+                timer=timer,
+                config=config,
+                client=client,
+                repo_provider=repo_provider,
             )
         return
 
@@ -966,7 +973,7 @@ def update_index(
 
     with tempfile.TemporaryDirectory(dir=spack.stage.stage_root(config)) as tmpdir:
         spack.binary_distribution._url_generate_package_index(
-            url, tmpdir, timer=timer, config=config, client=client
+            url, tmpdir, timer=timer, config=config, client=client, repo_provider=repo_provider
         )
 
     if update_keys:
@@ -1065,7 +1072,7 @@ def update_view(
 
     with tempfile.TemporaryDirectory(dir=spack.stage.stage_root(ctx.config)) as tmpdir:
         # Initialize a database
-        db = spack.binary_distribution.BuildCacheDatabase(tmpdir)
+        db = spack.binary_distribution.BuildCacheDatabase(tmpdir, repo_provider=ctx.repo_provider)
         db._write()
 
         if update_mode == ViewUpdateMode.APPEND:
@@ -1078,7 +1085,14 @@ def update_view(
                         db._read_from_stream(f)
 
         spack.binary_distribution._url_generate_package_index(
-            url, tmpdir, db, name, filter_fn, config=ctx.config, client=ctx.network
+            url,
+            tmpdir,
+            db,
+            name,
+            filter_fn,
+            config=ctx.config,
+            client=ctx.network,
+            repo_provider=ctx.repo_provider,
         )
 
     if update_keys:
@@ -1134,7 +1148,9 @@ def check_index_fn(args, ctx):
             )
         if "manifests" in verify and index_exists:
             # Read the index file
-            db = spack.binary_distribution.BuildCacheDatabase(tmpdir)
+            db = spack.binary_distribution.BuildCacheDatabase(
+                tmpdir, repo_provider=ctx.repo_provider
+            )
             cache_entry = ctx.binary_index._local_index_cache[str(mirror_metadata)]
             cache_key = cache_entry["index_path"]
             with ctx.binary_index._index_file_cache.read_transaction(cache_key) as f:
@@ -1241,7 +1257,14 @@ def update_index_fn(args, ctx):
             ctx=ctx,
         )
     else:
-        update_index(args.mirror, ctx.config, ctx.network, update_keys=args.keys, timer=t)
+        update_index(
+            args.mirror,
+            ctx.config,
+            ctx.network,
+            update_keys=args.keys,
+            timer=t,
+            repo_provider=ctx.repo_provider,
+        )
 
     if tty.is_verbose():
         tty.msg("Timing summary:")
@@ -1300,6 +1323,7 @@ def migrate_fn(args, ctx):
         delete_existing=delete_existing,
         config=ctx.config,
         client=ctx.network,
+        repo_provider=ctx.repo_provider,
     )
 
 
