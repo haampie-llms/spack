@@ -66,11 +66,35 @@ def sbang_shebang_line_for(store: spack.store.Store) -> str:
     return "#!/bin/sh %s" % sbang_install_path_for(store)
 
 
+def _package_api_only(name: str) -> spack.error.SpackError:
+    return spack.error.SpackError(
+        f"spack.package.{name} is available to package code only, while Spack sets up a package"
+    )
+
+
+def sbang_install_path() -> str:
+    """Location sbang is installed within the install tree (package API)."""
+    raise _package_api_only("sbang_install_path")
+
+
+def sbang_shebang_line() -> str:
+    """Full shebang line that should be prepended to files to use sbang (package API)."""
+    raise _package_api_only("sbang_shebang_line")
+
+
 def get_interpreter(binary_string):
     # The interpreter may be preceded with ' ' and \t, is itself any byte that
     # follows until the first occurrence of ' ', \t, \0, \n or end of file.
     match = interpreter_regex.match(binary_string)
     return None if match is None else match.group(1)
+
+
+def filter_shebang(path):
+    """
+    Adds a second shebang line, using sbang, at the beginning of a file, if necessary
+    (package API).
+    """
+    raise _package_api_only("filter_shebang")
 
 
 def filter_shebang_for(path, store: spack.store.Store):

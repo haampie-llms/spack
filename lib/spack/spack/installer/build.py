@@ -866,7 +866,7 @@ def start_build(request: BuildRequest, jobserver: JobServerBase) -> ChildInfo:
             channels.control_r,
             channels.tee_control_w,
             makeflags,
-            GlobalStateMarshaler(context=spec.package.context),
+            GlobalStateMarshaler(),
         ),
     )
     proc.start()

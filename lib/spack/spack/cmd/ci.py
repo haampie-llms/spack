@@ -311,7 +311,7 @@ def ci_rebuild(args, ctx):
 
     # If signing key was provided via "SPACK_SIGNING_KEY", then try to import it.
     if signing_key:
-        spack_ci.import_signing_key(signing_key)
+        spack_ci.import_signing_key(signing_key, ctx)
 
     # Fail early if signing is required but we don't have a signing key
     sign_binaries = require_signing is not None and require_signing.lower() == "true"
@@ -869,6 +869,7 @@ def ci_verify_versions(args, ctx):
     for pkg_name in pkgs:
         spec = spack.spec.Spec(pkg_name)
         pkg = ctx.repo.get_pkg_class(spec.name)(spec)
+        pkg.context = ctx
         pkg.context = ctx
         path = ctx.repo.package_path(pkg_name)
 

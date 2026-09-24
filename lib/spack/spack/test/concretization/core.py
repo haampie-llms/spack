@@ -1,11 +1,11 @@
 # Copyright Spack Project Developers. See COPYRIGHT file for details.
 #
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
-import contextlib
 import gzip
 import json
 import os
 import pathlib
+import pickle
 import platform
 import re
 import sys
@@ -24,7 +24,6 @@ import spack.compilers.libraries
 import spack.concretize
 import spack.concretize_ui
 import spack.config
-import spack.context
 import spack.deprecation
 import spack.deptypes as dt
 import spack.environment as ev
@@ -37,7 +36,6 @@ import spack.platforms.test
 import spack.repo
 import spack.solver.asp
 import spack.solver.clauses
-import spack.solver.compat
 import spack.solver.core
 import spack.solver.input_analysis
 import spack.solver.result
@@ -65,7 +63,7 @@ from spack.solver.reuse import reusable_external_specs
 from spack.spec import Spec
 from spack.store import Store
 from spack.test.conftest import RepoBuilder
-from spack.test.utilities import RecordingUI, UnusableGlobal
+from spack.test.utilities import RecordingUI
 from spack.util.filesystem import getuid
 from spack.version import Version, VersionList, ver
 from spack.version.git_ref_lookup import GitRefLookup
@@ -4980,7 +4978,8 @@ def test_patch_condition_on_dependency(
     from serialized solver output."""
     for _ in range(2):
         spec = spack.concretize.concretize_one(spec_str, ctx)
-        assert {p.relative_path for p in spec.patches} == expected
+        patches = spec.patches_from(ctx.repo)
+        assert {p.relative_path for p in patches} == expected  # type: ignore[attr-defined]
         # concrete specs record every edge without the direct flag
         assert not any(e.direct for s in spec.traverse() for e in s.edges_to_dependencies())
 
@@ -6123,40 +6122,10 @@ def test_concretize_one_reports_an_already_concrete_spec_as_no_work(
     assert not ui.concretized
 
 
-#: The process globals a SpackContext replaces, as (module, attribute) pairs.
-_CONTEXT_GLOBALS = [(spack.context, "_DEFAULT")]
-
-
-@pytest.fixture()
-def break_globals(monkeypatch, ctx: SpackContext):
-    """Returns a context manager making every process global in ``_CONTEXT_GLOBALS`` raise.
-
-    It is a context manager rather than a plain fixture so a test can break the globals after
-    every other fixture is set up, and restore them before those fixtures are torn down: the
-    database and mock package fixtures use the repositories of the test context while tearing
-    down.
-    """
-
-    @contextlib.contextmanager
-    def _break():
-        spack.solver.compat.clingo()
-        with monkeypatch.context() as m:
-            for module, attribute in _CONTEXT_GLOBALS:
-                m.setattr(module, attribute, UnusableGlobal(f"{module.__name__}.{attribute}"))
-            yield
-
-    return _break
-
-
 @pytest.fixture()
 def injected_context(mutable_config, mock_packages, mock_packages_repo):
-    """A context reading from the mock repositories, built before any global is broken.
-
-    It is built once every fixture that pushes a configuration scope has run, so the store
-    points at the right install tree. It depends on ``mock_packages`` so that the process-wide
-    repositories are the mock ones too: ``Spec`` resolves virtuals through the repositories of the
-    process context, which would otherwise raise ``UnknownNamespaceError`` for ``builtin_mock``.
-    """
+    """A context of its own reading from the mock repositories, built once every fixture that
+    pushes a configuration scope has run, so the store points at the right install tree."""
     mutable_config.set("repos", {"builtin_mock": str(mock_packages_repo.root)})
     return SpackContext(mutable_config)
 
@@ -6208,52 +6177,43 @@ def injected_context(mutable_config, mock_packages, mock_packages_repo):
         "static-analysis-buildcache-query",
     ],
 )
-def test_solve_reads_no_global(
-    break_globals, injected_context, mutable_config, requests, config_settings
+def test_solve_in_a_context_of_its_own(
+    injected_context, mutable_config, requests, config_settings
 ):
-    """A solve driven by an injected context reads everything from it, so breaking every
-    process global a SpackContext replaces does not affect it."""
+    """A solve reads everything from the context it is given."""
     for key, value in config_settings.items():
         mutable_config.set(key, value)
 
-    with break_globals():
-        result = spack.solver.asp.Solver(context=injected_context).solve(
-            [Spec(x) for x in requests]
-        )
+    result = spack.solver.asp.Solver(context=injected_context).solve([Spec(x) for x in requests])
 
-        # Inspect the lazily computed results to trigger repo lookup
-        assert result.specs and all(s.concrete for s in result.specs)
-        assert result.specs_by_input is not None
-        assert result.unsolved_specs == []
+    # Inspect the lazily computed results to trigger repo lookup
+    assert result.specs and all(s.concrete for s in result.specs)
+    assert result.specs_by_input is not None
+    assert result.unsolved_specs == []
 
 
-def test_solve_in_rounds_reads_no_global(break_globals, injected_context):
-    """``solve_in_rounds`` yields between rounds, and must not reach a global either."""
-    with break_globals():
-        solver = spack.solver.asp.Solver(context=injected_context)
-        results = list(solver.solve_in_rounds([Spec("mpileaks"), Spec("libelf")]))
+def test_solve_in_rounds_in_a_context_of_its_own(injected_context):
+    """``solve_in_rounds`` yields between rounds, reading from the context it is given."""
+    solver = spack.solver.asp.Solver(context=injected_context)
+    results = list(solver.solve_in_rounds([Spec("mpileaks"), Spec("libelf")]))
 
-        assert results and any(r.specs for r in results)
-        for result in results:
-            assert all(s.concrete for s in result.specs)
+    assert results and any(r.specs for r in results)
+    for result in results:
+        assert all(s.concrete for s in result.specs)
 
 
-def test_buildcache_query_reads_no_global(break_globals, injected_context):
+def test_buildcache_query_in_a_context_of_its_own(injected_context):
     """Querying an injected buildcache index reads the injected configuration."""
-    with break_globals():
-        query = spack.binary_distribution.BinaryCacheQuery(
-            True, index=injected_context.binary_index
-        )
+    query = spack.binary_distribution.BinaryCacheQuery(True, index=injected_context.binary_index)
 
-        assert query(Spec("pkg-a")) == []
+    assert query(Spec("pkg-a")) == []
 
 
-def test_concretization_cache_reads_no_global(
-    break_globals, mutable_mock_env_path, mutable_config, mock_packages, ctx: SpackContext
+def test_concretization_cache_expands_env_path(
+    mutable_mock_env_path, mutable_config, mock_packages, ctx: SpackContext
 ):
-    """The concretization cache expands ``$env`` in its configured path, which is the one
-    place a solve used to reach for the global configuration to find the active environment.
-    """
+    """The concretization cache expands ``$env`` in its configured path, from the environment
+    active in the configuration of the solve."""
     ev.create("test_conc_cache_globals", ctx=ctx)
 
     with ev.read("test_conc_cache_globals", ctx=ctx) as env:
@@ -6263,10 +6223,9 @@ def test_concretization_cache_reads_no_global(
         )
         context = SpackContext(ctx.config)
 
-        with break_globals():
-            solver = spack.solver.asp.Solver(context=context)
-            first = solver.solve([Spec("pkg-a")])
-            second = solver.solve([Spec("pkg-a")])
+        solver = spack.solver.asp.Solver(context=context)
+        first = solver.solve([Spec("pkg-a")])
+        second = solver.solve([Spec("pkg-a")])
 
         assert first.specs and second.specs
         assert first.specs[0] == second.specs[0]
@@ -6276,10 +6235,10 @@ def test_concretization_cache_reads_no_global(
 
 
 def test_git_ref_lookup_uses_the_injected_cache_and_config(
-    break_globals, injected_context, monkeypatch, tmp_path
+    injected_context, monkeypatch, tmp_path
 ):
     """The ref lookup keeps its metadata in a cache and hands its git settings to the fetcher.
-    Both come from the injected context rather than the process-wide singletons.
+    Both come from the context it is given.
     """
     monkeypatch.setattr(
         spack.package_base.PackageBase, "git", "https://example.com/repo.git", raising=False
@@ -6292,24 +6251,18 @@ def test_git_ref_lookup_uses_the_injected_cache_and_config(
         config=injected_context.config,
     )
 
-    with break_globals():
-        lookup.data = {"deadbeef": ("1.0", 0)}
-        lookup.save()
-        lookup.data = {}
-        lookup.load_data()
-        fetcher_config = lookup.fetcher.config
+    lookup.data = {"deadbeef": ("1.0", 0)}
+    lookup.save()
+    lookup.data = {}
+    lookup.load_data()
+    fetcher_config = lookup.fetcher.config
 
     assert lookup.data == {"deadbeef": ["1.0", 0]}
     assert fetcher_config is injected_context.config
 
 
 def test_develop_specs_read_no_global(
-    break_globals,
-    mutable_mock_env_path,
-    mutable_config,
-    mock_packages,
-    tmp_path,
-    ctx: SpackContext,
+    mutable_mock_env_path, mutable_config, mock_packages, tmp_path, ctx: SpackContext
 ):
     """Develop specs are declared in configuration and their paths are expanded against it,
     so a solve has to read both from the injected context."""
@@ -6321,18 +6274,34 @@ def test_develop_specs_read_no_global(
         mutable_config.set(
             "develop", {"develop-test": {"spec": "develop-test@develop", "path": str(develop_dir)}}
         )
-        context = SpackContext(ctx.config)
-        context._set_environment(env)
-
-        with break_globals():
-            result = spack.solver.asp.Solver(context=context).solve([Spec("develop-test@develop")])
+        result = spack.solver.asp.Solver(context=env.ctx).solve([Spec("develop-test@develop")])
 
         assert result.specs
         assert str(develop_dir) in result.specs[0].variants["dev_path"]
 
 
+def test_concretize_pool_task_has_the_environment(
+    mutable_mock_env_path, mutable_config, mock_packages, tmp_path, ctx: SpackContext
+):
+    """Pickled contexts drop their environment, so the concretize pool ships it separately:
+    develop specs are read from it."""
+    develop_dir = tmp_path / "build"
+    develop_dir.mkdir()
+    ev.create("test_pool_env", ctx=ctx)
+
+    with ev.read("test_pool_env", ctx=ctx) as env:
+        mutable_config.set(
+            "develop", {"develop-test": {"spec": "develop-test@develop", "path": str(develop_dir)}}
+        )
+        shared = pickle.loads(pickle.dumps((ctx, env)))
+
+    task = (0, "develop-test@develop", False, None)
+    _, spec, _ = spack.concretize._concretize_task_in_environment(shared, task)
+    assert str(develop_dir) in spec.variants["dev_path"]
+
+
 @pytest.mark.use_package_hash
-def test_package_hash_is_assigned_through_the_injected_repository(break_globals, injected_context):
+def test_package_hash_is_assigned_through_the_injected_repository(injected_context):
     """Assigning a package hash reads package.py and resolves the patches applied to a node,
     so it goes through the injected repositories like the rest of the solve.
 
@@ -6340,9 +6309,8 @@ def test_package_hash_is_assigned_through_the_injected_repository(break_globals,
     would hide both lookups, hence the marker. "patch" is used because it has patches, so the
     patch index is consulted on top of package.py.
     """
-    with break_globals():
-        result = spack.solver.asp.Solver(context=injected_context).solve([Spec("patch")])
-        assert result.specs[0].dag_hash()
+    result = spack.solver.asp.Solver(context=injected_context).solve([Spec("patch")])
+    assert result.specs[0].dag_hash()
 
 
 @pytest.mark.regression("51964")

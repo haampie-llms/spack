@@ -203,10 +203,10 @@ def test_stale_patch_cache_falls_back_to_fresh(mock_packages: RepoPath, config, 
     mock_packages._patch_index = stale_cache
     mock_packages._index_is_fresh = False
 
-    patches = spec.patches
+    patches = spec.patches_from(ctx.repo)
 
     assert len(patches) == 2
-    assert {p.relative_path for p in patches} == {"foo.patch", "baz.patch"}
+    assert {p.relative_path for p in patches} == {"foo.patch", "baz.patch"}  # type: ignore[attr-defined]
 
 
 def test_patch_mixed_versions_subset_constraint(mock_packages, config, ctx: SpackContext):
@@ -600,9 +600,9 @@ def test_patch_lookup_for_shadowed_package(mock_packages, config, repo_builder, 
 
         spec = spack.concretize.concretize_one("builtin_mock.patch@=1.0", ctx)
         default = spack.concretize.concretize_one("patch", ctx)
-        assert spec.patches != default.patches
+        assert spec.patches_from(ctx.repo) != default.patches_from(ctx.repo)
         assert spec.namespace == "builtin_mock"
 
         # raises SpecError if the lookup uses the bare name: the shadowing
         # class's patch index has no such sha256
-        assert {p.sha256 for p in spec.patches} == {foo_sha256, baz_sha256}
+        assert {p.sha256 for p in spec.patches_from(ctx.repo)} == {foo_sha256, baz_sha256}

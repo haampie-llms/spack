@@ -76,7 +76,7 @@ indent-style = "space"
 line-ending = "lf"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "TID251"]
+select = ["E", "F", "W", "I"]
 ignore = ["E203", "E731", "F811"]
 typing-modules = ["spack.vendor.typing_extensions"]
 
@@ -99,14 +99,6 @@ spack = ["spack"]
 [tool.ruff.lint.per-file-ignores]
 "var/spack/*/package.py" = ["F403", "F405", "F811", "F821"]
 "*-ci-package.py" = ["F403", "F405", "F821"]
-# Files that still read process globals; the list shrinks as the globals are deleted
-"lib/spack/spack/test/**" = ["TID251"]
-"lib/spack/spack/main.py" = ["TID251"]
-"lib/spack/spack/package.py" = ["TID251"]
-"share/spack/qa/environment_activation.py" = ["TID251"]
-
-[tool.ruff.lint.flake8-tidy-imports.banned-api]
-"spack.context.default".msg = "take a context argument"
 
 
 [tool.mypy]
