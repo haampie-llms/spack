@@ -7,7 +7,6 @@ import concurrent.futures
 import contextlib
 import copy
 import datetime
-import functools
 import hashlib
 import io
 import itertools
@@ -1018,18 +1017,17 @@ def _do_create_tarball(
 
 
 def _exists_in_buildcache(
-    spec: spack.spec.Spec,
-    out_url: str,
-    allow_unsigned: bool = False,
-    *,
-    config: spack.config.Configuration,
-    client: web_util.NetworkClient,
-    gpg: Optional[spack.util.gpg.Gpg],
+    ctx: "spack.context.SpackContext", spec: spack.spec.Spec, out_url: str, allow_unsigned: bool
 ) -> URLBuildcacheEntry:
     """creates and returns (after checking existence) a URLBuildcacheEntry"""
     cache_type = get_url_buildcache_class(CURRENT_BUILD_CACHE_LAYOUT_VERSION)
     cache_entry = cache_type(
-        out_url, spec, allow_unsigned=allow_unsigned, config=config, client=client, gpg=gpg
+        out_url,
+        spec,
+        allow_unsigned=allow_unsigned,
+        config=ctx.config,
+        client=ctx.network,
+        gpg=None if allow_unsigned else ctx.gpg,
     )
     return cache_entry
 
@@ -1042,15 +1040,14 @@ def prefixes_to_relocate(spec, *, store: spack.store.Store):
 
 
 def _url_upload_tarball_and_specfile(
+    ctx: "spack.context.SpackContext",
     spec: spack.spec.Spec,
     tmpdir: str,
     cache_entry: URLBuildcacheEntry,
     signing_key: Optional[str],
-    *,
-    store: spack.store.Store,
 ):
     tarball = os.path.join(tmpdir, f"{spec.dag_hash()}.tar.gz")
-    checksum, _ = create_tarball(spec, tarball, store=store)
+    checksum, _ = create_tarball(spec, tarball, store=ctx.store)
 
     cache_entry.push_binary_package(spec, tarball, "sha256", checksum, tmpdir, signing_key)
 
@@ -1068,9 +1065,6 @@ class Uploader:
         self.force = force
         self.update_index = update_index
         self.ctx = ctx
-        self.config = ctx.config
-        self.client = ctx.network
-        self.store = ctx.store
 
         self.tmpdir: str
         self.executor: concurrent.futures.Executor
@@ -1079,7 +1073,7 @@ class Uploader:
         self.mirror.ensure_mirror_usable("push")
 
     def __enter__(self):
-        self._tmpdir = tempfile.TemporaryDirectory(dir=spack.stage.stage_root(self.config))
+        self._tmpdir = tempfile.TemporaryDirectory(dir=spack.stage.stage_root(self.ctx.config))
         self._executor = spack.util.parallel.make_concurrent_executor(shared=self.ctx)
 
         self.tmpdir = self._tmpdir.__enter__()
@@ -1136,9 +1130,7 @@ class OCIUploader(Uploader):
             force=self.force,
             tmpdir=self.tmpdir,
             executor=self.executor,
-            config=self.config,
-            client=self.client,
-            store=self.store,
+            ctx=self.ctx,
         )
 
         self._base_images = base_images
@@ -1146,14 +1138,7 @@ class OCIUploader(Uploader):
 
         # only update index if any binaries were uploaded
         if self.update_index and len(skipped) + len(upload_errors) < len(specs):
-            _oci_update_index(
-                self.target_image,
-                self.tmpdir,
-                self.executor,
-                config=self.config,
-                client=self.client,
-                repo_provider=self.ctx.repo_provider,
-            )
+            _oci_update_index(self.target_image, self.tmpdir, self.executor, ctx=self.ctx)
 
         return skipped, upload_errors
 
@@ -1167,8 +1152,8 @@ class OCIUploader(Uploader):
                 target_image=self.target_image,
                 spec=spec,
                 base_image_cache=self._base_images,
-                config=self.config,
-                client=self.client,
+                config=self.ctx.config,
+                client=self.ctx.network,
             )
         _oci_put_manifest(
             self._base_images,
@@ -1209,11 +1194,7 @@ class URLUploader(Uploader):
             signing_key=self.signing_key,
             tmpdir=self.tmpdir,
             executor=self.executor,
-            config=self.config,
-            client=self.client,
-            store=self.store,
-            gpg=self.ctx.gpg if self.signing_key else None,
-            repo_provider=self.ctx.repo_provider,
+            ctx=self.ctx,
         )
 
 
@@ -1287,27 +1268,18 @@ def _url_push(
     tmpdir: str,
     executor: concurrent.futures.Executor,
     *,
-    config: spack.config.Configuration,
-    client: web_util.NetworkClient,
-    store: spack.store.Store,
-    gpg: Optional[spack.util.gpg.Gpg] = None,
-    repo_provider: Optional["spack.repo.RepoProvider"] = None,
+    ctx: "spack.context.SpackContext",
 ) -> Tuple[List[spack.spec.Spec], List[Tuple[spack.spec.Spec, BaseException]]]:
     """Pushes to the provided build cache, and returns a list of skipped specs that were already
-    present (when force=False), and a list of errors. Does not raise on error. Signing with
-    ``signing_key`` requires ``gpg``."""
+    present (when force=False), and a list of errors. Does not raise on error. The workers of
+    ``executor`` share ``ctx``."""
+    config, client = ctx.config, ctx.network
     skipped: List[spack.spec.Spec] = []
     errors: List[Tuple[spack.spec.Spec, BaseException]] = []
 
     exists_futures = [
-        executor.submit(
-            _exists_in_buildcache,
-            spec,
-            out_url,
-            allow_unsigned=False if signing_key else True,
-            config=config,
-            client=client,
-            gpg=gpg,
+        executor.submit_shared(  # type: ignore[attr-defined]
+            _exists_in_buildcache, spec, out_url, not signing_key
         )
         for spec in specs
     ]
@@ -1339,13 +1311,12 @@ def _url_push(
         tty.info(f"{total} specs need to be pushed to {out_url}")
 
     upload_futures = [
-        executor.submit(
+        executor.submit_shared(  # type: ignore[attr-defined]
             _url_upload_tarball_and_specfile,
             spec,
             tmpdir,
             cache_entries[spec.dag_hash()],
             signing_key,
-            store=store,
         )
         for spec in specs_to_upload
     ]
@@ -1372,7 +1343,6 @@ def _url_push(
     cache_class.maybe_push_layout_json(out_url, config=config, client=client)
 
     if signing_key:
-        assert gpg is not None, "signing requires GnuPG"
         keys_tmpdir = os.path.join(tmpdir, "keys")
         os.mkdir(keys_tmpdir)
         _url_push_keys(
@@ -1382,14 +1352,14 @@ def _url_push(
             tmpdir=keys_tmpdir,
             config=config,
             client=client,
-            gpg=gpg,
+            gpg=ctx.gpg,
         )
 
     if update_index:
         index_tmpdir = os.path.join(tmpdir, "index")
         os.mkdir(index_tmpdir)
         _url_generate_package_index(
-            out_url, index_tmpdir, config=config, client=client, repo_provider=repo_provider
+            out_url, index_tmpdir, config=config, client=client, repo_provider=ctx.repo_provider
         )
 
     return skipped, errors
@@ -1404,15 +1374,16 @@ def _oci_upload_success_msg(spec: spack.spec.Spec, digest: Digest, size: int, el
 
 
 def _oci_get_blob_info(
-    image_ref: ImageReference,
-    *,
-    config: spack.config.Configuration,
-    client: web_util.NetworkClient,
+    ctx: "spack.context.SpackContext", image_ref: ImageReference
 ) -> Optional[spack.oci.oci.Blob]:
     """Get the spack tarball layer digests and size if it exists"""
+    client = ctx.network
     try:
         manifest, image_config = get_manifest_and_config_with_retry(
-            image_ref, urlopen=spack.oci.opener.oci_urlopen(client), config=config, client=client
+            image_ref,
+            urlopen=spack.oci.opener.oci_urlopen(client),
+            config=ctx.config,
+            client=client,
         )
 
         return spack.oci.oci.Blob(
@@ -1425,18 +1396,16 @@ def _oci_get_blob_info(
 
 
 def _oci_push_pkg_blob(
+    ctx: "spack.context.SpackContext",
     image_ref: ImageReference,
     spec: spack.spec.Spec,
     tmpdir: str,
-    *,
-    client: web_util.NetworkClient,
-    store: spack.store.Store,
 ) -> Tuple[spack.oci.oci.Blob, float]:
     """Push a package blob to the registry and return the blob info and the time taken"""
     filename = os.path.join(tmpdir, f"{spec.dag_hash()}.tar.gz")
 
     # Create an oci.image.layer aka tarball of the package
-    tar_gz_checksum, tar_checksum = create_tarball(spec, filename, store=store)
+    tar_gz_checksum, tar_checksum = create_tarball(spec, filename, store=ctx.store)
 
     blob = spack.oci.oci.Blob(
         Digest.from_sha256(tar_gz_checksum),
@@ -1450,7 +1419,7 @@ def _oci_push_pkg_blob(
         image_ref,
         file=filename,
         digest=blob.compressed_digest,
-        urlopen=spack.oci.opener.oci_urlopen(client),
+        urlopen=spack.oci.opener.oci_urlopen(ctx.network),
     )
     elapsed = time.time() - start
 
@@ -1649,9 +1618,7 @@ def _oci_push(
     tmpdir: str,
     executor: concurrent.futures.Executor,
     force: bool = False,
-    config: spack.config.Configuration,
-    client: web_util.NetworkClient,
-    store: spack.store.Store,
+    ctx: "spack.context.SpackContext",
 ) -> Tuple[
     List[spack.spec.Spec],
     Dict[str, Tuple[dict, dict]],
@@ -1674,11 +1641,14 @@ def _oci_push(
         tags_to_check = (
             target_image.with_tag(_oci_default_tag(s)) for s in installed_specs_with_deps
         )
-        available_blobs = executor.map(
-            functools.partial(_oci_get_blob_info, config=config, client=client), tags_to_check
-        )
+        available_blobs = [
+            executor.submit_shared(_oci_get_blob_info, tag)  # type: ignore[attr-defined]
+            for tag in tags_to_check
+        ]
 
-        for spec, maybe_blob in zip(installed_specs_with_deps, available_blobs):
+        for spec, maybe_blob in zip(
+            installed_specs_with_deps, (f.result() for f in available_blobs)
+        ):
             if maybe_blob is not None:
                 checksums[spec.dag_hash()] = maybe_blob
                 skipped.append(spec)
@@ -1700,7 +1670,9 @@ def _oci_push(
 
     # Upload blobs
     blob_futures = [
-        executor.submit(_oci_push_pkg_blob, target_image, spec, tmpdir, client=client, store=store)
+        executor.submit_shared(  # type: ignore[attr-defined]
+            _oci_push_pkg_blob, target_image, spec, tmpdir
+        )
         for spec in blobs_to_upload
     ]
 
@@ -1729,8 +1701,8 @@ def _oci_push(
             target_image=target_image,
             spec=spec,
             base_image_cache=base_images,
-            config=config,
-            client=client,
+            config=ctx.config,
+            client=ctx.network,
         )
 
     def extra_config(spec: spack.spec.Spec):
@@ -1779,12 +1751,9 @@ def _oci_push(
 
 
 def _oci_config_from_tag(
-    image_ref_and_tag: Tuple[ImageReference, str],
-    *,
-    config: spack.config.Configuration,
-    client: web_util.NetworkClient,
+    ctx: "spack.context.SpackContext", image_ref: ImageReference, tag: str
 ) -> Optional[dict]:
-    image_ref, tag = image_ref_and_tag
+    client = ctx.network
     # Don't allow recursion here, since Spack itself always uploads
     # vnd.oci.image.manifest.v1+json, not vnd.oci.image.index.v1+json
     _, image_config = get_manifest_and_config_with_retry(
@@ -1792,7 +1761,7 @@ def _oci_config_from_tag(
         tag,
         recurse=0,
         urlopen=spack.oci.opener.oci_urlopen(client),
-        config=config,
+        config=ctx.config,
         client=client,
     )
 
@@ -1807,20 +1776,23 @@ def _oci_update_index(
     pool: concurrent.futures.Executor,
     *,
     timer=timer.NULL_TIMER,
-    config: spack.config.Configuration,
-    client: web_util.NetworkClient,
-    repo_provider: Optional["spack.repo.RepoProvider"] = None,
+    ctx: "spack.context.SpackContext",
 ) -> None:
-    urlopen = spack.oci.opener.oci_urlopen(client)
+    """Pushes an index of the specs tagged in ``image_ref``. The workers of ``pool`` share
+    ``ctx``."""
+    repo_provider = ctx.repo_provider
+    urlopen = spack.oci.opener.oci_urlopen(ctx.network)
     with timer.measure("list"):
         tags = list_tags(image_ref, urlopen=urlopen)
 
     with timer.measure("read"):
         # Fetch all image config files in parallel
-        spec_dicts = pool.map(
-            functools.partial(_oci_config_from_tag, config=config, client=client),
-            ((image_ref, tag) for tag in tags if tag_is_spec(tag)),
-        )
+        spec_dict_futures = [
+            pool.submit_shared(_oci_config_from_tag, image_ref, tag)  # type: ignore[attr-defined]
+            for tag in tags
+            if tag_is_spec(tag)
+        ]
+        spec_dicts = (f.result() for f in spec_dict_futures)
 
         # Populate the database
         db_root_dir = os.path.join(tmpdir, "db_root")

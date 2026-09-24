@@ -6318,7 +6318,8 @@ def test_develop_specs_read_no_global(
         mutable_config.set(
             "develop", {"develop-test": {"spec": "develop-test@develop", "path": str(develop_dir)}}
         )
-        context = SpackContext(ctx.config, environment=env)
+        context = SpackContext(ctx.config)
+        context._set_environment(env)
 
         with break_globals():
             result = spack.solver.asp.Solver(context=context).solve([Spec("develop-test@develop")])

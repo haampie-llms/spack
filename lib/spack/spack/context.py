@@ -53,14 +53,10 @@ class SpackContext:
     """External resources an operation reads, all derived from ``config``."""
 
     def __init__(
-        self,
-        config: "spack.config.Configuration",
-        *,
-        environment: Optional["spack.environment.Environment"] = None,
-        is_bootstrap: bool = False,
+        self, config: "spack.config.Configuration", *, is_bootstrap: bool = False
     ) -> None:
         self._config = config
-        self._environment = environment
+        self._environment: Optional["spack.environment.Environment"] = None
         #: Whether this context bootstraps Spack's own dependencies
         self.is_bootstrap = is_bootstrap
         #: Members replaced by activating an environment, restored by deactivating it
@@ -216,14 +212,14 @@ class SpackContext:
             raise
         after = self._store_and_repo_config()
         if before[0] != after[0]:
-            self._replace_member("store", None)
+            self._before_activation["store"] = self.swap("store", None)
         if before[1] != after[1] or use_env_repo:
             import spack.repo
 
             repo = spack.repo.RepoPath.from_config(self.config, cache=self.misc_cache)
             if use_env_repo:
                 repo.put_first(env.repo)
-            self._replace_member("repo", repo)
+            self._before_activation["repo"] = self.swap("repo", repo)
 
     def deactivate(self) -> None:
         """Undo ``activate``, if an environment is active."""
@@ -231,7 +227,7 @@ class SpackContext:
         if env is None:
             return
         for member, value in self._before_activation.items():
-            self._restore_member(member, value)
+            self.swap(member, value)
         self._before_activation.clear()
         env.manifest.deactivate_config_scope(self.config)
         self._set_environment(None)
@@ -244,20 +240,15 @@ class SpackContext:
         self._environment = env
         self.config.env_path = env.path if env is not None else None
 
-    def _replace_member(self, member: str, value: Any) -> None:
-        """Replace a member for the activation; ``None`` rebuilds it on next access."""
-        self._before_activation[member] = self.__dict__.pop(member, None)
+    def swap(self, member: str, value: Any) -> Any:
+        """Replace a member, and return the previous one if it was built. ``None`` rebuilds it
+        on next access."""
+        previous = self.__dict__.pop(member, None)
         if value is not None:
             self.__dict__[member] = value
             if member == "repo":
                 value.enable()
-
-    def _restore_member(self, member: str, value: Any) -> None:
-        self.__dict__.pop(member, None)
-        if value is not None:
-            self.__dict__[member] = value
-            if member == "repo":
-                value.enable()
+        return previous
 
     def __reduce__(self):
         # Not the environment, which is large: its scope and path are part of config
@@ -266,10 +257,6 @@ class SpackContext:
             (self._config,),
             {"is_bootstrap": self.is_bootstrap, "gpg_home": self.gpg_home},
         )
-
-    def __setstate__(self, state):
-        self._before_activation = {}
-        self.__dict__.update(state)
 
 
 #: The context of the process (transitional)

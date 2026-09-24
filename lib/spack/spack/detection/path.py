@@ -489,10 +489,9 @@ def by_path(
     detected_specs_by_package: Dict[str, Tuple[concurrent.futures.Future, ...]] = {}
 
     result = collections.defaultdict(list)
-    repository = spack.util.lang.ensure_unwrapped(repo)
     additional_search_paths = config.get("config:additional_external_search_paths", default=[])
 
-    resources = _Resources(repository, config)
+    resources = _Resources(repo, config)
     if max_workers == 1:
         executor = spack.util.parallel.SequentialExecutor(resources)
     else:
