@@ -2199,7 +2199,8 @@ def attach_packages(
 ) -> None:
     """Create the packages of the concrete nodes of ``specs`` (including the builds of spliced
     nodes) that have none, from the repositories of ``ctx``. With ``skip_unknown``, nodes whose
-    package is not in the repositories are left without one instead of raising."""
+    package is not in the repositories are left without one instead of raising, and reading
+    their package raises the error."""
     stack = list(specs)
     seen: Set[int] = set()
     while stack:
@@ -2214,8 +2215,9 @@ def attach_packages(
                 continue
             try:
                 pkg = ctx.repo.get(node)
-            except UnknownEntityError:
+            except UnknownEntityError as e:
                 if skip_unknown:
+                    node._package_error = e
                     continue
                 raise
             pkg.context = ctx

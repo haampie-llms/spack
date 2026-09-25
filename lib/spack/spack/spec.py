@@ -1968,6 +1968,8 @@ class Spec:
 
         # cache of package for this spec
         self._package: Optional["spack.package_base.PackageBase"] = None
+        # why no package could be attached to this spec, raised when its package is read
+        self._package_error: Optional[Exception] = None
 
         # Virtual specs provided, frozen at concretization. None on abstract specs.
         self._provided_virtuals: Optional[Tuple["Spec", ...]] = None
@@ -2397,7 +2399,7 @@ class Spec:
             self.name
         )
         if not self._package:
-            raise PackageNotAttachedError(self)
+            raise self._package_error or PackageNotAttachedError(self)
         return self._package
 
     @property
@@ -3646,6 +3648,7 @@ class Spec:
                 If deptype, or depflag, copy matching types.
         """
         self._package = None
+        self._package_error = None
         # Immutable tuple, shared
         self._provided_virtuals = other._provided_virtuals
 
@@ -5034,6 +5037,7 @@ class Spec:
         state = self.__dict__.copy()
         # The package is lazily loaded upon demand.
         state.pop("_package", None)
+        state.pop("_package_error", None)
         # As with to_dict, do not include dependents. This avoids serializing more than intended.
         state.pop("_dependents", None)
 
@@ -5048,6 +5052,7 @@ class Spec:
     def __setstate__(self, state):
         self.__dict__.update(state)
         self._package = None
+        self._package_error = None
 
         # Reconstruct dependents map
         if not hasattr(self, "_dependents"):
