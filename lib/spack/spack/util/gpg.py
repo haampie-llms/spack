@@ -986,12 +986,14 @@ def glist(gpg: Gpg, trusted: bool, signing: bool, fmt: str = "default"):
         fmt: Key formatting string (default, colons, short, fpr)
     """
     if trusted:
+        keys = gpg.list_keys(ktype=GpgKeyType.PUBLIC, fmt=fmt)
         tty.msg("Trusted keys")
-        print(gpg.list_keys(ktype=GpgKeyType.PUBLIC, fmt=fmt))
+        print(keys)
 
     if signing:
+        keys = gpg.list_keys(ktype=GpgKeyType.SECRET, fmt=fmt)
         tty.msg("Signing keys")
-        print(gpg.list_keys(ktype=GpgKeyType.SECRET, fmt=fmt))
+        print(keys)
 
 
 def _verify_exe_or_raise(exe) -> spack.version.VersionType:
