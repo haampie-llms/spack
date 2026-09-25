@@ -22,14 +22,13 @@ def test_remove_extensions_ordered(
 ):
     view_dir = str(tmp_path / "view")
     layout = DirectoryLayout(view_dir)
-    view = YamlFilesystemView(view_dir, layout)
+    view = YamlFilesystemView(view_dir, layout, ctx=ctx)
     e2 = spack.concretize.concretize_one("extension2", ctx)
     PackageInstaller([e2.package], explicit=True).install()
     view.add_specs(e2)
 
     e1 = e2["extension1"]
     all_specs = view.get_all_specs()
-    spack.repo.attach_packages(all_specs, ctx)
     view.remove_specs(e1, e2, all_specs=set(all_specs))
 
 

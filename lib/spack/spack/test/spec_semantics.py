@@ -1407,6 +1407,19 @@ class TestSpecSemantics:
         with pytest.raises(SpecFormatStringError, match=message):
             Spec("zlib").format(fmt_str)
 
+    @pytest.mark.parametrize(
+        "fmt_str,expected",
+        [
+            ("{package.name}", True),
+            ("{PACKAGE.homepage}", True),
+            ("{^zlib.package.name}", True),
+            ("{name} {prefix}", False),
+            ("\\{package.name}", False),
+        ],
+    )
+    def test_format_reads_package(self, fmt_str, expected):
+        assert spack.spec.format_reads_package(fmt_str) is expected
+
     def test_wildcard_is_invalid_variant_value(self):
         """The spec string x=* is parsed as a multi-valued variant with values the empty set.
         That excludes * as a literal variant value."""

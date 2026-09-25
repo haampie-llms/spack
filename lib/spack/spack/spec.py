@@ -137,6 +137,15 @@ SPEC_FORMAT_RE = re.compile(
     re.IGNORECASE,
 )
 
+
+def format_reads_package(format_string: str) -> bool:
+    """Whether the format string reads attributes of the packages of specs."""
+    return any(
+        (m.group(6) or "").lower().split(".")[0] == "package"
+        for m in SPEC_FORMAT_RE.finditer(format_string)
+    )
+
+
 #: Valid pattern for an identifier in Spack
 
 IDENTIFIER_RE = r"\w[\w-]*"

@@ -91,7 +91,8 @@ def spec(parser, args, ctx: spack.context.SpackContext):
     elif env:
         env.concretize(ui=ui)
         concrete_specs = env.concrete_roots()
-        spack.repo.attach_packages(concrete_specs, ctx, skip_unknown=True)
+        if args.non_defaults or (args.format and spack.spec.format_reads_package(args.format)):
+            spack.repo.attach_packages(concrete_specs, ctx, skip_unknown=True)
     else:
         args.subparser.error("requires at least one spec or an active environment")
 

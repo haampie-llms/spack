@@ -14,7 +14,6 @@ import spack.environment as ev
 import spack.mirrors.utils
 import spack.spec
 import spack.test.harness
-import spack.util.parallel
 from spack.config import Configuration
 from spack.context import SpackContext
 
@@ -187,11 +186,10 @@ def test_bootstrap_mirror_metadata(
     """
     mirrored = []
 
-    def _mirror_one(ctx, candidate, mirror_cache):
-        mirrored.append((candidate.name, ctx.repo.exists(candidate.name)))
+    def _mirror_one(ctx: SpackContext, candidate, mirror_cache):
+        mirrored.append(candidate.name)
         return spack.mirrors.utils.MirrorStatsForOneSpec(candidate)
 
-    monkeypatch.setattr(spack.util.parallel, "ENABLE_PARALLELISM", False)
     monkeypatch.setattr(spack.cmd.mirror, "create_mirror_for_one_spec", _mirror_one)
     monkeypatch.setattr(spack.concretize, "concretize_one", lambda p, ctx: spack.spec.Spec(p))
 
@@ -203,7 +201,7 @@ def test_bootstrap_mirror_metadata(
     _bootstrap("add", "--trust", "test-mirror", str(metadata_dir))
 
     assert _bootstrap.returncode == 0
-    assert ("gnuconfig", True) in mirrored
+    assert "gnuconfig" in mirrored
     assert any(
         m["name"] == "test-mirror" for m in spack.bootstrap.core.bootstrapping_sources(ctx.config)
     )

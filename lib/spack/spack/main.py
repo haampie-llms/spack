@@ -42,7 +42,6 @@ import spack.spec
 import spack.util.environment
 import spack.util.lang
 import spack.util.lock
-import spack.util.tty.colify
 from spack.util import tty
 from spack.util.tty import color
 
@@ -390,8 +389,7 @@ class SpackArgumentParser(argparse.ArgumentParser):
     def _check_value(self, action, value):
         # converted value must be one of the choices (if specified)
         if action.choices is not None and value not in action.choices:
-            cols = spack.util.tty.colify.colified(sorted(action.choices), indent=4, tty=True)
-            msg = "invalid choice: %r choose from:\n%s" % (value, cols)
+            msg = spack.cmd.common.arguments.invalid_choice_message(value, action.choices)
             raise argparse.ArgumentError(action, msg)
 
 
@@ -1004,8 +1002,6 @@ def _main(argv=None):
     # Make spack load / env activate work on macOS
     restore_macos_dyld_vars()
 
-    # store any error that occurred loading an env
-    env_format_error = None
     env = None
 
     # try to find an active environment here, so that we can activate it later
@@ -1014,24 +1010,17 @@ def _main(argv=None):
             env = spack.cmd.find_environment(args, ctx)
         except (spack.config.ConfigFormatError, ev.SpackEnvironmentConfigError) as e:
             # print the context but delay this exception so that commands like
-            # `spack config edit` can still work with a bad environment.
+            # `spack config edit` can still work with a bad environment. All other
+            # commands raise it in `finish_parse_and_run`.
             e.print_context()
-            env_format_error = e
+            ctx.environment_error = e
 
-    def add_environment_scope():
-        if env_format_error:
-            # Allow command to continue without env in case it is `spack config edit`
-            # All other cases will raise in `finish_parse_and_run`
-            ctx.environment_error = env_format_error
-            return
+    # add the environment
+    if env:
         # do not call activate here, as it has a lot of expensive function calls to deal
         # with mutation of the configuration -- but we are still building the config.
         env.manifest.prepare_config_scope(config)
         ctx._set_environment(env)
-
-    # add the environment
-    if env or env_format_error:
-        add_environment_scope()
 
     # Push scopes from the command line last
     if args.config_scopes:

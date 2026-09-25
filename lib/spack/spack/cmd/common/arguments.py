@@ -5,7 +5,7 @@
 import argparse
 import os
 import textwrap
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Iterable
 
 import spack.cmd
 import spack.config
@@ -64,6 +64,12 @@ def defer_config(namespace: argparse.Namespace, fn: Callable[["SpackContext"], N
         deferred = []
         setattr(namespace, "_deferred_config", deferred)
     deferred.append(fn)
+
+
+def invalid_choice_message(value: Any, choices: Iterable[Any]) -> str:
+    """Message for an argument that is not one of ``choices``, listed in columns."""
+    cols = spack.util.tty.colify.colified(sorted(choices), indent=4, tty=True)
+    return f"invalid choice: {value!r} choose from:\n{cols}"
 
 
 class Deferred:
@@ -212,7 +218,6 @@ class ConfigScope(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
         setattr(namespace, self.dest, values)
         readable = self.readable
-        action = self
 
         def _validate(ctx: "SpackContext") -> None:
             if readable:
@@ -222,11 +227,8 @@ class ConfigScope(argparse.Action):
                         "for config read operation, scope context does not exist"
                     )
             elif values not in ctx.config.scopes:
-                cols = spack.util.tty.colify.colified(
-                    sorted(ctx.config.scopes), indent=4, tty=True
-                )
-                msg = f"invalid choice: {values!r} choose from:\n{cols}"
-                parser.error(str(argparse.ArgumentError(action, msg)))
+                msg = invalid_choice_message(values, ctx.config.scopes)
+                parser.error(str(argparse.ArgumentError(self, msg)))
 
         defer_config(namespace, _validate)
 

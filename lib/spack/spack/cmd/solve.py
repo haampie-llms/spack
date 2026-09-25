@@ -105,7 +105,11 @@ def _process_result(result, show, required_format, kwargs, ctx: spack.context.Sp
 
     # dump the solutions as concretized specs
     if "solutions" in show:
-        spack.repo.attach_packages(result.specs, ctx, skip_unknown=True)
+        # --non-defaults and formats read the packages
+        if kwargs["version_style_fn"] or (
+            required_format and spack.spec.format_reads_package(required_format)
+        ):
+            spack.repo.attach_packages(result.specs, ctx, skip_unknown=True)
         if required_format:
             for spec in result.specs:
                 # With -y, just print YAML to output.

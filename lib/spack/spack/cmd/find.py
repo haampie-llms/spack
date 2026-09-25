@@ -4,7 +4,6 @@
 
 import argparse
 import copy
-import re
 import sys
 from typing import Any, Dict, List, Tuple
 
@@ -400,8 +399,9 @@ def _find_query(
 
     # Where the store would install the lockfile specs
     if args.show_concretized:
-        for node in spack.traverse.traverse_nodes(concretized_but_not_installed):
-            ctx.store.prefix_of(node)
+        with ctx.store.db.read_transaction():
+            for node in spack.traverse.traverse_nodes(concretized_but_not_installed):
+                ctx.store.prefix_of(node)
 
     return results, concretized_but_not_installed
 
@@ -421,8 +421,7 @@ def find(parser, args, ctx: spack.context.SpackContext):
         # the latter only exists if you call args.specs()
         tty.die(f"No package matches the query: {' '.join(args.constraint)}")
 
-    # The format can read attributes of the packages
-    if args.format and re.search(r"\{[^}]*\bpackage\.", args.format):
+    if args.format and spack.spec.format_reads_package(args.format):
         spack.repo.attach_packages(results + concretized_but_not_installed, ctx, skip_unknown=True)
 
     if args.install_status or args.show_concretized:

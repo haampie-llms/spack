@@ -1007,8 +1007,7 @@ def configuration_dir(request, tmp_path_factory: pytest.TempPathFactory, linux_o
     test_config = Path(spack.paths.test_path) / "data" / "config"
     shutil.copytree(test_config, tmp_path / "site")
     # A read-only Spack prefix gives read-only copies, which are written below
-    for path in (tmp_path / "site", *(tmp_path / "site").rglob("*")):
-        path.chmod(path.stat().st_mode | stat.S_IWUSR)
+    _recursive_chmod(tmp_path / "site", 0o755)
 
     # Create temporary 'defaults', 'site' and 'user' folders
     (tmp_path / "user").mkdir()

@@ -302,7 +302,7 @@ class YamlFilesystemView(FilesystemView):
         verbose: bool = False,
         link_type: LinkType = "symlink",
         env_path: Optional[str] = None,
-        ctx: Optional["spack.context.SpackContext"] = None,
+        ctx: "spack.context.SpackContext",
     ):
         super().__init__(
             root,
@@ -582,12 +582,8 @@ class YamlFilesystemView(FilesystemView):
                     spec = get_spec_from_file(filename)
                     if spec:
                         specs.append(spec)
-        self._attach_packages(specs)
+        spack.repo.attach_packages(specs, self._ctx, skip_unknown=True)
         return specs
-
-    def _attach_packages(self, specs: List[spack.spec.Spec]) -> None:
-        if self._ctx is not None:
-            spack.repo.attach_packages(specs, self._ctx, skip_unknown=True)
 
     def get_conflicts(self, *specs):
         """
@@ -611,7 +607,7 @@ class YamlFilesystemView(FilesystemView):
 
         result = get_spec_from_file(filename)
         if result:
-            self._attach_packages([result])
+            spack.repo.attach_packages([result], self._ctx, skip_unknown=True)
         return result
 
     def link_meta_folder(self, spec):
