@@ -4,11 +4,13 @@
 
 import argparse
 import copy
+import re
 import sys
 from typing import Any, Dict, List, Tuple
 
 import spack.binary_distribution
 import spack.context
+import spack.repo
 import spack.solver.reuse
 import spack.spec
 import spack.store
@@ -418,6 +420,10 @@ def find(parser, args, ctx: spack.context.SpackContext):
         # Note: this uses args.constraint vs. args.constraint_specs because
         # the latter only exists if you call args.specs()
         tty.die(f"No package matches the query: {' '.join(args.constraint)}")
+
+    # The format can read attributes of the packages
+    if args.format and re.search(r"\{[^}]*\bpackage\.", args.format):
+        spack.repo.attach_packages(results + concretized_but_not_installed, ctx, skip_unknown=True)
 
     if args.install_status or args.show_concretized:
         spack.binary_distribution.load_buildcache_index(ctx.binary_index)

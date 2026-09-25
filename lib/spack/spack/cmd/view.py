@@ -216,6 +216,7 @@ def view(parser, args, ctx):
         link_type=link_type,
         verbose=args.verbose,
         env_path=ctx.config.env_path,
+        ctx=ctx,
     )
 
     # Process common args and specs
@@ -257,7 +258,7 @@ def view(parser, args, ctx):
 
     elif args.action in actions_remove:
         all_specs = set(view.get_all_specs())
-        spack.repo.attach_packages([*specs, *all_specs], ctx)
+        spack.repo.attach_packages(specs, ctx)
         view.remove_specs(
             *specs,
             with_dependencies=with_dependencies,
@@ -267,6 +268,7 @@ def view(parser, args, ctx):
         )
 
     elif args.action in actions_status:
+        spack.repo.attach_packages(specs, ctx)
         view.print_status(*specs, with_dependencies=with_dependencies)
 
     else:

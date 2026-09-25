@@ -266,3 +266,12 @@ def test_compilers_shows_packages_yaml(
 
     out = compiler("list", fail_on_error=True)
     assert out.count("gcc@7.7.7") == 1
+
+
+def test_compiler_info_and_list_with_compilers_in_the_store(
+    mutable_database, mock_packages, ctx: SpackContext
+):
+    """Tests that compilers from packages.yaml and from the store are listed and described."""
+    assert ctx.store.db.query("gcc", installed=True)
+    assert "gcc@" in compiler("list")
+    assert "compilers:" in compiler("info", "gcc")

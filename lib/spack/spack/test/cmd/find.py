@@ -365,6 +365,13 @@ def test_find_prefix_in_env(
         assert ctx.store.layout.path_for_spec(pkg_a) in find("-c", "-p")
 
 
+@pytest.mark.db
+def test_find_format_package_attributes(database):
+    """Tests that formats can read the package of the specs in the store."""
+    names = find("--format", "{name}").split()
+    assert find("--format", "{package.name}").split() == names
+
+
 def test_find_specs_include_concrete_env(
     mutable_mock_env_path, mutable_mock_repo, tmp_path: pathlib.Path, ctx: SpackContext
 ):

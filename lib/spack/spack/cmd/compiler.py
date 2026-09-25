@@ -11,6 +11,7 @@ import spack.cmd
 import spack.compilers.config
 import spack.context
 import spack.detection
+import spack.repo
 import spack.spec
 from spack.cmd.common import arguments
 from spack.spec import Spec
@@ -233,19 +234,21 @@ def _all_available_compilers(
 ) -> List[Spec]:
     supported_compilers = spack.compilers.config.supported_compilers(repo=ctx.repo)
 
-    def _is_compiler(x):
-        return x.name in supported_compilers and x.package.supported_languages and not x.external
+    def _is_candidate(x):
+        return not x.external and x.name in supported_compilers
 
-    compilers_from_store = [x for x in ctx.store.db.query() if _is_compiler(x)]
+    candidates = [x for x in ctx.store.db.query() if _is_candidate(x)]
+    if remote:
+        remote_specs = spack.binary_distribution.update_cache_and_get_specs(ctx.binary_index)
+        candidates.extend(x for x in remote_specs if _is_candidate(x))
+
     compilers_from_yaml = spack.compilers.config.all_compilers(
         ctx.config, repo=ctx.repo, scope=scope, init_config=False
     )
-    compilers = compilers_from_yaml + compilers_from_store
-
-    if remote:
-        candidates = spack.binary_distribution.update_cache_and_get_specs(ctx.binary_index)
-        compilers.extend([x for x in candidates if _is_compiler(x)])
-    return compilers
+    spack.repo.attach_packages(compilers_from_yaml + candidates, ctx, skip_unknown=True)
+    return compilers_from_yaml + [
+        x for x in candidates if x.has_package and x.package.supported_languages
+    ]
 
 
 def compiler(parser, args, ctx):
