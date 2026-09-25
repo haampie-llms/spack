@@ -52,7 +52,6 @@ import spack.hooks
 import spack.mirrors.mirror
 import spack.package_base
 import spack.package_prefs as prefs
-import spack.repo
 import spack.report
 import spack.rewiring
 import spack.store
@@ -2768,12 +2767,8 @@ def deprecate(
     for deprecated in store.db.specs_deprecated_by(spec):
         deprecate(deprecated, deprecator, link_fn, ctx=ctx)
 
-    # Now that we've handled metadata, uninstall and replace with link. The uninstall hooks
-    # need the package.
-    spack.repo.attach_packages([spec], ctx, skip_unknown=True)
-    spack.package_base.PackageBase.uninstall_by_spec(
-        spec, store, force=True, deprecator=deprecator
-    )
+    # Now that we've handled metadata, uninstall and replace with link
+    spack.package_base.PackageBase.uninstall_by_spec(spec, ctx, force=True, deprecator=deprecator)
     link_fn(deprecator.prefix, spec.prefix)
 
 

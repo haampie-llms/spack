@@ -213,7 +213,7 @@ def test_load_installed_package_not_in_repo(
     )
     assert module_path
 
-    spack.package_base.PackageBase.uninstall_by_spec(spec, ctx.store)
+    spack.package_base.PackageBase.uninstall_by_spec(spec, ctx)
 
 
 @pytest.mark.regression("37649")
