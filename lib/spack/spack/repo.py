@@ -2201,16 +2201,13 @@ def attach_packages(
     nodes) that have none, from the repositories of ``ctx``. With ``skip_unknown``, nodes whose
     package is not in the repositories are left without one instead of raising, and reading
     their package raises the error."""
-    stack = list(specs)
-    seen: Set[int] = set()
-    while stack:
-        root = stack.pop()
-        for node in spack.traverse.traverse_nodes([root], deptype="all", key=id):
-            if id(node) in seen:
-                continue
-            seen.add(id(node))
-            if node.build_spec is not node:
-                stack.append(node.build_spec)
+    roots = list(specs)
+    visited: Set[int] = set()
+    while roots:
+        # One traversal for all roots: per-root traversals visit shared nodes again
+        nodes = list(spack.traverse.traverse_nodes(roots, deptype="all", key=id, visited=visited))
+        roots = [node.build_spec for node in nodes if node.build_spec is not node]
+        for node in nodes:
             if node._package is not None or not node.concrete:
                 continue
             try:
