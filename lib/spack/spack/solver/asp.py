@@ -941,6 +941,7 @@ class PyclingoDriver:
 
         # run the solver, delay import of clingo until after cache miss
         if result is None:
+            load_clingo(setup.context)
             self.control = control or default_clingo_control()
             tty.debug("Starting concretizer")
             result = self._run_clingo(specs, setup, problem_str, control_file_paths, timer)
@@ -3527,7 +3528,6 @@ class Solver:
         specs_factory: Optional[SpecFiltersFactory] = None,
     ):
         self.context = context
-        load_clingo(context)
 
         cache_root = self.context.config.get("concretizer:concretization_cache:url", None)
         if cache_root is None:
