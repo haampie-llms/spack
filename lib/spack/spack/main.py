@@ -549,14 +549,6 @@ def make_argument_parser(**kwargs):
     return parser
 
 
-def showwarning(message, category, filename, lineno, file=None, line=None):
-    """Redirects messages to tty.warn."""
-    if category is spack.error.SpackAPIWarning:
-        tty.warn(f"{filename}:{lineno}: {message}")
-    else:
-        tty.warn(message)
-
-
 def setup_main_options(args, config: spack.config.Configuration):
     """Configure the process and the ``command_line`` scope of ``config`` from the basic
     options."""
@@ -958,7 +950,7 @@ def _main(argv=None):
     # configuration. This doesn't include much -- setting up the parser,
     # restoring some key environment variables, very simple CLI options, etc.
     # ------------------------------------------------------------------------
-    warnings.showwarning = showwarning
+    warnings.showwarning = spack.error.showwarning
 
     # Create a parser with a simple positional argument first.  We'll
     # lazily load the subcommand(s) we need later. This allows us to

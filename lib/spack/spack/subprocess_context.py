@@ -17,9 +17,11 @@ import io
 import multiprocessing
 import multiprocessing.context
 import pickle
+import warnings
 from types import ModuleType
 from typing import TYPE_CHECKING, Optional, Union
 
+import spack.error
 import spack.paths
 import spack.platforms
 
@@ -78,8 +80,8 @@ class PackageInstallContext:
 
 class GlobalStateMarshaler:
     """Class to serialize and restore the process state that child processes need, and that is
-    not part of the context they receive: the platform, the working directory and, in tests,
-    monkeypatches.
+    not part of the context they receive: the platform, the working directory, how warnings are
+    shown and, in tests, monkeypatches.
     """
 
     def __init__(self, *, ctx: Optional[multiprocessing.context.BaseContext] = None) -> None:
@@ -95,6 +97,7 @@ class GlobalStateMarshaler:
     def restore(self):
         if self.is_forked:
             return
+        warnings.showwarning = spack.error.showwarning
         spack.platforms.host = self.platform
         spack.paths.spack_working_dir = self.spack_working_dir
         self.test_patches.restore()
