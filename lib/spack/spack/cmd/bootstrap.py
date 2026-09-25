@@ -15,6 +15,7 @@ import spack.bootstrap.core
 import spack.cmd.mirror
 import spack.concretize
 import spack.config
+import spack.context
 import spack.stage
 import spack.util.filesystem
 import spack.util.spack_yaml
@@ -388,7 +389,7 @@ def _remove(args, ctx):
             spack.util.tty.msg(msg.format(args.name))
 
 
-def _mirror(args, ctx):
+def _mirror(args, ctx: spack.context.SpackContext):
     mirror_dir = spack.config.canonicalize_path(
         os.path.join(args.root_dir, LOCAL_MIRROR_DIR), config=ctx.config
     )
@@ -409,7 +410,7 @@ def _mirror(args, ctx):
         for node in spec.traverse():
             if node.external:
                 continue
-            spack.cmd.mirror.create(mirror_dir, [node], ctx.repo)
+            spack.cmd.mirror.create(mirror_dir, [node], ctx)
         spack.util.tty.set_msg_enabled(True)
 
     if args.binary_packages:
