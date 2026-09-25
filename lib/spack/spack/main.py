@@ -1030,7 +1030,7 @@ def _main(argv=None):
         ctx._set_environment(env)
 
     # add the environment
-    if env:
+    if env or env_format_error:
         add_environment_scope()
 
     # Push scopes from the command line last
