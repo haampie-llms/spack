@@ -139,11 +139,18 @@ SPEC_FORMAT_RE = re.compile(
 
 
 def format_reads(format_string: str, attribute: str) -> bool:
-    """Whether the format string reads the attribute of specs, e.g. ``package`` or ``prefix``."""
-    return any(
-        (m.group(6) or "").lower().split(".")[0] == attribute
-        for m in SPEC_FORMAT_RE.finditer(format_string)
-    )
+    """Whether the format string reads the attribute of specs, e.g. ``package`` or ``prefix``.
+    Attributes of dependencies that their package provides (``{^dep.libs}``) read ``package``."""
+    forwarded = {
+        k for k, v in vars(SpecBuildInterface).items() if isinstance(v, ForwardQueryToPackage)
+    }
+    for m in SPEC_FORMAT_RE.finditer(format_string):
+        name = (m.group(6) or "").lower().split(".")[0]
+        if m.group(3) and name in forwarded:
+            name = "package"
+        if name == attribute:
+            return True
+    return False
 
 
 #: Valid pattern for an identifier in Spack

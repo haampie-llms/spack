@@ -1416,6 +1416,9 @@ class TestSpecSemantics:
             ("{name} {prefix}", "package", False),
             ("{name} {prefix}", "prefix", True),
             ("{prefix.bin}", "prefix", True),
+            ("{^zlib.libs}", "package", True),
+            ("{^zlib.home}", "package", True),
+            ("{libs}", "package", False),
             ("\\{package.name}", "package", False),
         ],
     )
