@@ -19,7 +19,7 @@ import spack.util.filesystem as fs
 from spack.cmd.common import arguments
 from spack.concretize_ui import TerminalUI
 from spack.error import InstallError, SpackError
-from spack.old_installer import InstallPolicy
+from spack.installer.base import InstallPolicy
 from spack.util import tty
 from spack.util.string import plural
 
