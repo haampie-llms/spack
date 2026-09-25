@@ -138,10 +138,10 @@ SPEC_FORMAT_RE = re.compile(
 )
 
 
-def format_reads_package(format_string: str) -> bool:
-    """Whether the format string reads attributes of the packages of specs."""
+def format_reads(format_string: str, attribute: str) -> bool:
+    """Whether the format string reads the attribute of specs, e.g. ``package`` or ``prefix``."""
     return any(
-        (m.group(6) or "").lower().split(".")[0] == "package"
+        (m.group(6) or "").lower().split(".")[0] == attribute
         for m in SPEC_FORMAT_RE.finditer(format_string)
     )
 

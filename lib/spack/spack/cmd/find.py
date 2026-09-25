@@ -421,7 +421,7 @@ def find(parser, args, ctx: spack.context.SpackContext):
         # the latter only exists if you call args.specs()
         tty.die(f"No package matches the query: {' '.join(args.constraint)}")
 
-    if args.format and spack.spec.format_reads_package(args.format):
+    if args.format and spack.spec.format_reads(args.format, "package"):
         spack.repo.attach_packages(results + concretized_but_not_installed, ctx, skip_unknown=True)
 
     if args.install_status or args.show_concretized:

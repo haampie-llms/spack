@@ -91,8 +91,10 @@ def spec(parser, args, ctx: spack.context.SpackContext):
     elif env:
         env.concretize(ui=ui)
         concrete_specs = env.concrete_roots()
-        if args.non_defaults or (args.format and spack.spec.format_reads_package(args.format)):
+        if args.non_defaults or (args.format and spack.spec.format_reads(args.format, "package")):
             spack.repo.attach_packages(concrete_specs, ctx, skip_unknown=True)
+        if args.format and spack.spec.format_reads(args.format, "prefix"):
+            ctx.store.assign_prefixes(concrete_specs)
     else:
         args.subparser.error("requires at least one spec or an active environment")
 

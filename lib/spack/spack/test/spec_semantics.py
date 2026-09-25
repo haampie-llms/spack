@@ -1408,17 +1408,19 @@ class TestSpecSemantics:
             Spec("zlib").format(fmt_str)
 
     @pytest.mark.parametrize(
-        "fmt_str,expected",
+        "fmt_str,attribute,expected",
         [
-            ("{package.name}", True),
-            ("{PACKAGE.homepage}", True),
-            ("{^zlib.package.name}", True),
-            ("{name} {prefix}", False),
-            ("\\{package.name}", False),
+            ("{package.name}", "package", True),
+            ("{PACKAGE.homepage}", "package", True),
+            ("{^zlib.package.name}", "package", True),
+            ("{name} {prefix}", "package", False),
+            ("{name} {prefix}", "prefix", True),
+            ("{prefix.bin}", "prefix", True),
+            ("\\{package.name}", "package", False),
         ],
     )
-    def test_format_reads_package(self, fmt_str, expected):
-        assert spack.spec.format_reads_package(fmt_str) is expected
+    def test_format_reads(self, fmt_str, attribute, expected):
+        assert spack.spec.format_reads(fmt_str, attribute) is expected
 
     def test_wildcard_is_invalid_variant_value(self):
         """The spec string x=* is parsed as a multi-valued variant with values the empty set.

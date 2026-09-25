@@ -425,6 +425,7 @@ def test_spec_non_defaults_in_a_concretized_environment(tmp_path: pathlib.Path, 
     with ev.Environment(tmp_path, ctx=ctx):
         assert "libelf" in spec("--non-defaults")
         assert spec("--format", "{package.name}").strip() == "libelf"
+        assert spec("--format", "{prefix}").strip().startswith(ctx.store.root)
 
 
 def test_spec_env_reports_included_concrete_roots(tmp_path: pathlib.Path, ctx: SpackContext):

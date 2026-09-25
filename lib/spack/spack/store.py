@@ -30,6 +30,7 @@ import spack.error
 import spack.package_prefs
 import spack.paths
 import spack.spec
+import spack.traverse
 import spack.util.path
 from spack.util import filesystem as fs
 from spack.util import tty
@@ -182,6 +183,13 @@ class Store:
             spec.set_prefix(record.path)
         else:
             spec.set_prefix(self.layout.path_for_spec(spec))
+
+    def assign_prefixes(self, specs: List["spack.spec.Spec"]) -> None:
+        """Assign the prefixes of the specs and their dependencies that have none yet."""
+        with self.db.read_transaction():
+            for node in spack.traverse.traverse_nodes(specs, key=spack.traverse.by_dag_hash):
+                if not node.external:
+                    self.prefix_of(node)
 
     def reindex(self) -> None:
         """Convenience function to reindex the store DB with its own layout."""

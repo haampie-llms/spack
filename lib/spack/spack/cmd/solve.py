@@ -107,9 +107,11 @@ def _process_result(result, show, required_format, kwargs, ctx: spack.context.Sp
     if "solutions" in show:
         # --non-defaults and formats read the packages
         if kwargs["version_style_fn"] or (
-            required_format and spack.spec.format_reads_package(required_format)
+            required_format and spack.spec.format_reads(required_format, "package")
         ):
             spack.repo.attach_packages(result.specs, ctx, skip_unknown=True)
+        if required_format and spack.spec.format_reads(required_format, "prefix"):
+            ctx.store.assign_prefixes(result.specs)
         if required_format:
             for spec in result.specs:
                 # With -y, just print YAML to output.
