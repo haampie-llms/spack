@@ -480,15 +480,22 @@ class Gpg:
             ctx: context GnuPG is bootstrapped from, when it is not in the ``PATH``
         """
         self._ctx = ctx
-        if sys.platform == "win32":
-            self.home = Gpg._init_gnupghome_dir(gnupghome)
-        else:
-            self.home = Gpg._init_gnupghome_posix(gnupghome)
-
+        self._gnupghome = gnupghome
+        self._home: Optional[pathlib.Path] = None
         self._gpg: Optional[Executable] = None
         self._gpgconf: Optional[Executable] = None
         self._version: Optional[spack.version.VersionType] = None
         self._socket_dir: Optional[pathlib.Path] = None
+
+    @property
+    def home(self) -> pathlib.Path:
+        """GnuPG home directory, created on first use."""
+        if self._home is None:
+            if sys.platform == "win32":
+                self._home = Gpg._init_gnupghome_dir(self._gnupghome)
+            else:
+                self._home = Gpg._init_gnupghome_posix(self._gnupghome)
+        return self._home
 
     @staticmethod
     def _init_gnupghome_dir(gnupghome: Optional[str] = None) -> pathlib.Path:
