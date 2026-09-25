@@ -605,11 +605,9 @@ def ci_rebuild(args, ctx):
 
     if install_exit_code == 0:
         # If the install succeeded, push it to the buildcache destination. Failure to push
-        # will result in a non-zero exit code. Pushing is best-effort. The record of the store
-        # has prefixes, the lockfile spec has not; without a record the push reports the error.
-        record = ctx.store.db.query_local_by_spec_hash(job_spec.dag_hash())
+        # will result in a non-zero exit code. Pushing is best-effort.
         for result in spack_ci.create_buildcache(
-            input_spec=record.spec if record else job_spec,
+            input_spec=job_spec,
             destination_mirror_urls=[buildcache_destination.push_url],
             sign_binaries=spack_ci.can_sign_binaries(ctx.gpg),
             ctx=ctx,

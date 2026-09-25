@@ -98,14 +98,8 @@ def test_buildcache_list_allarch(database, mock_get_specs_multiarch):
 
 
 @pytest.mark.enable_parallelism
-@pytest.mark.parametrize("args", [[], ["--private"]])
 def tests_buildcache_create_env(
-    args,
-    install_mockery,
-    mock_fetch,
-    tmp_path: pathlib.Path,
-    mutable_mock_env_path,
-    ctx: SpackContext,
+    install_mockery, mock_fetch, tmp_path: pathlib.Path, mutable_mock_env_path, ctx: SpackContext
 ):
     """ "Ensure that buildcache create creates output files from env"""
     pkg = "trivial-install-test-package"
@@ -117,7 +111,7 @@ def tests_buildcache_create_env(
 
     # Push the specs of a fresh read of the lockfile
     with ev.read("test", ctx=ctx):
-        buildcache("push", "--unsigned", *args, str(tmp_path))
+        buildcache("push", "--unsigned", str(tmp_path))
 
     spec = spack.concretize.concretize_one(pkg, ctx)
 

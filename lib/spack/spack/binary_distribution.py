@@ -1105,6 +1105,15 @@ class Uploader:
         """Make a list of selected specs together available under the given tag"""
         pass
 
+    def _assign_prefixes(self, specs: List[spack.spec.Spec]) -> None:
+        """Assign the prefixes of the specs from the store they are pushed from, since the
+        workers receive the specs without packages."""
+        store = self.ctx.store
+        with store.db.read_transaction():
+            for node in traverse.traverse_nodes(specs, key=traverse.by_dag_hash):
+                if not node.external:
+                    store.prefix_of(node)
+
 
 class OCIUploader(Uploader):
     def __init__(
@@ -1123,6 +1132,7 @@ class OCIUploader(Uploader):
     def push(
         self, specs: List[spack.spec.Spec]
     ) -> Tuple[List[spack.spec.Spec], List[Tuple[spack.spec.Spec, BaseException]]]:
+        self._assign_prefixes(specs)
         skipped, base_images, checksums, upload_errors = _oci_push(
             target_image=self.target_image,
             base_image=self.base_image,
@@ -1186,6 +1196,7 @@ class URLUploader(Uploader):
     def push(
         self, specs: List[spack.spec.Spec]
     ) -> Tuple[List[spack.spec.Spec], List[Tuple[spack.spec.Spec, BaseException]]]:
+        self._assign_prefixes(specs)
         return _url_push(
             specs,
             out_url=self.url,
