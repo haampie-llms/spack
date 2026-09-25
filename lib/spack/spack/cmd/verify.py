@@ -94,11 +94,20 @@ def verify_versions(args, ctx):
     3. Installed package version deprecated in the package recipe
     """
     specs = args.specs(ctx, installed=True)
-    spack.repo.attach_packages(specs, ctx, skip_unknown=True)
+    _attach_loadable_packages(specs, ctx)
 
     msg_lines = _verify_version(specs)
     if msg_lines:
         tty.die("\n".join(msg_lines))
+
+
+def _attach_loadable_packages(specs, ctx):
+    """Attach packages to the specs whose recipe exists and loads; the others are reported."""
+    for spec in specs:
+        try:
+            spack.repo.attach_packages([spec], ctx, skip_unknown=True)
+        except spack.repo.RepoError as e:
+            tty.debug(str(e))
 
 
 def _verify_version(specs):
@@ -144,7 +153,7 @@ def _verify_version(specs):
 def verify_libraries(args, ctx):
     """verify that shared libraries of install packages can be located in rpaths (Linux only)"""
     specs_from_db = [s for s in args.specs(ctx, installed=True) if not s.external]
-    spack.repo.attach_packages(specs_from_db, ctx, skip_unknown=True)
+    _attach_loadable_packages(specs_from_db, ctx)
 
     tty.info(f"Checking {len(specs_from_db)} packages for shared library resolution")
 

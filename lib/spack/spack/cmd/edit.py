@@ -86,7 +86,7 @@ def locate_package(name: str, repo: Union[spack.repo.Repo, spack.repo.RepoPath])
             return path
     except OSError as e:
         if e.errno == errno.ENOENT:
-            raise spack.repo.UnknownPackageError(name) from e
+            raise spack.repo.UnknownPackageError(name, repo) from e
         tty.die(f"Cannot edit package: {e}")
 
 

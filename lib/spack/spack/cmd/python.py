@@ -66,7 +66,9 @@ def python(parser, args, unknown_args, ctx):
 
     if args.module:
         sys.argv = ["spack-python"] + unknown_args + args.python_args
-        runpy.run_module(args.module, run_name="__main__", alter_sys=True)
+        runpy.run_module(
+            args.module, init_globals={"ctx": ctx}, run_name="__main__", alter_sys=True
+        )
         return
 
     if unknown_args:
@@ -102,9 +104,9 @@ def ipython_interpreter(args, ctx):
 
     # IPython can also support running a script OR command, not both
     if args.python_args:
-        IPython.start_ipython(argv=args.python_args)
+        IPython.start_ipython(argv=args.python_args, user_ns={"ctx": ctx})
     elif args.python_command:
-        IPython.start_ipython(argv=["-c", args.python_command])
+        IPython.start_ipython(argv=["-c", args.python_command], user_ns={"ctx": ctx})
     else:
         header = "Spack version %s\nPython %s, %s %s" % (
             spack.spack_version,

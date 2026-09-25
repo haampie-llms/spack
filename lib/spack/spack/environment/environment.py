@@ -3765,6 +3765,7 @@ class SpackEnvironmentConfigError(SpackEnvironmentError):
 
     def __init__(self, msg, filename):
         super().__init__(f"{msg} in {filename}")
+        self.filename = filename
 
 
 class SpackEnvironmentDevelopError(SpackEnvironmentError):

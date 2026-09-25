@@ -7,9 +7,10 @@ A :class:`SpackContext` holds a configuration and builds everything derived from
 access, so an operation only pays for what it reads. Command entry points receive one from
 ``spack.main``, and pass the instances their callees need.
 
-This module imports nothing at runtime, so it can be imported from anywhere.
+This module imports no Spack modules when it is imported, so it can be imported from anywhere.
 """
 
+import os
 from typing import TYPE_CHECKING, Any, Callable, Dict, Generic, Optional, TypeVar, overload
 
 if TYPE_CHECKING:
@@ -50,6 +51,12 @@ class _member(Generic[T]):
         return value
 
 
+def _default_gpg_home() -> str:
+    import spack.paths
+
+    return spack.paths.gpg_path
+
+
 class SpackContext:
     """External resources an operation reads, all derived from ``config``."""
 
@@ -62,8 +69,9 @@ class SpackContext:
         self.is_bootstrap = is_bootstrap
         #: Members replaced by activating an environment, restored by deactivating it
         self._before_activation: Dict[str, Any] = {}
-        #: GnuPG home of ``gpg``; ``None`` for ``SPACK_GNUPGHOME``, or Spack's own
-        self.gpg_home: Optional[str] = None
+        #: GnuPG home of ``gpg``: ``SPACK_GNUPGHOME``, or Spack's own. Resolved here, so that
+        #: worker processes use the same home.
+        self.gpg_home: str = os.environ.get("SPACK_GNUPGHOME") or _default_gpg_home()
         #: Error reading the environment to activate, if its manifest is broken
         self.environment_error: Optional[Exception] = None
 

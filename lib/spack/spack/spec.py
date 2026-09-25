@@ -137,6 +137,22 @@ SPEC_FORMAT_RE = re.compile(
     re.IGNORECASE,
 )
 
+
+def format_reads(format_string: str, attribute: str) -> bool:
+    """Whether the format string reads the attribute of specs, e.g. ``package`` or ``prefix``.
+    Attributes of dependencies that their package provides (``{^dep.libs}``) read ``package``."""
+    forwarded = {
+        k for k, v in vars(SpecBuildInterface).items() if isinstance(v, ForwardQueryToPackage)
+    }
+    for m in SPEC_FORMAT_RE.finditer(format_string):
+        name = (m.group(6) or "").lower().split(".")[0]
+        if m.group(3) and name in forwarded:
+            name = "package"
+        if name == attribute:
+            return True
+    return False
+
+
 #: Valid pattern for an identifier in Spack
 
 IDENTIFIER_RE = r"\w[\w-]*"
@@ -1952,6 +1968,8 @@ class Spec:
 
         # cache of package for this spec
         self._package: Optional["spack.package_base.PackageBase"] = None
+        # why no package could be attached to this spec, raised when its package is read
+        self._package_error: Optional[Exception] = None
 
         # Virtual specs provided, frozen at concretization. None on abstract specs.
         self._provided_virtuals: Optional[Tuple["Spec", ...]] = None
@@ -2381,7 +2399,7 @@ class Spec:
             self.name
         )
         if not self._package:
-            raise PackageNotAttachedError(self)
+            raise self._package_error or PackageNotAttachedError(self)
         return self._package
 
     @property
@@ -3630,6 +3648,7 @@ class Spec:
                 If deptype, or depflag, copy matching types.
         """
         self._package = None
+        self._package_error = None
         # Immutable tuple, shared
         self._provided_virtuals = other._provided_virtuals
 
@@ -4271,10 +4290,15 @@ class Spec:
                             return "none"
                         elif part == "specfile_version":
                             return f"v{current.original_spec_format()}"
+                        elif idx == 0 and part in ("installed", "installed_upstream"):
+                            raise SpecFormatStringError(
+                                f"Specs no longer have the attribute {part}. "
+                                "Use `spack find -I` to show the install status"
+                            )
 
                         raise SpecFormatStringError(
                             f"Attempted to format attribute {attribute}. "
-                            f"Spec {'.'.join(parts[:idx])} has no attribute {part}"
+                            f"{'.'.join(['spec', *parts[:idx]])} has no attribute {part}"
                         )
                     if isinstance(current, vn.VersionList) and current == vn.any_version:
                         # don't print empty version lists
@@ -5013,6 +5037,7 @@ class Spec:
         state = self.__dict__.copy()
         # The package is lazily loaded upon demand.
         state.pop("_package", None)
+        state.pop("_package_error", None)
         # As with to_dict, do not include dependents. This avoids serializing more than intended.
         state.pop("_dependents", None)
 
@@ -5027,6 +5052,7 @@ class Spec:
     def __setstate__(self, state):
         self.__dict__.update(state)
         self._package = None
+        self._package_error = None
 
         # Reconstruct dependents map
         if not hasattr(self, "_dependents"):

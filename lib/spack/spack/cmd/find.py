@@ -9,9 +9,11 @@ from typing import Any, Dict, List, Tuple
 
 import spack.binary_distribution
 import spack.context
+import spack.repo
 import spack.solver.reuse
 import spack.spec
 import spack.store
+import spack.traverse
 import spack.util.lang
 from spack import cmd
 from spack.cmd.common import arguments
@@ -355,16 +357,17 @@ def _find_query(
         else:
             env_specs = all_env_specs
 
-        spec_hashes = {x.dag_hash() for x in env_specs}
-        specs_meeting_q_args = set(ctx.store.db.query(hashes=list(spec_hashes), **q_args))
+        spec_hashes = [x.dag_hash() for x in env_specs]
+        # Show the records of the store, which have prefixes, instead of the lockfile specs
+        records = {s.dag_hash(): s for s in ctx.store.db.query(hashes=spec_hashes, **q_args)}
 
         results = list()
         with ctx.store.db.read_transaction():
             for spec in env_specs:
                 if not ctx.store.db.installed(spec):
                     concretized_but_not_installed.append(spec)
-                if spec in specs_meeting_q_args:
-                    results.append(spec)
+                if spec.dag_hash() in records:
+                    results.append(records[spec.dag_hash()])
     else:
         results = args.specs(ctx, **q_args)
 
@@ -394,6 +397,12 @@ def _find_query(
     if args.loaded:
         results = cmd.filter_loaded_specs(results)
 
+    # Where the store would install the lockfile specs
+    if args.show_concretized:
+        with ctx.store.db.read_transaction():
+            for node in spack.traverse.traverse_nodes(concretized_but_not_installed):
+                ctx.store.prefix_of(node)
+
     return results, concretized_but_not_installed
 
 
@@ -411,6 +420,9 @@ def find(parser, args, ctx: spack.context.SpackContext):
         # Note: this uses args.constraint vs. args.constraint_specs because
         # the latter only exists if you call args.specs()
         tty.die(f"No package matches the query: {' '.join(args.constraint)}")
+
+    if args.format and spack.spec.format_reads(args.format, "package"):
+        spack.repo.attach_packages(results + concretized_but_not_installed, ctx, skip_unknown=True)
 
     if args.install_status or args.show_concretized:
         spack.binary_distribution.load_buildcache_index(ctx.binary_index)

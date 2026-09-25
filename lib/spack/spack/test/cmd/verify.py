@@ -172,3 +172,24 @@ def test_verify_versions(mock_packages, ctx: SpackContext):
     assert "Cannot load package" in msg_lines[1]
     assert "version thisisnotaversion unknown to Spack" in msg_lines[2]
     assert "deprecated version 1.1.0" in msg_lines[3]
+
+
+def test_verify_versions_skips_broken_recipes(mock_packages, monkeypatch, ctx: SpackContext):
+    """Tests that a recipe that fails to load is reported, and the other specs are checked."""
+    broken, deprecated = Spec("deprecated-client@=1.1.0"), Spec("deprecated-versions@=1.1.0")
+    for spec in (broken, deprecated):
+        spec._mark_concrete()
+        spec.set_prefix(f"/opt/{spec.name}")
+
+    get = ctx.repo.get
+
+    def _get(spec):
+        if spec.name == "deprecated-client":
+            raise spack.repo.RepoError("cannot load package 'deprecated-client'")
+        return get(spec)
+
+    monkeypatch.setattr(ctx.repo, "get", _get)
+    spack.cmd.verify._attach_loadable_packages([broken, deprecated], ctx)
+    msg_lines = spack.cmd.verify._verify_version([broken, deprecated])
+    assert "Cannot check version for deprecated-client" in msg_lines[1]
+    assert "deprecated version 1.1.0" in msg_lines[2]

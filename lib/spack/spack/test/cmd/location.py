@@ -102,6 +102,18 @@ def test_location_with_active_env(mutable_mock_env_path, ctx: SpackContext):
         assert location("--env").strip() == e.path
 
 
+def test_location_stage_dir_of_environment_spec(mutable_mock_env_path, ctx: SpackContext):
+    """Tests the stage of a spec from the lockfile of an environment."""
+    with ev.create("test", ctx=ctx) as e:
+        e.add("libelf")
+        e.concretize()
+        e.write()
+
+    with ev.read("test", ctx=ctx):
+        assert "libelf" in location("--stage-dir", "libelf")
+        assert "libelf" in location("--build-dir", "libelf")
+
+
 def test_location_env_missing():
     """Tests spack location --env."""
     missing_env_name = "missing-env"

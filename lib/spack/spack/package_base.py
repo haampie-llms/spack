@@ -52,7 +52,6 @@ import spack.phase_callbacks
 import spack.repo
 import spack.spec
 import spack.stage as stg
-import spack.store
 import spack.url
 import spack.util.archive
 import spack.util.environment
@@ -2190,7 +2189,12 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
             raise NotImplementedError(msg)
 
     @staticmethod
-    def uninstall_by_spec(spec, store: spack.store.Store, force=False, deprecator=None):
+    def uninstall_by_spec(
+        spec, ctx: "spack.context.SpackContext", force=False, deprecator=None
+    ) -> None:
+        """Uninstall ``spec`` from the store of ``ctx``. The uninstall hooks run if its package
+        is in the repositories of ``ctx``."""
+        store = ctx.store
         if not os.path.isdir(store.prefix_of(spec)):
             # prefix may not exist, but DB may be inconsistent. Try to fix by
             # removing, but omit hooks.
@@ -2213,11 +2217,8 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
             if dependents:
                 raise PackageStillNeededError(spec, dependents)
 
-        # Try to get the package for the spec
-        try:
-            pkg = spec.package
-        except (spack.repo.UnknownEntityError, spack.spec.PackageNotAttachedError):
-            pkg = None
+        spack.repo.attach_packages([spec], ctx, skip_unknown=True)
+        pkg = spec.package if spec.has_package else None
 
         # Pre-uninstall hook runs first.
         with store.prefix_locker.write_lock(spec):
@@ -2280,14 +2281,14 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
     def do_uninstall(self, force=False):
         """Uninstall this package by spec."""
         # delegate to instance-less method.
-        PackageBase.uninstall_by_spec(self.spec, self.context.store, force)
+        PackageBase.uninstall_by_spec(self.spec, self.context, force)
 
     def view(self):
         """Create a view with the prefix of this package as the root.
         Extensions added to this view will modify the installation prefix of
         this package.
         """
-        return YamlFilesystemView(self.prefix, self.context.store.layout)
+        return YamlFilesystemView(self.prefix, self.context.store.layout, ctx=self.context)
 
     def do_restage(self):
         """Reverts expanded/checked out source to a pristine state."""

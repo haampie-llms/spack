@@ -18,6 +18,7 @@ import spack.environment as ev
 import spack.error
 import spack.extensions
 import spack.paths
+import spack.repo
 import spack.spec
 import spack.spec_parser
 import spack.user_environment as uenv
@@ -216,10 +217,11 @@ def matching_spec_from_env(spec, ctx: "spack.context.SpackContext"):
     active), this will return the given spec but concretized.
     """
     env = ctx.environment
-    if env:
-        return env.matching_spec(spec) or spack.concretize.concretize_one(spec, ctx)
-    else:
+    match = env.matching_spec(spec) if env else None
+    if match is None:
         return spack.concretize.concretize_one(spec, ctx)
+    spack.repo.attach_packages([match], ctx, skip_unknown=True)
+    return match
 
 
 def matching_specs_from_env(specs, ctx: "spack.context.SpackContext"):

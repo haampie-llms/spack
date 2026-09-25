@@ -5,7 +5,7 @@
 import argparse
 import os
 import textwrap
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Iterable
 
 import spack.cmd
 import spack.config
@@ -16,6 +16,7 @@ import spack.mirrors.mirror
 import spack.mirrors.utils
 import spack.reporters
 import spack.spec
+import spack.util.tty.colify
 from spack.util.lang import stable_partition
 from spack.util.pattern import Args
 
@@ -65,6 +66,12 @@ def defer_config(namespace: argparse.Namespace, fn: Callable[["SpackContext"], N
     deferred.append(fn)
 
 
+def invalid_choice_message(value: Any, choices: Iterable[Any]) -> str:
+    """Message for an argument that is not one of ``choices``, listed in columns."""
+    cols = spack.util.tty.colify.colified(sorted(choices), indent=4, tty=True)
+    return f"invalid choice: {value!r} choose from:\n{cols}"
+
+
 class Deferred:
     """Value of an argument that depends on the command's context, resolved before it runs."""
 
@@ -79,7 +86,9 @@ def _resolve(value: Any, ctx: "SpackContext") -> Any:
         except argparse.ArgumentTypeError as e:
             raise spack.error.SpackError(str(e)) from e
     if isinstance(value, list):
-        return [_resolve(v, ctx) for v in value]
+        # Keep the list itself when nothing changes: actions may still hold a reference to it
+        resolved = [_resolve(v, ctx) for v in value]
+        return value if all(r is v for r, v in zip(resolved, value)) else resolved
     return value
 
 
@@ -218,10 +227,8 @@ class ConfigScope(argparse.Action):
                         "for config read operation, scope context does not exist"
                     )
             elif values not in ctx.config.scopes:
-                choices = ", ".join(repr(x) for x in ctx.config.scopes.keys())
-                parser.error(
-                    f"argument {option_string}: invalid choice: {values!r} (choose from {choices})"
-                )
+                msg = invalid_choice_message(values, ctx.config.scopes)
+                parser.error(str(argparse.ArgumentError(self, msg)))
 
         defer_config(namespace, _validate)
 

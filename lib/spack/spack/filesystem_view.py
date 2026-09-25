@@ -9,7 +9,7 @@ import shutil
 import stat
 import sys
 import tempfile
-from typing import Callable, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Set
 
 from spack.vendor.typing_extensions import Literal
 
@@ -17,6 +17,7 @@ import spack.config
 import spack.directory_layout
 import spack.projections
 import spack.relocate
+import spack.repo
 import spack.schema.projections
 import spack.spec
 import spack.util.spack_json as s_json
@@ -41,6 +42,9 @@ from spack.util.link_tree import (
 )
 from spack.util.string import comma_or
 from spack.util.tty.color import colorize
+
+if TYPE_CHECKING:
+    import spack.context
 
 _projections_path = ".spack/projections.yaml"
 
@@ -298,6 +302,7 @@ class YamlFilesystemView(FilesystemView):
         verbose: bool = False,
         link_type: LinkType = "symlink",
         env_path: Optional[str] = None,
+        ctx: "spack.context.SpackContext",
     ):
         super().__init__(
             root,
@@ -308,6 +313,8 @@ class YamlFilesystemView(FilesystemView):
             link_type=link_type,
             env_path=env_path,
         )
+        #: Context whose packages are attached to the specs read from the view
+        self._ctx = ctx
 
         # Super class gets projections from the kwargs
         # YAML specific to get projections from YAML file
@@ -575,6 +582,7 @@ class YamlFilesystemView(FilesystemView):
                     spec = get_spec_from_file(filename)
                     if spec:
                         specs.append(spec)
+        spack.repo.attach_packages(specs, self._ctx, skip_unknown=True)
         return specs
 
     def get_conflicts(self, *specs):
@@ -597,7 +605,10 @@ class YamlFilesystemView(FilesystemView):
         dotspack = self.get_path_meta_folder(spec)
         filename = os.path.join(dotspack, self.layout.spec_file_name)
 
-        return get_spec_from_file(filename)
+        result = get_spec_from_file(filename)
+        if result:
+            spack.repo.attach_packages([result], self._ctx, skip_unknown=True)
+        return result
 
     def link_meta_folder(self, spec):
         src = self.layout.metadata_path(spec)

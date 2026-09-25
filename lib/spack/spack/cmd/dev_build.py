@@ -99,7 +99,7 @@ def dev_build(self, args, ctx):
 
     spec = specs[0]
     if not ctx.repo.exists(spec.name):
-        raise spack.repo.UnknownPackageError(spec.name)
+        raise spack.repo.UnknownPackageError(spec.name, ctx.repo)
 
     if not spec.versions.concrete_range_as_version:
         args.subparser.error(

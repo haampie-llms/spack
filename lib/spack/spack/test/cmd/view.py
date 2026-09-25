@@ -171,6 +171,17 @@ def test_view_extension_remove(
     assert not os.path.exists(os.path.join(viewpath, "bin", "extension1"))
 
 
+def test_view_status_of_extensions(
+    tmp_path: pathlib.Path, mock_packages, mock_archive, mock_fetch, install_mockery
+):
+    """Tests the status of a view whose specs are read back from the view."""
+    install("extension1@1.0")
+    viewpath = str(tmp_path / "view")
+    view("symlink", viewpath, "extendee", "extension1@1.0")
+    assert "extension1@1.0" in view("statlink", viewpath)
+    assert "extension1@1.0" in view("statlink", viewpath, "extension1")
+
+
 def test_view_extension_conflict(
     tmp_path: pathlib.Path, mock_packages, mock_archive, mock_fetch, install_mockery
 ):

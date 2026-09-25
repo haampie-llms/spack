@@ -2199,23 +2199,22 @@ def attach_packages(
 ) -> None:
     """Create the packages of the concrete nodes of ``specs`` (including the builds of spliced
     nodes) that have none, from the repositories of ``ctx``. With ``skip_unknown``, nodes whose
-    package is not in the repositories are left without one instead of raising."""
-    stack = list(specs)
-    seen: Set[int] = set()
-    while stack:
-        root = stack.pop()
-        for node in spack.traverse.traverse_nodes([root], deptype="all", key=id):
-            if id(node) in seen:
-                continue
-            seen.add(id(node))
-            if node.build_spec is not node:
-                stack.append(node.build_spec)
+    package is not in the repositories are left without one instead of raising, and reading
+    their package raises the error."""
+    roots = list(specs)
+    visited: Set[int] = set()
+    while roots:
+        # One traversal for all roots: per-root traversals visit shared nodes again
+        nodes = list(spack.traverse.traverse_nodes(roots, deptype="all", key=id, visited=visited))
+        roots = [node.build_spec for node in nodes if node.build_spec is not node]
+        for node in nodes:
             if node._package is not None or not node.concrete:
                 continue
             try:
                 pkg = ctx.repo.get(node)
-            except UnknownEntityError:
+            except UnknownEntityError as e:
                 if skip_unknown:
+                    node._package_error = e
                     continue
                 raise
             pkg.context = ctx

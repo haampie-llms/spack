@@ -69,6 +69,7 @@ from spack.util.tty.color import colorize
 from spack.util.tty.log import log_output, preserve_terminal_settings
 
 if TYPE_CHECKING:
+    import spack.context
     import spack.spec
 
 #: Counter to support unique spec sequencing that is used to ensure packages
@@ -2729,9 +2730,14 @@ def build_process(pkg: "spack.package_base.PackageBase", install_args: dict) -> 
 
 
 def deprecate(
-    spec: "spack.spec.Spec", deprecator: "spack.spec.Spec", link_fn, *, store: "spack.store.Store"
+    spec: "spack.spec.Spec",
+    deprecator: "spack.spec.Spec",
+    link_fn,
+    *,
+    ctx: "spack.context.SpackContext",
 ) -> None:
-    """Deprecate this package in favor of deprecator spec, in ``store``"""
+    """Deprecate this package in favor of deprecator spec, in the store of ``ctx``"""
+    store = ctx.store
     # Here we assume we don't deprecate across different stores, and that same hash
     # means same binary artifacts
     if spec.dag_hash() == deprecator.dag_hash():
@@ -2759,12 +2765,10 @@ def deprecate(
 
     # Any specs deprecated in favor of this spec are re-deprecated in favor of its new deprecator
     for deprecated in store.db.specs_deprecated_by(spec):
-        deprecate(deprecated, deprecator, link_fn, store=store)
+        deprecate(deprecated, deprecator, link_fn, ctx=ctx)
 
     # Now that we've handled metadata, uninstall and replace with link
-    spack.package_base.PackageBase.uninstall_by_spec(
-        spec, store, force=True, deprecator=deprecator
-    )
+    spack.package_base.PackageBase.uninstall_by_spec(spec, ctx, force=True, deprecator=deprecator)
     link_fn(deprecator.prefix, spec.prefix)
 
 

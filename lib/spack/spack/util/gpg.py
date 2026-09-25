@@ -480,15 +480,22 @@ class Gpg:
             ctx: context GnuPG is bootstrapped from, when it is not in the ``PATH``
         """
         self._ctx = ctx
-        if sys.platform == "win32":
-            self.home = Gpg._init_gnupghome_dir(gnupghome)
-        else:
-            self.home = Gpg._init_gnupghome_posix(gnupghome)
-
+        self._gnupghome = gnupghome
+        self._home: Optional[pathlib.Path] = None
         self._gpg: Optional[Executable] = None
         self._gpgconf: Optional[Executable] = None
         self._version: Optional[spack.version.VersionType] = None
         self._socket_dir: Optional[pathlib.Path] = None
+
+    @property
+    def home(self) -> pathlib.Path:
+        """GnuPG home directory, created on first use."""
+        if self._home is None:
+            if sys.platform == "win32":
+                self._home = Gpg._init_gnupghome_dir(self._gnupghome)
+            else:
+                self._home = Gpg._init_gnupghome_posix(self._gnupghome)
+        return self._home
 
     @staticmethod
     def _init_gnupghome_dir(gnupghome: Optional[str] = None) -> pathlib.Path:
@@ -979,12 +986,14 @@ def glist(gpg: Gpg, trusted: bool, signing: bool, fmt: str = "default"):
         fmt: Key formatting string (default, colons, short, fpr)
     """
     if trusted:
+        keys = gpg.list_keys(ktype=GpgKeyType.PUBLIC, fmt=fmt)
         tty.msg("Trusted keys")
-        print(gpg.list_keys(ktype=GpgKeyType.PUBLIC, fmt=fmt))
+        print(keys)
 
     if signing:
+        keys = gpg.list_keys(ktype=GpgKeyType.SECRET, fmt=fmt)
         tty.msg("Signing keys")
-        print(gpg.list_keys(ktype=GpgKeyType.SECRET, fmt=fmt))
+        print(keys)
 
 
 def _verify_exe_or_raise(exe) -> spack.version.VersionType:

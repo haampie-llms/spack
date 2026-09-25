@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
 
+import gc
 import os
 import os.path
 import pathlib
@@ -25,6 +26,14 @@ from spack.context import SpackContext
 pytestmark = pytest.mark.not_on_windows(
     "Test functionality supported but tests are failing on Win"
 )
+
+
+@pytest.fixture(autouse=True)
+def _restore_gc_threshold():
+    # main() raises the threshold on every call
+    threshold = gc.get_threshold()
+    yield
+    gc.set_threshold(*threshold)
 
 
 @pytest.fixture(autouse=True)
@@ -101,6 +110,54 @@ def test_main_calls_get_version(capfd, working_env, monkeypatch):
 
 def test_unrecognized_top_level_flag():
     assert spack.main.main(["-o", "mirror", "list"]) != 0
+
+
+@pytest.mark.parametrize(
+    "manifest,included",
+    [
+        ("spack:\n  specs: [zlib]\ngarbage: [\n", None),
+        (
+            "spack:\n  specs: [zlib]\n  include: [inc.yaml]\n",
+            "config:\n  build_jobs: notanumber\n",
+        ),
+    ],
+)
+def test_broken_environment_is_an_error(tmp_path: pathlib.Path, capfd, manifest, included):
+    """Tests that commands fail when the environment cannot be read, instead of running
+    without it."""
+    (tmp_path / "spack.yaml").write_text(manifest)
+    if included:
+        (tmp_path / "inc.yaml").write_text(included)
+    with pytest.raises(SystemExit, match="1"):
+        spack.main.main(["-D", str(tmp_path), "config", "get", "config"])
+    assert "build_stage" not in capfd.readouterr().out
+
+
+@pytest.mark.regression("haampie-llms/spack#93")
+@pytest.mark.parametrize(
+    "manifest,included,broken_file",
+    [
+        ("spack:\n  specs: [zlib]\ngarbage: [\n", None, "spack.yaml"),
+        (
+            "spack:\n  specs: [zlib]\n  include: [inc.yaml]\n",
+            "config:\n  build_jobs: notanumber\n",
+            "inc.yaml",
+        ),
+    ],
+)
+def test_config_edit_with_broken_environment(
+    tmp_path: pathlib.Path, capfd, manifest, included, broken_file
+):
+    """Tests that `spack config edit` opens the broken file, and edits other scopes as usual."""
+    (tmp_path / "spack.yaml").write_text(manifest)
+    if included:
+        (tmp_path / "inc.yaml").write_text(included)
+    capfd.readouterr()
+    assert spack.main.main(["-D", str(tmp_path), "config", "edit", "--print-file"]) == 0
+    assert capfd.readouterr().out.strip() == str(tmp_path / broken_file)
+    argv = ["-D", str(tmp_path), "config", "--scope=user", "edit", "--print-file", "packages"]
+    assert spack.main.main(argv) == 0
+    assert capfd.readouterr().out.strip().endswith("packages.yaml")
 
 
 def test_get_version_bad_git(tmp_path: pathlib.Path, working_env, monkeypatch):

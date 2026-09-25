@@ -205,3 +205,19 @@ def test_gpg_key_type():
     for s, t in str_to_type:
         assert s == str(t)
         assert spack.util.gpg.GpgKeyType(s) == t
+
+
+def test_gnupghome_is_created_on_first_use(tmp_path: pathlib.Path, ctx: SpackContext):
+    """Tests that GnuPG needs no home until it is used, so unsigned work does without one."""
+    gpg = spack.util.gpg.Gpg(str(tmp_path / "gpg"), ctx)
+    assert not (tmp_path / "gpg").exists()
+    assert gpg.home == tmp_path / "gpg" and gpg.home.is_dir()
+
+
+def test_glist_prints_no_header_without_a_home(tmp_path: pathlib.Path, capfd, ctx: SpackContext):
+    """Tests that listing keys fails before printing anything when the home is not usable."""
+    (tmp_path / "file").write_text("")
+    gpg = spack.util.gpg.Gpg(str(tmp_path / "file" / "gpg"), ctx)
+    with pytest.raises(OSError):
+        spack.util.gpg.glist(gpg, trusted=True, signing=True)
+    assert "keys" not in capfd.readouterr().out

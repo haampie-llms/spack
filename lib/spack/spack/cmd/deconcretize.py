@@ -96,6 +96,6 @@ def deconcretize(parser, args, ctx: spack.context.SpackContext):
             "  use `spack deconcretize --all` to deconcretize ALL specs"
         )
 
-    specs = spack.cmd.parse_specs(args.specs, ctx) if args.specs else [None]
+    specs = spack.cmd.parse_specs(args.specs, ctx) if args.specs else []
     env = spack.cmd.require_active_env(args.subparser, ctx.environment)
     deconcretize_specs(args, specs, env)

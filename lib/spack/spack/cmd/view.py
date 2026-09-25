@@ -216,6 +216,7 @@ def view(parser, args, ctx):
         link_type=link_type,
         verbose=args.verbose,
         env_path=ctx.config.env_path,
+        ctx=ctx,
     )
 
     # Process common args and specs
@@ -228,7 +229,6 @@ def view(parser, args, ctx):
         # only link commands need to disambiguate specs
         env = ctx.environment
         specs = [spack.cmd.disambiguate_spec(s, env, store=ctx.store) for s in specs]
-        spack.repo.attach_packages(specs, ctx)
 
     elif args.action in actions_status:
         # no specs implies all
@@ -241,6 +241,7 @@ def view(parser, args, ctx):
         # status and remove can map a partial spec to packages in view
         specs = disambiguate_in_view(specs, view, ctx.store)
 
+    spack.repo.attach_packages(specs, ctx)
     with_dependencies = args.dependencies.lower() in ["true", "yes"]
 
     # Map action to corresponding functionality
@@ -257,7 +258,6 @@ def view(parser, args, ctx):
 
     elif args.action in actions_remove:
         all_specs = set(view.get_all_specs())
-        spack.repo.attach_packages([*specs, *all_specs], ctx)
         view.remove_specs(
             *specs,
             with_dependencies=with_dependencies,

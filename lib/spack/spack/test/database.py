@@ -874,7 +874,7 @@ def test_uninstall_by_spec(mutable_database, ctx: SpackContext):
     with mutable_database.write_transaction():
         for spec in mutable_database.query():
             if mutable_database.installed(spec):
-                spack.package_base.PackageBase.uninstall_by_spec(spec, ctx.store, force=True)
+                spack.package_base.PackageBase.uninstall_by_spec(spec, ctx, force=True)
             else:
                 mutable_database.remove(spec)
     assert len(mutable_database.query()) == 0
@@ -1095,7 +1095,7 @@ def test_store_find_accept_string(database, ctx: SpackContext):
 
 
 def test_reindex_removed_prefix_is_not_installed(
-    mutable_database, mock_store_path, capfd, ctx: SpackContext
+    mutable_database, mock_store_path, capfd, tmp_path: pathlib.Path, ctx: SpackContext
 ):
     """When a prefix of a dependency is removed and the database is reindexed,
     the spec should still be added through the dependent, but should be listed as
@@ -1119,6 +1119,18 @@ def test_reindex_removed_prefix_is_not_installed(
     # And we should still have libelf in the database, but not installed.
     assert not mutable_database.query_one("libelf", installed=True)
     assert mutable_database.query_one("libelf", installed=False)
+
+    # Its record has no path, and reading it back gives the prefix of the layout
+    db = spack.database.Database(mutable_database.root, layout=mutable_database.layout)
+    libelf = db.query_one("libelf", installed=False)
+    assert libelf and libelf.prefix == prefix
+
+    # Also when it is read as an upstream, which has no layout
+    upstream = spack.database.Database(mutable_database.root, is_upstream=True)
+    upstream._read()
+    downstream = spack.database.Database(str(tmp_path), upstream_dbs=[upstream])
+    libelf = downstream.query_one("libelf", installed=False)
+    assert libelf and libelf.prefix == prefix
 
 
 def test_reindex_when_all_prefixes_are_removed(

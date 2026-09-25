@@ -6,6 +6,7 @@ import pathlib
 
 import pytest
 
+import spack.concretize
 import spack.environment
 import spack.package_base
 import spack.paths
@@ -68,6 +69,16 @@ def test_repo_multi_getpkgclass(mutable_mock_repo, extra_repo):
 def test_repo_pkg_with_unknown_namespace(mutable_mock_repo):
     with pytest.raises(spack.repo.UnknownNamespaceError):
         mutable_mock_repo.get_pkg_class("unknown.pkg-a")
+
+
+def test_attach_packages_skip_unknown_keeps_the_error(config, mock_packages, ctx: SpackContext):
+    """Tests that reading the package of a spec whose package could not be attached raises why,
+    as it did before packages were attached ahead of time."""
+    spec = spack.spec.Spec.from_dict(spack.concretize.concretize_one("libelf", ctx).to_dict())
+    spec.namespace = "unknown"
+    spack.repo.attach_packages([spec], ctx, skip_unknown=True)
+    with pytest.raises(spack.repo.UnknownNamespaceError):
+        spec.package
 
 
 def test_repo_unknown_pkg(mutable_mock_repo):

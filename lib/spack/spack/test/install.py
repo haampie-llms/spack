@@ -84,7 +84,7 @@ def test_uninstall_non_existing_package(
         spack.repo.attach_packages([spec], ctx)
 
     # Ensure we can uninstall it
-    PackageBase.uninstall_by_spec(spec, ctx.store)
+    PackageBase.uninstall_by_spec(spec, ctx)
     assert not temporary_store.db.installed(spec)
 
 
@@ -392,12 +392,12 @@ def test_uninstall_by_spec_errors(mutable_database, ctx: SpackContext):
     # Try to uninstall a spec that has not been installed
     spec = spack.concretize.concretize_one("dependent-install", ctx)
     with pytest.raises(InstallError, match="is not installed"):
-        PackageBase.uninstall_by_spec(spec, ctx.store)
+        PackageBase.uninstall_by_spec(spec, ctx)
 
     # Try an unforced uninstall of a spec with dependencies
     rec = mutable_database.get_record("mpich")
     with pytest.raises(PackageStillNeededError, match="Cannot uninstall"):
-        PackageBase.uninstall_by_spec(rec.spec, ctx.store)
+        PackageBase.uninstall_by_spec(rec.spec, ctx)
 
 
 @pytest.mark.disable_clean_stage_check

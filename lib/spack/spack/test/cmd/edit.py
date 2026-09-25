@@ -5,6 +5,8 @@
 import os
 import pathlib
 
+import pytest
+
 import spack.paths
 import spack.repo
 import spack.test.harness
@@ -30,6 +32,14 @@ def test_edit_packages(monkeypatch, mock_packages: spack.repo.RepoPath):
     monkeypatch.setattr(spack.util.editor, "editor", editor)
     edit("pkg-a", "pkg-b")
     assert called
+
+
+def test_edit_suggests_close_matches(mock_packages):
+    """Test that a mistyped package name gets close matches as suggestions"""
+    with pytest.raises(spack.repo.UnknownPackageError) as e:
+        edit("pkg-aa")
+    assert "Did you mean one of the following packages?" in e.value.long_message
+    assert "pkg-a" in e.value.long_message
 
 
 def test_edit_files(monkeypatch, mock_packages):

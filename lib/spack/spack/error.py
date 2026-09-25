@@ -19,6 +19,14 @@ class SpackAPIWarning(UserWarning):
     """Warning that formats with file and line number."""
 
 
+def showwarning(message, category, filename, lineno, file=None, line=None):
+    """Redirects messages to tty.warn."""
+    if category is SpackAPIWarning:
+        tty.warn(f"{filename}:{lineno}: {message}")
+    else:
+        tty.warn(message)
+
+
 class SpackError(Exception):
     """This is the superclass for all Spack errors.
     Subclasses can be found in the modules they have to do with.

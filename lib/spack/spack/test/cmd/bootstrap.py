@@ -11,6 +11,7 @@ import spack.bootstrap.core
 import spack.cmd.mirror
 import spack.concretize
 import spack.environment as ev
+import spack.mirrors.utils
 import spack.spec
 import spack.test.harness
 from spack.config import Configuration
@@ -183,8 +184,13 @@ def test_bootstrap_mirror_metadata(
     `spack bootstrap add`. Here we don't download data, since that would be an
     expensive operation for a unit test.
     """
-    old_create = spack.cmd.mirror.create
-    monkeypatch.setattr(spack.cmd.mirror, "create", lambda p, s, r: old_create(p, [], r))
+    mirrored = []
+
+    def _mirror_one(ctx: SpackContext, candidate, mirror_cache):
+        mirrored.append(candidate.name)
+        return spack.mirrors.utils.MirrorStatsForOneSpec(candidate)
+
+    monkeypatch.setattr(spack.cmd.mirror, "create_mirror_for_one_spec", _mirror_one)
     monkeypatch.setattr(spack.concretize, "concretize_one", lambda p, ctx: spack.spec.Spec(p))
 
     # Create the mirror in a temporary folder
@@ -195,6 +201,7 @@ def test_bootstrap_mirror_metadata(
     _bootstrap("add", "--trust", "test-mirror", str(metadata_dir))
 
     assert _bootstrap.returncode == 0
+    assert "gnuconfig" in mirrored
     assert any(
         m["name"] == "test-mirror" for m in spack.bootstrap.core.bootstrapping_sources(ctx.config)
     )

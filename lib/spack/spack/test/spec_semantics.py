@@ -1394,6 +1394,37 @@ class TestSpecSemantics:
         with pytest.raises(SpecFormatStringError):
             spec.format(fmt_str)
 
+    @pytest.mark.parametrize(
+        "fmt_str,message",
+        [
+            ("{installed}", "Specs no longer have the attribute installed"),
+            ("{installed_upstream}", "Specs no longer have the attribute installed_upstream"),
+            ("{nosuch}", "spec has no attribute nosuch"),
+            ("{compiler_flags.nosuch}", "spec.compiler_flags has no attribute nosuch"),
+        ],
+    )
+    def test_spec_formatting_unknown_attributes(self, fmt_str, message):
+        with pytest.raises(SpecFormatStringError, match=message):
+            Spec("zlib").format(fmt_str)
+
+    @pytest.mark.parametrize(
+        "fmt_str,attribute,expected",
+        [
+            ("{package.name}", "package", True),
+            ("{PACKAGE.homepage}", "package", True),
+            ("{^zlib.package.name}", "package", True),
+            ("{name} {prefix}", "package", False),
+            ("{name} {prefix}", "prefix", True),
+            ("{prefix.bin}", "prefix", True),
+            ("{^zlib.libs}", "package", True),
+            ("{^zlib.home}", "package", True),
+            ("{libs}", "package", False),
+            ("\\{package.name}", "package", False),
+        ],
+    )
+    def test_format_reads(self, fmt_str, attribute, expected):
+        assert spack.spec.format_reads(fmt_str, attribute) is expected
+
     def test_wildcard_is_invalid_variant_value(self):
         """The spec string x=* is parsed as a multi-valued variant with values the empty set.
         That excludes * as a literal variant value."""

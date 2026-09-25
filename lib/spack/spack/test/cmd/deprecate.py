@@ -7,6 +7,7 @@ import pathlib
 import pytest
 
 import spack.concretize
+import spack.hooks
 import spack.spec
 from spack.context import SpackContext
 from spack.enums import InstallRecordStatus
@@ -181,6 +182,24 @@ def test_deprecate_deprecator(
     assert first_deprecator == final_deprecator
     second_deprecator = temporary_store.db.deprecator(second_deprecated_spec)
     assert second_deprecator == final_deprecator
+
+
+def test_deprecate_runs_uninstall_hooks(
+    mock_packages, mock_archive, mock_fetch, install_mockery, monkeypatch
+):
+    """Tests that the uninstall hooks run for deprecated specs, also when they are
+    re-deprecated in favor of the new deprecator of their deprecator."""
+    install("--fake", "libelf@0.8.13")
+    install("--fake", "libelf@0.8.12")
+    install("--fake", "libelf@0.8.10")
+    uninstalled = []
+    monkeypatch.setattr(spack.hooks, "pre_uninstall", lambda s: uninstalled.append(str(s.version)))
+
+    deprecate("-y", "libelf@0.8.10", "libelf@0.8.12")
+    assert uninstalled == ["0.8.10"]
+
+    deprecate("-y", "libelf@0.8.12", "libelf@0.8.13")
+    assert uninstalled == ["0.8.10", "0.8.10", "0.8.12"]
 
 
 def test_concretize_deprecated(

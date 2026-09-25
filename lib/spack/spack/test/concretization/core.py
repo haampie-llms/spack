@@ -4915,6 +4915,19 @@ def test_concretization_cache_roundtrip_result(use_concretization_cache, ctx: Sp
     assert result1 == result2
 
 
+def test_concretization_cache_hit_needs_no_clingo(
+    use_concretization_cache, monkeypatch, ctx: SpackContext
+):
+    """Tests that a cache hit neither imports nor bootstraps clingo."""
+    expected = spack.concretize.concretize_one("hdf5", ctx)
+
+    def _no_clingo(ctx):
+        raise AssertionError("clingo was loaded on a cache hit")
+
+    monkeypatch.setattr(spack.solver.asp, "load_clingo", _no_clingo)
+    assert spack.concretize.concretize_one("hdf5", ctx) == expected
+
+
 def test_concretization_cache_reapplies_patches_on_hit(
     mock_packages, use_concretization_cache, monkeypatch, ctx: SpackContext
 ):

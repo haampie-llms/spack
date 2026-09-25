@@ -13,6 +13,7 @@ import spack.cmd.spec
 import spack.concretize
 import spack.context
 import spack.package_base
+import spack.repo
 import spack.spec
 from spack.solver import asp
 from spack.solver.error import format_unsolved
@@ -55,7 +56,7 @@ def setup_parser(subparser: argparse.ArgumentParser) -> None:
     spack.cmd.spec.setup_parser(subparser)
 
 
-def _process_result(result, show, required_format, kwargs):
+def _process_result(result, show, required_format, kwargs, ctx: spack.context.SpackContext):
     opt, _, _ = min(result.answers)
     if ("opt" in show) and (not required_format):
         tty.msg("Best of %d considered solutions." % result.nmodels)
@@ -104,6 +105,13 @@ def _process_result(result, show, required_format, kwargs):
 
     # dump the solutions as concretized specs
     if "solutions" in show:
+        # --non-defaults and formats read the packages
+        if kwargs["version_style_fn"] or (
+            required_format and spack.spec.format_reads(required_format, "package")
+        ):
+            spack.repo.attach_packages(result.specs, ctx, skip_unknown=True)
+        if required_format and spack.spec.format_reads(required_format, "prefix"):
+            ctx.store.assign_prefixes(result.specs)
         if required_format:
             for spec in result.specs:
                 # With -y, just print YAML to output.
@@ -195,7 +203,7 @@ def solve(parser, args, ctx: spack.context.SpackContext):
             else:
                 print("% END ROUND {0}\n".format(idx))
             if not setup_only:
-                _process_result(result, show, required_format, kwargs)
+                _process_result(result, show, required_format, kwargs, ctx)
     elif unify:
         # set up solver parameters
         # Note: reuse and other concretizer prefs are passed as configuration
@@ -203,7 +211,7 @@ def solve(parser, args, ctx: spack.context.SpackContext):
             specs, out=output, timers=args.timers, stats=args.stats, setup_only=setup_only
         )
         if not setup_only:
-            _process_result(result, show, required_format, kwargs)
+            _process_result(result, show, required_format, kwargs, ctx)
     else:
         for spec in specs:
             tty.msg("SOLVING SPEC:", str(spec))
@@ -211,4 +219,4 @@ def solve(parser, args, ctx: spack.context.SpackContext):
                 [spec], out=output, timers=args.timers, stats=args.stats, setup_only=setup_only
             )
             if not setup_only:
-                _process_result(result, show, required_format, kwargs)
+                _process_result(result, show, required_format, kwargs, ctx)

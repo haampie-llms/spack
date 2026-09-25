@@ -415,6 +415,19 @@ spack:
     assert roots[0].satisfies("libelf@0.8.12")
 
 
+def test_spec_non_defaults_in_a_concretized_environment(tmp_path: pathlib.Path, ctx: SpackContext):
+    """Tests that the packages of the lockfile specs are available to --non-defaults."""
+    (tmp_path / ev.manifest_name).write_text("spack:\n  specs:\n  - libelf\n")
+    with ev.Environment(tmp_path, ctx=ctx) as env:
+        env.concretize()
+        env.write()
+
+    with ev.Environment(tmp_path, ctx=ctx):
+        assert "libelf" in spec("--non-defaults")
+        assert spec("--format", "{package.name}").strip() == "libelf"
+        assert spec("--format", "{prefix}").strip().startswith(ctx.store.root)
+
+
 def test_spec_env_reports_included_concrete_roots(tmp_path: pathlib.Path, ctx: SpackContext):
     """Tests that roots coming from an included concrete environment are reported too."""
     include_dir = tmp_path / "included"
