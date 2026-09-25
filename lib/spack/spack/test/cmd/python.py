@@ -48,6 +48,15 @@ def test_python_with_module():
         python("-m", "sys")
 
 
+def test_python_module_gets_the_context(tmp_path, monkeypatch):
+    (tmp_path / "spack_test_probe.py").write_text("print(type(ctx).__name__)")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    # pytest's assertion rewriting breaks runpy
+    finders = [f for f in sys.meta_path if type(f).__name__ != "AssertionRewritingHook"]
+    monkeypatch.setattr(sys, "meta_path", finders)
+    assert "Context" in python("-m", "spack_test_probe")
+
+
 def test_python_raises():
     out = python("--foobar", fail_on_error=False)
     assert python.returncode == 2
