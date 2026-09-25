@@ -4271,10 +4271,15 @@ class Spec:
                             return "none"
                         elif part == "specfile_version":
                             return f"v{current.original_spec_format()}"
+                        elif idx == 0 and part in ("installed", "installed_upstream"):
+                            raise SpecFormatStringError(
+                                f"Specs no longer have the attribute {part}. "
+                                "Use `spack find -I` to show the install status"
+                            )
 
                         raise SpecFormatStringError(
                             f"Attempted to format attribute {attribute}. "
-                            f"Spec {'.'.join(parts[:idx])} has no attribute {part}"
+                            f"{'.'.join(['spec', *parts[:idx]])} has no attribute {part}"
                         )
                     if isinstance(current, vn.VersionList) and current == vn.any_version:
                         # don't print empty version lists
