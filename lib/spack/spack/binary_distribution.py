@@ -1019,7 +1019,7 @@ def _do_create_tarball(
 def _exists_in_buildcache(
     ctx: "spack.context.SpackContext", spec: spack.spec.Spec, out_url: str, allow_unsigned: bool
 ) -> URLBuildcacheEntry:
-    """creates and returns (after checking existence) a URLBuildcacheEntry"""
+    """creates and returns a URLBuildcacheEntry"""
     cache_type = get_url_buildcache_class(CURRENT_BUILD_CACHE_LAYOUT_VERSION)
     cache_entry = cache_type(
         out_url,
@@ -1043,9 +1043,10 @@ def _url_upload_tarball_and_specfile(
     ctx: "spack.context.SpackContext",
     spec: spack.spec.Spec,
     tmpdir: str,
-    cache_entry: URLBuildcacheEntry,
+    out_url: str,
     signing_key: Optional[str],
 ):
+    cache_entry = _exists_in_buildcache(ctx, spec, out_url, not signing_key)
     tarball = os.path.join(tmpdir, f"{spec.dag_hash()}.tar.gz")
     checksum, _ = create_tarball(spec, tarball, store=ctx.store)
 
@@ -1281,25 +1282,13 @@ def _url_push(
     skipped: List[spack.spec.Spec] = []
     errors: List[Tuple[spack.spec.Spec, BaseException]] = []
 
-    exists_futures = [
-        executor.submit_shared(  # type: ignore[attr-defined]
-            _exists_in_buildcache, spec, out_url, not signing_key
-        )
-        for spec in specs
-    ]
-
-    cache_entries = {
-        spec.dag_hash(): exists_future.result()
-        for spec, exists_future in zip(specs, exists_futures)
-    }
-
+    # Entries hold the context: they are created where they're used, not sent between processes
     if not force:
         specs_to_upload = []
 
         for spec in specs:
-            if cache_entries[spec.dag_hash()].exists(
-                [BuildcacheComponent.SPEC, BuildcacheComponent.TARBALL]
-            ):
+            cache_entry = _exists_in_buildcache(ctx, spec, out_url, not signing_key)
+            if cache_entry.exists([BuildcacheComponent.SPEC, BuildcacheComponent.TARBALL]):
                 skipped.append(spec)
             else:
                 specs_to_upload.append(spec)
@@ -1316,11 +1305,7 @@ def _url_push(
 
     upload_futures = [
         executor.submit_shared(  # type: ignore[attr-defined]
-            _url_upload_tarball_and_specfile,
-            spec,
-            tmpdir,
-            cache_entries[spec.dag_hash()],
-            signing_key,
+            _url_upload_tarball_and_specfile, spec, tmpdir, out_url, signing_key
         )
         for spec in specs_to_upload
     ]
