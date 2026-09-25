@@ -109,7 +109,7 @@ def test_find_fails_on_multiple_matches():
     # fail because of multiple matches
     out = module("tcl", "find", "mpileaks", fail_on_error=False)
     assert module.returncode == 1
-    assert "matches multiple packages" in out
+    assert "the constraint 'mpileaks' matches multiple packages" in out
 
     # Passing multiple packages from the command line also results in the
     # same failure
@@ -125,7 +125,7 @@ def test_find_fails_on_non_existing_packages():
     # Another way the command might fail is if the package does not exist
     out = module("tcl", "find", "doesnotexist", fail_on_error=False)
     assert module.returncode == 1
-    assert "matches no package" in out
+    assert "the constraint 'doesnotexist' matches no package" in out
 
 
 @pytest.mark.db

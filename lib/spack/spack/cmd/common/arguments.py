@@ -79,7 +79,9 @@ def _resolve(value: Any, ctx: "SpackContext") -> Any:
         except argparse.ArgumentTypeError as e:
             raise spack.error.SpackError(str(e)) from e
     if isinstance(value, list):
-        return [_resolve(v, ctx) for v in value]
+        # Keep the list itself when nothing changes: actions may still hold a reference to it
+        resolved = [_resolve(v, ctx) for v in value]
+        return value if all(r is v for r, v in zip(resolved, value)) else resolved
     return value
 
 
