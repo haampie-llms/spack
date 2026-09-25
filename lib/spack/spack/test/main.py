@@ -133,6 +133,33 @@ def test_broken_environment_is_an_error(tmp_path: pathlib.Path, capfd, manifest,
     assert "build_stage" not in capfd.readouterr().out
 
 
+@pytest.mark.regression("haampie-llms/spack#93")
+@pytest.mark.parametrize(
+    "manifest,included,broken_file",
+    [
+        ("spack:\n  specs: [zlib]\ngarbage: [\n", None, "spack.yaml"),
+        (
+            "spack:\n  specs: [zlib]\n  include: [inc.yaml]\n",
+            "config:\n  build_jobs: notanumber\n",
+            "inc.yaml",
+        ),
+    ],
+)
+def test_config_edit_with_broken_environment(
+    tmp_path: pathlib.Path, capfd, manifest, included, broken_file
+):
+    """Tests that `spack config edit` opens the broken file, and edits other scopes as usual."""
+    (tmp_path / "spack.yaml").write_text(manifest)
+    if included:
+        (tmp_path / "inc.yaml").write_text(included)
+    capfd.readouterr()
+    assert spack.main.main(["-D", str(tmp_path), "config", "edit", "--print-file"]) == 0
+    assert capfd.readouterr().out.strip() == str(tmp_path / broken_file)
+    argv = ["-D", str(tmp_path), "config", "--scope=user", "edit", "--print-file", "packages"]
+    assert spack.main.main(argv) == 0
+    assert capfd.readouterr().out.strip().endswith("packages.yaml")
+
+
 def test_get_version_bad_git(tmp_path: pathlib.Path, working_env, monkeypatch):
     bad_git = str(tmp_path / "git")
     with open(bad_git, "w", encoding="utf-8") as f:

@@ -274,10 +274,7 @@ def config_edit(args, ctx):
     spack_env = os.environ.get(ev.spack_env_var)
     env_error = ctx.environment_error
 
-    if env_error and args.scope:
-        # Cannot use scopes beyond the environment itself with a failed environment
-        raise env_error
-    elif env_error:
+    if env_error and not args.scope:
         # The rest of the config system wasn't set up fully, but spack.main was allowed
         # to progress so the user can open the malformed environment file
         config_file = env_error.filename
