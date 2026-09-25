@@ -204,6 +204,19 @@ def test_missing_config_scopes_not_valid_read_scope(
         arguments.apply_deferred_config(namespace, ctx)
 
 
+def test_invalid_scope_lists_the_choices(ctx: SpackContext, capsys):
+    """Tests that an invalid scope is reported like any invalid choice, with a list of scopes."""
+    a = argparse.ArgumentParser()
+    a.add_argument("--scope", action=arguments.ConfigScope)
+    namespace = a.parse_args(["--scope", "nosuch"])
+    with pytest.raises(SystemExit):
+        arguments.apply_deferred_config(namespace, ctx)
+    err = capsys.readouterr().err
+    assert "argument --scope: invalid choice: 'nosuch' choose from:\n" in err
+    assert all(name in err for name in ctx.config.scopes)
+    assert "(choose from" not in err
+
+
 def test_deprecated_flag_allows_deprecations_on_packages_with_an_allow_list(
     mutable_config: Configuration, mock_packages
 ):

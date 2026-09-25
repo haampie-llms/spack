@@ -16,6 +16,7 @@ import spack.mirrors.mirror
 import spack.mirrors.utils
 import spack.reporters
 import spack.spec
+import spack.util.tty.colify
 from spack.util.lang import stable_partition
 from spack.util.pattern import Args
 
@@ -211,6 +212,7 @@ class ConfigScope(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
         setattr(namespace, self.dest, values)
         readable = self.readable
+        action = self
 
         def _validate(ctx: "SpackContext") -> None:
             if readable:
@@ -220,10 +222,11 @@ class ConfigScope(argparse.Action):
                         "for config read operation, scope context does not exist"
                     )
             elif values not in ctx.config.scopes:
-                choices = ", ".join(repr(x) for x in ctx.config.scopes.keys())
-                parser.error(
-                    f"argument {option_string}: invalid choice: {values!r} (choose from {choices})"
+                cols = spack.util.tty.colify.colified(
+                    sorted(ctx.config.scopes), indent=4, tty=True
                 )
+                msg = f"invalid choice: {values!r} choose from:\n{cols}"
+                parser.error(str(argparse.ArgumentError(action, msg)))
 
         defer_config(namespace, _validate)
 
