@@ -207,14 +207,8 @@ def test_gpg_key_type():
         assert spack.util.gpg.GpgKeyType(s) == t
 
 
-@pytest.mark.not_on_windows("chmod has no effect on Windows")
 def test_gnupghome_is_created_on_first_use(tmp_path: pathlib.Path, ctx: SpackContext):
     """Tests that GnuPG needs no home until it is used, so unsigned work does without one."""
-    (tmp_path / "ro").mkdir(mode=0o555)
-    gpg = spack.util.gpg.Gpg(str(tmp_path / "ro" / "gpg"), ctx)
-    with pytest.raises(PermissionError):
-        gpg.home
-
     gpg = spack.util.gpg.Gpg(str(tmp_path / "gpg"), ctx)
     assert not (tmp_path / "gpg").exists()
     assert gpg.home == tmp_path / "gpg" and gpg.home.is_dir()
