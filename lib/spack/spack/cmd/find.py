@@ -12,6 +12,7 @@ import spack.context
 import spack.solver.reuse
 import spack.spec
 import spack.store
+import spack.traverse
 import spack.util.lang
 from spack import cmd
 from spack.cmd.common import arguments
@@ -355,16 +356,17 @@ def _find_query(
         else:
             env_specs = all_env_specs
 
-        spec_hashes = {x.dag_hash() for x in env_specs}
-        specs_meeting_q_args = set(ctx.store.db.query(hashes=list(spec_hashes), **q_args))
+        spec_hashes = [x.dag_hash() for x in env_specs]
+        # Show the records of the store, which have prefixes, instead of the lockfile specs
+        records = {s.dag_hash(): s for s in ctx.store.db.query(hashes=spec_hashes, **q_args)}
 
         results = list()
         with ctx.store.db.read_transaction():
             for spec in env_specs:
                 if not ctx.store.db.installed(spec):
                     concretized_but_not_installed.append(spec)
-                if spec in specs_meeting_q_args:
-                    results.append(spec)
+                if spec.dag_hash() in records:
+                    results.append(records[spec.dag_hash()])
     else:
         results = args.specs(ctx, **q_args)
 
@@ -393,6 +395,11 @@ def _find_query(
 
     if args.loaded:
         results = cmd.filter_loaded_specs(results)
+
+    # Where the store would install the lockfile specs
+    if args.show_concretized:
+        for node in spack.traverse.traverse_nodes(concretized_but_not_installed):
+            ctx.store.prefix_of(node)
 
     return results, concretized_but_not_installed
 

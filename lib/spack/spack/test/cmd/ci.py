@@ -34,6 +34,7 @@ from spack.ci.generator_registry import generator
 from spack.cmd.ci import FAILED_CREATE_BUILDCACHE_CODE
 from spack.context import SpackContext
 from spack.error import SpackError
+from spack.installer import PackageInstaller
 from spack.schema.database_index import schema as db_idx_schema
 from spack.test.conftest import MockHTTPResponse, RepoBuilder
 from spack.util.filesystem import mkdirp, working_dir
@@ -689,6 +690,47 @@ def test_ci_rebuild_mock_success(
         else:
             # No installation means no package to test and no test log to copy
             assert "Cannot copy test logs" in out
+
+
+def _install_succeeds(*args, **kwargs):
+    return 0
+
+
+def _cannot_sign(gpg):
+    return False
+
+
+@pytest.mark.enable_parallelism
+def test_ci_rebuild_pushes_job_with_dependencies(
+    tmp_path: pathlib.Path,
+    working_env,
+    mutable_mock_env_path,
+    install_mockery,
+    mock_gnupghome,
+    mock_fetch,
+    mock_binary_index,
+    ci_base_environment,
+    monkeypatch,
+    ctx: SpackContext,
+):
+    """Tests that a job whose spec has dependencies is pushed after it is installed."""
+    pkg_name = "libdwarf"
+    rebuild_env = create_rebuild_env(tmp_path, pkg_name, ctx=ctx)
+
+    # The install runs in another process, which leaves only the record in the store
+    spec = ev.Environment(rebuild_env.env_dir, ctx=ctx).get_one_by_hash(
+        rebuild_env.root_spec_dag_hash
+    )
+    spack.repo.attach_packages([spec], ctx)
+    PackageInstaller([spec.package], fake=True).install()
+    monkeypatch.setattr(ci, "process_command", _install_succeeds)
+    monkeypatch.setattr(ci, "can_sign_binaries", _cannot_sign)
+
+    with working_dir(rebuild_env.env_dir):
+        activate_rebuild_env(tmp_path, pkg_name, rebuild_env)
+        out = ci_cmd("rebuild")
+
+    assert "Pushed libdwarf" in out
 
 
 def test_ci_rebuild_mock_failure_to_push(

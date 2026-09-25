@@ -407,6 +407,12 @@ def _matching_specs(
     ]
 
 
+def _installed_record(spec: Spec, store: spack.store.Store) -> Spec:
+    _, record = store.db.query_by_spec_hash(spec.dag_hash())
+    assert record is not None
+    return record.spec
+
+
 def _format_spec(spec: Spec) -> str:
     return spec.cformat("{name}{@version}{/hash:7}")
 
@@ -567,6 +573,9 @@ def push_fn(args, ctx):
                 failed.extend(
                     (s, PackageNotInstalledError("package not installed")) for s in not_installed
                 )
+
+        # Push the records of the store, which have prefixes, instead of lockfile specs
+        specs = [_installed_record(s, ctx.store) for s in specs]
 
     # Warn about possible old binary mirror layout
     if not spack.oci.image.is_oci_url(mirror.push_url):

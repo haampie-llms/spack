@@ -345,12 +345,24 @@ def test_find_prefix_in_env(
 ):
     """Test `find` formats requiring concrete specs work in environments."""
     env("create", "test")
-    with ev.read("test", ctx=ctx):
+    with ev.read("test", ctx=ctx) as e:
         install("--fake", "--add", "mpileaks")
+        e.add("pkg-a")
+        e.concretize()
+        e.write()
         find("-p")
         find("-l")
         find("-L")
         # Would throw error on regression
+
+    # The specs read from the lockfile get their prefixes from the store
+    with ev.read("test", ctx=ctx) as e:
+        mpileaks = ctx.store.db.query_one("mpileaks")
+        pkg_a = e.matching_spec("pkg-a")
+        assert mpileaks and pkg_a
+        assert mpileaks.prefix in find("-p")
+        assert mpileaks.prefix in find("--format", "{prefix}")
+        assert ctx.store.layout.path_for_spec(pkg_a) in find("-c", "-p")
 
 
 def test_find_specs_include_concrete_env(

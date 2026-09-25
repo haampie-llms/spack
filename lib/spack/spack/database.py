@@ -940,6 +940,12 @@ class Database:
                 [rec.spec for rec in data.values()], self.repo_provider, spec_reader.SPEC_VERSION
             )
 
+        # Pass 5: records without a path get the prefix the layout gives them
+        if self.layout:
+            for rec in data.values():
+                if not rec.spec.external and not rec.spec.has_prefix:
+                    rec.spec.set_prefix(self.layout.path_for_spec(rec.spec))
+
         self._data = data
         self._installed_prefixes = installed_prefixes
 

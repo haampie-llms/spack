@@ -1120,6 +1120,11 @@ def test_reindex_removed_prefix_is_not_installed(
     assert not mutable_database.query_one("libelf", installed=True)
     assert mutable_database.query_one("libelf", installed=False)
 
+    # Its record has no path, and reading it back gives the prefix of the layout
+    db = spack.database.Database(mutable_database.root, layout=mutable_database.layout)
+    libelf = db.query_one("libelf", installed=False)
+    assert libelf and libelf.prefix == prefix
+
 
 def test_reindex_when_all_prefixes_are_removed(
     mutable_database, mock_store_path, ctx: SpackContext
