@@ -1627,9 +1627,8 @@ def mock_gnupghome(
     # We must manually set gnupghome here, else tests run in parallel
     # will all fall back to the system default location and cause
     # failures when multiple try to init the same location concurrently.
-    # Child processes inherit the variable.
-    monkeypatch.setenv("SPACK_GNUPGHOME", short_name_tmpdir)
-    # GnuPG reads SPACK_GNUPGHOME when it is built
+    # Worker processes get the home with the context.
+    monkeypatch.setattr(ctx, "gpg_home", short_name_tmpdir)
     ctx.swap("gpg", None)
     try:
         _ = ctx.gpg.gpg

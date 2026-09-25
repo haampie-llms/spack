@@ -696,10 +696,6 @@ def _install_succeeds(*args, **kwargs):
     return 0
 
 
-def _cannot_sign(gpg):
-    return False
-
-
 @pytest.mark.enable_parallelism
 def test_ci_rebuild_pushes_job_with_dependencies(
     tmp_path: pathlib.Path,
@@ -724,7 +720,6 @@ def test_ci_rebuild_pushes_job_with_dependencies(
     spack.repo.attach_packages([spec], ctx)
     PackageInstaller([spec.package], fake=True).install()
     monkeypatch.setattr(ci, "process_command", _install_succeeds)
-    monkeypatch.setattr(ci, "can_sign_binaries", _cannot_sign)
 
     with working_dir(rebuild_env.env_dir):
         activate_rebuild_env(tmp_path, pkg_name, rebuild_env)
