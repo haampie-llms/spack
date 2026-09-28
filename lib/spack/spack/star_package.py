@@ -17,7 +17,9 @@ implements the protocol; by default the ``star`` binary, found through the
   build context derived from the concrete spec, and the resulting actions are
   executed here with Spack's own file utilities.
 
-This is a prototype: resources and per-version build systems are not mapped.
+``resource()`` keeps shpack's semantics (unpacked flat into the stage, beside the
+source) by fetching in the install step rather than through Spack's resources,
+so ``spack mirror`` does not see them yet.
 """
 
 import glob
@@ -26,14 +28,18 @@ import os
 import shutil
 import subprocess
 import sys
+import tarfile
 import types
 from typing import Any, Dict, List
 
 import spack.builder
 import spack.config
 import spack.directives
+import spack.fetch_strategy
+import spack.stage
 import spack.util.naming as nm
 from spack.error import SpackError
+from spack.util import tty
 from spack.util.filesystem import copy_tree, filter_file, mkdirp
 
 STAR_FILE_NAME = "package.star"
@@ -106,6 +112,7 @@ def make_package_class(repo, pkg_name: str, filename: str) -> type:
     # so every one of them is called right before the class below.
     has_code = False
     first_url = None
+    resources = []
     for d in record["directives"]:
         kind = d["directive"]
         when = d.get("when")
@@ -119,6 +126,12 @@ def make_package_class(repo, pkg_name: str, filename: str) -> type:
                 first_url = first_url or d["url"]
             spack.directives.version(d["version"], **kwargs)
         elif kind == "depends_on":
+            if d["spec"].partition("@")[0] == pkg_name:
+                # shpack builds a package with an older version of itself
+                # (gcc-boot@9.5.0 with gcc-boot@4.7); Spack has no
+                # self-dependencies, so such an edge cannot be expressed.
+                tty.debug(f"{pkg_name}: dropping self-dependency {d['spec']}")
+                continue
             spack.directives.depends_on(_exact(d["spec"]), when=when)
         elif kind == "patch":
             spack.directives.patch(os.path.join("patches", d["file"]), level=d["level"], when=when)
@@ -127,13 +140,14 @@ def make_package_class(repo, pkg_name: str, filename: str) -> type:
         elif kind in ("build_system", "build_directory"):
             pass  # the plan carries these
         elif kind == "resource":
-            raise StarError(f"{pkg_name}: resource() is not supported yet by Spack's star adapter")
+            resources.append((when, d["sha256"], d["url"], d["fname"]))
     if record["package"]["license"]:
         spack.directives.license(record["package"]["license"])
     if first_url:
         attrs["url"] = first_url
     if not has_code:
         attrs["has_code"] = False
+    attrs["_star_resources"] = resources
 
     base = spack.builder.Package
     cls = type(base)(nm.pkg_name_to_class_name(pkg_name), (base,), attrs)  # type: ignore[misc]
@@ -168,7 +182,10 @@ def _ctx(pkg, spec, prefix) -> Dict[str, Any]:
         "source_dir": pkg.stage.source_path,
         "package_dir": package_dir,
         "jobs": jobs,
-        "makejobs": [] if pkg.parallel else ["-j1"],
+        # shpack leaves -j to an inherited jobserver; here make is whatever is on PATH (its
+        # recipes do not depend on it), which may not speak Spack's fifo jobserver, so the
+        # plan gets an explicit -jN and the inherited MAKEFLAGS are dropped (_install).
+        "makejobs": [f"-j{jobs}" if pkg.parallel else "-j1"],
         "file_prefix_map": f"-ffile-prefix-map={stage_dir}=.",
         "debug_prefix_map": f"-fdebug-prefix-map={stage_dir}=.",
         "package_files": sorted(files),
@@ -181,7 +198,24 @@ def _starlark_literal(value) -> str:
     return json.dumps(value, indent=4, sort_keys=False)
 
 
+def _fetch_resources(pkg, spec) -> None:
+    """Unpack the recipe's resources into the stage, beside the source (as shpack does)."""
+    for when, sha256, url, fname in pkg._star_resources:
+        if when and not spec.satisfies(when):
+            continue
+        fetcher = spack.fetch_strategy.URLFetchStrategy(url=url, checksum=sha256)
+        with spack.stage.stage_from_config(
+            fetcher, config=spack.config.CONFIG, name=f"{spec.name}-resource-{sha256[:7]}"
+        ) as stage:
+            stage.fetch()
+            stage.check()
+            with tarfile.open(stage.archive_file) as tar:
+                tar.extractall(pkg.stage.path)
+
+
 def _install(self, spec, prefix):
+    os.environ.pop("MAKEFLAGS", None)
+    _fetch_resources(self, spec)
     ctx = _ctx(self, spec, prefix)
     ctx_file = os.path.join(self.stage.path, "ctx.star")
     with open(ctx_file, "w", encoding="utf-8") as f:
