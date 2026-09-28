@@ -222,6 +222,8 @@ repo_config_name = "repo.yaml"  # Top-level filename for repo config.
 repo_index_name = "index.yaml"  # Top-level filename for repository index.
 packages_dir_name = "packages"  # Top-level repo directory containing pkgs.
 package_file_name = "package.py"  # Filename for packages in a repository.
+#: Filename of a package recipe written in Starlark (see spack.star_package)
+star_file_name = "package.star"
 
 #: Guaranteed unused default value for some functions.
 NOT_PROVIDED = object()
@@ -441,13 +443,19 @@ class FastPackageChecker(Mapping[str, float]):
                     sinfo = os.stat(pkg_file, dir_fd=fd)
                 except OSError as e:
                     if e.errno in (errno.ENOENT, errno.ENOTDIR):
-                        # No package.py file here.
-                        continue
+                        # No package.py file here; a Starlark recipe then?
+                        try:
+                            sinfo = os.stat(
+                                pkg_file[: -len(package_file_name)] + star_file_name, dir_fd=fd
+                            )
+                        except OSError:
+                            continue
                     elif e.errno == errno.EACCES:
                         pkg_file = os.path.join(self.packages_path, entry.name, package_file_name)
                         tty.warn(f"Can't read package file {pkg_file}.")
                         continue
-                    raise
+                    else:
+                        raise
 
                 # If it's not a file, skip it.
                 if not stat.S_ISREG(sinfo.st_mode):
@@ -1446,7 +1454,11 @@ class Repo:
         the package exists before importing.
         """
         pkg_dir = self.dirname_for_package_name(pkg_name)
-        return os.path.join(pkg_dir, package_file_name)
+        filename = os.path.join(pkg_dir, package_file_name)
+        star = os.path.join(pkg_dir, star_file_name)
+        if not os.path.exists(filename) and os.path.exists(star):
+            return star
+        return filename
 
     @property
     def _pkg_checker(self) -> FastPackageChecker:
@@ -1462,10 +1474,8 @@ class Repo:
         return [x for x in names if not self.is_virtual(x)]
 
     def package_path(self, name: str) -> str:
-        """Get path to package.py file for this repo."""
-        return os.path.join(
-            self.packages_path, self.naming_scheme.pkg_name_to_pkg_dir(name), package_file_name
-        )
+        """Get path to package.py (or package.star) file for this repo."""
+        return self.filename_for_package_name(name)
 
     def all_package_paths(self) -> Generator[str, None, None]:
         for name in self.all_package_names():
@@ -1527,6 +1537,16 @@ class Repo:
 
         if not self.exists(pkg_name):
             raise UnknownPackageError(fullname, self)
+
+        filename = self.filename_for_package_name(pkg_name)
+        if filename.endswith(star_file_name):
+            from spack import star_package
+
+            try:
+                return star_package.make_package_class(self, pkg_name, filename)
+            except Exception as e:
+                msg = f"cannot load package '{pkg_name}' from the '{self.namespace}' repository"
+                raise RepoError(msg, str(e)) from e
 
         try:
             if self.python_path:
