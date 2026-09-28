@@ -35,7 +35,9 @@ from typing import Any, Dict, List
 import spack.builder
 import spack.config
 import spack.directives
+import spack.directives_meta
 import spack.fetch_strategy
+import spack.repo
 import spack.stage
 import spack.util.naming as nm
 from spack.error import SpackError
@@ -123,8 +125,22 @@ def make_package_class(repo, pkg_name: str, filename: str) -> type:
     if record["package"]["homepage"]:
         attrs["homepage"] = record["package"]["homepage"]
 
+    # Refuse what Spack cannot express before a single directive is queued: queued
+    # directives go to the next package class created, whichever that is.
+    for d in record["directives"]:
+        if d["directive"] == "depends_on" and d["spec"].partition("@")[0] == pkg_name:
+            raise StarError(f"{pkg_name} depends on itself ({d['spec']})")
+
     # Directives queue up and are consumed by the next package class created,
     # so every one of them is called right before the class below.
+    try:
+        return _make_class(repo, pkg_name, record, module, attrs, packages_path, root)
+    except BaseException:
+        spack.directives_meta.DirectiveMeta._directives_to_be_executed.clear()
+        raise
+
+
+def _make_class(repo, pkg_name, record, module, attrs, packages_path, root) -> type:
     has_code = False
     first_url = None
     resources = []
@@ -143,8 +159,6 @@ def make_package_class(repo, pkg_name: str, filename: str) -> type:
                 first_url = first_url or d["url"]
             spack.directives.version(d["version"], **kwargs)
         elif kind == "depends_on":
-            if d["spec"].partition("@")[0] == pkg_name:
-                raise StarError(f"{pkg_name} depends on itself ({d['spec']})")
             # A recipe's dependencies are what its build sees (PATH, ctx.dep): build
             # dependencies to Spack, which lets two versions of a package in one DAG.
             spack.directives.depends_on(
@@ -182,10 +196,11 @@ def make_package_class(repo, pkg_name: str, filename: str) -> type:
 def _declared_deps(node) -> List:
     """``node``'s dependencies in the order its recipe declares them (shpack's order),
     restricted to its version; externals and non-Starlark packages have none."""
-    if node.external or not hasattr(node.package_class, "_star_deps"):
+    cls = spack.repo.PATH.get_pkg_class(node.fullname)
+    if node.external or not hasattr(cls, "_star_deps"):
         return []
     out = []
-    for when, dep_spec in node.package_class._star_deps:
+    for when, dep_spec in cls._star_deps:
         if when and not node.satisfies(when):
             continue
         name = dep_spec.partition("@")[0]
