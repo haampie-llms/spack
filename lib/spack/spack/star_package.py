@@ -5,17 +5,15 @@
 
 A ``package.star`` is a recipe in the format of shpack's recipes (see
 ``star/PROTOCOL.md`` in shpack): directives declare versions, dependencies and
-patches, and phase functions return *actions* instead of performing them.
-Evaluation is pure and happens in an external backend -- any program that
-implements the protocol; by default the ``star`` binary, found through the
-``SPACK_STAR`` environment variable or on ``PATH``:
+patches, and phase functions return *actions* instead of performing them. The
+file is written in the common subset of Starlark and Python, so shpack's ``star``
+and Python (:mod:`spack.starlark_eval`) evaluate it to the same records:
 
-* ``star recipe --format json`` gives the directive record, from which this
-  module builds an ordinary :class:`spack.package_base.PackageBase` subclass
-  (so concretization sees versions, dependencies and patches as usual);
-* at install time, ``star plan --format json`` evaluates the phases against a
-  build context derived from the concrete spec, and the resulting actions are
-  executed here with Spack's own file utilities.
+* the directive record, from which this module builds an ordinary
+  :class:`spack.package_base.PackageBase` subclass (so concretization sees
+  versions, dependencies and patches as usual);
+* at install time, the plan: the phases evaluated against a build context
+  derived from the concrete spec, whose actions are executed here.
 
 ``resource()`` keeps shpack's semantics (unpacked flat into the stage, beside the
 source) by fetching in the install step rather than through Spack's resources,
@@ -23,7 +21,6 @@ so ``spack mirror`` does not see them yet.
 """
 
 import glob
-import json
 import os
 import shlex
 import shutil
@@ -39,6 +36,7 @@ import spack.directives_meta
 import spack.fetch_strategy
 import spack.repo
 import spack.stage
+import spack.starlark_eval
 import spack.util.naming as nm
 from spack.error import SpackError
 from spack.util.filesystem import copy_tree, filter_file, mkdirp
@@ -53,33 +51,16 @@ class StarError(SpackError):
     """Error evaluating or executing a Starlark package recipe."""
 
 
-def star_executable() -> str:
-    exe = os.environ.get("SPACK_STAR") or shutil.which("star")
-    if not exe:
-        raise StarError(
-            "cannot evaluate package.star recipes: set SPACK_STAR or put `star` on PATH"
-        )
-    return exe
-
-
-def _star(*args: str) -> Any:
-    proc = subprocess.run(
-        [star_executable(), *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE
-    )
-    if proc.returncode != 0:
-        raise StarError(f"star {args[0]} failed", proc.stderr.decode("utf-8", "replace"))
-    return json.loads(proc.stdout.decode("utf-8"))
-
-
 _records: Dict[str, Any] = {}
 
 
 def _record(packages_path: str, root: str, name: str) -> Any:
     key = os.path.join(packages_path, name)
     if key not in _records:
-        _records[key] = _star(
-            "recipe", "--repo", packages_path, "--root", root, "--format", "json", name
-        )
+        try:
+            _records[key] = spack.starlark_eval.recipe(packages_path, root, name)
+        except spack.starlark_eval.StarlarkError as e:
+            raise StarError(f"{name}: {e}") from e
     return _records[key]
 
 
@@ -307,11 +288,6 @@ def _build_env(spec, ctx: Dict[str, Any]) -> Dict[str, str]:
     return env
 
 
-def _starlark_literal(value) -> str:
-    """ctx as Starlark source: JSON is valid Starlark for these types."""
-    return json.dumps(value, indent=4, sort_keys=False)
-
-
 def _unpack(archive: str, into: str, env: Dict[str, str]) -> None:
     """shpack's unpack(): compressors piped into tar, all taken from the build's PATH."""
     a = shlex.quote(archive)
@@ -382,23 +358,16 @@ def _install(self, spec, prefix):
     patch_shebangs = os.environ.get("SPACK_STAR_PATCH_SHEBANGS")
     if patch_shebangs:
         subprocess.run([patch_shebangs, ctx["sh"], stage_dir], check=True)
-    ctx_file = os.path.join(stage_dir, "..", f"{ctx['id']}.ctx.star")
-    with open(ctx_file, "w", encoding="utf-8") as f:
-        f.write("ctx = " + _starlark_literal(ctx) + "\n")
-    plan = _star(
-        "plan",
-        "--repo",
+    plan = spack.starlark_eval.plan(
         self._star_packages,
-        "--root",
         self._star_root,
-        "--ctx",
-        ctx_file,
-        "--format",
-        "json",
         os.path.basename(os.path.dirname(self._star_file)),
+        ctx,
     )
-    os.remove(ctx_file)
     mkdirp(str(prefix))
+    if os.environ.get("SPACK_STAR_KEEP_STAGE"):
+        with open(os.path.join(stage_dir, "..", f"{ctx['id']}.env"), "w", encoding="utf-8") as f:
+            f.writelines(f"{k}={v}\n" for k, v in sorted(env.items()))
     executor = _Executor(ctx, source_dir, env)
     for phase in plan["phases"]:
         for action in phase["actions"]:
@@ -407,7 +376,8 @@ def _install(self, spec, prefix):
     for libdir in ("lib", "lib64"):
         for la in glob.glob(os.path.join(str(prefix), libdir, "*.la")):
             os.remove(la)
-    shutil.rmtree(stage_dir, ignore_errors=True)
+    if not os.environ.get("SPACK_STAR_KEEP_STAGE"):
+        shutil.rmtree(stage_dir, ignore_errors=True)
 
 
 class _Executor:
