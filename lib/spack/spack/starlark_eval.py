@@ -122,12 +122,23 @@ _UNIVERSE: Dict[str, Any] = {
 _ARCHES = {"target=x86_64:": "amd64", "target=aarch64:": "aarch64"}
 
 
-def parse_when(when: str) -> Tuple[Optional[str], Optional[str]]:
-    """``@=VERSION`` and ``target=FAMILY:`` terms -> (version, arch)."""
-    version = arch = None
-    for term in when.split():
-        if term.startswith("@=") and len(term) > 2 and version is None:
-            version = term[2:]
+def parse_when(when: str) -> Tuple[Optional[Tuple[str, ...]], Optional[str]]:
+    """``@=VERSION`` (or ``@=V1,=V2``) and ``target=FAMILY:`` terms -> (versions, arch)."""
+    version: Optional[Tuple[str, ...]] = None
+    arch = None
+    for term in when.split(" "):
+        if not term:
+            continue
+        if term.startswith("@=") and len(term) > 2:
+            if version is not None:
+                raise StarlarkError(f'when="{when}": more than one @= constraint')
+            items = term[1:].split(",")
+            if any(len(i) < 2 or not i.startswith("=") for i in items):
+                raise StarlarkError(
+                    f'when="{when}": use @=V1,=V2 for a list of exact versions '
+                    "(version ranges are not supported)"
+                )
+            version = tuple(i[1:] for i in items)
         elif term in _ARCHES:
             arch = _ARCHES[term]
         elif term.startswith("@"):
@@ -266,6 +277,64 @@ _ACTIONS: Dict[str, Callable] = {
 # -------------------------------------------------------------------- evaluation
 
 
+_DEP_TYPES = ("build", "link", "run", "test")
+
+
+def dep_types(type) -> List[str]:
+    """Spack's ``type=``: a string or a tuple of them, ``("build", "link")`` by default;
+    returned in canonical order."""
+    if type is None:
+        return ["build", "link"]
+    if isinstance(type, str):
+        type = [type]
+    if not isinstance(type, (list, tuple)):
+        raise StarlarkError(
+            f"depends_on: type= wants a string or a tuple of strings, got {_type(type)}"
+        )
+    if not type:
+        raise StarlarkError("depends_on: type= is empty")
+    for t in type:
+        if t not in _DEP_TYPES:
+            raise StarlarkError(f'depends_on: type "{t}": want build, link, run or test')
+    return [t for t in _DEP_TYPES if t in type]
+
+
+def _conditional(*values, when=None):
+    """Spack's ``conditional("makefile", when="@=3.0.4")``, for ``build_system``."""
+    if not values:
+        raise StarlarkError("conditional: at least one value is required")
+    if when is None:
+        raise StarlarkError("conditional: when= is required")
+    return Struct("conditional", values=tuple(values), when=when)
+
+
+def _attributes(globs: Dict[str, Any], path: str) -> Dict[str, Any]:
+    """What a Spack package keeps in class attributes, a recipe keeps in its docstring and
+    globals; in the order of star's record."""
+    doc = globs.get("__doc__")
+    homepage = globs.get("homepage")
+    parallel = globs.get("parallel", True)
+    build_directory = globs.get("build_directory")
+    if homepage is not None and not isinstance(homepage, str):
+        raise StarlarkError(f"{path}: homepage must be a string, got {_type(homepage)}")
+    if not isinstance(parallel, bool):
+        raise StarlarkError(f"{path}: parallel must be a bool, got {_type(parallel)}")
+    if build_directory is not None:
+        if not isinstance(build_directory, str):
+            raise StarlarkError(
+                f"{path}: build_directory must be a string, got {_type(build_directory)}"
+            )
+        if not build_directory or build_directory.startswith("/"):
+            raise StarlarkError(f"{path}: build_directory must be a relative path")
+    description = " ".join(w for w in re.split("[ \t\n\r]+", doc) if w) if doc else None
+    return {
+        "description": description or None,
+        "homepage": homepage,
+        "parallel": parallel,
+        "build_directory": build_directory,
+    }
+
+
 class _Evaluation:
     """One recipe evaluation: its module cache, directive record and load order."""
 
@@ -276,7 +345,7 @@ class _Evaluation:
         self.load_bound: Dict[str, set] = {}
         self.load_order: List[str] = []
         self.loading = False
-        self.package: Dict[str, Optional[str]] = {}
+        self.attributes: Dict[str, Any] = {}
         self.directives: List[Dict[str, Any]] = []
 
     # -- modules --
@@ -294,6 +363,7 @@ class _Evaluation:
         globs: Dict[str, Any] = {"__builtins__": _UNIVERSE, "__file__": path}
         globs.update(_ACTIONS)
         globs.update(self._directives())
+        globs["conditional"] = _conditional
         globs["load"] = self._loader(path, globs)
         self.load_bound[path] = set()
         self.modules[path] = globs
@@ -317,7 +387,7 @@ class _Evaluation:
 
     def exported(self, globs: Dict[str, Any]) -> Dict[str, Any]:
         path = globs["__file__"]
-        hidden = set(_ACTIONS) | set(self._directives()) | {"load", "__file__", "__builtins__"}
+        hidden = set(_ACTIONS) | set(self._directives()) | {"load", "conditional"}
         return {
             k: v
             for k, v in globs.items()
@@ -328,14 +398,12 @@ class _Evaluation:
 
     def _directives(self) -> Dict[str, Callable]:
         return {
-            "package": self._package,
             "version": self._version,
             "resource": self._resource,
             "depends_on": self._depends_on,
             "patch": self._patch,
+            "license": self._license,
             "build_system": self._build_system,
-            "parallel": self._parallel,
-            "build_directory": self._build_directory,
         }
 
     def _directive(self, kind: str, **fields) -> None:
@@ -349,13 +417,6 @@ class _Evaluation:
                     f'{kind}: when="{when}": target= constraints are only supported on patch()'
                 )
         self.directives.append(dict(directive=kind, **fields))
-
-    def _package(self, description=None, homepage=None, license=None):
-        if not self.loading:
-            raise StarlarkError("package: directives may only be called while the recipe loads")
-        if self.package:
-            raise StarlarkError("package: called more than once")
-        self.package = {"description": description, "homepage": homepage, "license": license}
 
     @staticmethod
     def _fname(url, fname):
@@ -373,25 +434,37 @@ class _Evaluation:
             "resource", sha256=sha256, url=url, fname=self._fname(url, fname), when=when
         )
 
-    def _depends_on(self, *specs, when=None):
-        if not specs:
-            raise StarlarkError("depends_on: at least one spec is required")
-        for spec in specs:
-            self._directive("depends_on", spec=spec, when=when)
+    def _depends_on(self, spec, when=None, type=None):
+        if not spec or spec.startswith("@") or any(c in spec for c in " \t\n"):
+            raise StarlarkError(f'depends_on: invalid spec "{spec}"')
+        self._directive("depends_on", spec=spec, type=dep_types(type), when=when)
 
     def _patch(self, file, level=1, when=None):
         self._directive("patch", file=file, level=level, when=when)
 
-    def _build_system(self, name, when=None):
-        self._directive("build_system", name=name, when=when)
+    def _license(self, license_identifier, checked_by=None, when=None):
+        if not license_identifier:
+            raise StarlarkError("license: empty license identifier")
+        self._directive("license", license=license_identifier, when=when)
 
-    def _parallel(self, value):
-        if not isinstance(value, bool):
-            raise StarlarkError(f"parallel: got {_type(value)}, want bool")
-        self._directive("parallel", value=value)
-
-    def _build_directory(self, path):
-        self._directive("build_directory", path=path)
+    def _build_system(self, *values, default=None):
+        if not values:
+            raise StarlarkError("build_system: at least one value is required")
+        if any(d["directive"] == "build_system" for d in self.directives):
+            raise StarlarkError("build_system: called more than once")
+        out = []
+        for v in values:
+            if isinstance(v, Struct) and v._ctor == "conditional":
+                out.extend({"name": n, "when": v.when} for n in v.values)
+            else:
+                out.append({"name": v, "when": None})
+        for v in out:
+            if v["when"] is not None:
+                parse_when(v["when"])
+        default = default or out[0]["name"]
+        if default not in [v["name"] for v in out]:
+            raise StarlarkError(f'build_system: default "{default}" is not among the values')
+        self._directive("build_system", values=out, default=default)
 
     # -- the recipe --
 
@@ -402,12 +475,31 @@ class _Evaluation:
             globs = self.module(path)
         finally:
             self.loading = False
-        if not self.package:
-            raise StarlarkError(f"{path}: package() was not called")
+        self.attributes = _attributes(globs, path)
         for d in self.directives:
             if d["directive"] == "build_system":
-                self.module(os.path.join(self.root, "build_systems", d["name"] + ".star"))
+                for v in d["values"]:
+                    self.module(os.path.join(self.root, "build_systems", v["name"] + ".star"))
         return globs
+
+    def build_system(self, version: str) -> str:
+        """The build system of ``version``: the default if its condition holds, else the
+        first value whose condition does; ``generic`` without the directive."""
+        for d in self.directives:
+            if d["directive"] != "build_system":
+                continue
+
+            def holds(v):
+                return v["when"] is None or version in parse_when(v["when"])[0]
+
+            for v in d["values"]:
+                if v["name"] == d["default"] and holds(v):
+                    return v["name"]
+            for v in d["values"]:
+                if holds(v):
+                    return v["name"]
+            raise StarlarkError(f"@{version}: no build_system value applies to this version")
+        return "generic"
 
     def loads(self) -> List[str]:
         repo = self.packages_path.rstrip(os.sep) + os.sep
@@ -418,7 +510,7 @@ def recipe(packages_path: str, root: str, name: str) -> Dict[str, Any]:
     """The directive record of ``name`` (``star recipe --format json``)."""
     ev = _Evaluation(packages_path, root)
     ev.load_recipe(name)
-    return {"name": name, "package": ev.package, "directives": ev.directives, "loads": ev.loads()}
+    return {"name": name, **ev.attributes, "directives": ev.directives, "loads": ev.loads()}
 
 
 def plan(packages_path: str, root: str, name: str, ctx: Dict[str, Any]) -> Dict[str, Any]:
@@ -429,8 +521,8 @@ def plan(packages_path: str, root: str, name: str, ctx: Dict[str, Any]) -> Dict[
     version, arch = ctx["version"], ctx["arch"]
 
     def satisfies(when):
-        want_version, want_arch = parse_when(when)
-        return (want_version in (None, version)) and (want_arch in (None, arch))
+        want_versions, want_arch = parse_when(when)
+        return (want_versions is None or version in want_versions) and (want_arch in (None, arch))
 
     def dep(dep_name):
         if dep_name not in ctx["deps"]:
@@ -439,14 +531,8 @@ def plan(packages_path: str, root: str, name: str, ctx: Dict[str, Any]) -> Dict[
             )
         return Struct("dep", prefix=ctx["deps"][dep_name])
 
-    bs_name = "generic"
-    build_directory = None
-    for d in ev.directives:
-        if d["directive"] == "build_system" and bs_name == "generic":
-            if not d["when"] or parse_when(d["when"])[0] == version:
-                bs_name = d["name"]
-        if d["directive"] == "build_directory":
-            build_directory = d["path"]
+    bs_name = ev.build_system(version)
+    build_directory = ev.attributes["build_directory"]
     bs = ev.module(os.path.join(root, "build_systems", bs_name + ".star"))
 
     fields = {k: v for k, v in ctx.items() if k != "deps"}

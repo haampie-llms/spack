@@ -32,15 +32,20 @@ def install(ctx):
 """
 
 RECIPES = {
-    "foo": f"""
+    "foo": f"""\"\"\"a
+    foo\"\"\"
+
 load("//build_systems/lib.star", "triple")
 
-package(description = "a foo", homepage = "https://foo.test", license = "MIT")
+homepage = "https://foo.test"
+parallel = False
+license("MIT")
 version("1.1", sha256 = "{SHA}", url = "https://foo.test/foo-1.1.tar.gz")
 version("1.0-musl", sha256 = "{SHA}", url = "https://foo.test/foo-1.0.tar.gz")
-build_system("generic")
-depends_on("bar@2.0", "dash")
-depends_on("baz", when = "@=1.1")
+build_system(conditional("generic", when = "@=1.1,=1.0-musl"))
+depends_on("bar@2.0")
+depends_on("dash", type = "build")
+depends_on("baz", when = "@=1.1", type = ("build", "run"))
 patch("x.patch", when = "@=1.0-musl")
 
 def install(ctx):
@@ -52,24 +57,24 @@ def install(ctx):
     ] + ([sh("true")] if ctx.satisfies("@=1.1") else [])
 """,
     "bar": """
-package(description = "a bar")
+"a bar"
 version("3.0")
 version("2.0")
 """,
     "baz": """
-package(description = "a baz")
+"a baz"
 version("5")
 version("4")
 """,
     "dash": """
-package(description = "a shell")
+"a shell"
 version("1")
 """,
 }
 
 SELFISH = {
     "selfish": """
-package(description = "depends on itself")
+"depends on itself"
 version("2")
 depends_on("selfish@1")
 """
@@ -111,7 +116,10 @@ def test_star_packages_are_discovered(star_repo):
 def test_star_package_class(star_repo):
     cls = star_repo.get_pkg_class("foo")
     assert cls.name == "foo"
+    assert cls.__doc__ == "a foo"
     assert cls.homepage == "https://foo.test"
+    assert cls.parallel is False
+    assert list(cls.licenses.values()) == ["MIT"]
     assert "build-tools" in cls.tags
     assert {str(v) for v in cls.versions} == {"1.1", "1.0-musl"}
 
@@ -119,12 +127,19 @@ def test_star_package_class(star_repo):
     # name@version pins exactly; a bare name is the first version its recipe declares
     assert {str(d.spec) for dl in deps["bar"].values() for d in dl} == {"bar@=2.0"}
     assert {str(d.spec) for dl in deps["baz"].values() for d in dl} == {"baz@=5"}
+    # to the concretizer every edge is a build edge (it cannot duplicate the
+    # bootstrap's link dependencies); the recipe's types are kept for the build
     assert all(
         d.depflag == spack.deptypes.BUILD
         for by_when in deps.values()
         for dl in by_when.values()
         for d in dl
     )
+    assert [(spec, types) for _, spec, types in cls._star_deps] == [
+        ("bar@2.0", ("build", "link")),
+        ("dash", ("build",)),
+        ("baz", ("build", "run")),
+    ]
     assert cls._star_patches == [("x.patch", 1, "@=1.0-musl")]
 
 
@@ -175,6 +190,48 @@ def test_star_plan(star_repo):
         {"argv": ["make", "install"], "env": {"V": "1"}, "op": "run"},
         {"op": "sh", "script": "true"},
     ]
+
+
+def test_star_record(star_repo):
+    """The record matches star's: attributes from the docstring and globals, one
+    depends_on per spec with canonical types, Spack's build_system values."""
+    packages = str(pathlib.Path(star_repo.root) / "packages")
+    rec = spack.starlark_eval.recipe(packages, star_repo.root, "foo")
+    assert list(rec)[:5] == ["name", "description", "homepage", "parallel", "build_directory"]
+    assert rec["description"] == "a foo" and rec["parallel"] is False
+    kinds = [d["directive"] for d in rec["directives"]]
+    assert kinds == ["license", "version", "version", "build_system"] + ["depends_on"] * 3 + [
+        "patch"
+    ]
+    assert rec["directives"][3] == {
+        "directive": "build_system",
+        "values": [{"name": "generic", "when": "@=1.1,=1.0-musl"}],
+        "default": "generic",
+    }
+    assert rec["directives"][6] == {
+        "directive": "depends_on",
+        "spec": "baz",
+        "type": ["build", "run"],
+        "when": "@=1.1",
+    }
+
+
+@pytest.mark.parametrize(
+    "text,error",
+    [
+        ('depends_on("a", "b")', "only @=VERSION"),
+        ('depends_on("a", type = "runtime")', "want build, link, run or test"),
+        ('depends_on("a", when = "@1:")', "version ranges are not supported"),
+        ('version("1")\nbuild_system("generic")\nbuild_system("generic")', "more than once"),
+        ("parallel = 0", "parallel must be a bool"),
+    ],
+)
+def test_star_record_errors(star_repo, text, error):
+    recipe = pathlib.Path(star_repo.root) / "packages" / "bar" / "package.star"
+    recipe.write_text(text + "\n")
+    packages = str(pathlib.Path(star_repo.root) / "packages")
+    with pytest.raises((spack.starlark_eval.StarlarkError, TypeError), match=error):
+        spack.starlark_eval.recipe(packages, star_repo.root, "bar")
 
 
 def test_star_directives_only_while_loading(star_repo):

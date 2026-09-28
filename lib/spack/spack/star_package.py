@@ -93,18 +93,19 @@ def make_package_class(repo, pkg_name: str, filename: str) -> type:
 
     attrs: Dict[str, Any] = {
         "__module__": module_name,
-        # Everything a recipe depends on is a build dependency (shpack builds several
-        # versions of musl, grep, gawk, ... into one DAG); tagged build-tools, Spack lets
-        # a package appear once per version in a DAG.
+        # shpack builds several versions of musl, gawk, xz, ... into one DAG; tagged
+        # build-tools, Spack lets a package appear once per version among build deps.
         "tags": ["build-tools"],
-        "__doc__": record["package"]["description"],
+        # the recipe's docstring and globals are what a package keeps as class attributes
+        "__doc__": record["description"],
+        "parallel": record["parallel"],
         "_star_file": filename,
         "_star_root": root,
         "_star_packages": packages_path,
         "install": _install,
     }
-    if record["package"]["homepage"]:
-        attrs["homepage"] = record["package"]["homepage"]
+    if record["homepage"]:
+        attrs["homepage"] = record["homepage"]
 
     # Refuse what Spack cannot express before a single directive is queued: queued
     # directives go to the next package class created, whichever that is.
@@ -140,23 +141,24 @@ def _make_class(repo, pkg_name, record, module, attrs, packages_path, root) -> t
                 first_url = first_url or d["url"]
             spack.directives.version(d["version"], **kwargs)
         elif kind == "depends_on":
-            # A recipe's dependencies are what its build sees (PATH, ctx.dep): build
-            # dependencies to Spack, which lets two versions of a package in one DAG.
+            # To Spack every edge is a build edge: the bootstrap links several libcs
+            # (musl 1.1.24 and 1.2.5, glibc-boot and glibc) and shells into what the
+            # concretizer would make one unification set, and it cannot duplicate
+            # link dependencies that way. The recipe's own types (_star_deps) decide
+            # what the build sees: PATH, the wrapper's -I/-L/rpath, PKG_CONFIG_PATH.
             spack.directives.depends_on(
                 _resolve(packages_path, root, d["spec"]), when=when, type="build"
             )
-            star_deps.append((when, d["spec"]))
+            star_deps.append((when, d["spec"], tuple(d["type"])))
         elif kind == "patch":
             spack.directives.patch(os.path.join("patches", d["file"]), level=d["level"], when=when)
             star_patches.append((d["file"], d["level"], when))
-        elif kind == "parallel":
-            attrs["parallel"] = d["value"]
-        elif kind in ("build_system", "build_directory"):
-            pass  # the plan carries these
+        elif kind == "license":
+            spack.directives.license(d["license"], when=when)
+        elif kind == "build_system":
+            pass  # the plan carries it
         elif kind == "resource":
             resources.append((when, d["sha256"], d["url"], d["fname"]))
-    if record["package"]["license"]:
-        spack.directives.license(record["package"]["license"])
     if first_url:
         attrs["url"] = first_url
     if not has_code:
@@ -174,18 +176,46 @@ def _make_class(repo, pkg_name, record, module, attrs, packages_path, root) -> t
 # --------------------------------------------------------------------- install
 
 
-def _declared_deps(node) -> List:
-    """``node``'s dependencies in the order its recipe declares them (shpack's order),
-    restricted to its version; externals and non-Starlark packages have none."""
+def _declared_edges(node) -> List:
+    """``node``'s dependencies with their types, in the order its recipe declares them
+    (shpack's order), restricted to its version; externals and non-Starlark packages have
+    none."""
     cls = spack.repo.PATH.get_pkg_class(node.fullname)
     if node.external or not hasattr(cls, "_star_deps"):
         return []
-    out = []
-    for when, dep_spec in cls._star_deps:
+    out: List = []
+    for when, dep_spec, deptypes in cls._star_deps:
         if when and not node.satisfies(when):
             continue
         name = dep_spec.partition("@")[0]
-        out.extend(node.dependencies(name=name))
+        out.extend((dep, deptypes) for dep in node.dependencies(name=name))
+    return out
+
+
+def _declared_deps(node) -> List:
+    return [dep for dep, _ in _declared_edges(node)]
+
+
+def _exec(node) -> Dict[str, Any]:
+    """What a dependent may run through ``node`` (Spack's RUNTIME_EXECUTABLE): its run
+    dependencies, and theirs and its link dependencies', by DAG hash."""
+    out: Dict[str, Any] = {}
+    for dep, deptypes in _declared_edges(node):
+        if "run" in deptypes:
+            out[dep.dag_hash()] = dep
+        if "run" in deptypes or "link" in deptypes:
+            out.update(_exec(dep))
+    return out
+
+
+def _runnable(node) -> Dict[str, Any]:
+    """Whose ``bin`` a build of ``node`` has on PATH, as in Spack's effective_deptypes:
+    its build (and test) dependencies, and what each of those runs."""
+    out: Dict[str, Any] = {}
+    for dep, deptypes in _declared_edges(node):
+        if "build" in deptypes or "test" in deptypes:
+            out[dep.dag_hash()] = dep
+            out.update(_exec(dep))
     return out
 
 
@@ -255,9 +285,16 @@ def _build_env(spec, ctx: Dict[str, Any]) -> Dict[str, str]:
                     env[key] = value
     basepath = env.get("BASEPATH", os.environ.get("PATH", ""))
     path = [os.path.join(ctx["prefix"], "bin")]
-    path += [os.path.join(str(n.prefix), "bin") for n in reversed(_closure_order(spec))]
+    runnable = _runnable(spec)
+    path += [
+        os.path.join(str(n.prefix), "bin")
+        for n in reversed(_closure_order(spec))
+        if n.dag_hash() in runnable
+    ]
     include, link, pkgconfig = [], [], []
-    for dep in _declared_deps(spec):
+    for dep, deptypes in _declared_edges(spec):
+        if "link" not in deptypes:
+            continue
         p = str(dep.prefix)
         if os.path.isdir(os.path.join(p, "include")):
             include.append(os.path.join(p, "include"))
