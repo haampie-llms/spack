@@ -234,6 +234,54 @@ def test_star_record_errors(star_repo, text, error):
         spack.starlark_eval.recipe(packages, star_repo.root, "bar")
 
 
+def test_star_when(star_repo):
+    """when(cond, [...]) ANDs cond into the directives it is given, nests, and
+    canonicalizes the result."""
+    recipe = pathlib.Path(star_repo.root) / "packages" / "bar" / "package.star"
+    recipe.write_text(
+        """
+version("1")
+version("2")
+version("3")
+when("@=1,=2", [
+    depends_on("baz", type = "build"),
+    depends_on("dash", when = "@=2,=3"),
+    when("target=aarch64:", [patch("x.patch")]),
+])
+x = when("@=3", [license(n) for n in ["MIT", "BSD-3-Clause"]])
+"""
+    )
+    packages = str(pathlib.Path(star_repo.root) / "packages")
+    rec = spack.starlark_eval.recipe(packages, star_repo.root, "bar")
+    assert [d.get("when") for d in rec["directives"]] == [
+        None,
+        None,
+        None,
+        "@=1,=2",
+        "@=2",
+        "@=1,=2 target=aarch64:",
+        "@=3",
+        "@=3",
+    ]
+
+
+@pytest.mark.parametrize(
+    "text,error",
+    [
+        ('when("@=1", [version("2")])', "want the value of depends_on"),
+        ('when("@=1", [depends_on("a", when = "@=2")])', "no version satisfies both"),
+        ('when("target=aarch64:", [depends_on("a")])', "only supported on patch"),
+        ('when("@1:", [depends_on("a")])', "version ranges are not supported"),
+    ],
+)
+def test_star_when_errors(star_repo, text, error):
+    recipe = pathlib.Path(star_repo.root) / "packages" / "bar" / "package.star"
+    recipe.write_text('version("1")\n' + text + "\n")
+    packages = str(pathlib.Path(star_repo.root) / "packages")
+    with pytest.raises(spack.starlark_eval.StarlarkError, match=error):
+        spack.starlark_eval.recipe(packages, star_repo.root, "bar")
+
+
 def test_star_directives_only_while_loading(star_repo):
     recipe = pathlib.Path(star_repo.root) / "packages" / "bar" / "package.star"
     recipe.write_text(

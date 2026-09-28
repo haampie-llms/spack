@@ -404,9 +404,74 @@ class _Evaluation:
             "patch": self._patch,
             "license": self._license,
             "build_system": self._build_system,
+            "when": self._when,
         }
 
-    def _directive(self, kind: str, **fields) -> None:
+    def _when(self, cond, items):
+        """``when("@=4.9-musl", [depends_on(...), ...])``: Spack's ``with when()``. The
+        directives in the list are declared already; their conditions become their own AND
+        this one. Returns them, so that when() nests."""
+        if not self.loading:
+            raise StarlarkError("when: directives may only be called while the recipe loads")
+        if not isinstance(cond, str):
+            raise StarlarkError(f"when: got {_type(cond)}, want string")
+        try:
+            versions, arch = parse_when(cond)
+        except StarlarkError as e:
+            raise StarlarkError(f'when("{cond}"): {str(e).split(": ", 1)[1]}') from None
+        if not isinstance(items, (list, tuple)):
+            raise StarlarkError(f"when: got {_type(items)}, want a list of directives")
+        out: List[Struct] = []
+        self._when_apply(items, versions, arch, cond, out, 0)
+        return out
+
+    def _when_apply(self, x, versions, arch, cond, out, depth):
+        if isinstance(x, (list, tuple)):
+            if depth > 8:
+                raise StarlarkError("when: lists nested too deeply")
+            for item in x:
+                self._when_apply(item, versions, arch, cond, out, depth + 1)
+            return
+        if isinstance(x, Struct) and x._ctor == "directive":
+            self._conjoin(self.directives[x.index], versions, arch, cond)
+            out.append(x)
+            return
+        raise StarlarkError(
+            f"when: got {_type(x)}, want the value of depends_on, patch, resource or license "
+            "(or a list of them)"
+        )
+
+    @staticmethod
+    def _conjoin(d, versions, arch, cond):
+        """``d``'s condition AND (versions, arch), written back in canonical form
+        ``@=V1,=V2 target=FAMILY:``; version lists intersect, in ``d``'s order."""
+        kind, old = d["directive"], d["when"]
+        v, ar = parse_when(old) if old is not None else (None, None)
+        if versions and v:
+            v = tuple(x for x in v if x in versions)
+            if not v:
+                raise StarlarkError(
+                    f'when("{cond}"): no version satisfies both it and the {kind}\'s when="{old}"'
+                )
+        elif versions:
+            v = versions
+        if arch and ar and arch != ar:
+            raise StarlarkError(
+                f'when("{cond}"): the {kind}\'s when="{old}" asks for another target'
+            )
+        ar = arch or ar
+        if ar and kind != "patch":
+            raise StarlarkError(
+                f'when("{cond}"): target= constraints are only supported on patch()'
+            )
+        parts = []
+        if v:
+            parts.append("@" + ",".join("=" + x for x in v))
+        if ar:
+            parts.append("target=x86_64:" if ar == "amd64" else "target=aarch64:")
+        d["when"] = " ".join(parts)
+
+    def _directive(self, kind: str, **fields) -> "Struct":
         if not self.loading:
             raise StarlarkError(f"{kind}: directives may only be called while the recipe loads")
         when = fields.get("when")
@@ -417,6 +482,8 @@ class _Evaluation:
                     f'{kind}: when="{when}": target= constraints are only supported on patch()'
                 )
         self.directives.append(dict(directive=kind, **fields))
+        # the value when() constrains: the directive's index in the record
+        return Struct("directive", index=len(self.directives) - 1)
 
     @staticmethod
     def _fname(url, fname):
@@ -430,22 +497,22 @@ class _Evaluation:
         )
 
     def _resource(self, url=None, sha256=None, fname=None, when=None):
-        self._directive(
+        return self._directive(
             "resource", sha256=sha256, url=url, fname=self._fname(url, fname), when=when
         )
 
     def _depends_on(self, spec, when=None, type=None):
         if not spec or spec.startswith("@") or any(c in spec for c in " \t\n"):
             raise StarlarkError(f'depends_on: invalid spec "{spec}"')
-        self._directive("depends_on", spec=spec, type=dep_types(type), when=when)
+        return self._directive("depends_on", spec=spec, type=dep_types(type), when=when)
 
     def _patch(self, file, level=1, when=None):
-        self._directive("patch", file=file, level=level, when=when)
+        return self._directive("patch", file=file, level=level, when=when)
 
     def _license(self, license_identifier, checked_by=None, when=None):
         if not license_identifier:
             raise StarlarkError("license: empty license identifier")
-        self._directive("license", license=license_identifier, when=when)
+        return self._directive("license", license=license_identifier, when=when)
 
     def _build_system(self, *values, default=None):
         if not values:
