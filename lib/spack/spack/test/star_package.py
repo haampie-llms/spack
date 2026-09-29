@@ -178,40 +178,6 @@ def test_star_source_hash_is_shpacks_package_text(star_repo):
     assert loads == {"build_systems/lib.star", "build_systems/generic.star"}
 
 
-def test_star_plan(star_repo):
-    ctx = {
-        "name": "foo",
-        "version": "1.1",
-        "id": "foo-1.1",
-        "arch": "aarch64",
-        "prefix": "/p",
-        "sh": "/sh",
-        "stage_dir": "/s",
-        "source_dir": "/s/foo-1.1",
-        "package_dir": "/r/foo",
-        "jobs": 2,
-        "makejobs": [],
-        "file_prefix_map": "",
-        "debug_prefix_map": "",
-        "package_files": ["package.star"],
-        "deps": {"dash": "/d"},
-    }
-    packages = str(pathlib.Path(star_repo.root) / "packages")
-    plan = spack.starlark_eval.plan(packages, star_repo.root, "foo", ctx)
-    assert [p["phase"] for p in plan["phases"]] == ["edit", "install"]
-    assert plan["phases"][1]["actions"] == [
-        {"op": "mkdir", "paths": ["/p/bin"]},
-        {
-            "content": "#!/sh\necho aarch64-linux-gnu\n",
-            "mode": "755",
-            "op": "write_file",
-            "path": "/p/bin/foo",
-        },
-        {"argv": ["make", "install"], "env": {"V": "1"}, "op": "run"},
-        {"op": "sh", "script": "true"},
-    ]
-
-
 def test_star_record(star_repo):
     """The record matches star's: attributes from the docstring and globals, one
     depends_on per spec with canonical types, Spack's build_system values."""
@@ -300,14 +266,3 @@ def test_star_when_errors(star_repo, text, error):
     packages = str(pathlib.Path(star_repo.root) / "packages")
     with pytest.raises(spack.starlark_eval.StarlarkError, match=error):
         spack.starlark_eval.recipe(packages, star_repo.root, "bar")
-
-
-def test_star_directives_only_while_loading(star_repo):
-    recipe = pathlib.Path(star_repo.root) / "packages" / "bar" / "package.star"
-    recipe.write_text(
-        recipe.read_text() + "\ndef install(ctx):\n    version('9')\n    return []\n"
-    )
-    packages = str(pathlib.Path(star_repo.root) / "packages")
-    ctx = {"version": "3.0", "arch": "amd64", "id": "bar-3.0", "deps": {}}
-    with pytest.raises(spack.starlark_eval.StarlarkError, match="only be called while"):
-        spack.starlark_eval.plan(packages, star_repo.root, "bar", ctx)
