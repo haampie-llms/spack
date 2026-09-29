@@ -583,9 +583,9 @@ def _seed_path(seed: str, seed_path_file: str) -> List[str]:
     """shpack/bootstrap/seed.path: what the seed puts on the PATH of the steps after it."""
     with open(seed_path_file, encoding="utf-8") as f:
         for line in f:
-            if line.startswith("PATH="):
-                return line.strip()[len("PATH=") :].replace("${SEED}", seed).split(":")
-    raise star_recipe.StarError("seed.path has no PATH= line")
+            if line.startswith("SEEDPATH="):
+                return line.strip()[len("SEEDPATH=") :].replace("${SEED}", seed).split(":")
+    raise star_recipe.StarError("seed.path has no SEEDPATH= line")
 
 
 def _kaem_path(step, own_bin: str, seed_path_file: str) -> List[str]:
