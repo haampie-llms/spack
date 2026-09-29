@@ -10,6 +10,7 @@ import pytest
 import spack.deptypes
 import spack.directives_meta
 import spack.repo
+import spack.spec
 import spack.star_package
 import spack.starlark_eval
 import spack.util.file_cache
@@ -153,9 +154,19 @@ def test_star_package_self_dependency_is_an_error(tmp_path: pathlib.Path, monkey
         assert not spack.directives_meta.DirectiveMeta._directives_to_be_executed
 
 
-def test_star_source_hash_covers_loaded_modules(star_repo):
-    text = spack.star_package.source_hash(star_repo.filename_for_package_name("foo"))
-    assert "def install" in text and "def triple" in text
+def test_star_source_hash_is_shpacks_package_text(star_repo):
+    """What the package hash sees of a recipe is shpack's package text: the version and
+    arch, every file of the package directory and every loaded module, by content."""
+    spec = spack.spec.Spec("foo@=1.1 target=aarch64")
+    text = spack.star_package.source_hash(spec, star_repo.filename_for_package_name("foo"))
+    lines = text.splitlines()
+    assert lines[:3] == ["package foo", "version 1.1", "arch aarch64"]
+    files = [line.split()[2] for line in lines if line.startswith("file ")]
+    assert files == ["package.star", "patches/x.patch"]
+    assert "evaluator star 1.0" in lines
+    # the modules it loads, its build system's included
+    loads = {line.split()[2] for line in lines if line.startswith("load ")}
+    assert loads == {"build_systems/lib.star", "build_systems/generic.star"}
 
 
 def test_star_plan(star_repo):
