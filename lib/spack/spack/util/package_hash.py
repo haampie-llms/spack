@@ -10,7 +10,6 @@ import spack.directives_meta
 import spack.fetch_strategy
 import spack.repo
 import spack.spec
-import spack.star_recipe
 import spack.util.hash
 from spack.util.unparse import unparse
 
@@ -367,9 +366,12 @@ def package_hash(
         repo: repositories the package.py is read from, when ``source`` is not given.
     """
     if source is None:
-        filename = repo.filename_for_package_name(spec.fullname)
-        if filename.endswith(spack.repo.star_file_name):
-            return spack.util.hash.b32_hash(spack.star_recipe.source_hash(spec, filename))
+        # star_package imports package_base, which imports this module
+        from spack.star_package import StarPackage
+
+        pkg_cls = repo.get_pkg_class(spec.fullname)
+        if issubclass(pkg_cls, StarPackage):
+            return spack.util.hash.b32_hash(pkg_cls.package_text(spec))
     source = canonical_source(spec, filter_multimethods=True, source=source, repo=repo)
     return spack.util.hash.b32_hash(source)
 

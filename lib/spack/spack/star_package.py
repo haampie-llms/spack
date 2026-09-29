@@ -16,8 +16,9 @@ and Python (:mod:`spack.starlark_eval`) evaluate it to the same records:
   derived from the concrete spec, whose actions are executed here.
 
 A repository loads a ``package.star`` as a package module (``spack.repo._StarLoader``),
-which calls :func:`define_package`. The recipe as data (its record, its package text,
-the input of the package hash) is :mod:`spack.star_recipe`.
+which calls :func:`define_package`: the package class derives from :class:`StarPackage`
+and holds the recipe's record. The recipe as data (its record, its package text, the
+input of the package hash) is :mod:`spack.star_recipe`.
 
 Spack fetches every archive, versions and ``resource()`` alike, unexpanded; staging
 copies into the stage all the build reads, before a build sandbox applies; the build
@@ -31,7 +32,7 @@ import os
 import shutil
 import subprocess
 import types
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import spack.builder
 import spack.config
@@ -76,34 +77,15 @@ def _register_os() -> None:
 def define_package(module: types.ModuleType) -> None:
     """Define the package class of a ``package.star`` in its package module, which the
     repository's import machinery created for it (``spack.repo._StarLoader``), as a
-    ``package.py`` defines its own."""
+    ``package.py`` defines its own: a :class:`StarPackage` holding the recipe's record,
+    with the recipe's directives."""
     _register_os()
-    loader = module.__loader__
-    pkg_name = loader.package_name  # type: ignore[union-attr]
-    filename = module.__file__
-    assert filename is not None
-    pkg_dir = os.path.dirname(filename)
+    pkg_name = module.__loader__.package_name  # type: ignore[union-attr]
+    assert module.__file__ is not None
+    pkg_dir = os.path.dirname(module.__file__)
     packages_path = os.path.dirname(pkg_dir)
     root = os.path.dirname(packages_path)  # load("//...") resolves here
     record = star_recipe.record(packages_path, root, os.path.basename(pkg_dir))
-
-    attrs: Dict[str, Any] = {
-        "__module__": module.__name__,
-        # shpack builds several versions of musl, gawk, xz, ... into one DAG; tagged
-        # build-tools, Spack lets a package appear once per version among build deps.
-        "tags": ["build-tools"],
-        # the recipe's docstring and globals are what a package keeps as class attributes
-        "__doc__": record["description"],
-        "parallel": record["parallel"],
-        "_star_root": root,
-        "_star_packages": packages_path,
-        "_star_kaem": star_recipe.kaem_steps(pkg_dir),
-        "install": _install,
-        "do_stage": _do_stage,
-        "do_patch": _do_patch,
-    }
-    if record["homepage"]:
-        attrs["homepage"] = record["homepage"]
 
     # Refuse what Spack cannot express before a single directive is queued: queued
     # directives go to the next package class created, whichever that is.
@@ -111,21 +93,34 @@ def define_package(module: types.ModuleType) -> None:
         if d["directive"] == "depends_on" and d["spec"].partition("@")[0] == pkg_name:
             raise star_recipe.StarError(f"{pkg_name} depends on itself ({d['spec']})")
 
+    attrs: Dict[str, Any] = {
+        "__module__": module.__name__,
+        # the recipe's docstring and globals are what a package keeps as class attributes
+        "__doc__": record["description"],
+        "parallel": record["parallel"],
+        "star_record": record,
+        "star_dir": pkg_dir,
+        "star_kaem": star_recipe.kaem_steps(pkg_dir),
+    }
+    if record["homepage"]:
+        attrs["homepage"] = record["homepage"]
+
     # Directives queue up and are consumed by the next package class created,
     # so every one of them is called right before the class below.
     try:
-        _make_class(pkg_name, record, module, attrs, packages_path, root)
+        _queue_directives(record, packages_path, root, attrs)
+        cls = type(StarPackage)(  # type: ignore[misc]
+            nm.pkg_name_to_class_name(pkg_name), (StarPackage,), attrs
+        )
     except BaseException:
         spack.directives_meta.DirectiveMeta._directives_to_be_executed.clear()
         raise
+    setattr(module, cls.__name__, cls)
 
 
-def _make_class(pkg_name, record, module, attrs, packages_path, root) -> None:
+def _queue_directives(record, packages_path: str, root: str, attrs: Dict[str, Any]) -> None:
+    """The recipe's directives as Spack's, and the class attributes they imply."""
     has_code = False
-    first_url = None
-    resources = []
-    star_deps: List = []
-    star_patches: List = []
     for d in record["directives"]:
         kind = d["directive"]
         when = d.get("when")
@@ -138,74 +133,413 @@ def _make_class(pkg_name, record, module, attrs, packages_path, root) -> None:
                 has_code = True
             if d["url"]:
                 kwargs["url"] = d["url"]
-                first_url = first_url or d["url"]
+                attrs.setdefault("url", d["url"])
             spack.directives.version(d["version"], **kwargs)
         elif kind == "depends_on":
             # To Spack every edge is a build edge: the bootstrap links several libcs
             # (musl 1.1.24 and 1.2.5, glibc-boot and glibc) and shells into what the
             # concretizer would make one unification set, and it cannot duplicate
-            # link dependencies that way. The recipe's own types (_star_deps) decide
+            # link dependencies that way. The recipe's own types (declared_edges) decide
             # what the build sees: PATH, the wrapper's -I/-L/rpath, PKG_CONFIG_PATH.
             spack.directives.depends_on(
                 _resolve(packages_path, root, d["spec"]), when=when, type="build"
             )
-            star_deps.append((when, d["spec"], tuple(d["type"])))
         elif kind == "patch":
             spack.directives.patch(os.path.join("patches", d["file"]), level=d["level"], when=when)
-            star_patches.append((d["file"], d["level"], when))
         elif kind == "license":
             spack.directives.license(d["license"], when=when)
-        elif kind == "build_system":
-            pass  # the plan carries it
         elif kind == "resource":
             spack.directives.resource(
                 name=d["fname"], url=d["url"], sha256=d["sha256"], expand=False, when=when
             )
-            resources.append((when, d["sha256"], d["url"], d["fname"]))
-    if first_url:
-        attrs["url"] = first_url
+        # build_system: the plan carries it
     if not has_code:
         attrs["has_code"] = False
-    attrs["_star_resources"] = resources
-    attrs["_star_deps"] = star_deps
-    attrs["_star_patches"] = star_patches
+
+
+class StarPackage(spack.builder.Package):
+    """The base class of the package class of a ``package.star`` (:func:`define_package`
+    derives one per recipe). Staging copies in what the build reads; installing runs the
+    recipe's plan, or, for a version the kaem phase builds, that kaem step."""
+
+    build_system_class = "StarPackage"
+
+    #: shpack builds several versions of musl, gawk, xz, ... into one DAG; tagged
+    #: build-tools, Spack lets a package appear once per version among build deps.
+    tags = ["build-tools"]
+
+    #: The recipe's directive record (``star recipe``, :func:`spack.starlark_eval.recipe`)
+    star_record: Dict[str, Any] = {"directives": [], "loads": []}
+    #: The recipe's package directory
+    star_dir = ""
+    #: VERSION -> [STEP, INPUT...] from the recipe's kaem-steps (star_recipe.kaem_steps)
+    star_kaem: Dict[str, List[str]] = {}
 
     # what a recipe builds does not depend on the host's operating system
     spack.directives.requires(f"os={star_recipe.STAR_OS}")
 
-    base = spack.builder.Package
-    cls = type(base)(nm.pkg_name_to_class_name(pkg_name), (base,), attrs)  # type: ignore[misc]
-    setattr(module, cls.__name__, cls)
+    @classmethod
+    def star_directives(cls, kind: str) -> List[Dict[str, Any]]:
+        """The recipe's directives of one kind, in recipe order."""
+        return [d for d in cls.star_record["directives"] if d["directive"] == kind]
+
+    @classmethod
+    def package_text(cls, spec) -> str:
+        """What Spack's package hash sees of the recipe (star_recipe.package_text)."""
+        return star_recipe.package_text(spec, cls.star_dir, cls.star_record)
+
+    @property
+    def star_root(self) -> str:
+        """The repository root, where ``load("//...")`` resolves."""
+        return os.path.dirname(os.path.dirname(self.star_dir))
+
+    def _applies(self, d: Dict[str, Any]) -> bool:
+        return not d.get("when") or self.spec.satisfies(d["when"])
+
+    @property
+    def kaem_step(self) -> Optional[List[str]]:
+        """[STEP, INPUT...] if the kaem phase builds this version."""
+        return self.star_kaem.get(str(self.spec.version))
+
+    @property
+    def is_seed(self) -> bool:
+        step = self.kaem_step
+        return step is not None and step[:1] == ["seed"]
+
+    def declared_edges(self) -> List[Tuple[Any, Tuple[str, ...]]]:
+        """The dependencies with their types, in the order the recipe declares them
+        (shpack's order), restricted to this version; an external has none."""
+        if self.spec.external:
+            return []
+        out: List[Tuple[Any, Tuple[str, ...]]] = []
+        for d in self.star_directives("depends_on"):
+            if self._applies(d):
+                name = d["spec"].partition("@")[0]
+                out.extend((dep, tuple(d["type"])) for dep in self.spec.dependencies(name=name))
+        return out
+
+    # ----------------------------------------------------------------- staging
+
+    @property
+    def _inputs(self) -> str:
+        """Where staging put what the build reads (``do_stage``): the stage's own copy."""
+        return os.path.join(self.stage.path, "shpack")
+
+    @property
+    def _tree(self) -> str:
+        """The build's copy of the tree (the repository root's parent): the recipe
+        directory, the modules it loads, a kaem step's inputs, and seed.path."""
+        return os.path.join(self._inputs, "tree")
+
+    def _in_tree(self, path: str) -> str:
+        """The build's copy of ``path``, a path in the tree."""
+        return os.path.join(self._tree, os.path.relpath(path, os.path.dirname(self.star_root)))
+
+    def do_stage(self, mirror_only=False):
+        """Spack's staging (fetch and checksum; the archives stay packed), then a copy in
+        the stage of all that the build reads, before any build sandbox applies: the
+        archives under their names, the recipe directory and the modules it loads, and for
+        a kaem step the tree paths it declares. These are what its package hash covers."""
+        super().do_stage(mirror_only)
+        spec = self.spec
+        out = self._inputs
+        shutil.rmtree(out, ignore_errors=True)
+        distfiles = os.path.join(out, "distfiles")
+        mkdirp(distfiles)
+        sources = []
+        if self.has_code:
+            version = next(
+                d for d in self.star_directives("version") if d["version"] == str(spec.version)
+            )
+            fname = version["fname"] or os.path.basename(version["url"])
+            shutil.copyfile(self.stage.archive_file, os.path.join(distfiles, fname))
+            sources.append(fname)
+        archives = {
+            s.resource.name: s.archive_file
+            for s in self.stage
+            if isinstance(s, spack.stage.ResourceStage)
+        }
+        for d in self.star_directives("resource"):
+            if self._applies(d):
+                shutil.copyfile(archives[d["fname"]], os.path.join(distfiles, d["fname"]))
+                sources.append(d["fname"])
+        with open(os.path.join(out, "sources"), "w", encoding="utf-8") as f:
+            f.writelines(f"{s}\n" for s in sources)
+        src_tree = os.path.dirname(self.star_root)
+        paths = [self.star_dir, os.path.join(self.star_root, "bootstrap", "seed.path")]
+        paths += [os.path.join(self.star_root, m) for m in self.star_record["loads"]]
+        inputs = (self.kaem_step or [""])[1:]
+        paths += [os.path.join(src_tree, p) for p in inputs if not p.startswith("!")]
+        for p in paths:
+            _copy_input(p, self._in_tree(p))
+        for p in inputs:  # "!PATH": left out, but the directory is there (stage0's outputs)
+            if p.startswith("!"):
+                shutil.rmtree(os.path.join(self._tree, p[1:]), ignore_errors=True)
+                mkdirp(os.path.join(self._tree, p[1:]))
+        # the build may need any package class of its DAG, and cannot read the repo then
+        for node in spec.traverse():
+            spack.repo.PATH.get_pkg_class(node.fullname)
+
+    def do_patch(self):
+        """Staging only: the build applies the recipe's patches after unpacking (the
+        protocol's staging), so Spack's patch step has nothing to patch."""
+        self.do_stage()
+
+    # ----------------------------------------------------------------- install
+
+    def install(self, spec, prefix):
+        step = self.kaem_step
+        if step:
+            self._kaem_install(str(prefix), step[0])
+        else:
+            self._plan_install(str(prefix))
+        # shpack's finalize (and how it registers a kaem-phase prefix)
+        _normalize_modes(str(prefix))
+
+    def _seed_path_file(self) -> str:
+        return self._in_tree(os.path.join(self.star_root, "bootstrap", "seed.path"))
+
+    def _kaem_install(self, prefix: str, step: str) -> None:
+        """Build a kaem-phase package as shpack's kaem phase does: the seed by the stage0
+        seed itself (start.kaem, COMMAND=seed), any other step by its kaem.run under the
+        kaem phase's environment contract (shpack/bootstrap/README.md), into the unhashed
+        prefix <store>/<name>-<version> that the kaem phase uses too."""
+        spec = self.spec
+        tree = self._tree
+        arch = star_recipe.arch(spec)
+        distfiles = os.path.join(self._inputs, "distfiles")
+        build = os.path.join(self._inputs, "build")
+        mkdirp(os.path.join(build, "home"))
+        if step == "seed":
+            if os.path.basename(prefix) != _node_id(spec):
+                raise star_recipe.StarError(
+                    f"{spec.name}: the seed installs at <store>/{_node_id(spec)}, "
+                    f"not {prefix} (install_tree projections)"
+                )
+            with open(os.path.join(tree, "shpack.conf"), "w", encoding="utf-8") as f:
+                f.write(
+                    f"STORE={os.path.dirname(prefix)}\nBUILDDIR={build}\n"
+                    f"DISTFILES={distfiles}\nCOMMAND=seed\n"
+                )
+            seed = os.path.join("bootstrap-seeds", "POSIX", _ARCH_DIR[arch], "kaem-optional-seed")
+            subprocess.run(
+                [seed, f"kaem.{arch}"], cwd=os.path.join(tree, "seed"), env={}, check=True
+            )
+            # the stage0 seed exits 0 even when the chain aborts
+            if not os.path.exists(os.path.join(prefix, "bin", "tcc")):
+                raise star_recipe.StarError(f"{spec.name}: the seed chain failed")
+            return
+        seed = str([d for d in _deps(spec) if _is_seed(d)][0].prefix)
+        boot = self._in_tree(os.path.join(self.star_root, "bootstrap"))
+        bindir = os.path.join(prefix, "bin")
+        env = {
+            "ROOT": tree,
+            "ARCH": arch,
+            "ARCH_DIR": _ARCH_DIR[arch],
+            "STORE": os.path.dirname(prefix),
+            "DISTFILES": distfiles,
+            "BUILDDIR": build,
+            "TMPDIR": build,
+            "HOME": os.path.join(build, "home"),
+            "TERM": "dumb",
+            "SEEDDIR": os.path.join(tree, "seed"),
+            "BOOT": boot,
+            "MESR": os.path.join(tree, "vendor", "mes-replacement"),
+            "LIBC_PREFIX": seed,
+            "LIBDIR": os.path.join(seed, "lib"),
+            "INCDIR": os.path.join(seed, "include"),
+            "pkg": step,
+            "PKG": os.path.join(boot, step),
+            "PREFIX": prefix,
+            "BINDIR": bindir,
+            "PATH": ":".join(_kaem_path(spec, bindir, self._seed_path_file())),
+        }
+        mkdirp(bindir)
+        kaem = os.path.join(seed, "mescc-tools-1.7.0", "bin", "kaem")
+        subprocess.run(
+            [kaem, "--verbose", "--strict", "--file", os.path.join(boot, step, "kaem.run")],
+            cwd=tree,
+            env=env,
+            check=True,
+        )
+
+    def _plan_install(self, prefix: str) -> None:
+        spec = self.spec
+        stage_dir = os.path.join(self._inputs, "stage")
+        scratch = os.path.join(self._inputs, "tmp")
+        mkdirp(stage_dir, os.path.join(scratch, "home"))
+        closure = _closure_order(spec)
+        ctx = self._ctx(prefix, closure, stage_dir)
+        env = self._build_env(ctx, closure, scratch)
+        self._stage_sources(stage_dir, env)
+        # the source directory is the first directory in the stage (shpack's do_stage)
+        dirs = sorted(
+            d for d in os.listdir(stage_dir) if os.path.isdir(os.path.join(stage_dir, d))
+        )
+        source_dir = os.path.join(stage_dir, dirs[0]) if dirs else stage_dir
+        ctx["source_dir"] = source_dir
+        self._patch(ctx["package_dir"], source_dir, env)
+        # #! lines in the whole stage point at the build shell (there is no /bin/sh)
+        subprocess.run([_tool("patch-shebangs", env), ctx["sh"], stage_dir], env=env, check=True)
+        plan = spack.starlark_eval.plan(
+            os.path.dirname(ctx["package_dir"]), self._in_tree(self.star_root), spec.name, ctx
+        )
+        mkdirp(prefix)
+        # the environment the plan runs in, for the record (shpack keeps it as spec/<id>/env)
+        with open(os.path.join(self._inputs, "env"), "w", encoding="utf-8") as f:
+            f.writelines(f"{k}={v}\n" for k, v in sorted(env.items()))
+        executor = _Executor(ctx, source_dir, env)
+        for phase in plan["phases"]:
+            for action in phase["actions"]:
+                executor.do(action)
+        # as shpack's finalize: no libtool archives
+        for libdir in ("lib", "lib64"):
+            for la in glob.glob(os.path.join(prefix, libdir, "*.la")):
+                os.remove(la)
+
+    def _ctx(self, prefix: str, closure: List, stage_dir: str) -> Dict[str, Any]:
+        """The build's ctx (star/PROTOCOL.md); staging fills in source_dir."""
+        spec = self.spec
+        package_dir = self._in_tree(self.star_dir)
+        direct = _deps(spec)
+        # name -> prefix over the direct deps, then the closure sorted by id: prefix_of
+        deps: Dict[str, str] = {}
+        for dep in direct + sorted(closure, key=_node_id):
+            deps.setdefault(dep.name, str(dep.prefix))
+        names = [d.name for d in direct]
+        shell_dep = "dash" if "dash" in names else "dash-boot" if "dash-boot" in names else None
+        if shell_dep is None:
+            raise star_recipe.StarError(f"{spec.name} declares no shell dependency (dash)")
+        return {
+            "name": spec.name,
+            "version": str(spec.version),
+            "id": _node_id(spec),
+            "arch": star_recipe.arch(spec),
+            "prefix": prefix,
+            "sh": os.path.join(deps[shell_dep], "bin", "sh"),
+            "stage_dir": stage_dir,
+            "source_dir": "",
+            "package_dir": package_dir,
+            "jobs": spack.config.determine_number_of_jobs(parallel=True),
+            # as in shpack: -j comes with MAKEFLAGS, and parallel(False) pins -j1
+            "makejobs": [] if self.parallel else ["-j1"],
+            "file_prefix_map": f"-ffile-prefix-map={stage_dir}=.",
+            "debug_prefix_map": f"-fdebug-prefix-map={stage_dir}=.",
+            "package_files": star_recipe.walk_files(package_dir),
+            "deps": deps,
+        }
+
+    def _base(self):
+        """The base PATH and shell of a shell-phase build: the kaem phase's PATH and shell
+        as it hands over to shpack (BASEPATH, CONFIG_SHELL), i.e. those of its last step,
+        the kaem-phase node in the DAG that has all the others below it."""
+        kaem = [n for n in self.spec.traverse(root=False) if _is_kaem(n) and not _is_seed(n)]
+        if not kaem:
+            raise star_recipe.StarError(
+                f"{self.spec.name}: no kaem-phase package in its DAG (depends_on dash-boot)"
+            )
+        last = max(kaem, key=lambda n: len(list(n.traverse())))
+        bindir = os.path.join(str(last.prefix), "bin")
+        return _kaem_path(last, bindir, self._seed_path_file()), os.path.join(bindir, "sh")
+
+    def _build_env(self, ctx: Dict[str, Any], closure: List, scratch: str) -> Dict[str, str]:
+        """The environment of a plan (star/PROTOCOL.md, Hosts): nothing inherited from
+        Spack or the user."""
+        basepath, config_shell = self._base()
+        path = [os.path.join(ctx["prefix"], "bin")]
+        runnable = _runnable(self.spec)
+        path += [
+            os.path.join(str(n.prefix), "bin")
+            for n in reversed(closure)
+            if n.dag_hash() in runnable
+        ]
+        include, link, pkgconfig = [], [], []
+        for dep, deptypes in self.declared_edges():
+            if "link" not in deptypes:
+                continue
+            p = str(dep.prefix)
+            if os.path.isdir(os.path.join(p, "include")):
+                include.append(os.path.join(p, "include"))
+            for lib in (os.path.join(p, "lib64"), os.path.join(p, "lib")):
+                if os.path.isdir(lib):
+                    link.append(lib)
+                    if os.path.isdir(os.path.join(lib, "pkgconfig")):
+                        pkgconfig.append(os.path.join(lib, "pkgconfig"))
+        return {
+            "PATH": ":".join(path + basepath),
+            "CONFIG_SHELL": config_shell,
+            "HOME": os.path.join(scratch, "home"),
+            "TMPDIR": scratch,
+            "TERM": "dumb",
+            "PREFIX": ctx["prefix"],
+            "ARCH": ctx["arch"],
+            "JOBS": str(ctx["jobs"]),
+            "makejobs": " ".join(ctx["makejobs"]),
+            "sh": ctx["sh"],
+            "SHELL": ctx["sh"],
+            "MAKEFLAGS": f"-j{ctx['jobs']} SHELL={ctx['sh']}",
+            "MFLAGS": f"-j{ctx['jobs']}",
+            "SOURCE_DATE_EPOCH": "0",
+            "SHPACK_INCLUDE_DIRS": ":".join(include),
+            "SHPACK_LINK_DIRS": ":".join(link),
+            "SHPACK_RPATH_DIRS": ":".join(link),
+            "PKG_CONFIG_PATH": ":".join(pkgconfig),
+            "SHPACK_FILE_PREFIX_MAP": ctx["file_prefix_map"],
+        }
+
+    def _stage_sources(self, stage_dir: str, env: Dict[str, str]) -> None:
+        """shpack's do_stage: every archive (the main source, then the resources) unpacked
+        side by side in one directory."""
+        distfiles = os.path.join(self._inputs, "distfiles")
+        with open(os.path.join(self._inputs, "sources"), encoding="utf-8") as f:
+            for fname in f.read().split():
+                _unpack(os.path.join(distfiles, fname), stage_dir, env)
+
+    def _patch(self, package_dir: str, source_dir: str, env: Dict[str, str]) -> None:
+        """shpack's do_patch: the recipe's patches, in order, with the patch on the build
+        PATH."""
+        for d in self.star_directives("patch"):
+            if not self._applies(d):
+                continue
+            with open(os.path.join(package_dir, "patches", d["file"]), "rb") as f:
+                subprocess.run(
+                    [_tool("patch", env), f"-p{int(d['level'])}"],
+                    stdin=f,
+                    cwd=source_dir,
+                    env=env,
+                    check=True,
+                )
 
 
-# --------------------------------------------------------------------- install
+# ---------------------------------------------------------------- the DAG, by node
 
 
-def _declared_edges(node) -> List:
-    """``node``'s dependencies with their types, in the order its recipe declares them
-    (shpack's order), restricted to its version; externals and non-Starlark packages have
-    none."""
-    cls = spack.repo.PATH.get_pkg_class(node.fullname)
-    if node.external or not hasattr(cls, "_star_deps"):
-        return []
-    out: List = []
-    for when, dep_spec, deptypes in cls._star_deps:
-        if when and not node.satisfies(when):
-            continue
-        name = dep_spec.partition("@")[0]
-        out.extend((dep, deptypes) for dep in node.dependencies(name=name))
-    return out
+def _edges(node) -> List[Tuple[Any, Tuple[str, ...]]]:
+    """``node``'s declared dependencies with their types; a package not written in
+    Starlark has none."""
+    pkg = node.package
+    return pkg.declared_edges() if isinstance(pkg, StarPackage) else []
 
 
-def _declared_deps(node) -> List:
-    return [dep for dep, _ in _declared_edges(node)]
+def _deps(node) -> List:
+    return [dep for dep, _ in _edges(node)]
+
+
+def _is_kaem(node) -> bool:
+    pkg = node.package
+    return isinstance(pkg, StarPackage) and pkg.kaem_step is not None
+
+
+def _is_seed(node) -> bool:
+    pkg = node.package
+    return isinstance(pkg, StarPackage) and pkg.is_seed
 
 
 def _exec(node) -> Dict[str, Any]:
     """What a dependent may run through ``node`` (Spack's RUNTIME_EXECUTABLE): its run
     dependencies, and theirs and its link dependencies', by DAG hash."""
     out: Dict[str, Any] = {}
-    for dep, deptypes in _declared_edges(node):
+    for dep, deptypes in _edges(node):
         if "run" in deptypes:
             out[dep.dag_hash()] = dep
         if "run" in deptypes or "link" in deptypes:
@@ -217,7 +551,7 @@ def _runnable(node) -> Dict[str, Any]:
     """Whose ``bin`` a build of ``node`` has on PATH, as in Spack's effective_deptypes:
     its build (and test) dependencies, and what each of those runs."""
     out: Dict[str, Any] = {}
-    for dep, deptypes in _declared_edges(node):
+    for dep, deptypes in _edges(node):
         if "build" in deptypes or "test" in deptypes:
             out[dep.dag_hash()] = dep
             out.update(_exec(dep))
@@ -231,7 +565,7 @@ def _closure_order(node) -> List:
     seen: Set[str] = set()
 
     def visit(n) -> None:
-        for dep in _declared_deps(n):
+        for dep in _deps(n):
             if dep.dag_hash() not in seen:
                 seen.add(dep.dag_hash())
                 visit(dep)
@@ -245,141 +579,29 @@ def _node_id(node) -> str:
     return f"{node.name}-{node.version}"
 
 
-def _ctx(pkg, spec, prefix, closure: List, stage_dir: str) -> Dict[str, Any]:
-    """The build's ctx (star/PROTOCOL.md); staging fills in source_dir."""
-    package_dir = os.path.join(_tree(pkg), "shpack", "packages", spec.name)
-    direct = _declared_deps(spec)
-    closure = sorted(closure, key=_node_id)
-    # name -> prefix over the direct deps, then the closure sorted by id: prefix_of
-    deps: Dict[str, str] = {}
-    for dep in direct + closure:
-        deps.setdefault(dep.name, str(dep.prefix))
-    names = [d.name for d in direct]
-    shell_dep = "dash" if "dash" in names else "dash-boot" if "dash-boot" in names else None
-    if shell_dep is None:
-        raise star_recipe.StarError(f"{spec.name} declares no shell dependency (dash)")
-    return {
-        "name": spec.name,
-        "version": str(spec.version),
-        "id": _node_id(spec),
-        "arch": star_recipe.arch(spec),
-        "prefix": str(prefix),
-        "sh": os.path.join(deps[shell_dep], "bin", "sh"),
-        "stage_dir": stage_dir,
-        "source_dir": "",
-        "package_dir": package_dir,
-        "jobs": spack.config.determine_number_of_jobs(parallel=True),
-        # as in shpack: -j comes with MAKEFLAGS, and parallel(False) pins -j1
-        "makejobs": [] if pkg.parallel else ["-j1"],
-        "file_prefix_map": f"-ffile-prefix-map={stage_dir}=.",
-        "debug_prefix_map": f"-fdebug-prefix-map={stage_dir}=.",
-        "package_files": star_recipe.walk_files(package_dir),
-        "deps": deps,
-    }
-
-
-def _inputs(pkg) -> str:
-    """Where staging put what the build reads (``_do_stage``): the stage's own copy."""
-    return os.path.join(pkg.stage.path, "shpack")
-
-
-def _tree(pkg) -> str:
-    """The build's copy of the tree: the recipe directory, the modules it loads, a kaem
-    step's inputs, and seed.path."""
-    return os.path.join(_inputs(pkg), "tree")
-
-
-def _is_kaem(node) -> bool:
-    cls = spack.repo.PATH.get_pkg_class(node.fullname)
-    return str(node.version) in getattr(cls, "_star_kaem", {})
-
-
-def _is_seed(node) -> bool:
-    cls = spack.repo.PATH.get_pkg_class(node.fullname)
-    return getattr(cls, "_star_kaem", {}).get(str(node.version), [None])[0] == "seed"
-
-
-def _seed_path(seed: str, tree: str) -> List[str]:
+def _seed_path(seed: str, seed_path_file: str) -> List[str]:
     """shpack/bootstrap/seed.path: what the seed puts on the PATH of the steps after it."""
-    with open(os.path.join(tree, "shpack", "bootstrap", "seed.path"), encoding="utf-8") as f:
+    with open(seed_path_file, encoding="utf-8") as f:
         for line in f:
             if line.startswith("PATH="):
                 return line.strip()[len("PATH=") :].replace("${SEED}", seed).split(":")
     raise star_recipe.StarError("seed.path has no PATH= line")
 
 
-def _kaem_path(step, own_bin: str, tree: str) -> List[str]:
+def _kaem_path(step, own_bin: str, seed_path_file: str) -> List[str]:
     """start.kaem's PATH for a kaem step: its own bin, the steps before it (its declared
     dependencies but the seed) newest first, then the seed's (seed.path)."""
-    deps = _declared_deps(step)
+    deps = _deps(step)
     seeds = [d for d in deps if _is_seed(d)]
     if len(seeds) != 1:
         raise star_recipe.StarError(f"{step.name}: a kaem step depends on the seed")
     path = [own_bin] + [
         os.path.join(str(d.prefix), "bin") for d in reversed(deps) if not _is_seed(d)
     ]
-    return path + _seed_path(str(seeds[0].prefix), tree)
+    return path + _seed_path(str(seeds[0].prefix), seed_path_file)
 
 
-def _base(spec, tree: str):
-    """The base PATH and shell of a shell-phase build: the kaem phase's PATH and shell as
-    it hands over to shpack (BASEPATH, CONFIG_SHELL), i.e. those of its last step, the
-    kaem-phase node in the DAG that has all the others below it."""
-    kaem = [n for n in spec.traverse(root=False) if _is_kaem(n) and not _is_seed(n)]
-    if not kaem:
-        raise star_recipe.StarError(
-            f"{spec.name}: no kaem-phase package in its DAG (depends_on dash-boot)"
-        )
-    last = max(kaem, key=lambda n: len(list(n.traverse())))
-    return _kaem_path(last, os.path.join(str(last.prefix), "bin"), tree), os.path.join(
-        str(last.prefix), "bin", "sh"
-    )
-
-
-def _build_env(
-    spec, ctx: Dict[str, Any], closure: List, scratch: str, tree: str
-) -> Dict[str, str]:
-    """The environment of a plan (star/PROTOCOL.md, Hosts): nothing inherited from Spack
-    or the user."""
-    basepath, config_shell = _base(spec, tree)
-    path = [os.path.join(ctx["prefix"], "bin")]
-    runnable = _runnable(spec)
-    path += [
-        os.path.join(str(n.prefix), "bin") for n in reversed(closure) if n.dag_hash() in runnable
-    ]
-    include, link, pkgconfig = [], [], []
-    for dep, deptypes in _declared_edges(spec):
-        if "link" not in deptypes:
-            continue
-        p = str(dep.prefix)
-        if os.path.isdir(os.path.join(p, "include")):
-            include.append(os.path.join(p, "include"))
-        for lib in (os.path.join(p, "lib64"), os.path.join(p, "lib")):
-            if os.path.isdir(lib):
-                link.append(lib)
-                if os.path.isdir(os.path.join(lib, "pkgconfig")):
-                    pkgconfig.append(os.path.join(lib, "pkgconfig"))
-    return {
-        "PATH": ":".join(path + basepath),
-        "CONFIG_SHELL": config_shell,
-        "HOME": os.path.join(scratch, "home"),
-        "TMPDIR": scratch,
-        "TERM": "dumb",
-        "PREFIX": ctx["prefix"],
-        "ARCH": ctx["arch"],
-        "JOBS": str(ctx["jobs"]),
-        "makejobs": " ".join(ctx["makejobs"]),
-        "sh": ctx["sh"],
-        "SHELL": ctx["sh"],
-        "MAKEFLAGS": f"-j{ctx['jobs']} SHELL={ctx['sh']}",
-        "MFLAGS": f"-j{ctx['jobs']}",
-        "SOURCE_DATE_EPOCH": "0",
-        "SHPACK_INCLUDE_DIRS": ":".join(include),
-        "SHPACK_LINK_DIRS": ":".join(link),
-        "SHPACK_RPATH_DIRS": ":".join(link),
-        "PKG_CONFIG_PATH": ":".join(pkgconfig),
-        "SHPACK_FILE_PREFIX_MAP": ctx["file_prefix_map"],
-    }
+# ------------------------------------------------------------------ build tools
 
 
 def _tool(name: str, env: Dict[str, str]) -> str:
@@ -417,31 +639,6 @@ def _unpack(archive: str, into: str, env: Dict[str, str]) -> None:
         subprocess.run([_tool("cp", env), archive, "."], cwd=into, env=env, check=True)
 
 
-def _stage_sources(pkg, stage_dir: str, env: Dict[str, str]) -> None:
-    """shpack's do_stage: every archive (the main source, then the resources) unpacked side
-    by side in one directory."""
-    distfiles = os.path.join(_inputs(pkg), "distfiles")
-    with open(os.path.join(_inputs(pkg), "sources"), encoding="utf-8") as f:
-        for fname in f.read().split():
-            _unpack(os.path.join(distfiles, fname), stage_dir, env)
-
-
-def _patch(pkg, spec, source_dir: str, env: Dict[str, str]) -> None:
-    """shpack's do_patch: the recipe's patches, in order, with the patch on the build PATH."""
-    package_dir = os.path.join(_tree(pkg), "shpack", "packages", spec.name)
-    for fname, level, when in pkg._star_patches:
-        if when and not spec.satisfies(when):
-            continue
-        with open(os.path.join(package_dir, "patches", fname), "rb") as f:
-            subprocess.run(
-                [_tool("patch", env), f"-p{int(level)}"],
-                stdin=f,
-                cwd=source_dir,
-                env=env,
-                check=True,
-            )
-
-
 _ARCH_DIR = {"aarch64": "AArch64", "amd64": "AMD64"}
 
 
@@ -453,65 +650,6 @@ def _copy_input(src: str, dst: str) -> None:
         shutil.copy2(src, dst)
 
 
-def _do_stage(self, mirror_only=False):
-    """Spack's staging (fetch and checksum; the archives stay packed), then a copy in the
-    stage of all that the build reads, before any build sandbox applies: the archives
-    under their names, the recipe directory and the modules it loads, and for a kaem step
-    the tree paths it declares. These are what its package hash covers."""
-    spack.package_base.PackageBase.do_stage(self, mirror_only)
-    spec = self.spec
-    out = _inputs(self)
-    shutil.rmtree(out, ignore_errors=True)
-    distfiles = os.path.join(out, "distfiles")
-    mkdirp(distfiles)
-    record = star_recipe.record(self._star_packages, self._star_root, spec.name)
-    sources = []
-    if self.has_code:
-        version = [
-            d
-            for d in record["directives"]
-            if d["directive"] == "version" and d["version"] == str(spec.version)
-        ][0]
-        fname = version["fname"] or os.path.basename(version["url"])
-        shutil.copyfile(self.stage.archive_file, os.path.join(distfiles, fname))
-        sources.append(fname)
-    archives = {
-        s.resource.name: s.archive_file
-        for s in self.stage
-        if isinstance(s, spack.stage.ResourceStage)
-    }
-    for when, _, _, fname in self._star_resources:
-        if when and not spec.satisfies(when):
-            continue
-        shutil.copyfile(archives[fname], os.path.join(distfiles, fname))
-        sources.append(fname)
-    with open(os.path.join(out, "sources"), "w", encoding="utf-8") as f:
-        f.writelines(f"{s}\n" for s in sources)
-    tree = os.path.join(out, "tree")
-    src_tree = os.path.dirname(self._star_root)
-    shpack = os.path.relpath(self._star_root, src_tree)
-    paths = [os.path.join(shpack, "packages", spec.name)]
-    paths += [os.path.join(shpack, m) for m in record["loads"]]
-    paths.append(os.path.join(shpack, "bootstrap", "seed.path"))
-    inputs = self._star_kaem.get(str(spec.version), [None])[1:]
-    paths += [p for p in inputs if not p.startswith("!")]
-    for p in paths:
-        _copy_input(os.path.join(src_tree, p), os.path.join(tree, p))
-    for p in inputs:  # "!PATH": left out, but the directory is there (stage0's outputs)
-        if p.startswith("!"):
-            shutil.rmtree(os.path.join(tree, p[1:]), ignore_errors=True)
-            mkdirp(os.path.join(tree, p[1:]))
-    # the build may need any package class of its DAG, and cannot read the repo then
-    for node in spec.traverse():
-        spack.repo.PATH.get_pkg_class(node.fullname)
-
-
-def _do_patch(self):
-    """Staging only: the build applies the recipe's patches after unpacking (the protocol's
-    staging), so Spack's patch step has nothing to patch."""
-    self.do_stage()
-
-
 def _normalize_modes(prefix: str) -> None:
     """shpack's finalize (chmod -R u=rwX,go=rX): directories 755, files 644, or 755 if any
     execute bit is set."""
@@ -521,111 +659,6 @@ def _normalize_modes(prefix: str) -> None:
             p = os.path.join(root, n)
             if not os.path.islink(p):
                 os.chmod(p, 0o755 if os.stat(p).st_mode & 0o111 else 0o644)
-
-
-def _kaem_install(pkg, spec, prefix, step: str) -> None:
-    """Build a kaem-phase package as shpack's kaem phase does: the seed by the stage0 seed
-    itself (start.kaem, COMMAND=seed), any other step by its kaem.run under the kaem phase's
-    environment contract (shpack/bootstrap/README.md), into the unhashed prefix
-    <store>/<name>-<version> that the kaem phase uses too."""
-    tree = _tree(pkg)
-    arch = star_recipe.arch(spec)
-    distfiles = os.path.join(_inputs(pkg), "distfiles")
-    build = os.path.join(_inputs(pkg), "build")
-    mkdirp(os.path.join(build, "home"))
-    if step == "seed":
-        if os.path.basename(str(prefix)) != _node_id(spec):
-            raise star_recipe.StarError(
-                f"{spec.name}: the seed installs at <store>/{_node_id(spec)}, "
-                f"not {prefix} (install_tree projections)"
-            )
-        with open(os.path.join(tree, "shpack.conf"), "w", encoding="utf-8") as f:
-            f.write(
-                f"STORE={os.path.dirname(str(prefix))}\nBUILDDIR={build}\n"
-                f"DISTFILES={distfiles}\nCOMMAND=seed\n"
-            )
-        seed = os.path.join("bootstrap-seeds", "POSIX", _ARCH_DIR[arch], "kaem-optional-seed")
-        subprocess.run([seed, f"kaem.{arch}"], cwd=os.path.join(tree, "seed"), env={}, check=True)
-        # the stage0 seed exits 0 even when the chain aborts
-        if not os.path.exists(os.path.join(str(prefix), "bin", "tcc")):
-            raise star_recipe.StarError(f"{spec.name}: the seed chain failed")
-        return
-    seed = str([d for d in _declared_deps(spec) if _is_seed(d)][0].prefix)
-    boot = os.path.join(tree, "shpack", "bootstrap")
-    bindir = os.path.join(str(prefix), "bin")
-    env = {
-        "ROOT": tree,
-        "ARCH": arch,
-        "ARCH_DIR": _ARCH_DIR[arch],
-        "STORE": os.path.dirname(str(prefix)),
-        "DISTFILES": distfiles,
-        "BUILDDIR": build,
-        "TMPDIR": build,
-        "HOME": os.path.join(build, "home"),
-        "TERM": "dumb",
-        "SEEDDIR": os.path.join(tree, "seed"),
-        "BOOT": boot,
-        "MESR": os.path.join(tree, "vendor", "mes-replacement"),
-        "LIBC_PREFIX": seed,
-        "LIBDIR": os.path.join(seed, "lib"),
-        "INCDIR": os.path.join(seed, "include"),
-        "pkg": step,
-        "PKG": os.path.join(boot, step),
-        "PREFIX": str(prefix),
-        "BINDIR": bindir,
-        "PATH": ":".join(_kaem_path(spec, bindir, tree)),
-    }
-    mkdirp(bindir)
-    kaem = os.path.join(seed, "mescc-tools-1.7.0", "bin", "kaem")
-    subprocess.run(
-        [kaem, "--verbose", "--strict", "--file", os.path.join(boot, step, "kaem.run")],
-        cwd=tree,
-        env=env,
-        check=True,
-    )
-
-
-def _install(self, spec, prefix):
-    step = self._star_kaem.get(str(spec.version))
-    if step:
-        _kaem_install(self, spec, prefix, step[0])
-    else:
-        _plan_install(self, spec, prefix)
-    # shpack's finalize (and how it registers a kaem-phase prefix)
-    _normalize_modes(str(prefix))
-
-
-def _plan_install(pkg, spec, prefix):
-    tree = _tree(pkg)
-    stage_dir = os.path.join(_inputs(pkg), "stage")
-    scratch = os.path.join(_inputs(pkg), "tmp")
-    mkdirp(stage_dir, os.path.join(scratch, "home"))
-    closure = _closure_order(spec)
-    ctx = _ctx(pkg, spec, prefix, closure, stage_dir)
-    env = _build_env(spec, ctx, closure, scratch, tree)
-    _stage_sources(pkg, stage_dir, env)
-    # the source directory is the first directory in the stage (shpack's do_stage)
-    dirs = sorted(d for d in os.listdir(stage_dir) if os.path.isdir(os.path.join(stage_dir, d)))
-    source_dir = os.path.join(stage_dir, dirs[0]) if dirs else stage_dir
-    ctx["source_dir"] = source_dir
-    _patch(pkg, spec, source_dir, env)
-    # #! lines in the whole stage point at the build shell (there is no /bin/sh)
-    subprocess.run([_tool("patch-shebangs", env), ctx["sh"], stage_dir], env=env, check=True)
-    plan = spack.starlark_eval.plan(
-        os.path.join(tree, "shpack", "packages"), os.path.join(tree, "shpack"), spec.name, ctx
-    )
-    mkdirp(str(prefix))
-    # the environment the plan runs in, for the record (shpack keeps it as spec/<id>/env)
-    with open(os.path.join(_inputs(pkg), "env"), "w", encoding="utf-8") as f:
-        f.writelines(f"{k}={v}\n" for k, v in sorted(env.items()))
-    executor = _Executor(ctx, source_dir, env)
-    for phase in plan["phases"]:
-        for action in phase["actions"]:
-            executor.do(action)
-    # as shpack's finalize: no libtool archives
-    for libdir in ("lib", "lib64"):
-        for la in glob.glob(os.path.join(str(prefix), libdir, "*.la")):
-            os.remove(la)
 
 
 class _Executor:

@@ -4,6 +4,7 @@
 """Tests for Starlark package recipes (package.star)."""
 
 import pathlib
+import sys
 
 import pytest
 
@@ -11,6 +12,7 @@ import spack.deptypes
 import spack.directives_meta
 import spack.repo
 import spack.spec
+import spack.star_package
 import spack.star_recipe
 import spack.starlark_eval
 import spack.util.file_cache
@@ -82,9 +84,13 @@ depends_on("selfish@1")
 }
 
 
-def _star_repo(tmp_path: pathlib.Path, recipes) -> spack.repo.Repo:
+def _star_repo(tmp_path: pathlib.Path, recipes, monkeypatch) -> spack.repo.Repo:
     """A Package API v1 repo of package.star recipes, with shpack's layout (the
     build systems in build_systems/ beside packages/)."""
+    # a package class knows its recipe's directory: none of an earlier test's repo
+    monkeypatch.setattr(spack.star_recipe, "records_cache", {})
+    for m in [m for m in sys.modules if m.startswith("spack.pkg.starry")]:
+        monkeypatch.delitem(sys.modules, m)
     root, _ = spack.repo.create_repo(
         str(tmp_path / "repo"), namespace="starry", package_api=(1, 0)
     )
@@ -103,8 +109,7 @@ def _star_repo(tmp_path: pathlib.Path, recipes) -> spack.repo.Repo:
 
 @pytest.fixture()
 def star_repo(tmp_path: pathlib.Path, monkeypatch):
-    monkeypatch.setattr(spack.star_recipe, "records_cache", {})
-    repo = _star_repo(tmp_path, RECIPES)
+    repo = _star_repo(tmp_path, RECIPES, monkeypatch)
     (pathlib.Path(repo.root) / "packages" / "foo" / "patches").mkdir()
     (pathlib.Path(repo.root) / "packages" / "foo" / "patches" / "x.patch").write_text("")
     with spack.repo.use_repositories(repo):
@@ -138,17 +143,19 @@ def test_star_package_class(star_repo):
         for dl in by_when.values()
         for d in dl
     )
-    assert [(spec, types) for _, spec, types in cls._star_deps] == [
+    assert issubclass(cls, spack.star_package.StarPackage)
+    assert [(d["spec"], tuple(d["type"])) for d in cls.star_directives("depends_on")] == [
         ("bar@2.0", ("build", "link")),
         ("dash", ("build",)),
         ("baz", ("build", "run")),
     ]
-    assert cls._star_patches == [("x.patch", 1, "@=1.0-musl")]
+    assert [(d["file"], d["level"], d["when"]) for d in cls.star_directives("patch")] == [
+        ("x.patch", 1, "@=1.0-musl")
+    ]
 
 
 def test_star_package_self_dependency_is_an_error(tmp_path: pathlib.Path, monkeypatch):
-    monkeypatch.setattr(spack.star_recipe, "records_cache", {})
-    repo = _star_repo(tmp_path, SELFISH)
+    repo = _star_repo(tmp_path, SELFISH, monkeypatch)
     with spack.repo.use_repositories(repo):
         with pytest.raises(spack.repo.RepoError, match="depends on itself"):
             repo.get_pkg_class("selfish")
@@ -160,7 +167,7 @@ def test_star_source_hash_is_shpacks_package_text(star_repo):
     """What the package hash sees of a recipe is shpack's package text: the version and
     arch, every file of the package directory and every loaded module, by content."""
     spec = spack.spec.Spec("foo@=1.1 target=aarch64")
-    text = spack.star_recipe.source_hash(spec, star_repo.filename_for_package_name("foo"))
+    text = star_repo.get_pkg_class("foo").package_text(spec)
     lines = text.splitlines()
     assert lines[:3] == ["package foo", "version 1.1", "arch aarch64"]
     files = [line.split()[2] for line in lines if line.startswith("file ")]

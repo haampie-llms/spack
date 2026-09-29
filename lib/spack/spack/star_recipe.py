@@ -92,16 +92,14 @@ def kaem_steps(pkg_dir: str) -> Dict[str, List[str]]:
     return out
 
 
-def source_hash(spec, filename: str) -> str:
+def package_text(spec, pkg_dir: str, rec) -> str:
     """What Spack's package hash sees of a Starlark recipe: shpack's package text
     (package_text in its lib/concretize.star), everything that determines the build but
     the dependencies -- the sources of this version and its resources, every file in the
     package directory, the evaluator, and every module the recipe loads -- so that shpack
-    and Spack compute the same DAG hashes."""
-    pkg_dir = os.path.dirname(filename)
-    packages_path = os.path.dirname(pkg_dir)
-    root = os.path.dirname(packages_path)
-    rec = record(packages_path, root, os.path.basename(pkg_dir))
+    and Spack compute the same DAG hashes. ``rec`` is the record of the recipe in
+    ``pkg_dir``."""
+    root = os.path.dirname(os.path.dirname(pkg_dir))
     version = str(spec.version)
     out = [f"package {spec.name}", f"version {version}", f"arch {arch(spec)}"]
     for d in rec["directives"]:
