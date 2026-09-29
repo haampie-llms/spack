@@ -10,6 +10,7 @@ import spack.directives_meta
 import spack.fetch_strategy
 import spack.repo
 import spack.spec
+import spack.star_recipe
 import spack.util.hash
 from spack.util.unparse import unparse
 
@@ -368,9 +369,7 @@ def package_hash(
     if source is None:
         filename = repo.filename_for_package_name(spec.fullname)
         if filename.endswith(spack.repo.star_file_name):
-            from spack import star_package
-
-            return spack.util.hash.b32_hash(star_package.source_hash(spec, filename))
+            return spack.util.hash.b32_hash(spack.star_recipe.source_hash(spec, filename))
     source = canonical_source(spec, filter_multimethods=True, source=source, repo=repo)
     return spack.util.hash.b32_hash(source)
 

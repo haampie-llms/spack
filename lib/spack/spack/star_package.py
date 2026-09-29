@@ -15,18 +15,21 @@ and Python (:mod:`spack.starlark_eval`) evaluate it to the same records:
 * at install time, the plan: the phases evaluated against a build context
   derived from the concrete spec, whose actions are executed here.
 
-``resource()`` keeps shpack's semantics (unpacked flat into the stage, beside the
-source) by fetching in the install step rather than through Spack's resources,
-so ``spack mirror`` does not see them yet.
+A repository loads a ``package.star`` as a package module (``spack.repo._StarLoader``),
+which calls :func:`define_package`. The recipe as data (its record, its package text,
+the input of the package hash) is :mod:`spack.star_recipe`.
+
+Spack fetches every archive, versions and ``resource()`` alike, unexpanded; staging
+copies into the stage all the build reads, before a build sandbox applies; the build
+unpacks, patches and runs the plan with the tools of its own PATH (star/PROTOCOL.md in
+shpack, Hosts).
 """
 
 import fnmatch
 import glob
-import hashlib
 import os
 import shutil
 import subprocess
-import sys
 import types
 from typing import Any, Dict, List
 
@@ -34,42 +37,15 @@ import spack.builder
 import spack.config
 import spack.directives
 import spack.directives_meta
-import spack.fetch_strategy
+import spack.operating_systems
+import spack.package_base
+import spack.platforms
 import spack.repo
 import spack.stage
+import spack.star_recipe as star_recipe
 import spack.starlark_eval
 import spack.util.naming as nm
-from spack.error import SpackError
 from spack.util.filesystem import copy_tree, filter_file, mkdirp
-
-STAR_FILE_NAME = "package.star"
-
-#: shpack's arch names, by target family
-_ARCH = {"x86_64": "amd64", "aarch64": "aarch64"}
-
-#: The evaluator shpack names in its package text (star --version)
-STAR_VERSION = "star 1.0"
-
-#: The operating system of every Starlark package: what they build does not depend on the
-#: host's, and shpack records it (platform_os) so that both compute the same hashes
-STAR_OS = "shpack"
-
-
-class StarError(SpackError):
-    """Error evaluating or executing a Starlark package recipe."""
-
-
-_records: Dict[str, Any] = {}
-
-
-def _record(packages_path: str, root: str, name: str) -> Any:
-    key = os.path.join(packages_path, name)
-    if key not in _records:
-        try:
-            _records[key] = spack.starlark_eval.recipe(packages_path, root, name)
-        except spack.starlark_eval.StarlarkError as e:
-            raise StarError(f"{name}: {e}") from e
-    return _records[key]
 
 
 def _resolve(packages_path: str, root: str, spec: str) -> str:
@@ -79,42 +55,40 @@ def _resolve(packages_path: str, root: str, spec: str) -> str:
     name, at, version = spec.partition("@")
     if at:
         return f"{name}@={version}"
-    if not os.path.exists(os.path.join(packages_path, name, STAR_FILE_NAME)):
+    if not os.path.exists(os.path.join(packages_path, name, spack.repo.star_file_name)):
         return spec
-    for d in _record(packages_path, root, name)["directives"]:
+    for d in star_recipe.record(packages_path, root, name)["directives"]:
         if d["directive"] == "version":
             return f"{name}@={d['version']}"
     return spec
 
 
 def _register_os() -> None:
-    """Make STAR_OS an operating system the host platform builds for (Spack otherwise
-    knows only the host's, and those named on the command line)."""
-    import spack.operating_systems
-    import spack.platforms
-
+    """Make star_recipe.STAR_OS an operating system the host platform builds for (Spack
+    otherwise knows only the host's, and those named on the command line)."""
     platform = spack.platforms.host()
-    if STAR_OS not in platform.operating_sys:
+    if star_recipe.STAR_OS not in platform.operating_sys:
         platform.add_operating_system(
-            STAR_OS, spack.operating_systems.OperatingSystem(STAR_OS, "")
+            star_recipe.STAR_OS, spack.operating_systems.OperatingSystem(star_recipe.STAR_OS, "")
         )
 
 
-def make_package_class(repo, pkg_name: str, filename: str) -> type:
-    """Build the package class for ``pkg_name`` from its ``package.star``."""
+def define_package(module: types.ModuleType) -> None:
+    """Define the package class of a ``package.star`` in its package module, which the
+    repository's import machinery created for it (``spack.repo._StarLoader``), as a
+    ``package.py`` defines its own."""
     _register_os()
+    loader = module.__loader__
+    pkg_name = loader.package_name  # type: ignore[union-attr]
+    filename = module.__file__
+    assert filename is not None
     pkg_dir = os.path.dirname(filename)
     packages_path = os.path.dirname(pkg_dir)
     root = os.path.dirname(packages_path)  # load("//...") resolves here
-    record = _record(packages_path, root, os.path.basename(pkg_dir))
-
-    module_name = f"{repo.full_namespace}.{repo.naming_scheme.pkg_name_to_pkg_dir(pkg_name)}"
-    module = types.ModuleType(module_name)
-    module.__file__ = filename
-    sys.modules[module_name] = module
+    record = star_recipe.record(packages_path, root, os.path.basename(pkg_dir))
 
     attrs: Dict[str, Any] = {
-        "__module__": module_name,
+        "__module__": module.__name__,
         # shpack builds several versions of musl, gawk, xz, ... into one DAG; tagged
         # build-tools, Spack lets a package appear once per version among build deps.
         "tags": ["build-tools"],
@@ -124,7 +98,7 @@ def make_package_class(repo, pkg_name: str, filename: str) -> type:
         "_star_file": filename,
         "_star_root": root,
         "_star_packages": packages_path,
-        "_star_kaem": _kaem_steps(pkg_dir),
+        "_star_kaem": star_recipe.kaem_steps(pkg_dir),
         "install": _install,
         "do_stage": _do_stage,
         "do_patch": _do_patch,
@@ -136,18 +110,18 @@ def make_package_class(repo, pkg_name: str, filename: str) -> type:
     # directives go to the next package class created, whichever that is.
     for d in record["directives"]:
         if d["directive"] == "depends_on" and d["spec"].partition("@")[0] == pkg_name:
-            raise StarError(f"{pkg_name} depends on itself ({d['spec']})")
+            raise star_recipe.StarError(f"{pkg_name} depends on itself ({d['spec']})")
 
     # Directives queue up and are consumed by the next package class created,
     # so every one of them is called right before the class below.
     try:
-        return _make_class(repo, pkg_name, record, module, attrs, packages_path, root)
+        _make_class(pkg_name, record, module, attrs, packages_path, root)
     except BaseException:
         spack.directives_meta.DirectiveMeta._directives_to_be_executed.clear()
         raise
 
 
-def _make_class(repo, pkg_name, record, module, attrs, packages_path, root) -> type:
+def _make_class(pkg_name, record, module, attrs, packages_path, root) -> type:
     has_code = False
     first_url = None
     resources = []
@@ -198,7 +172,7 @@ def _make_class(repo, pkg_name, record, module, attrs, packages_path, root) -> t
     attrs["_star_patches"] = star_patches
 
     # what a recipe builds does not depend on the host's operating system
-    spack.directives.requires(f"os={STAR_OS}")
+    spack.directives.requires(f"os={star_recipe.STAR_OS}")
 
     base = spack.builder.Package
     cls = type(base)(nm.pkg_name_to_class_name(pkg_name), (base,), attrs)  # type: ignore[misc]
@@ -278,7 +252,7 @@ def _ctx(pkg, spec, prefix, stage_dir: str, source_dir: str) -> Dict[str, Any]:
     names = [d.name for d in direct]
     shell_dep = "dash" if "dash" in names else "dash-boot" if "dash-boot" in names else None
     if shell_dep is None:
-        raise StarError(f"{spec.name} declares no shell dependency (dash)")
+        raise star_recipe.StarError(f"{spec.name} declares no shell dependency (dash)")
     files = []
     for root, _, fnames in os.walk(package_dir):
         for n in fnames:
@@ -288,7 +262,7 @@ def _ctx(pkg, spec, prefix, stage_dir: str, source_dir: str) -> Dict[str, Any]:
         "name": spec.name,
         "version": str(spec.version),
         "id": _node_id(spec),
-        "arch": _ARCH.get(str(spec.target.family), str(spec.target.family)),
+        "arch": star_recipe.ARCH.get(str(spec.target.family), str(spec.target.family)),
         "prefix": str(prefix),
         "sh": os.path.join(deps[shell_dep], "bin", "sh"),
         "stage_dir": stage_dir,
@@ -331,7 +305,7 @@ def _seed_path(seed: str, tree: str) -> List[str]:
         for line in f:
             if line.startswith("PATH="):
                 return line.strip()[len("PATH=") :].replace("${SEED}", seed).split(":")
-    raise StarError("seed.path has no PATH= line")
+    raise star_recipe.StarError("seed.path has no PATH= line")
 
 
 def _kaem_path(step, own_bin: str, tree: str) -> List[str]:
@@ -340,7 +314,7 @@ def _kaem_path(step, own_bin: str, tree: str) -> List[str]:
     deps = _declared_deps(step)
     seeds = [d for d in deps if _is_seed(d)]
     if len(seeds) != 1:
-        raise StarError(f"{step.name}: a kaem step depends on the seed")
+        raise star_recipe.StarError(f"{step.name}: a kaem step depends on the seed")
     path = [own_bin] + [
         os.path.join(str(d.prefix), "bin") for d in reversed(deps) if not _is_seed(d)
     ]
@@ -353,7 +327,9 @@ def _base(spec, tree: str):
     kaem-phase node in the DAG that has all the others below it."""
     kaem = [n for n in spec.traverse(root=False) if _is_kaem(n) and not _is_seed(n)]
     if not kaem:
-        raise StarError(f"{spec.name}: no kaem-phase package in its DAG (depends_on dash-boot)")
+        raise star_recipe.StarError(
+            f"{spec.name}: no kaem-phase package in its DAG (depends_on dash-boot)"
+        )
     last = max(kaem, key=lambda n: len(list(n.traverse())))
     return _kaem_path(last, os.path.join(str(last.prefix), "bin"), tree), os.path.join(
         str(last.prefix), "bin", "sh"
@@ -409,7 +385,7 @@ def _build_env(spec, ctx: Dict[str, Any], scratch: str, tree: str) -> Dict[str, 
 def _tool(name: str, env: Dict[str, str]) -> str:
     exe = shutil.which(name, path=env["PATH"])
     if not exe:
-        raise StarError(f"{name}: not found on the build PATH")
+        raise star_recipe.StarError(f"{name}: not found on the build PATH")
     return exe
 
 
@@ -482,15 +458,13 @@ def _do_stage(self, mirror_only=False):
     stage of all that the build reads, before any build sandbox applies: the archives
     under their names, the recipe directory and the modules it loads, and for a kaem step
     the tree paths it declares. These are what its package hash covers."""
-    import spack.package_base
-
     spack.package_base.PackageBase.do_stage(self, mirror_only)
     spec = self.spec
     out = _inputs(self)
     shutil.rmtree(out, ignore_errors=True)
     distfiles = os.path.join(out, "distfiles")
     mkdirp(distfiles)
-    record = _record(self._star_packages, self._star_root, spec.name)
+    record = star_recipe.record(self._star_packages, self._star_root, spec.name)
     sources = []
     if self.has_code:
         version = [
@@ -555,13 +529,13 @@ def _kaem_install(pkg, spec, prefix, step: str) -> None:
     environment contract (shpack/bootstrap/README.md), into the unhashed prefix
     <store>/<name>-<version> that the kaem phase uses too."""
     tree = _tree(pkg)
-    arch = _ARCH.get(str(spec.target.family), str(spec.target.family))
+    arch = star_recipe.ARCH.get(str(spec.target.family), str(spec.target.family))
     distfiles = os.path.join(_inputs(pkg), "distfiles")
     build = os.path.join(_inputs(pkg), "build")
     mkdirp(os.path.join(build, "home"))
     if step == "seed":
         if os.path.basename(str(prefix)) != _node_id(spec):
-            raise StarError(
+            raise star_recipe.StarError(
                 f"{spec.name}: the seed installs at <store>/{_node_id(spec)}, "
                 f"not {prefix} (install_tree projections)"
             )
@@ -574,7 +548,7 @@ def _kaem_install(pkg, spec, prefix, step: str) -> None:
         subprocess.run([seed, f"kaem.{arch}"], cwd=os.path.join(tree, "seed"), env={}, check=True)
         # the stage0 seed exits 0 even when the chain aborts
         if not os.path.exists(os.path.join(str(prefix), "bin", "tcc")):
-            raise StarError(f"{spec.name}: the seed chain failed")
+            raise star_recipe.StarError(f"{spec.name}: the seed chain failed")
         return
     seed = str([d for d in _declared_deps(spec) if _is_seed(d)][0].prefix)
     boot = os.path.join(tree, "shpack", "bootstrap")
@@ -671,13 +645,13 @@ class _Executor:
             return [self.path(p)]
         matches = sorted(glob.glob(self.path(p), recursive="**" in p))
         if not matches and must_match:
-            raise StarError(f"no file matches {p}")
+            raise star_recipe.StarError(f"no file matches {p}")
         return matches
 
     def one(self, p: str) -> str:
         m = self.expand(p)
         if len(m) != 1:
-            raise StarError(f"{p} matches {len(m)} paths, want exactly one")
+            raise star_recipe.StarError(f"{p} matches {len(m)} paths, want exactly one")
         return m[0]
 
     def do(self, a: Dict[str, Any]) -> None:
@@ -696,7 +670,7 @@ class _Executor:
         if os.sep not in argv[0]:
             exe = shutil.which(argv[0], path=env["PATH"])
             if not exe:
-                raise StarError(f"{argv[0]}: not found on the build PATH")
+                raise star_recipe.StarError(f"{argv[0]}: not found on the build PATH")
             argv[0] = exe
         out = open(self.path(a["stdout"]), "wb") if a.get("stdout") else None
         try:
@@ -740,7 +714,7 @@ class _Executor:
             dst = os.path.join(dst, os.path.basename(src.rstrip("/")))
         if os.path.isdir(src):
             if not recursive:
-                raise StarError(f"copy: {src} is a directory (recursive = True?)")
+                raise star_recipe.StarError(f"copy: {src} is a directory (recursive = True?)")
             copy_tree(src, dst, symlinks=bool(a.get("preserve")))
             return
         if a.get("force") and os.path.lexists(dst) and not os.access(dst, os.W_OK):
@@ -760,7 +734,9 @@ class _Executor:
                     if a.get("recursive"):
                         shutil.rmtree(p)
                     else:
-                        raise StarError(f"remove: {p} is a directory (recursive = True?)")
+                        raise star_recipe.StarError(
+                            f"remove: {p} is a directory (recursive = True?)"
+                        )
                 elif os.path.lexists(p):
                     os.remove(p)
 
@@ -822,82 +798,3 @@ class _Executor:
     def _filter_file(self, a):
         # the protocol's portable regex subset means the same in Python's re
         self._filter(a["files"], a["regex"], a["repl"], string=False)
-
-
-def _sha256_file(path: str) -> str:
-    with open(path, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
-
-
-def _package_files(pkg_dir: str, rel: str = "") -> List:
-    """shpack's host.files: (path, sha256) of every file in the package directory, depth
-    first, names sorted bytewise, dotfiles and dangling symlinks skipped."""
-    out: List = []
-    here = os.path.join(pkg_dir, rel) if rel else pkg_dir
-    for name in sorted(os.listdir(here), key=lambda n: n.encode()):
-        if name.startswith("."):
-            continue
-        path = os.path.join(here, name)
-        r = f"{rel}/{name}" if rel else name
-        if not os.path.exists(path):
-            continue
-        if os.path.isdir(path):
-            out.extend(_package_files(pkg_dir, r))
-        else:
-            out.append((r, _sha256_file(path)))
-    return out
-
-
-def _kaem_steps(pkg_dir: str) -> Dict[str, List[str]]:
-    """VERSION -> [STEP, INPUT...] from the recipe's kaem-steps: the versions shpack's kaem
-    phase builds, by shpack/bootstrap/STEP/kaem.run (or, for STEP "seed", the stage0 seed
-    up to COMMAND=seed), and the tree paths the step reads."""
-    out: Dict[str, List[str]] = {}
-    path = os.path.join(pkg_dir, "kaem-steps")
-    if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            for line in f:
-                fields = line.split()
-                if fields and not fields[0].startswith("#"):
-                    out[fields[0]] = fields[1:]
-    return out
-
-
-def source_hash(spec, filename: str) -> str:
-    """What Spack's package hash sees of a Starlark recipe: shpack's package text
-    (package_text in its lib/concretize.star), everything that determines the build but
-    the dependencies -- the sources of this version and its resources, every file in the
-    package directory, the evaluator, and every module the recipe loads -- so that shpack
-    and Spack compute the same DAG hashes."""
-    pkg_dir = os.path.dirname(filename)
-    packages_path = os.path.dirname(pkg_dir)
-    root = os.path.dirname(packages_path)
-    record = _record(packages_path, root, os.path.basename(pkg_dir))
-    version = str(spec.version)
-    family = str(spec.target.family)
-    out = [f"package {spec.name}", f"version {version}", f"arch {_ARCH.get(family, family)}"]
-    for d in record["directives"]:
-        if d["directive"] == "version" and d["version"] == version and d["sha256"]:
-            out.append(f"source {d['sha256']} {d['fname'] or '-'}")
-    for d in record["directives"]:
-        if d["directive"] == "resource" and (not d["when"] or spec.satisfies(d["when"])):
-            out.append(f"source {d['sha256']} {d['fname']}")
-    out.extend(f"file {sha} {path}" for path, sha in _package_files(pkg_dir))
-    # a kaem step also depends on the tree it runs, by content
-    # ("!PATH" leaves out what is under PATH: the seed's own build outputs)
-    tree = os.path.dirname(root)
-    inputs = _kaem_steps(pkg_dir).get(version, [])[1:]
-    skip = tuple(p[1:] + "/" for p in inputs if p.startswith("!"))
-    for path in inputs:
-        if path.startswith("!"):
-            continue
-        full = os.path.join(tree, path)
-        if not os.path.isdir(full):
-            out.append(f"input {_sha256_file(full)} {path}")
-            continue
-        for rel, sha in _package_files(full):
-            if not f"{path}/{rel}".startswith(skip):
-                out.append(f"input {sha} {path}/{rel}")
-    out.append(f"evaluator {STAR_VERSION}")
-    out.extend(f"load {_sha256_file(os.path.join(root, m))} {m}" for m in record["loads"])
-    return "".join(line + "\n" for line in out)

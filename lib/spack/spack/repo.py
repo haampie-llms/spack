@@ -8,6 +8,7 @@ import difflib
 import errno
 import functools
 import importlib
+import importlib.abc
 import importlib.machinery
 import importlib.util
 import itertools
@@ -155,6 +156,32 @@ class _PrependFileLoader(importlib.machinery.SourceFileLoader):
         return self.prepend + data if path == self.path else data
 
 
+#: The module a package.star is loaded as: it defines its package class from the recipe
+_STAR_MODULE = (
+    "import sys\n"
+    "import spack.star_package\n"
+    "spack.star_package.define_package(sys.modules[__name__])\n"
+)
+
+
+class _StarLoader(importlib.abc.Loader):
+    """Loads a package recipe written in Starlark (``package.star``) as a package module,
+    which defines the package class from the recipe (:mod:`spack.star_package`), as a
+    ``package.py`` module defines its own."""
+
+    def __init__(self, fullname: str, repo: "Repo", package_name: str) -> None:
+        self.repo = repo
+        self.package_name = package_name
+        self.path = repo.filename_for_package_name(package_name)
+
+    def create_module(self, spec):
+        return None
+
+    def exec_module(self, module):
+        module.__file__ = self.path
+        exec(compile(_STAR_MODULE, self.path, "exec"), module.__dict__)
+
+
 class SpackNamespaceLoader:
     def create_module(self, spec):
         return SpackNamespace(spec.name)
@@ -201,6 +228,8 @@ class ReposFinder:
                 # With 2 nested conditionals we can call "repo.real_name" only once
                 package_name = repo.real_name(module_name)
                 if package_name:
+                    if repo.filename_for_package_name(package_name).endswith(star_file_name):
+                        return _StarLoader(fullname, repo, package_name)
                     return _PrependFileLoader(fullname, repo, package_name)
 
             # We are importing a full namespace like 'spack.pkg.builtin'
@@ -222,7 +251,8 @@ repo_config_name = "repo.yaml"  # Top-level filename for repo config.
 repo_index_name = "index.yaml"  # Top-level filename for repository index.
 packages_dir_name = "packages"  # Top-level repo directory containing pkgs.
 package_file_name = "package.py"  # Filename for packages in a repository.
-#: Filename of a package recipe written in Starlark (see spack.star_package)
+#: Filename of a package recipe written in Starlark (see spack.star_package); a repository
+#: of Package API v1 loads it as a package module (_StarLoader)
 star_file_name = "package.star"
 
 #: Guaranteed unused default value for some functions.
@@ -1537,16 +1567,6 @@ class Repo:
 
         if not self.exists(pkg_name):
             raise UnknownPackageError(fullname, self)
-
-        filename = self.filename_for_package_name(pkg_name)
-        if filename.endswith(star_file_name):
-            from spack import star_package
-
-            try:
-                return star_package.make_package_class(self, pkg_name, filename)
-            except Exception as e:
-                msg = f"cannot load package '{pkg_name}' from the '{self.namespace}' repository"
-                raise RepoError(msg, str(e)) from e
 
         try:
             if self.python_path:

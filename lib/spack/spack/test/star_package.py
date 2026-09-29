@@ -11,7 +11,7 @@ import spack.deptypes
 import spack.directives_meta
 import spack.repo
 import spack.spec
-import spack.star_package
+import spack.star_recipe
 import spack.starlark_eval
 import spack.util.file_cache
 
@@ -101,7 +101,7 @@ def _star_repo(tmp_path: pathlib.Path, recipes) -> spack.repo.Repo:
 
 @pytest.fixture()
 def star_repo(tmp_path: pathlib.Path, monkeypatch):
-    monkeypatch.setattr(spack.star_package, "_records", {})
+    monkeypatch.setattr(spack.star_recipe, "records_cache", {})
     repo = _star_repo(tmp_path, RECIPES)
     (pathlib.Path(repo.root) / "packages" / "foo" / "patches").mkdir()
     (pathlib.Path(repo.root) / "packages" / "foo" / "patches" / "x.patch").write_text("")
@@ -145,7 +145,7 @@ def test_star_package_class(star_repo):
 
 
 def test_star_package_self_dependency_is_an_error(tmp_path: pathlib.Path, monkeypatch):
-    monkeypatch.setattr(spack.star_package, "_records", {})
+    monkeypatch.setattr(spack.star_recipe, "records_cache", {})
     repo = _star_repo(tmp_path, SELFISH)
     with spack.repo.use_repositories(repo):
         with pytest.raises(spack.repo.RepoError, match="depends on itself"):
@@ -158,7 +158,7 @@ def test_star_source_hash_is_shpacks_package_text(star_repo):
     """What the package hash sees of a recipe is shpack's package text: the version and
     arch, every file of the package directory and every loaded module, by content."""
     spec = spack.spec.Spec("foo@=1.1 target=aarch64")
-    text = spack.star_package.source_hash(spec, star_repo.filename_for_package_name("foo"))
+    text = spack.star_recipe.source_hash(spec, star_repo.filename_for_package_name("foo"))
     lines = text.splitlines()
     assert lines[:3] == ["package foo", "version 1.1", "arch aarch64"]
     files = [line.split()[2] for line in lines if line.startswith("file ")]
