@@ -569,8 +569,14 @@ class _Evaluation:
         return "generic"
 
     def loads(self) -> List[str]:
+        """The loaded modules, relative to the root and with ``/`` as star records them
+        (they are in the package text, so in the package hash, on any host)."""
         repo = self.packages_path.rstrip(os.sep) + os.sep
-        return [os.path.relpath(p, self.root) for p in self.load_order if not p.startswith(repo)]
+        return [
+            os.path.relpath(p, self.root).replace(os.sep, "/")
+            for p in self.load_order
+            if not p.startswith(repo)
+        ]
 
 
 def recipe(packages_path: str, root: str, name: str) -> Dict[str, Any]:
