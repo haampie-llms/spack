@@ -11,6 +11,7 @@ import os
 from typing import Any, Dict, List
 
 import spack.starlark_eval
+import spack.util.crypto
 from spack.error import SpackError
 
 #: shpack's arch names, by target family
@@ -42,16 +43,21 @@ def record(packages_path: str, root: str, name: str) -> Any:
     return records_cache[key]
 
 
+def arch(spec) -> str:
+    """shpack's name of the spec's target family (ARCH)."""
+    family = str(spec.target.family)
+    return ARCH.get(family, family)
+
+
 def sha256_file(path: str) -> str:
-    with open(path, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
+    return spack.util.crypto.checksum(hashlib.sha256, path)
 
 
-def package_files(pkg_dir: str, rel: str = "") -> List:
-    """shpack's host.files: (path, sha256) of every file in the package directory, depth
-    first, names sorted bytewise, dotfiles and dangling symlinks skipped."""
-    out: List = []
-    here = os.path.join(pkg_dir, rel) if rel else pkg_dir
+def walk_files(top: str, rel: str = "") -> List[str]:
+    """shpack's walk_files: every file under ``top``, relative to it, depth first, names
+    sorted bytewise, dotfiles and dangling symlinks skipped."""
+    out: List[str] = []
+    here = os.path.join(top, rel) if rel else top
     for name in sorted(os.listdir(here), key=lambda n: n.encode()):
         if name.startswith("."):
             continue
@@ -60,10 +66,15 @@ def package_files(pkg_dir: str, rel: str = "") -> List:
         if not os.path.exists(path):
             continue
         if os.path.isdir(path):
-            out.extend(package_files(pkg_dir, r))
+            out.extend(walk_files(top, r))
         else:
-            out.append((r, sha256_file(path)))
+            out.append(r)
     return out
+
+
+def package_files(pkg_dir: str) -> List:
+    """shpack's host.files: (path, sha256) of every file walk_files lists."""
+    return [(r, sha256_file(os.path.join(pkg_dir, r))) for r in walk_files(pkg_dir)]
 
 
 def kaem_steps(pkg_dir: str) -> Dict[str, List[str]]:
@@ -92,8 +103,7 @@ def source_hash(spec, filename: str) -> str:
     root = os.path.dirname(packages_path)
     rec = record(packages_path, root, os.path.basename(pkg_dir))
     version = str(spec.version)
-    family = str(spec.target.family)
-    out = [f"package {spec.name}", f"version {version}", f"arch {ARCH.get(family, family)}"]
+    out = [f"package {spec.name}", f"version {version}", f"arch {arch(spec)}"]
     for d in rec["directives"]:
         if d["directive"] == "version" and d["version"] == version and d["sha256"]:
             out.append(f"source {d['sha256']} {d['fname'] or '-'}")

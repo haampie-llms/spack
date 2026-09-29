@@ -156,21 +156,12 @@ class _PrependFileLoader(importlib.machinery.SourceFileLoader):
         return self.prepend + data if path == self.path else data
 
 
-#: The module a package.star is loaded as: it defines its package class from the recipe
-_STAR_MODULE = (
-    "import sys\n"
-    "import spack.star_package\n"
-    "spack.star_package.define_package(sys.modules[__name__])\n"
-)
-
-
 class _StarLoader(importlib.abc.Loader):
     """Loads a package recipe written in Starlark (``package.star``) as a package module,
     which defines the package class from the recipe (:mod:`spack.star_package`), as a
     ``package.py`` module defines its own."""
 
-    def __init__(self, fullname: str, repo: "Repo", package_name: str) -> None:
-        self.repo = repo
+    def __init__(self, repo: "Repo", package_name: str) -> None:
         self.package_name = package_name
         self.path = repo.filename_for_package_name(package_name)
 
@@ -178,8 +169,10 @@ class _StarLoader(importlib.abc.Loader):
         return None
 
     def exec_module(self, module):
+        import spack.star_package
+
         module.__file__ = self.path
-        exec(compile(_STAR_MODULE, self.path, "exec"), module.__dict__)
+        spack.star_package.define_package(module)
 
 
 class SpackNamespaceLoader:
@@ -228,8 +221,8 @@ class ReposFinder:
                 # With 2 nested conditionals we can call "repo.real_name" only once
                 package_name = repo.real_name(module_name)
                 if package_name:
-                    if repo.filename_for_package_name(package_name).endswith(star_file_name):
-                        return _StarLoader(fullname, repo, package_name)
+                    if repo.package_file_name == star_file_name:
+                        return _StarLoader(repo, package_name)
                     return _PrependFileLoader(fullname, repo, package_name)
 
             # We are importing a full namespace like 'spack.pkg.builtin'
@@ -251,8 +244,9 @@ repo_config_name = "repo.yaml"  # Top-level filename for repo config.
 repo_index_name = "index.yaml"  # Top-level filename for repository index.
 packages_dir_name = "packages"  # Top-level repo directory containing pkgs.
 package_file_name = "package.py"  # Filename for packages in a repository.
-#: Filename of a package recipe written in Starlark (see spack.star_package); a repository
-#: of Package API v1 loads it as a package module (_StarLoader)
+#: Filename of a package recipe written in Starlark (see spack.star_package): a repository
+#: of Package API v1 whose repo.yaml sets ``package_file: package.star`` has only these, and
+#: loads each as a package module (_StarLoader)
 star_file_name = "package.star"
 
 #: Guaranteed unused default value for some functions.
@@ -430,10 +424,16 @@ class FastPackageChecker(Mapping[str, float]):
     #: Global cache, reused by every instance
     _paths_cache: Dict[str, Dict[str, float]] = {}
 
-    def __init__(self, packages_path: str, package_api: Tuple[int, int]) -> None:
+    def __init__(
+        self,
+        packages_path: str,
+        package_api: Tuple[int, int],
+        package_file: str = package_file_name,
+    ) -> None:
         # The path of the repository managed by this instance
         self.packages_path = packages_path
         self.package_api = package_api
+        self.package_file = package_file
 
         # If the cache we need is not there yet, then build it appropriately
         if packages_path not in self._paths_cache:
@@ -457,7 +457,7 @@ class FastPackageChecker(Mapping[str, float]):
         # package name and its mtime
         cache: Dict[str, float] = {}
         # Don't use os.path.join in the loop cause it's slow and redundant.
-        package_py_suffix = f"{os.path.sep}{package_file_name}"
+        package_py_suffix = f"{os.path.sep}{self.package_file}"
         naming_scheme = nm.get_naming_scheme(self.package_api)
 
         # Use a file descriptor for the packages directory to avoid repeated path resolution.
@@ -473,19 +473,13 @@ class FastPackageChecker(Mapping[str, float]):
                     sinfo = os.stat(pkg_file, dir_fd=fd)
                 except OSError as e:
                     if e.errno in (errno.ENOENT, errno.ENOTDIR):
-                        # No package.py file here; a Starlark recipe then?
-                        try:
-                            sinfo = os.stat(
-                                pkg_file[: -len(package_file_name)] + star_file_name, dir_fd=fd
-                            )
-                        except OSError:
-                            continue
+                        # No package.py file here.
+                        continue
                     elif e.errno == errno.EACCES:
-                        pkg_file = os.path.join(self.packages_path, entry.name, package_file_name)
+                        pkg_file = os.path.join(self.packages_path, entry.name, self.package_file)
                         tty.warn(f"Can't read package file {pkg_file}.")
                         continue
-                    else:
-                        raise
+                    raise
 
                 # If it's not a file, skip it.
                 if not stat.S_ISREG(sinfo.st_mode):
@@ -495,7 +489,7 @@ class FastPackageChecker(Mapping[str, float]):
                 # the current package API
                 if not naming_scheme.valid_module_name(entry.name):
                     x, y = self.package_api
-                    pkg_file = os.path.join(self.packages_path, entry.name, package_file_name)
+                    pkg_file = os.path.join(self.packages_path, entry.name, self.package_file)
                     tty.warn(
                         f"Package {pkg_file} cannot be used because `{entry.name}` is not a valid "
                         f"Spack package module name for Package API v{x}.{y}."
@@ -1221,6 +1215,14 @@ class Repo:
             config.get("subdirectory", packages_dir_name), root, self.package_api
         )
         self.packages_path = os.path.join(self.root, self.subdirectory)
+        #: package.py, or package.star for a repository of Starlark recipes
+        self.package_file_name = config.get("package_file", package_file_name)
+        check(
+            self.package_file_name == package_file_name
+            or (self.package_file_name == star_file_name and self.package_api < (2, 0)),
+            f"Invalid package_file '{self.package_file_name}' in '{root}': "
+            f"'{package_file_name}', or '{star_file_name}' under Package API v1",
+        )
         self.build_systems_path = os.path.join(self.root, "build_systems")
 
         check(
@@ -1484,16 +1486,14 @@ class Repo:
         the package exists before importing.
         """
         pkg_dir = self.dirname_for_package_name(pkg_name)
-        filename = os.path.join(pkg_dir, package_file_name)
-        star = os.path.join(pkg_dir, star_file_name)
-        if not os.path.exists(filename) and os.path.exists(star):
-            return star
-        return filename
+        return os.path.join(pkg_dir, self.package_file_name)
 
     @property
     def _pkg_checker(self) -> FastPackageChecker:
         if self._fast_package_checker is None:
-            self._fast_package_checker = FastPackageChecker(self.packages_path, self.package_api)
+            self._fast_package_checker = FastPackageChecker(
+                self.packages_path, self.package_api, self.package_file_name
+            )
         return self._fast_package_checker
 
     def all_package_names(self, include_virtuals: bool = False) -> List[str]:
@@ -1505,7 +1505,11 @@ class Repo:
 
     def package_path(self, name: str) -> str:
         """Get path to package.py (or package.star) file for this repo."""
-        return self.filename_for_package_name(name)
+        return os.path.join(
+            self.packages_path,
+            self.naming_scheme.pkg_name_to_pkg_dir(name),
+            self.package_file_name,
+        )
 
     def all_package_paths(self) -> Generator[str, None, None]:
         for name in self.all_package_names():

@@ -88,6 +88,8 @@ def _star_repo(tmp_path: pathlib.Path, recipes) -> spack.repo.Repo:
     root, _ = spack.repo.create_repo(
         str(tmp_path / "repo"), namespace="starry", package_api=(1, 0)
     )
+    with (pathlib.Path(root) / "repo.yaml").open("a", encoding="utf-8") as f:
+        f.write("  package_file: package.star\n")
     for name, text in recipes.items():
         d = pathlib.Path(root) / "packages" / name
         d.mkdir(parents=True)

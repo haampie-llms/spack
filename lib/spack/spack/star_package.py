@@ -31,7 +31,7 @@ import os
 import shutil
 import subprocess
 import types
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Set
 
 import spack.builder
 import spack.config
@@ -95,7 +95,6 @@ def define_package(module: types.ModuleType) -> None:
         # the recipe's docstring and globals are what a package keeps as class attributes
         "__doc__": record["description"],
         "parallel": record["parallel"],
-        "_star_file": filename,
         "_star_root": root,
         "_star_packages": packages_path,
         "_star_kaem": star_recipe.kaem_steps(pkg_dir),
@@ -121,7 +120,7 @@ def define_package(module: types.ModuleType) -> None:
         raise
 
 
-def _make_class(pkg_name, record, module, attrs, packages_path, root) -> type:
+def _make_class(pkg_name, record, module, attrs, packages_path, root) -> None:
     has_code = False
     first_url = None
     resources = []
@@ -177,7 +176,6 @@ def _make_class(pkg_name, record, module, attrs, packages_path, root) -> type:
     base = spack.builder.Package
     cls = type(base)(nm.pkg_name_to_class_name(pkg_name), (base,), attrs)  # type: ignore[misc]
     setattr(module, cls.__name__, cls)
-    return cls
 
 
 # --------------------------------------------------------------------- install
@@ -230,10 +228,16 @@ def _closure_order(node) -> List:
     """shpack's PATH order for ``node``: a DFS post-order over declared dependencies
     (dependencies before dependents), which compose_path reverses."""
     order: List = []
-    for dep in _declared_deps(node):
-        for n in _closure_order(dep) + [dep]:
-            if all(n.dag_hash() != o.dag_hash() for o in order):
-                order.append(n)
+    seen: Set[str] = set()
+
+    def visit(n) -> None:
+        for dep in _declared_deps(n):
+            if dep.dag_hash() not in seen:
+                seen.add(dep.dag_hash())
+                visit(dep)
+                order.append(dep)
+
+    visit(node)
     return order
 
 
@@ -241,10 +245,11 @@ def _node_id(node) -> str:
     return f"{node.name}-{node.version}"
 
 
-def _ctx(pkg, spec, prefix, stage_dir: str, source_dir: str) -> Dict[str, Any]:
+def _ctx(pkg, spec, prefix, closure: List, stage_dir: str) -> Dict[str, Any]:
+    """The build's ctx (star/PROTOCOL.md); staging fills in source_dir."""
     package_dir = os.path.join(_tree(pkg), "shpack", "packages", spec.name)
     direct = _declared_deps(spec)
-    closure = sorted(_closure_order(spec), key=_node_id)
+    closure = sorted(closure, key=_node_id)
     # name -> prefix over the direct deps, then the closure sorted by id: prefix_of
     deps: Dict[str, str] = {}
     for dep in direct + closure:
@@ -253,27 +258,22 @@ def _ctx(pkg, spec, prefix, stage_dir: str, source_dir: str) -> Dict[str, Any]:
     shell_dep = "dash" if "dash" in names else "dash-boot" if "dash-boot" in names else None
     if shell_dep is None:
         raise star_recipe.StarError(f"{spec.name} declares no shell dependency (dash)")
-    files = []
-    for root, _, fnames in os.walk(package_dir):
-        for n in fnames:
-            if not n.startswith("."):
-                files.append(os.path.relpath(os.path.join(root, n), package_dir))
     return {
         "name": spec.name,
         "version": str(spec.version),
         "id": _node_id(spec),
-        "arch": star_recipe.ARCH.get(str(spec.target.family), str(spec.target.family)),
+        "arch": star_recipe.arch(spec),
         "prefix": str(prefix),
         "sh": os.path.join(deps[shell_dep], "bin", "sh"),
         "stage_dir": stage_dir,
-        "source_dir": source_dir,
+        "source_dir": "",
         "package_dir": package_dir,
         "jobs": spack.config.determine_number_of_jobs(parallel=True),
         # as in shpack: -j comes with MAKEFLAGS, and parallel(False) pins -j1
         "makejobs": [] if pkg.parallel else ["-j1"],
         "file_prefix_map": f"-ffile-prefix-map={stage_dir}=.",
         "debug_prefix_map": f"-fdebug-prefix-map={stage_dir}=.",
-        "package_files": sorted(files),
+        "package_files": star_recipe.walk_files(package_dir),
         "deps": deps,
     }
 
@@ -336,16 +336,16 @@ def _base(spec, tree: str):
     )
 
 
-def _build_env(spec, ctx: Dict[str, Any], scratch: str, tree: str) -> Dict[str, str]:
+def _build_env(
+    spec, ctx: Dict[str, Any], closure: List, scratch: str, tree: str
+) -> Dict[str, str]:
     """The environment of a plan (star/PROTOCOL.md, Hosts): nothing inherited from Spack
     or the user."""
     basepath, config_shell = _base(spec, tree)
     path = [os.path.join(ctx["prefix"], "bin")]
     runnable = _runnable(spec)
     path += [
-        os.path.join(str(n.prefix), "bin")
-        for n in reversed(_closure_order(spec))
-        if n.dag_hash() in runnable
+        os.path.join(str(n.prefix), "bin") for n in reversed(closure) if n.dag_hash() in runnable
     ]
     include, link, pkgconfig = [], [], []
     for dep, deptypes in _declared_edges(spec):
@@ -529,7 +529,7 @@ def _kaem_install(pkg, spec, prefix, step: str) -> None:
     environment contract (shpack/bootstrap/README.md), into the unhashed prefix
     <store>/<name>-<version> that the kaem phase uses too."""
     tree = _tree(pkg)
-    arch = star_recipe.ARCH.get(str(spec.target.family), str(spec.target.family))
+    arch = star_recipe.arch(spec)
     distfiles = os.path.join(_inputs(pkg), "distfiles")
     build = os.path.join(_inputs(pkg), "build")
     mkdirp(os.path.join(build, "home"))
@@ -600,15 +600,14 @@ def _plan_install(pkg, spec, prefix):
     stage_dir = os.path.join(_inputs(pkg), "stage")
     scratch = os.path.join(_inputs(pkg), "tmp")
     mkdirp(stage_dir, os.path.join(scratch, "home"))
-    # The environment depends on ctx only through prefix/sh/jobs/maps; stage with a
-    # provisional one (no stage paths are in it), then build the final one.
-    env = _build_env(spec, _ctx(pkg, spec, prefix, "", ""), scratch, tree)
+    closure = _closure_order(spec)
+    ctx = _ctx(pkg, spec, prefix, closure, stage_dir)
+    env = _build_env(spec, ctx, closure, scratch, tree)
     _stage_sources(pkg, stage_dir, env)
     # the source directory is the first directory in the stage (shpack's do_stage)
     dirs = sorted(d for d in os.listdir(stage_dir) if os.path.isdir(os.path.join(stage_dir, d)))
     source_dir = os.path.join(stage_dir, dirs[0]) if dirs else stage_dir
-    ctx = _ctx(pkg, spec, prefix, stage_dir, source_dir)
-    env = _build_env(spec, ctx, scratch, tree)
+    ctx["source_dir"] = source_dir
     _patch(pkg, spec, source_dir, env)
     # #! lines in the whole stage point at the build shell (there is no /bin/sh)
     subprocess.run([_tool("patch-shebangs", env), ctx["sh"], stage_dir], env=env, check=True)
@@ -668,10 +667,7 @@ class _Executor:
         env = self._env(a.get("env"))
         argv = list(a["argv"])
         if os.sep not in argv[0]:
-            exe = shutil.which(argv[0], path=env["PATH"])
-            if not exe:
-                raise star_recipe.StarError(f"{argv[0]}: not found on the build PATH")
-            argv[0] = exe
+            argv[0] = _tool(argv[0], env)
         out = open(self.path(a["stdout"]), "wb") if a.get("stdout") else None
         try:
             subprocess.run(argv, cwd=cwd, env=env, stdout=out, check=True)
@@ -702,7 +698,7 @@ class _Executor:
             mkdirp(self.path(p))
 
     def _copy(self, a):
-        dst = self.one(a["dst"]) if any(c in a["dst"] for c in "*?[") else self.path(a["dst"])
+        dst = self.one(a["dst"])
         for pattern in a["src"]:
             for src in self.expand(pattern):
                 self._copy_one(src, dst, a)
@@ -722,7 +718,7 @@ class _Executor:
         (shutil.copy2 if a.get("preserve") else shutil.copy)(src, dst)
 
     def _move(self, a):
-        dst = self.one(a["dst"]) if any(c in a["dst"] for c in "*?[") else self.path(a["dst"])
+        dst = self.one(a["dst"])
         for pattern in a["src"]:
             for src in self.expand(pattern):
                 shutil.move(src.rstrip("/"), dst)
