@@ -365,6 +365,13 @@ def package_hash(
         source: Optionally provide a string to read python code from.
         repo: repositories the package.py is read from, when ``source`` is not given.
     """
+    if source is None:
+        # star_package imports package_base, which imports this module
+        from spack.star_package import StarPackage
+
+        pkg_cls = repo.get_pkg_class(spec.fullname)
+        if issubclass(pkg_cls, StarPackage):
+            return spack.util.hash.b32_hash(pkg_cls.package_text(spec))
     source = canonical_source(spec, filter_multimethods=True, source=source, repo=repo)
     return spack.util.hash.b32_hash(source)
 

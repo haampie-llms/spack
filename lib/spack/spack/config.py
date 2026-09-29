@@ -2236,7 +2236,10 @@ def architecture():
     return spack.spec.ArchSpec((str(host_platform), str(host_os), str(host_target)))
 
 
+@lang.memoized
 def get_user():
+    # Memoized: the effective user does not change, and a build sandbox may deny the
+    # passwd lookup once it applies (the stage path, computed before, depends on it).
     # User pwd where available because it accounts for effective uids when using ksu and similar
     try:
         # user pwd for unix systems
