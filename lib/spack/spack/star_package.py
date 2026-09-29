@@ -21,6 +21,7 @@ so ``spack mirror`` does not see them yet.
 """
 
 import glob
+import hashlib
 import os
 import shlex
 import shutil
@@ -45,6 +46,13 @@ STAR_FILE_NAME = "package.star"
 
 #: shpack's arch names, by target family
 _ARCH = {"x86_64": "amd64", "aarch64": "aarch64"}
+
+#: The evaluator shpack names in its package text (star --version)
+STAR_VERSION = "star 1.0"
+
+#: The operating system of every Starlark package: what they build does not depend on the
+#: host's, and shpack records it (platform_os) so that both compute the same hashes
+STAR_OS = "shpack"
 
 
 class StarError(SpackError):
@@ -79,8 +87,22 @@ def _resolve(packages_path: str, root: str, spec: str) -> str:
     return spec
 
 
+def _register_os() -> None:
+    """Make STAR_OS an operating system the host platform builds for (Spack otherwise
+    knows only the host's, and those named on the command line)."""
+    import spack.operating_systems
+    import spack.platforms
+
+    platform = spack.platforms.host()
+    if STAR_OS not in platform.operating_sys:
+        platform.add_operating_system(
+            STAR_OS, spack.operating_systems.OperatingSystem(STAR_OS, "")
+        )
+
+
 def make_package_class(repo, pkg_name: str, filename: str) -> type:
     """Build the package class for ``pkg_name`` from its ``package.star``."""
+    _register_os()
     pkg_dir = os.path.dirname(filename)
     packages_path = os.path.dirname(pkg_dir)
     root = os.path.dirname(packages_path)  # load("//...") resolves here
@@ -166,6 +188,9 @@ def _make_class(repo, pkg_name, record, module, attrs, packages_path, root) -> t
     attrs["_star_resources"] = resources
     attrs["_star_deps"] = star_deps
     attrs["_star_patches"] = star_patches
+
+    # what a recipe builds does not depend on the host's operating system
+    spack.directives.requires(f"os={STAR_OS}")
 
     base = spack.builder.Package
     cls = type(base)(nm.pkg_name_to_class_name(pkg_name), (base,), attrs)  # type: ignore[misc]
@@ -588,15 +613,50 @@ class _Executor:
         self._filter(a["files"], a["regex"], a["repl"], string=False)
 
 
-def source_hash(filename: str) -> str:
-    """What Spack's package hash sees of a Starlark recipe: its text and the text of every
-    module it loads (build systems, helpers), as shpack hashes it."""
+def _sha256_file(path: str) -> str:
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+def _package_files(pkg_dir: str, rel: str = "") -> List:
+    """shpack's host.files: (path, sha256) of every file in the package directory, depth
+    first, names sorted bytewise, dotfiles and dangling symlinks skipped."""
+    out: List = []
+    here = os.path.join(pkg_dir, rel) if rel else pkg_dir
+    for name in sorted(os.listdir(here), key=lambda n: n.encode()):
+        if name.startswith("."):
+            continue
+        path = os.path.join(here, name)
+        r = f"{rel}/{name}" if rel else name
+        if not os.path.exists(path):
+            continue
+        if os.path.isdir(path):
+            out.extend(_package_files(pkg_dir, r))
+        else:
+            out.append((r, _sha256_file(path)))
+    return out
+
+
+def source_hash(spec, filename: str) -> str:
+    """What Spack's package hash sees of a Starlark recipe: shpack's package text
+    (package_text in its lib/concretize.star), everything that determines the build but
+    the dependencies -- the sources of this version and its resources, every file in the
+    package directory, the evaluator, and every module the recipe loads -- so that shpack
+    and Spack compute the same DAG hashes."""
     pkg_dir = os.path.dirname(filename)
     packages_path = os.path.dirname(pkg_dir)
     root = os.path.dirname(packages_path)
     record = _record(packages_path, root, os.path.basename(pkg_dir))
-    parts = []
-    for path in [filename] + [os.path.join(root, m) for m in record["loads"]]:
-        with open(path, "r", encoding="utf-8") as f:
-            parts.append(f.read())
-    return "\0".join(parts)
+    version = str(spec.version)
+    family = str(spec.target.family)
+    out = [f"package {spec.name}", f"version {version}", f"arch {_ARCH.get(family, family)}"]
+    for d in record["directives"]:
+        if d["directive"] == "version" and d["version"] == version and d["sha256"]:
+            out.append(f"source {d['sha256']} {d['fname'] or '-'}")
+    for d in record["directives"]:
+        if d["directive"] == "resource" and (not d["when"] or spec.satisfies(d["when"])):
+            out.append(f"source {d['sha256']} {d['fname']}")
+    out.extend(f"file {sha} {path}" for path, sha in _package_files(pkg_dir))
+    out.append(f"evaluator {STAR_VERSION}")
+    out.extend(f"load {_sha256_file(os.path.join(root, m))} {m}" for m in record["loads"])
+    return "".join(line + "\n" for line in out)

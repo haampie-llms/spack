@@ -370,7 +370,7 @@ def package_hash(
         if filename.endswith(spack.repo.star_file_name):
             from spack import star_package
 
-            return spack.util.hash.b32_hash(star_package.source_hash(filename))
+            return spack.util.hash.b32_hash(star_package.source_hash(spec, filename))
     source = canonical_source(spec, filter_multimethods=True, source=source, repo=repo)
     return spack.util.hash.b32_hash(source)
 
