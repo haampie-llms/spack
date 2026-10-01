@@ -2339,19 +2339,9 @@ def extract_buildcache_tarball(tarfile_path: Union[str, IO[bytes]], destination:
         )
 
 
-def extract_tarball(
-    spec,
-    tarball_stage: spack.stage.Stage,
-    force=False,
-    timer=timer.NULL_TIMER,
-    confine: Optional[Callable[[], None]] = None,
-):
+def extract_tarball(spec, tarball_stage: spack.stage.Stage, force=False, timer=timer.NULL_TIMER):
     """
     extract binary tarball for given package into install area
-
-    If ``confine`` is given, it is called after the install prefix is created and before the
-    tarball is extracted, with the tarball open and its stage removed, so that it can disallow
-    writes outside of the prefix.
     """
     timer.start("extract")
 
@@ -2366,16 +2356,14 @@ def extract_tarball(
     spack.package_prefs.warn_if_sgid_on_afs(spec.prefix, perms.dir_mode)
     fsys.mkdirp(spec.prefix, mode=perms.dir_mode, group=perms.group, default_perms="parents")
 
-    with open(tarball_stage.save_filename, "rb") as tarball:
-        if confine is not None:
-            tarball_stage.destroy()
-            confine()
-        try:
-            extract_buildcache_tarball(tarball, destination=spec.prefix)
-        except Exception:
-            shutil.rmtree(spec.prefix, ignore_errors=True)
-            tarball_stage.destroy()
-            raise
+    tarfile_path = tarball_stage.save_filename
+
+    try:
+        extract_buildcache_tarball(tarfile_path, destination=spec.prefix)
+    except Exception:
+        shutil.rmtree(spec.prefix, ignore_errors=True)
+        tarball_stage.destroy()
+        raise
 
     timer.stop("extract")
     timer.start("relocate")
