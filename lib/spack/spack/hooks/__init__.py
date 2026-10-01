@@ -65,6 +65,11 @@ class _HookRunner:
                     hook(*args, **kwargs)
 
 
+def load() -> None:
+    """Import all hook modules, e.g. before forking processes that run hooks."""
+    _HookRunner("load").hooks
+
+
 # pre/post install and run by the install subprocess
 pre_install = _HookRunner("pre_install")
 post_install_prefix = _HookRunner("post_install")

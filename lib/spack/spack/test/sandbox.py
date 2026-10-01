@@ -177,7 +177,7 @@ def test_enable_sandbox_paths(
         "allow_network": True,
     }
 
-    _enable_sandbox(config, spec, str(stage_path), str(source_path))
+    _enable_sandbox(config, spec, [str(stage_path), str(source_path)])
 
     allow_read_resolved = [c[1] for c in mock_sandbox.read_calls]
     for dep in spec.traverse(root=False):
@@ -209,7 +209,7 @@ def test_enable_sandbox_allow_read_all(config, mock_packages, monkeypatch, tmp_p
     for dep in spec.traverse(root=False):
         pathlib.Path(dep.prefix).mkdir(parents=True, exist_ok=True)
 
-    _enable_sandbox({"allow_read": "all"}, spec, str(tmp_path), str(tmp_path))
+    _enable_sandbox({"allow_read": "all"}, spec, [str(tmp_path)])
 
     assert not mock_sandbox.restrict_reads
     assert not mock_sandbox.read_calls

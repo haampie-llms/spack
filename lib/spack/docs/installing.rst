@@ -193,6 +193,7 @@ When ``allow_read`` is a list, only the listed paths and Spack-installed depende
 Use ``enable: false`` to disable the sandbox.
 
 The sandbox applies to the build process (and sub-processes) immediately after source extraction and prefix creation, until the post-install hooks that operate on the install prefix have run.
+Binaries from build caches are extracted and relocated in the sandbox, so that a tarball cannot write outside of the install prefix.
 Hooks that publish the installed package, such as module file generation and pushing to build caches, run outside of the sandbox.
 Note that network restrictions only apply during the build, leaving Spack's own fetch operations unaffected.
 

@@ -2071,8 +2071,13 @@ def _tar_strip_component(tar: tarfile.TarFile, prefix: str):
         yield m
 
 
-def extract_buildcache_tarball(tarfile_path: str, destination: str) -> None:
-    with closing(tarfile.open(tarfile_path, "r")) as tar:
+def extract_buildcache_tarball(tarfile_path: Union[str, IO[bytes]], destination: str) -> None:
+    """Extract a build cache tarball, given by path or as a file object, into destination."""
+    if isinstance(tarfile_path, str):
+        tar = tarfile.open(tarfile_path, "r")
+    else:
+        tar = tarfile.open(fileobj=tarfile_path, mode="r")
+    with closing(tar):
         # For consistent behavior across all supported Python versions
         tar.extraction_filter = lambda member, path: member
         # Remove common prefix from tarball entries and directly extract them to the install dir.
@@ -2081,9 +2086,19 @@ def extract_buildcache_tarball(tarfile_path: str, destination: str) -> None:
         )
 
 
-def extract_tarball(spec, tarball_stage: spack.stage.Stage, force=False, timer=timer.NULL_TIMER):
+def extract_tarball(
+    spec,
+    tarball_stage: spack.stage.Stage,
+    force=False,
+    timer=timer.NULL_TIMER,
+    confine: Optional[Callable[[], None]] = None,
+):
     """
     extract binary tarball for given package into install area
+
+    If ``confine`` is given, it is called after the install prefix is created and before the
+    tarball is extracted, with the tarball open and its stage removed, so that it can disallow
+    writes outside of the prefix.
     """
     timer.start("extract")
 
@@ -2101,14 +2116,16 @@ def extract_tarball(spec, tarball_stage: spack.stage.Stage, force=False, timer=t
         default_perms="parents",
     )
 
-    tarfile_path = tarball_stage.save_filename
-
-    try:
-        extract_buildcache_tarball(tarfile_path, destination=spec.prefix)
-    except Exception:
-        shutil.rmtree(spec.prefix, ignore_errors=True)
-        tarball_stage.destroy()
-        raise
+    with open(tarball_stage.save_filename, "rb") as tarball:
+        if confine is not None:
+            tarball_stage.destroy()
+            confine()
+        try:
+            extract_buildcache_tarball(tarball, destination=spec.prefix)
+        except Exception:
+            shutil.rmtree(spec.prefix, ignore_errors=True)
+            tarball_stage.destroy()
+            raise
 
     timer.stop("extract")
     timer.start("relocate")
