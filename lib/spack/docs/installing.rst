@@ -170,27 +170,31 @@ See :ref:`spack install <spack-install>` for the full set of flags related to de
 Build isolation and sandboxing (Linux)
 --------------------------------------
 
-Spack can run builds in an unprivileged sandbox to restrict filesystem and network access.
-This opt-in feature requires Linux 5.13+ with Landlock support (network restrictions require Linux 6.7+).
+Spack runs builds in an unprivileged sandbox to restrict filesystem and network access.
+The sandbox is enabled by default on Linux 5.19+ with Landlock support, and is silently disabled when the kernel does not support it (network restrictions require Linux 6.7+).
 Sandboxing is meant for build reproducibility and bug containment rather than acting as a strict security boundary, as package recipes still execute outside the sandbox ahead of the build.
 
-When enabled, the stage directory, install prefix, system temp directory and ``/dev/null`` are implicitly writable.
-Spack-installed dependencies (excluding externals) are implicitly readable.
-All other paths must be explicitly allowed in configuration:
+When enabled, the stage directory, install prefix, system temp directory, ``/dev/shm`` and ``/dev/null`` are implicitly writable, and so is the source directory of develop specs.
+Reads are not restricted by default.
+Other paths must be explicitly allowed in configuration:
 
 .. code-block:: yaml
 
    config:
      sandbox:
-       enable: true          # Enable for all builds
+       enable: true          # Fail if the kernel does not support the sandbox (default: auto)
        allow_network: false  # Disable TCP network access during the build phase
-       allow_read:           # Additional paths with read and execute permissions
+       allow_read:           # Restrict reads to these paths (default: all)
        - /usr
        allow_write:          # Additional paths with write and execute permissions
        - /scratch
 
-The sandbox activates immediately after source extraction and prefix creation.
-Note that network restrictions only apply during the build phases, leaving Spack's own fetch operations unaffected.
+When ``allow_read`` is a list, only the listed paths and Spack-installed dependencies (excluding externals) are readable.
+Use ``enable: false`` to disable the sandbox.
+
+The sandbox applies to the build process (and sub-processes) immediately after source extraction and prefix creation, until the post-install hooks that operate on the install prefix have run.
+Hooks that publish the installed package, such as module file generation and pushing to build caches, run outside of the sandbox.
+Note that network restrictions only apply during the build, leaving Spack's own fetch operations unaffected.
 
 File system restrictions are complementary to existing file permissions and ACLs; they cannot grant access to files the user does not already have permission to read or write.
 

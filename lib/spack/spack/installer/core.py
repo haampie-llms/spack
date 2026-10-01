@@ -22,6 +22,7 @@ import spack.deprecation
 import spack.error
 import spack.mirrors.mirror
 import spack.report
+import spack.sandbox
 import spack.spec
 import spack.stage
 import spack.store
@@ -255,6 +256,9 @@ class PackageInstaller:
         self.restage = restage
         self.keep_stage = keep_stage
         self.skip_patch = skip_patch
+        #: The sandbox config for builds, or None if builds are not sandboxed. Resolved once here,
+        #: so that builds don't fail later in a subprocess when the kernel lacks support.
+        self.sandbox = spack.sandbox.resolve_config(spack.config.CONFIG.get("config:sandbox", {}))
 
         #: queue of packages ready to install (no children)
         self.pending_builds = [
@@ -783,6 +787,7 @@ class PackageInstaller:
             log_path=self.log_paths[dag_hash],
             stop_before=self.stop_before if is_root else None,
             stop_at=self.stop_at if is_root else None,
+            sandbox=self.sandbox,
         )
         child_info = self.launcher(request, jobserver)
         child_info.prefix_lock = prefix_lock

@@ -21,14 +21,13 @@ import tempfile
 import traceback
 from gzip import GzipFile
 from multiprocessing import Process
-from typing import TYPE_CHECKING, List, NamedTuple, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, NamedTuple, Optional
 
 from spack.vendor.typing_extensions import Protocol
 
 import spack.binary_distribution
 import spack.build_environment
 import spack.builder
-import spack.config
 import spack.error
 import spack.hooks
 import spack.mirrors.mirror
@@ -38,6 +37,7 @@ import spack.spec
 import spack.store
 import spack.url_buildcache
 import spack.util.environment
+import spack.util.executable
 import spack.util.filesystem as fs
 import spack.util.lock
 import spack.util.timer
@@ -61,7 +61,11 @@ if sys.platform == "win32":
 else:
     from spack.installer.posix import PosixExitNotifier as ExitNotifier
     from spack.installer.posix import PosixTee as Tee
-    from spack.installer.posix import create_build_channels, make_state_stream
+    from spack.installer.posix import (
+        create_build_channels,
+        get_jobserver_config,
+        make_state_stream,
+    )
 
 if TYPE_CHECKING:
     import spack.package_base
@@ -359,6 +363,8 @@ class PrefixPivoter:
         #: Temporary location for the original prefix
         self.tmp_prefix: Optional[str] = None
         self.parent = os.path.dirname(prefix)
+        #: Exit code of the build. Without an exception, anything other than success is a failure
+        self.exit_code = ExitCode.SUCCESS
 
     def __enter__(self) -> "PrefixPivoter":
         """Enter the context: move existing prefix to temporary location if needed."""
@@ -375,14 +381,14 @@ class PrefixPivoter:
         self, exc_type: Optional[type], exc_val: Optional[BaseException], exc_tb: Optional[object]
     ) -> None:
         """Exit the context: cleanup on success, restore on failure."""
-        if exc_type is None:
+        if exc_type is None and self.exit_code == ExitCode.SUCCESS:
             # Success: remove the backup
             if self.tmp_prefix is not None:
                 self._rmtree_ignore_errors(self.tmp_prefix)
             return
 
         # Failure handling:
-        if self.keep_prefix and not issubclass(exc_type, BinaryCacheMiss):
+        if self.keep_prefix and self.exit_code != ExitCode.BUILD_CACHE_MISS:
             # Leave the failed prefix in place, discard the backup. Except for binary cache misses,
             # which is a scheduling failure and not a build failure.
             if self.tmp_prefix is not None:
@@ -436,6 +442,8 @@ class BuildRequest(NamedTuple):
     log_path: str
     stop_before: Optional[str]
     stop_at: Optional[str]
+    #: The config:sandbox section if the build is sandboxed, None otherwise
+    sandbox: Optional[Dict[str, Any]]
 
 
 def worker_function(
@@ -507,7 +515,8 @@ def worker_function(
     sys.stdin = open(os.devnull, "r", encoding=sys.stdin.encoding)
     os.dup2(sys.stdin.fileno(), 0)
 
-    # Start the tee thread to forward output to the log file and parent process.
+    # Redirect stdout and stderr to the log file and parent process. The tee thread is started
+    # later, so that a sandboxed build can fork while this process is single-threaded.
     tee = Tee(tee_control_r, tee_control_w, parent, log_path)
 
     # Use closefd=False because of the connection objects. Use line buffering.
@@ -521,25 +530,44 @@ def worker_function(
     sys.stderr = os.fdopen(
         sys.stderr.fileno(), "w", buffering=1, encoding=_stderr_enc, closefd=False
     )
-    state_stream = make_state_stream(state)
-    exit_code = ExitCode.SUCCESS
+    exit_code = ExitCode.BUILD_ERROR
 
+    # A sandboxed build runs in a child process, since the sandbox cannot be lifted. This process
+    # remains unconfined for what needs write access outside of the sandbox: moving the install
+    # prefix, removing the stage directory, and the hooks that publish the installed package.
     try:
-        with PrefixPivoter(spec.prefix, request.keep_prefix):
-            _install(request, state_stream, spack.store.STORE)
-    except spack.error.StopPhase:
-        exit_code = ExitCode.STOPPED_AT_PHASE
-    except ProcessError as e:
-        print(e, file=sys.stderr)
-        exit_code = ExitCode.BUILD_ERROR
-    except BinaryCacheMiss:
-        exit_code = ExitCode.BUILD_CACHE_MISS
+        with PrefixPivoter(spec.prefix, request.keep_prefix) as pivoter:
+            pid = None
+            if request.sandbox is not None:
+                # The child inherits the SIGTERM handler. Block SIGTERM until the child is in its
+                # try block, so that a KeyboardInterrupt cannot run this function's cleanup in it.
+                signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
+                try:
+                    pid = os.fork()
+                    if pid == 0:
+                        child_exit_code = ExitCode.BUILD_ERROR
+                        try:
+                            signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM})
+                            child_exit_code = _build(request, state)
+                            sys.stdout.flush()
+                            sys.stderr.flush()
+                        finally:
+                            os._exit(child_exit_code)
+                finally:
+                    signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM})
+            tee.start()
+            exit_code = _build(request, state) if pid is None else _wait_for_exit_code(pid)
+            if exit_code == _SUCCESS_FROM_BINARY_CACHE:
+                spec.package.installed_from_binary_cache = True
+                exit_code = ExitCode.SUCCESS
+            if exit_code == ExitCode.SUCCESS:
+                spack.hooks.post_install_publish(spec, request.explicit)
+            pivoter.exit_code = exit_code
     except BaseException:
         traceback.print_exc(limit=-4)
         exit_code = ExitCode.BUILD_ERROR
     finally:
         tee.close()
-        state_stream.close()
 
     if exit_code == ExitCode.SUCCESS:
         # Try to install the compressed log file
@@ -555,7 +583,50 @@ def worker_function(
             except Exception:
                 pass  # don't fail the build just because log compression failed
 
+        # The sandbox allows removing the contents of the stage directory, but not the directory
+        # itself, unless the stage root is in the temp dir.
+        if request.sandbox is not None and not request.keep_stage:
+            try:
+                for stage in spec.package.stage:
+                    os.rmdir(stage.path)
+            except Exception:
+                pass
+
     sys.exit(exit_code)
+
+
+#: Exit code of a successful install from a build cache. Only used between ``_build`` and
+#: ``worker_function``, which turns it into ``ExitCode.SUCCESS``.
+_SUCCESS_FROM_BINARY_CACHE = 10
+
+
+def _build(request: BuildRequest, state: IpcChannel) -> int:
+    """Install the requested spec and return an exit code. Runs in the child process of
+    ``worker_function`` if the build is sandboxed."""
+    state_stream = make_state_stream(state)
+    try:
+        _install(request, state_stream, spack.store.STORE)
+        if request.spec.package.installed_from_binary_cache:
+            return _SUCCESS_FROM_BINARY_CACHE
+        return ExitCode.SUCCESS
+    except spack.error.StopPhase:
+        return ExitCode.STOPPED_AT_PHASE
+    except ProcessError as e:
+        print(e, file=sys.stderr)
+        return ExitCode.BUILD_ERROR
+    except BinaryCacheMiss:
+        return ExitCode.BUILD_CACHE_MISS
+    except BaseException:
+        traceback.print_exc(limit=-4)
+        return ExitCode.BUILD_ERROR
+    finally:
+        state_stream.close()
+
+
+def _wait_for_exit_code(pid: int) -> int:
+    """Wait for the sandboxed child process and return its exit code."""
+    _, status = os.waitpid(pid, 0)
+    return os.WEXITSTATUS(status) if os.WIFEXITED(status) else ExitCode.BUILD_ERROR
 
 
 def _archive_build_metadata(pkg: "spack.package_base.PackageBase") -> None:
@@ -625,14 +696,17 @@ def _archive_build_metadata(pkg: "spack.package_base.PackageBase") -> None:
         spack.util.tty.debug(e)
 
 
-def _enable_sandbox(config: dict, spec: spack.spec.Spec, stage_path: str) -> None:
-    if not config.get("enable", False):
-        return
-
+def _enable_sandbox(
+    config: Dict[str, Any], spec: spack.spec.Spec, stage_path: str, source_path: str
+) -> None:
+    """Apply the sandbox described by the ``config:sandbox`` section to the current process."""
     try:
         sandbox = spack.sandbox.get_sandbox()
     except spack.sandbox.SandboxError as e:
         raise spack.error.InstallError(f"Cannot enable build sandbox: {e}") from e
+
+    allow_read = config.get("allow_read", "all")
+    sandbox.restrict_reads = allow_read != "all"
 
     for dep in spec.traverse(root=False):
         if not dep.external:
@@ -641,10 +715,30 @@ def _enable_sandbox(config: dict, spec: spack.spec.Spec, stage_path: str) -> Non
     sandbox.allow_write(stage_path)
     sandbox.allow_write(spec.prefix)
 
+    # Develop specs build in a source directory outside of the stage.
+    sandbox.allow_write(source_path)
+
     # POSIX prescribes /tmp and /dev/null are present. In the future we can consider setting
     # TMPPATH to a sibling of the stage path to isolate concurrent builds better.
     sandbox.allow_write(tempfile.gettempdir())
     sandbox.allow_write(os.devnull)
+
+    # POSIX shared memory and named semaphores, used by e.g. Python's multiprocessing.
+    sandbox.allow_write("/dev/shm")
+
+    # A jobserver FIFO inherited from an outer make can be outside the temp dir.
+    fifo_path = get_jobserver_config()
+    if fifo_path is not None:
+        sandbox.allow_write(fifo_path)
+
+    # The compiler wrapper invokes ccache, which writes to its cache directory.
+    ccache = os.environ.get(spack.build_environment.SPACK_CCACHE_BINARY)
+    if ccache:
+        cache_dir = os.environ.get("CCACHE_DIR") or spack.util.executable.Executable(ccache)(
+            "--get-config", "cache_dir", output=str, fail_on_error=False
+        )
+        if cache_dir.strip():
+            sandbox.allow_write(cache_dir.strip())
 
     # Allow read access to sbang, which might be needed to run build scripts.
     sandbox.allow_read(os.path.join(spack.store.STORE.unpadded_root, "bin", "sbang"))
@@ -652,8 +746,9 @@ def _enable_sandbox(config: dict, spec: spack.spec.Spec, stage_path: str) -> Non
         sandbox.allow_read(os.path.join(upstream_db.root, "bin", "sbang"))
 
     # User-configured paths
-    for p in config.get("allow_read", []):
-        sandbox.allow_read(p)
+    if isinstance(allow_read, list):
+        for p in allow_read:
+            sandbox.allow_read(p)
     for p in config.get("allow_write", []):
         sandbox.allow_write(p)
 
@@ -781,7 +876,8 @@ def _install(
         if stop_at is not None and stop_at not in builder.phases:
             raise spack.error.InstallError(f"'{stop_at}' is not a valid phase for {pkg.name}")
 
-        _enable_sandbox(spack.config.CONFIG.get("config:sandbox", {}), spec, stage.path)
+        if request.sandbox is not None:
+            _enable_sandbox(request.sandbox, spec, stage.path, stage.source_path)
 
         for phase in builder:
             if stop_before is not None and phase.name == stop_before:
@@ -817,7 +913,8 @@ def _post_install(
         if cache:
             if hasattr(pkg, "_post_buildcache_install_hook"):
                 pkg._post_buildcache_install_hook()
-        spack.hooks.post_install(spec, explicit)
+        # The hooks that write outside of the prefix run in worker_function, after the build.
+        spack.hooks.post_install_prefix(spec, explicit)
 
     timer.stop()
     _write_timer_json(pkg, timer, cache)

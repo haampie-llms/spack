@@ -7,7 +7,7 @@ import spack.mirrors.mirror
 from spack.util import tty
 
 
-def post_install(spec, explicit):
+def post_install_publish(spec, explicit):
     # Push package to all buildcaches with autopush==True
 
     # Do nothing if spec is an external package

@@ -31,7 +31,7 @@ def _for_each_enabled(
                 tty.warn(msg.format(method_name, str(e)))
 
 
-def post_install(spec, explicit: bool):
+def post_install_publish(spec, explicit: bool):
     _for_each_enabled(spec, "write", explicit)
 
 
