@@ -31,6 +31,7 @@ import spack.builder
 import spack.error
 import spack.hooks
 import spack.mirrors.mirror
+import spack.package_prefs
 import spack.repo
 import spack.sandbox
 import spack.spec
@@ -337,14 +338,23 @@ def install_from_buildcache(
 
     send_state("relocating", state_stream)
     with timer.measure("install"):
-        # Extract and relocate in the sandbox, so that the tarball cannot write outside the prefix
-        spack.binary_distribution.extract_tarball(
-            spec,
-            tarball_stage,
-            force=False,
-            timer=timer,
-            confine=None if sandbox is None else lambda: _enable_sandbox(sandbox, spec, []),
-        )
+        # Extract and relocate in the sandbox, so that the tarball cannot write outside the prefix.
+        # The stage is removed before, since the sandbox does not allow removing its directory.
+        with open(tarball_stage.save_filename, "rb") as tarball:
+            tarball_stage.destroy()
+            fs.mkdirp(
+                spec.prefix,
+                mode=spack.package_prefs.get_package_dir_permissions(spec),
+                group=spack.package_prefs.get_package_group(spec),
+                default_perms="parents",
+            )
+            _enable_sandbox(sandbox, spec, [])
+            with timer.measure("extract"):
+                spack.binary_distribution.extract_buildcache_tarball(
+                    tarball, destination=spec.prefix
+                )
+        with timer.measure("relocate"):
+            spack.binary_distribution.relocate_package(spec)
 
     if spec.spliced:  # overwrite old metadata with new
         spack.store.STORE.layout.write_spec(spec, spack.store.STORE.layout.spec_file_path(spec))
@@ -542,34 +552,16 @@ def worker_function(
     sys.stderr = os.fdopen(
         sys.stderr.fileno(), "w", buffering=1, encoding=_stderr_enc, closefd=False
     )
-    exit_code = ExitCode.BUILD_ERROR
 
     # A sandboxed build runs in a child process, since the sandbox cannot be lifted. This process
     # remains unconfined for what needs write access outside of the sandbox: moving the install
     # prefix, removing the stage directory, and the hooks that publish the installed package.
     try:
         with PrefixPivoter(spec.prefix, request.keep_prefix) as pivoter:
-            pid = None
-            if request.sandbox is not None:
-                # The child inherits the SIGTERM handler. Block SIGTERM until the child is in its
-                # try block, so that a KeyboardInterrupt cannot run this function's cleanup in it.
-                signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
-                try:
-                    pid = os.fork()
-                    if pid == 0:
-                        child_exit_code = ExitCode.BUILD_ERROR
-                        try:
-                            signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM})
-                            child_exit_code = _build(request, state)
-                            sys.stdout.flush()
-                            sys.stderr.flush()
-                        finally:
-                            os._exit(child_exit_code)
-                finally:
-                    signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM})
+            pid = _fork_build(request, state) if request.sandbox is not None else None
             tee.start()
             exit_code = _build(request, state) if pid is None else _wait_for_exit_code(pid)
-            if exit_code == _SUCCESS_FROM_BINARY_CACHE:
+            if exit_code == ExitCode.SUCCESS_FROM_BINARY_CACHE:
                 spec.package.installed_from_binary_cache = True
                 exit_code = ExitCode.SUCCESS
             if exit_code == ExitCode.SUCCESS:
@@ -597,23 +589,34 @@ def worker_function(
 
         # The sandbox allows removing the contents of the stage directory, but not the directory
         # itself, unless the stage root is in the temp dir.
-        if (
-            request.sandbox is not None
-            and not request.keep_stage
-            and not spec.package.installed_from_binary_cache
-        ):
+        if not request.keep_stage and not spec.package.installed_from_binary_cache:
             try:
-                for stage in spec.package.stage:
-                    os.rmdir(stage.path)
+                spec.package.stage.destroy()
             except Exception:
                 pass
 
     sys.exit(exit_code)
 
 
-#: Exit code of a successful install from a build cache. Only used between ``_build`` and
-#: ``worker_function``, which turns it into ``ExitCode.SUCCESS``.
-_SUCCESS_FROM_BINARY_CACHE = 10
+def _fork_build(request: BuildRequest, state: IpcChannel) -> int:
+    """Run ``_build`` in a child process and return its pid."""
+    # The child inherits the SIGTERM handler. Block SIGTERM until the child is in its try block,
+    # so that a KeyboardInterrupt cannot run the cleanup of worker_function in the child.
+    signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
+    try:
+        pid = os.fork()
+        if pid == 0:
+            exit_code = ExitCode.BUILD_ERROR
+            try:
+                signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM})
+                exit_code = _build(request, state)
+                sys.stdout.flush()
+                sys.stderr.flush()
+            finally:
+                os._exit(exit_code)
+        return pid
+    finally:
+        signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM})
 
 
 def _build(request: BuildRequest, state: IpcChannel) -> int:
@@ -623,7 +626,7 @@ def _build(request: BuildRequest, state: IpcChannel) -> int:
     try:
         _install(request, state_stream, spack.store.STORE)
         if request.spec.package.installed_from_binary_cache:
-            return _SUCCESS_FROM_BINARY_CACHE
+            return ExitCode.SUCCESS_FROM_BINARY_CACHE
         return ExitCode.SUCCESS
     except spack.error.StopPhase:
         return ExitCode.STOPPED_AT_PHASE
@@ -726,6 +729,7 @@ def _enable_sandbox(
 
     allow_read = config.get("allow_read", "all")
     sandbox.restrict_reads = allow_read != "all"
+    read_paths = allow_read if sandbox.restrict_reads else []
 
     for dep in spec.traverse(root=False):
         if not dep.external:
@@ -754,8 +758,9 @@ def _enable_sandbox(
         cache_dir = os.environ.get("CCACHE_DIR") or spack.util.executable.Executable(ccache)(
             "--get-config", "cache_dir", output=str, fail_on_error=False
         )
-        if cache_dir.strip():
-            sandbox.allow_write(cache_dir.strip())
+        cache_dir = cache_dir.strip()
+        if cache_dir:
+            sandbox.allow_write(cache_dir)
 
     # Allow read access to sbang, which might be needed to run build scripts.
     sandbox.allow_read(os.path.join(spack.store.STORE.unpadded_root, "bin", "sbang"))
@@ -763,9 +768,8 @@ def _enable_sandbox(
         sandbox.allow_read(os.path.join(upstream_db.root, "bin", "sbang"))
 
     # User-configured paths
-    if isinstance(allow_read, list):
-        for p in allow_read:
-            sandbox.allow_read(p)
+    for p in read_paths:
+        sandbox.allow_read(p)
     for p in config.get("allow_write", []):
         sandbox.allow_write(p)
 

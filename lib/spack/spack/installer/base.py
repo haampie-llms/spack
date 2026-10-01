@@ -44,6 +44,9 @@ class ExitCode:
     STOPPED_AT_PHASE = 3
     #: Exit code used by the child process to signal a binary cache miss (no source fallback)
     BUILD_CACHE_MISS = 4
+    #: Exit code of a successful install from a build cache in a sandboxed child of the build
+    #: process, which reports it as SUCCESS
+    SUCCESS_FROM_BINARY_CACHE = 5
 
 
 #: How often the event loop should wake up to poll for a background-to-foreground transition
