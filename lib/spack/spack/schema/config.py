@@ -239,17 +239,21 @@ properties: Dict[str, Any] = {
                 "additionalProperties": False,
                 "properties": {
                     "enable": {
-                        "type": "boolean",
-                        "description": "Enable or disable the build sandbox.",
+                        "oneOf": [{"type": "boolean"}, {"type": "string", "enum": ["auto"]}],
+                        "description": "Enable or disable the build sandbox. With auto, the "
+                        "sandbox is used when the kernel supports it.",
                     },
                     "allow_network": {
                         "type": "boolean",
                         "description": "Allow TCP network access during the build phase.",
                     },
                     "allow_read": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Additional paths with read and execute permissions.",
+                        "oneOf": [
+                            {"type": "string", "enum": ["all"]},
+                            {"type": "array", "items": {"type": "string"}},
+                        ],
+                        "description": "Paths with read and execute permissions, in addition "
+                        "to dependency prefixes. The default all does not restrict reads.",
                     },
                     "allow_write": {
                         "type": "array",

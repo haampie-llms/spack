@@ -23,7 +23,7 @@ import sys
 import warnings
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Dict, Union
+from typing import Any, Dict, Optional, Union
 
 # os.O_PATH is only defined on linux. Appease mypy with our own O_PATH.
 if sys.platform == "linux":
@@ -32,6 +32,7 @@ else:
     O_PATH = 0
 
 import spack.error
+import spack.util.tty as tty
 
 # Linux landlock syscalls
 SYSCALL_LANDLOCK_CREATE_RULESET = 444
@@ -44,6 +45,10 @@ LANDLOCK_RULE_PATH_BENEATH = 1
 LANDLOCK_ACCESS_NET_BIND_TCP = 1 << 0
 LANDLOCK_ACCESS_NET_CONNECT_TCP = 1 << 1
 LANDLOCK_RESTRICT_SELF_TSYNC = 1 << 3
+
+#: Minimum Landlock ABI for ``enable: auto``. ABI v1 cannot handle REFER, which means that
+#: renaming or linking files across directories is always denied.
+MIN_AUTO_ABI = 2
 
 
 class FSAccess(enum.IntFlag):
@@ -90,7 +95,12 @@ class PathBeneathAttr(ctypes.Structure):
 class Sandbox(ABC):
     """Abstract base class for sandbox implementations."""
 
+    #: When False, read and execute access is not restricted, and allow_read is a no-op
+    restrict_reads = True
+
     def allow_read(self, path: Union[str, Path]):
+        if not self.restrict_reads:
+            return
         p = Path(path).absolute()
         resolved = p.resolve()
         if resolved.exists():
@@ -235,7 +245,8 @@ class LandlockSandbox(Sandbox):
             raise SandboxError(f"Failed to apply build sandbox: {e}") from e
 
     def _apply(self, net_flags: int) -> None:
-        ruleset_fd = self._syscall_create_ruleset(self.write_flags | self.read_flags, net_flags)
+        handled_flags = self.write_flags | (self.read_flags if self.restrict_reads else 0)
+        ruleset_fd = self._syscall_create_ruleset(handled_flags, net_flags)
 
         try:
             for path, flags in self.path_rules.items():
@@ -251,7 +262,8 @@ class LandlockSandbox(Sandbox):
                     if not stat.S_ISDIR(st.st_mode):
                         # Strip directory-specific flags
                         flags &= ~self.dir_flags
-                    self._syscall_add_rule(ruleset_fd, flags, fd)
+                    # Rules cannot grant access rights that the ruleset does not handle
+                    self._syscall_add_rule(ruleset_fd, flags & handled_flags, fd)
                 finally:
                     os.close(fd)
 
@@ -270,6 +282,32 @@ def get_sandbox() -> Sandbox:
         return LandlockSandbox()
     except OSError as e:
         raise SandboxError(f"Landlock sandboxing is unavailable: {e}") from e
+
+
+def resolve_config(config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Decide whether builds should be sandboxed, given the ``config:sandbox`` section.
+
+    Returns the section if builds should be sandboxed, and None otherwise. With ``enable: auto``
+    the sandbox is used only if the kernel supports it; with ``enable: true`` a missing kernel
+    feature is an error."""
+    enable = config.get("enable", False)
+    if enable is False:
+        return None
+    try:
+        sandbox = get_sandbox()
+    except SandboxError as e:
+        if enable is True:
+            raise
+        tty.debug(f"Build sandbox disabled: {e}")
+        return None
+    if enable == "auto" and isinstance(sandbox, LandlockSandbox):
+        if sandbox.abi_version < MIN_AUTO_ABI:
+            tty.debug(
+                f"Build sandbox disabled: Landlock ABI v{sandbox.abi_version} is older than "
+                f"v{MIN_AUTO_ABI} (kernel 5.19+)"
+            )
+            return None
+    return config
 
 
 class SandboxError(spack.error.SpackError):

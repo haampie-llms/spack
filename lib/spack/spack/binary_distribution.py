@@ -2149,8 +2149,13 @@ def _tar_strip_component(tar: tarfile.TarFile, prefix: str):
         yield m
 
 
-def extract_buildcache_tarball(tarfile_path: str, destination: str) -> None:
-    with closing(tarfile.open(tarfile_path, "r")) as tar:
+def extract_buildcache_tarball(tarfile_path: Union[str, IO[bytes]], destination: str) -> None:
+    """Extract a build cache tarball, given by path or as a file object, into destination."""
+    if isinstance(tarfile_path, str):
+        tar = tarfile.open(tarfile_path, "r")
+    else:
+        tar = tarfile.open(fileobj=tarfile_path, mode="r")
+    with closing(tar):
         # For consistent behavior across all supported Python versions
         tar.extraction_filter = lambda member, path: member
         # Remove common prefix from tarball entries and directly extract them to the install dir.

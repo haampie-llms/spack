@@ -11,7 +11,9 @@ Hooks are not executed in any particular order.
 Currently the following hooks are supported:
 
 * ``pre_install(spec)``
-* ``post_install(spec, explicit)``
+* ``post_install(spec, explicit)``: operates on the install prefix only
+* ``post_install_publish(spec, explicit)``: publishes the installed package outside of the prefix
+  (module files, build caches). Runs after all ``post_install`` hooks, outside the build sandbox.
 * ``pre_uninstall(spec)``
 * ``post_uninstall(spec)``
 
@@ -63,9 +65,23 @@ class _HookRunner:
                     hook(*args, **kwargs)
 
 
+def load() -> None:
+    """Import all hook modules, e.g. before forking processes that run hooks."""
+    _HookRunner("load").hooks
+
+
 # pre/post install and run by the install subprocess
 pre_install = _HookRunner("pre_install")
-post_install = _HookRunner("post_install")
+post_install_prefix = _HookRunner("post_install")
+post_install_publish = _HookRunner("post_install_publish")
+
+
+def post_install(spec, explicit) -> None:
+    """Run all post install hooks: first those that operate on the install prefix, then those
+    that publish the installed package."""
+    post_install_prefix(spec, explicit)
+    post_install_publish(spec, explicit)
+
 
 pre_uninstall = _HookRunner("pre_uninstall")
 post_uninstall = _HookRunner("post_uninstall")

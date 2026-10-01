@@ -44,6 +44,9 @@ class ExitCode:
     STOPPED_AT_PHASE = 3
     #: Exit code used by the child process to signal a binary cache miss (no source fallback)
     BUILD_CACHE_MISS = 4
+    #: Exit code of a successful install from a build cache in a sandboxed child of the build
+    #: process, which reports it as SUCCESS
+    SUCCESS_FROM_BINARY_CACHE = 5
 
 
 #: How often the event loop should wake up to poll for a background-to-foreground transition
@@ -336,11 +339,16 @@ class Tee(abc.ABC):
         self.log_path = log_path
         log_file = open(self.log_path, "ab")
         r, w = os.pipe()
-        self.tee_thread = threading.Thread(target=self.run, args=(r, log_file), daemon=True)
-        self.tee_thread.start()
         self.saved_fds = redirect_stdio(w)
         self._setup_handles()
         os.close(w)
+        # The thread is started separately, so that the process can fork while single-threaded,
+        # after stdout and stderr are redirected to the pipe.
+        self.tee_thread = threading.Thread(target=self.run, args=(r, log_file), daemon=True)
+
+    def start(self) -> None:
+        """Start forwarding output to the log file and parent."""
+        self.tee_thread.start()
 
     def _setup_handles(self) -> None:
         pass
@@ -358,6 +366,9 @@ class Tee(abc.ABC):
         # buffers may be flushed, and can cause exit code 120 (witnessed under pytest+coverage on
         # macOS).
         restore_stdio(self.saved_fds)
+        # If an error occurred before the thread was started, start it to drain pending output.
+        if self.tee_thread.ident is None:
+            self.tee_thread.start()
         if self.control_w is not None:
             # Send a control byte to stop the tee thread.
             try:
