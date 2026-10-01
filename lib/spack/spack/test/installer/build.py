@@ -7,7 +7,8 @@ import pathlib
 
 import pytest
 
-from spack.installer.build import OVERWRITE_GARBAGE_SUFFIX, BinaryCacheMiss, PrefixPivoter
+from spack.installer.base import ExitCode
+from spack.installer.build import OVERWRITE_GARBAGE_SUFFIX, PrefixPivoter
 
 
 @pytest.fixture
@@ -151,14 +152,25 @@ class TestPrefixPivoter:
     def test_binary_cache_miss_with_keep_prefix_and_existing_prefix_restores_original(
         self, tmp_path: pathlib.Path, existing_prefix: pathlib.Path
     ):
-        """BinaryCacheMiss bypasses keep_prefix: original prefix is restored."""
-        with pytest.raises(BinaryCacheMiss), PrefixPivoter(str(existing_prefix), keep_prefix=True):
+        """A binary cache miss bypasses keep_prefix: original prefix is restored."""
+        with PrefixPivoter(str(existing_prefix), keep_prefix=True) as pivoter:
             existing_prefix.mkdir()
             (existing_prefix / "partial_file").write_text("partial content")
-            raise BinaryCacheMiss("cache miss")
+            pivoter.exit_code = ExitCode.BUILD_CACHE_MISS
 
         assert (existing_prefix / "old_file").read_text() == "old content"
         assert not (existing_prefix / "partial_file").exists()
+        assert len(list(tmp_path.iterdir())) == 1
+
+    def test_failed_exit_code_restores_original(
+        self, tmp_path: pathlib.Path, existing_prefix: pathlib.Path
+    ):
+        """A failed exit code is a failure without an exception: original prefix is restored."""
+        with PrefixPivoter(str(existing_prefix)) as pivoter:
+            existing_prefix.mkdir()
+            pivoter.exit_code = ExitCode.BUILD_ERROR
+
+        assert (existing_prefix / "old_file").read_text() == "old content"
         assert len(list(tmp_path.iterdir())) == 1
 
 

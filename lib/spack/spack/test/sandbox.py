@@ -16,9 +16,7 @@ import tempfile
 from typing import List, Tuple
 
 import spack.concretize
-import spack.error
 import spack.sandbox
-import spack.spec
 import spack.store
 from spack.installer.build import _enable_sandbox
 
@@ -157,6 +155,10 @@ def test_enable_sandbox_paths(
     stage_path = tmp_path / "stage"
     stage_path.mkdir()
 
+    # Develop specs have their source outside of the stage
+    source_path = tmp_path / "source"
+    source_path.mkdir()
+
     custom_write = tmp_path / "custom_write"
     custom_write.mkdir()
 
@@ -177,7 +179,7 @@ def test_enable_sandbox_paths(
         "allow_network": True,
     }
 
-    _enable_sandbox(config, spec, str(stage_path))
+    _enable_sandbox(config, spec, str(stage_path), str(source_path))
 
     allow_read_resolved = [c[1] for c in mock_sandbox.read_calls]
     for dep in spec.traverse(root=False):
@@ -195,32 +197,76 @@ def test_enable_sandbox_paths(
     assert pathlib.Path(spec.prefix).resolve() in allow_write_resolved
     assert custom_write.resolve() in allow_write_resolved
     assert pathlib.Path(tempfile.gettempdir()).resolve() in allow_write_resolved
+    assert source_path.resolve() in allow_write_resolved
+    assert pathlib.Path("/dev/shm").resolve() in allow_write_resolved
 
     assert mock_sandbox.apply_calls == [False]
 
 
-def test_enable_sandbox_unsupported(monkeypatch, capfd):
-    """Test that only enable: true fails when the kernel does not support the sandbox, and that
-    enable: auto reports building without it."""
+def test_enable_sandbox_allow_read_all(config, mock_packages, monkeypatch, tmp_path):
+    """Test that allow_read: all does not restrict reads, but still restricts writes."""
+    mock_sandbox = MockSandbox()
+    monkeypatch.setattr(spack.sandbox, "get_sandbox", lambda: mock_sandbox)
+    spec = spack.concretize.concretize_one("dependent-install")
+    for dep in spec.traverse(root=False):
+        pathlib.Path(dep.prefix).mkdir(parents=True, exist_ok=True)
+
+    _enable_sandbox({"allow_read": "all"}, spec, str(tmp_path), str(tmp_path))
+
+    assert not mock_sandbox.restrict_reads
+    assert not mock_sandbox.read_calls
+    assert tmp_path.resolve() in [c[1] for c in mock_sandbox.write_calls]
+
+
+def test_landlock_sandbox_unrestricted_reads(tmp_path: pathlib.Path):
+    """Test that without read restrictions the ruleset and rules only contain write access."""
+    sandbox = SpyLandlockSandbox(abi_version=3)
+    sandbox.restrict_reads = False
+    sandbox.allow_read(tmp_path)
+    sandbox.allow_write(tmp_path)
+    sandbox.apply()
+
+    [(fs_flags, _)] = sandbox.create_ruleset_calls
+    assert fs_flags == sandbox.write_flags
+    [(_, access, _)] = sandbox.add_rule_calls
+    assert access == sandbox.write_flags
+
+
+@pytest.mark.parametrize(
+    "enable,abi_version,expected",
+    [(False, 4, False), (True, 1, True), ("auto", 1, False), ("auto", 2, True)],
+)
+def test_resolve_config(monkeypatch, enable, abi_version, expected):
+    """Test which combinations of enable and kernel support sandbox builds."""
+    monkeypatch.setattr(
+        spack.sandbox, "get_sandbox", lambda: SpyLandlockSandbox(abi_version=abi_version)
+    )
+    config = {"enable": enable}
+    assert (spack.sandbox.resolve_config(config) is config) == expected
+
+
+def test_resolve_config_unsupported(monkeypatch):
+    """Test that only enable: true fails when the kernel does not support the sandbox."""
 
     def unsupported():
         raise spack.sandbox.SandboxError("unsupported")
 
     monkeypatch.setattr(spack.sandbox, "get_sandbox", unsupported)
-    _enable_sandbox({"enable": "auto"}, spack.spec.Spec(), "")
-    assert "Building without sandbox: unsupported" in capfd.readouterr().out
-    with pytest.raises(spack.error.InstallError, match="unsupported"):
-        _enable_sandbox({"enable": True}, spack.spec.Spec(), "")
+    assert spack.sandbox.resolve_config({"enable": "auto"}) is None
+    with pytest.raises(spack.sandbox.SandboxError):
+        spack.sandbox.resolve_config({"enable": True})
 
 
 @pytest.mark.parametrize("supported", [True, False])
-def test_enable_sandbox_auto_network(supported, config, mock_packages, monkeypatch, capfd):
+def test_enable_sandbox_auto_network(
+    supported, config, mock_packages, monkeypatch, capfd, tmp_path
+):
     """Test that enable: auto blocks network access only when the sandbox supports it."""
     mock_sandbox = MockSandbox()
     mock_sandbox.supports_network_blocking = supported
     monkeypatch.setattr(spack.sandbox, "get_sandbox", lambda: mock_sandbox)
     spec = spack.concretize.concretize_one("trivial-install-test-package")
-    _enable_sandbox({"enable": "auto", "allow_network": False}, spec, "")
+    _enable_sandbox({"enable": "auto", "allow_network": False}, spec, str(tmp_path), str(tmp_path))
     assert mock_sandbox.apply_calls == [supported]
     assert ("Building without network sandbox" in capfd.readouterr().out) is not supported
 
