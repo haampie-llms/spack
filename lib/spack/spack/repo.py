@@ -156,6 +156,15 @@ class _PrependFileLoader(importlib.machinery.SourceFileLoader):
         return self.prepend + data if path == self.path else data
 
 
+#: The code of a package.star module (see :class:`_StarLoader`).
+_STAR_MODULE_CODE = compile(
+    "import sys\nimport spack.star_package\n"
+    "spack.star_package.define_package(sys.modules[__name__])\n",
+    "<package.star module>",
+    "exec",
+)
+
+
 class _StarLoader(importlib.abc.Loader):
     """Loads a package recipe written in Starlark (``package.star``) as a package module,
     which defines the package class from the recipe (:mod:`spack.star_package`), as a
@@ -169,10 +178,10 @@ class _StarLoader(importlib.abc.Loader):
         return None
 
     def exec_module(self, module):
-        import spack.star_package
-
         module.__file__ = self.path
-        spack.star_package.define_package(module)
+        # The module's code, as a package.py's: it imports Spack's API for Starlark
+        # recipes (spack.repo does not), which defines the class from the recipe.
+        exec(_STAR_MODULE_CODE, module.__dict__)
 
 
 class SpackNamespaceLoader:
