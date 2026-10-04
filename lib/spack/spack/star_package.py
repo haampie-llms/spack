@@ -286,20 +286,17 @@ class StarPackage(spack.builder.Package):
         else:
             self._builder_install(str(prefix))
 
-    def _seed_path_file(self) -> str:
-        return self._in_tree(os.path.join(self.star_root, "bootstrap", "seed.path"))
-
     def _kaem_install(self, prefix: str, step: str) -> None:
         """Build a kaem-phase package as shpack's kaem phase does: the seed by the stage0
-        seed itself (start.kaem, COMMAND=seed), any other step by its kaem.run under the
-        kaem phase's environment contract (shpack/bootstrap/README.md), into the unhashed
-        prefix <store>/<name>-<version> that the kaem phase uses too."""
+        seed itself (start.kaem, COMMAND=seed), any other step by step.kaem, as base.kaem
+        runs it (shpack/bootstrap/README.md), into the unhashed prefix
+        <store>/<name>-<version> that the kaem phase uses too."""
         spec = self.spec
         tree = self._tree
         arch = star_recipe.arch(spec)
         distfiles = os.path.join(self._inputs, "distfiles")
         build = os.path.join(self._inputs, "build")
-        mkdirp(os.path.join(build, "home"))
+        mkdirp(build)
         if step == "seed":
             if os.path.basename(prefix) != _node_id(spec):
                 raise star_recipe.StarError(
@@ -319,38 +316,31 @@ class StarPackage(spack.builder.Package):
             if not os.path.exists(os.path.join(prefix, "bin", "tcc")):
                 raise star_recipe.StarError(f"{spec.name}: the seed chain failed")
             return
-        seed = str([d for d in _deps(spec) if _is_seed(d)][0].prefix)
-        boot = self._in_tree(os.path.join(self.star_root, "bootstrap"))
-        bindir = os.path.join(prefix, "bin")
+        seeds = [d for d in _deps(spec) if _is_seed(d)]
+        if len(seeds) != 1:
+            raise star_recipe.StarError(f"{spec.name}: a kaem step depends on the seed")
+        seed = str(seeds[0].prefix)
+        # step.kaem, as base.kaem runs it: it sets the rest of the kaem phase's contract
         env = {
             "ROOT": tree,
             "ARCH": arch,
-            "ARCH_DIR": _ARCH_DIR[arch],
             "STORE": os.path.dirname(prefix),
             "DISTFILES": distfiles,
             "BUILDDIR": build,
-            "TMPDIR": build,
-            "HOME": os.path.join(build, "home"),
-            "TERM": "dumb",
-            "SEEDDIR": os.path.join(tree, "seed"),
-            "BOOT": boot,
-            "MESR": os.path.join(tree, "vendor", "mes-replacement"),
-            "LIBC_PREFIX": seed,
-            "LIBDIR": os.path.join(seed, "lib"),
-            "INCDIR": os.path.join(seed, "include"),
+            "SEED": seed,
             "pkg": step,
-            "PKG": os.path.join(boot, step),
             "PREFIX": prefix,
-            "BINDIR": bindir,
-            "PATH": ":".join(_kaem_path(spec, bindir, self._seed_path_file())),
+            # the steps before it, newest first, as base.kaem accumulates them
+            "STEPS": "".join(
+                os.path.join(str(d.prefix), "bin") + ":"
+                for d in reversed(_deps(spec))
+                if not _is_seed(d)
+            ),
         }
-        mkdirp(bindir)
         kaem = os.path.join(seed, "mescc-tools-1.7.0", "bin", "kaem")
+        step_kaem = self._in_tree(os.path.join(self.star_root, "bootstrap", "step.kaem"))
         subprocess.run(
-            [kaem, "--verbose", "--strict", "--file", os.path.join(boot, step, "kaem.run")],
-            cwd=tree,
-            env=env,
-            check=True,
+            [kaem, "--verbose", "--strict", "--file", step_kaem], cwd=tree, env=env, check=True
         )
 
     def _builder_install(self, prefix: str) -> None:
@@ -453,31 +443,6 @@ def _prefix_of(node, name: str) -> str:
 
 def _node_id(node) -> str:
     return f"{node.name}-{node.version}"
-
-
-def _seed_path(seed: str, seed_path_file: str) -> List[str]:
-    """shpack/bootstrap/seed.path: what the seed puts on the PATH of the steps after it."""
-    with open(seed_path_file, encoding="utf-8") as f:
-        for line in f:
-            if line.startswith("PATH="):
-                return line.strip()[len("PATH=") :].replace("${SEED}", seed).split(":")
-    raise star_recipe.StarError("seed.path has no PATH= line")
-
-
-def _kaem_path(step, own_bin: str, seed_path_file: str) -> List[str]:
-    """start.kaem's PATH for a kaem step: its own bin, the steps before it (its declared
-    dependencies but the seed) newest first, then the seed's (seed.path)."""
-    deps = _deps(step)
-    seeds = [d for d in deps if _is_seed(d)]
-    if len(seeds) != 1:
-        raise star_recipe.StarError(f"{step.name}: a kaem step depends on the seed")
-    path = [own_bin] + [
-        os.path.join(str(d.prefix), "bin") for d in reversed(deps) if not _is_seed(d)
-    ]
-    return path + _seed_path(str(seeds[0].prefix), seed_path_file)
-
-
-# ------------------------------------------------------------------ build tools
 
 
 _ARCH_DIR = {"aarch64": "AArch64", "amd64": "AMD64"}
