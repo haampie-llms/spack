@@ -39,7 +39,6 @@ import spack.config
 import spack.directives
 import spack.directives_meta
 import spack.operating_systems
-import spack.package_base
 import spack.platforms
 import spack.repo
 import spack.stage
