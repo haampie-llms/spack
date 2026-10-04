@@ -46,7 +46,7 @@ license("MIT")
 version("1.1", sha256 = "{SHA}", url = "https://foo.test/foo-1.1.tar.gz")
 version("1.0-musl", sha256 = "{SHA}", url = "https://foo.test/foo-1.0.tar.gz")
 build_system(conditional("generic", when = "@=1.1,=1.0-musl"))
-depends_on("bar@2.0")
+depends_on("bar@=2.0")
 depends_on("dash", type = "build")
 depends_on("baz", when = "@=1.1", type = ("build", "run"))
 patch("x.patch", when = "@=1.0-musl")
@@ -79,7 +79,7 @@ SELFISH = {
     "selfish": """
 "depends on itself"
 version("2")
-depends_on("selfish@1")
+depends_on("selfish@=1")
 """
 }
 
@@ -145,7 +145,7 @@ def test_star_package_class(star_repo):
     )
     assert issubclass(cls, spack.star_package.StarPackage)
     assert [(d["spec"], tuple(d["type"])) for d in cls.star_directives("depends_on")] == [
-        ("bar@2.0", ("build", "link")),
+        ("bar@=2.0", ("build", "link")),
         ("dash", ("build",)),
         ("baz", ("build", "run")),
     ]
@@ -208,6 +208,8 @@ def test_star_record(star_repo):
         ('depends_on("a", "b")', "only @=VERSION"),
         ('depends_on("a", type = "runtime")', "want build, link, run or test"),
         ('depends_on("a", when = "@1:")', "version ranges are not supported"),
+        ('depends_on("a@1")', "use name@=VERSION"),
+        ('resource(url = "u", placement = "a/b")', "is a directory name"),
         ('version("1")\nbuild_system("generic")\nbuild_system("generic")', "more than once"),
         ("parallel = 0", "parallel must be a bool"),
     ],

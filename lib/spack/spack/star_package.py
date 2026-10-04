@@ -45,12 +45,12 @@ from spack.util.filesystem import copy_tree, mkdirp
 
 
 def _resolve(packages_path: str, root: str, spec: str) -> str:
-    """shpack's resolution, spelled for Spack: ``name@version`` pins that exact version,
+    """shpack's resolution, spelled for Spack: ``name@=version`` pins that exact version,
     and a bare name means the first version its recipe declares (a recipe always beats
     an external); names without a recipe stay bare and resolve to an external."""
-    name, at, version = spec.partition("@")
+    name, at, _ = spec.partition("@")
     if at:
-        return f"{name}@={version}"
+        return spec
     if not os.path.exists(os.path.join(packages_path, name, spack.repo.star_file_name)):
         return spec
     for d in star_recipe.record(packages_path, root, name)["directives"]:
@@ -364,13 +364,21 @@ class StarPackage(spack.builder.Package):
         version = next(
             d for d in self.star_directives("version") if d["version"] == str(spec.version)
         )
-        sources = [(version, version["fname"] or "-")] if version["sha256"] else []
-        sources += [(d, d["fname"]) for d in self.star_directives("resource") if self._applies(d)]
+        # TARGET: "-" for the version's archive, else where the resource goes in the
+        # source, DESTINATION/PLACEMENT (DESTINATION/ keeps the archive's directory name)
+        sources = [(version, version["fname"] or "-", "-")] if version["sha256"] else []
+        sources += [
+            (d, d["fname"], f"{d['destination'] or '.'}/{d['placement'] or ''}")
+            for d in self.star_directives("resource")
+            if self._applies(d)
+        ]
         files = {
             "version": str(spec.version),
             "deps": "".join(f"{_node_id(d)}\n" for d in _deps(spec)),
             "closure": "".join(f"{id}\n" for id, _ in closure),
-            "sources": "".join(f"{d['sha256']} {f} {d['url'] or '-'}\n" for d, f in sources),
+            "sources": "".join(
+                f"{d['sha256']} {f} {d['url'] or '-'} {target}\n" for d, f, target in sources
+            ),
             "patches": "".join(
                 f"{d['file']} {int(d['level'])}\n"
                 for d in self.star_directives("patch")

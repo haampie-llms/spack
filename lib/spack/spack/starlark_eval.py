@@ -376,14 +376,39 @@ class _Evaluation:
             "version", version=version, sha256=sha256, url=url, fname=self._fname(url, fname)
         )
 
-    def _resource(self, url=None, sha256=None, fname=None, when=None):
+    def _resource(
+        self, url=None, sha256=None, fname=None, destination=None, placement=None, when=None
+    ):
+        destination = destination or None  # Spack's default, ""
+        for what, path in (("destination", destination), ("placement", placement)):
+            parts = (path or "x").split("/")
+            if path is not None and (
+                path.startswith("/") or any(p in ("", ".", "..") for p in parts)
+            ):
+                raise StarlarkError(f'resource: {what} "{path}" must be a relative path')
+        if placement and "/" in placement:
+            raise StarlarkError(f'resource: placement "{placement}" is a directory name')
         return self._directive(
-            "resource", sha256=sha256, url=url, fname=self._fname(url, fname), when=when
+            "resource",
+            sha256=sha256,
+            url=url,
+            fname=self._fname(url, fname),
+            destination=destination,
+            placement=placement,
+            when=when,
         )
 
     def _depends_on(self, spec, when=None, type=None):
         if not spec or spec.startswith("@") or any(c in spec for c in " \t\n"):
             raise StarlarkError(f'depends_on: invalid spec "{spec}"')
+        _, at, version = spec.partition("@")
+        if at and (
+            not version.startswith("=") or len(version) < 2 or "@" in version or "," in version
+        ):
+            raise StarlarkError(
+                f'depends_on: "{spec}": use name@=VERSION for an exact version '
+                "(version ranges are not supported)"
+            )
         return self._directive("depends_on", spec=spec, type=dep_types(type), when=when)
 
     def _patch(self, file, level=1, when=None):
