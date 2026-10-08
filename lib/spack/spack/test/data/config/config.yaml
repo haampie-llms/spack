@@ -7,8 +7,9 @@ config:
   - $spack/lib/spack/spack/test/data/templates_again
   build_stage:
   - $tempdir/$user/spack-stage
-  source_cache: $user_cache_path/source
-  misc_cache: $user_cache_path/cache
+  source_cache: {2}
+  misc_cache: {3}
+  test_stage: {4}
   verify_ssl: true
   ssl_certs: $SSL_CERT_FILE
   checksum: true

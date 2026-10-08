@@ -54,10 +54,12 @@ def test_version_parsed_correctly():
     assert not version_parsed_correctly(MyPackage("", ["0.18.0"]), "oce-0.18.0")
 
 
+@pytest.mark.usefixtures("config")
 def test_url_parse():
     url("parse", "http://zlib.net/fossils/zlib-1.2.10.tar.gz")
 
 
+@pytest.mark.usefixtures("config")
 def test_url_with_no_version_fails():
     # No version in URL
     with pytest.raises(UndetectableVersionError):

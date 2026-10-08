@@ -439,12 +439,16 @@ def no_path_access(monkeypatch):
 # Disable any active Spack environment BEFORE all tests
 #
 @pytest.fixture(scope="session", autouse=True)
-def clean_user_environment():
-    spack_env_value = os.environ.pop(ev.spack_env_var, None)
-    with ev.no_active_environment():
-        yield
-    if spack_env_value:
-        os.environ[ev.spack_env_var] = spack_env_value
+def clean_user_environment(tmp_path_factory: pytest.TempPathFactory):
+    """Tests see neither the active environment nor the user and system configuration: the
+    configuration of ``spack.config.create()`` has empty user and system scopes."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.delenv(ev.spack_env_var, raising=False)
+        mp.delenv("SPACK_DISABLE_LOCAL_CONFIG", raising=False)
+        mp.setenv("SPACK_USER_CONFIG_PATH", str(tmp_path_factory.mktemp("user_config")))
+        mp.setenv("SPACK_SYSTEM_CONFIG_PATH", str(tmp_path_factory.mktemp("system_config")))
+        with ev.no_active_environment():
+            yield
 
 
 #
@@ -1024,10 +1028,18 @@ def configuration_dir(request, tmp_path_factory: pytest.TempPathFactory, linux_o
     (tmp_path / "user").mkdir()
 
     # Fill out config.yaml, packages.yaml and modules.yaml templates.
+    # Caches of the session, instead of the user's: xdist workers get directories of their own
     locks = sys.platform != "win32"
+    source_cache = tmp_path_factory.mktemp("source_cache")
+    misc_cache = tmp_path_factory.mktemp("misc_cache")
+    test_stage = tmp_path_factory.mktemp("test_stage")
     config = tmp_path / "site" / "config.yaml"
     config_template = test_config / "config.yaml"
-    config.write_text(config_template.read_text().format(install_tree_root, locks))
+    config.write_text(
+        config_template.read_text().format(
+            install_tree_root, locks, source_cache, misc_cache, test_stage
+        )
+    )
 
     target = str(spack.vendor.archspec.cpu.host().family)
     compilers = tmp_path / "site" / "packages.yaml"
@@ -1065,11 +1077,9 @@ def configuration_dir(request, tmp_path_factory: pytest.TempPathFactory, linux_o
                 include:
                 # user configuration scope
                 - name: "user"
-                  path_override_env_var: SPACK_USER_CONFIG_PATH
                   path: ../user
                   optional: true
                   prefer_modify: true
-                  when: '"SPACK_DISABLE_LOCAL_CONFIG" not in env'
 
                 # site configuration scope
                 - name: "site"
@@ -1078,10 +1088,8 @@ def configuration_dir(request, tmp_path_factory: pytest.TempPathFactory, linux_o
 
                 # system configuration scope
                 - name: "system"
-                  path_override_env_var: SPACK_SYSTEM_CONFIG_PATH
                   path: ../system
                   optional: true
-                  when: '"SPACK_DISABLE_LOCAL_CONFIG" not in env'
                 """
             )
         )

@@ -16,6 +16,7 @@ def test_command(default_config, container_config_dir):
     assert "FROM spack/ubuntu-jammy" in output
 
 
+@pytest.mark.usefixtures("config")
 def test_listing_possible_os():
     output = containerize("--list-os")
 
@@ -23,6 +24,7 @@ def test_listing_possible_os():
         assert expected_os in output
 
 
+@pytest.mark.usefixtures("config")
 @pytest.mark.maybeslow
 @pytest.mark.requires_executables("git")
 def test_bootstrap_phase(minimal_configuration, config_dumper):

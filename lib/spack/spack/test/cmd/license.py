@@ -14,7 +14,10 @@ from spack.util.filesystem import mkdirp, touch
 
 license = SpackCommand("license")
 
-pytestmark = pytest.mark.not_on_windows("does not run on windows")
+pytestmark = [
+    pytest.mark.not_on_windows("does not run on windows"),
+    pytest.mark.usefixtures("config"),
+]
 
 
 def test_list_files():

@@ -424,6 +424,27 @@ def test_substitute_tempdir(mock_low_high_config):
     )
 
 
+def test_tests_ignore_user_configuration_and_caches(config: Configuration):
+    """Neither the mock configuration nor the one of ``spack.config.create()`` reads the user and
+    system configuration, and the mock configuration keeps its caches out of the user's."""
+    user_and_system = [
+        pathlib.Path(os.path.expanduser(f"~{os.sep}.spack")),
+        pathlib.Path(os.sep, "etc", "spack"),
+    ]
+    for configuration in (config, spack.config.create()):
+        for scope in configuration.scopes.values():
+            path = getattr(scope, "path", None)
+            if path is None:
+                continue
+            path = pathlib.Path(path)
+            assert not any(path == p or p in path.parents for p in user_and_system), scope.name
+
+    user_cache = pathlib.Path(spack.paths.user_cache_path)
+    for key in ("config:misc_cache", "config:source_cache", "config:test_stage"):
+        path = pathlib.Path(spack.config.canonicalize_path(config.get(key), config=config))
+        assert user_cache not in path.parents, key
+
+
 def test_substitute_date(mock_low_high_config):
     test_path = os.path.join("hello", "world", "on", "$date")
     new_path = spack.config.canonicalize_path(test_path)

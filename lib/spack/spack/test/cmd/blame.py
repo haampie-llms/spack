@@ -38,6 +38,7 @@ def test_blame_by_percent(mock_packages):
     assert "EMAIL" in out
 
 
+@pytest.mark.usefixtures("config")
 def test_blame_file():
     """Sanity check the blame command to make sure it works."""
     with working_dir(spack.paths.prefix):
@@ -47,6 +48,7 @@ def test_blame_file():
     assert "EMAIL" in out
 
 
+@pytest.mark.usefixtures("config")
 def test_blame_file_missing():
     """Ensure attempt to get blame for missing file fails."""
     with pytest.raises(SpackCommandError):
@@ -54,6 +56,7 @@ def test_blame_file_missing():
         assert "does not exist" in out
 
 
+@pytest.mark.usefixtures("config")
 def test_blame_directory():
     """Ensure attempt to get blame for path that is a directory fails."""
     with pytest.raises(SpackCommandError):
@@ -61,6 +64,7 @@ def test_blame_directory():
         assert "not tracked" in out
 
 
+@pytest.mark.usefixtures("config")
 def test_blame_file_outside_spack_repo(tmp_path: Path):
     """Ensure attempts to get blame outside a package repository are flagged."""
     test_file = tmp_path / "test"
@@ -70,6 +74,7 @@ def test_blame_file_outside_spack_repo(tmp_path: Path):
         assert "not within a spack repo" in out
 
 
+@pytest.mark.usefixtures("config")
 def test_blame_spack_not_git_clone(monkeypatch):
     """Ensure attempt to get blame when spack not a git clone fails."""
     non_git_dir = os.path.join(spack.paths.prefix, "..")

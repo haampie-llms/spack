@@ -24,6 +24,7 @@ repo = spack.main.SpackCommand("repo")
 env = spack.main.SpackCommand("env")
 
 
+@pytest.mark.usefixtures("config")
 def test_help_option():
     # Test 'spack repo --help' to check basic import works
     # and the command exits successfully
