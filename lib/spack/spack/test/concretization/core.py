@@ -2012,7 +2012,6 @@ spack:
     def test_best_effort_coconcretize(self, specs, checks):
         specs = [Spec(s) for s in specs]
         solver = spack.solver.asp.Solver(context=spack.context.default())
-        solver.reuse = False
         concrete_specs = set()
         for result in solver.solve_in_rounds(specs):
             for s in result.specs:
@@ -2056,7 +2055,6 @@ spack:
         """Test package preferences during coconcretization."""
         specs = [Spec(s) for s in specs]
         solver = spack.solver.asp.Solver(context=spack.context.default())
-        solver.reuse = False
         concrete_specs = {}
         for result in solver.solve_in_rounds(specs):
             concrete_specs.update(result.specs_by_input)
@@ -2070,7 +2068,6 @@ spack:
     def test_solve_in_rounds_all_unsolved(self, monkeypatch, mock_packages):
         specs = [Spec(x) for x in ["libdwarf%gcc", "libdwarf%clang"]]
         solver = spack.solver.asp.Solver(context=spack.context.default())
-        solver.reuse = False
 
         simulate_unsolved_property = [(x, None) for x in specs]
         monkeypatch.setattr(spack.solver.asp.Result, "unsolved_specs", simulate_unsolved_property)
