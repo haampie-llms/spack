@@ -39,6 +39,7 @@ import spack.compilers.config
 import spack.compilers.libraries
 import spack.concretize
 import spack.config
+import spack.context
 import spack.database
 import spack.directives_meta
 import spack.environment as ev
@@ -75,6 +76,7 @@ import spack.util.url as url_util
 import spack.util.web
 import spack.version
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.enums import ConfigScopePriority
 from spack.fetch_strategy import URLFetchStrategy
 from spack.installer import PackageInstaller
@@ -1133,6 +1135,12 @@ def config(mock_configuration_scopes):
     """This fixture activates/deactivates the mock configuration."""
     with _use_configuration_and_store(*mock_configuration_scopes) as config:
         yield config
+
+
+@pytest.fixture
+def ctx() -> SpackContext:
+    """The context of the test: a view of the process globals, which fixtures set up."""
+    return spack.context.default()
 
 
 @pytest.fixture(scope="function")

@@ -20,7 +20,6 @@ import spack.cmd
 import spack.cmd.external
 import spack.compilers.config
 import spack.concretize
-import spack.context
 import spack.cray_manifest
 import spack.platforms
 import spack.platforms.test
@@ -28,6 +27,7 @@ import spack.repo
 import spack.solver.reuse
 import spack.spec
 import spack.store
+from spack.context import SpackContext
 from spack.cray_manifest import compiler_from_entry, entries_to_specs
 from spack.externals_config import external_config_with_implicit_externals
 from spack.solver.reuse import ReusableSpecsSelector
@@ -462,7 +462,9 @@ def _reusable_hashes(context):
     return {x.dag_hash() for x in selector.reusable_specs([])}
 
 
-def test_reusable_externals_cray_manifest(temporary_store, mutable_config, manifest_file):
+def test_reusable_externals_cray_manifest(
+    temporary_store, mutable_config, manifest_file, ctx: SpackContext
+):
     """The concretizer should be able to reuse specs imported from a manifest without a
     externals config entry in packages.yaml"""
     spack.cray_manifest.read(path=str(manifest_file), apply_updates=True)
@@ -471,7 +473,7 @@ def test_reusable_externals_cray_manifest(temporary_store, mutable_config, manif
 
     mutable_config.set("concretizer:reuse", {"from": [{"type": "local"}]})
 
-    assert imported <= _reusable_hashes(spack.context.default())
+    assert imported <= _reusable_hashes(ctx)
 
 
 def test_cray_manifest_externals_from_a_build_cache_are_not_reusable(
@@ -505,6 +507,6 @@ def test_reusable_externals_cray_manifest_from_upstream(mutable_config, tmp_path
     mutable_config.set("upstreams", {"site": {"install_tree": str(upstream_root)}})
     mutable_config.set("concretizer:reuse", {"from": [{"type": "local"}]})
 
-    context = spack.context.default()._replace(store=spack.store.create(mutable_config))
+    context = SpackContext(mutable_config)
 
     assert imported <= _reusable_hashes(context)

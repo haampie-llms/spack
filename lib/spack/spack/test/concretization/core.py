@@ -9,7 +9,7 @@ import pathlib
 import platform
 import re
 import sys
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import pytest
 
@@ -25,7 +25,6 @@ import spack.compilers.libraries
 import spack.concretize
 import spack.concretize_ui
 import spack.config
-import spack.context
 import spack.deptypes as dt
 import spack.environment as ev
 import spack.error
@@ -55,6 +54,7 @@ import spack.variant as vt
 import spack.version.git_ref_lookup
 from spack.concretize_ui import SolveKind
 from spack.config import Configuration
+from spack.context import SpackContext
 from spack.database import Database
 from spack.externals import ExternalDependencyError
 from spack.installer import PackageInstaller
@@ -2009,9 +2009,9 @@ spack:
             (["mpi", "mpich"], {"mpi": 1, "mpich": 1, "zmpi": 0}),
         ],
     )
-    def test_best_effort_coconcretize(self, specs, checks):
+    def test_best_effort_coconcretize(self, specs, checks, ctx: SpackContext):
         specs = [Spec(s) for s in specs]
-        solver = spack.solver.asp.Solver(context=spack.context.default())
+        solver = spack.solver.asp.Solver(context=ctx)
         concrete_specs = set()
         for result in solver.solve_in_rounds(specs):
             for s in result.specs:
@@ -2051,10 +2051,12 @@ spack:
             (["hdf5+mpi", "zmpi", "mpich"], "mpich", 2),
         ],
     )
-    def test_best_effort_coconcretize_preferences(self, specs, expected_spec, occurrences):
+    def test_best_effort_coconcretize_preferences(
+        self, specs, expected_spec, occurrences, ctx: SpackContext
+    ):
         """Test package preferences during coconcretization."""
         specs = [Spec(s) for s in specs]
-        solver = spack.solver.asp.Solver(context=spack.context.default())
+        solver = spack.solver.asp.Solver(context=ctx)
         concrete_specs = {}
         for result in solver.solve_in_rounds(specs):
             concrete_specs.update(result.specs_by_input)
@@ -2065,9 +2067,9 @@ spack:
                 counter += 1
         assert counter == occurrences, concrete_specs
 
-    def test_solve_in_rounds_all_unsolved(self, monkeypatch, mock_packages):
+    def test_solve_in_rounds_all_unsolved(self, monkeypatch, mock_packages, ctx: SpackContext):
         specs = [Spec(x) for x in ["libdwarf%gcc", "libdwarf%clang"]]
-        solver = spack.solver.asp.Solver(context=spack.context.default())
+        solver = spack.solver.asp.Solver(context=ctx)
 
         simulate_unsolved_property = [(x, None) for x in specs]
         monkeypatch.setattr(spack.solver.asp.Result, "unsolved_specs", simulate_unsolved_property)
@@ -2076,16 +2078,16 @@ spack:
         with pytest.raises(spack.solver.asp.OutputDoesNotSatisfyInputError):
             list(solver.solve_in_rounds(specs))
 
-    def test_coconcretize_reuse_and_virtuals(self, mutable_config):
-        reusable_specs = []
+    def test_coconcretize_reuse_and_virtuals(self, mutable_config, ctx: SpackContext):
+        reusable_specs: List[Spec] = []
         for s in ["mpileaks ^mpich", "zmpi"]:
             reusable_specs.extend(spack.concretize.concretize_one(s).traverse(root=True))
 
         root_specs = [Spec("mpileaks"), Spec("zmpi")]
 
         with mutable_config.override("concretizer:reuse", True):
-            solver = spack.solver.asp.Solver(context=spack.context.default())
-            setup = spack.solver.asp.SpackSolverSetup(context=spack.context.default())
+            solver = spack.solver.asp.Solver(context=ctx)
+            setup = spack.solver.asp.SpackSolverSetup(context=ctx)
             result, _, _ = solver.driver.solve(setup, root_specs, reuse=reusable_specs)
 
         for spec in result.specs:
@@ -2093,7 +2095,7 @@ spack:
 
     @pytest.mark.regression("30864")
     def test_misleading_error_message_on_version(
-        self, mutable_database, mutable_config: Configuration
+        self, mutable_database, mutable_config: Configuration, ctx: SpackContext
     ):
         # For this bug to be triggered we need a reusable dependency
         # that is not optimal in terms of optimization scores.
@@ -2102,23 +2104,23 @@ spack:
         root_spec = Spec("non-existing-conditional-dep@2.0")
 
         with mutable_config.override("concretizer:reuse", True):
-            solver = spack.solver.asp.Solver(context=spack.context.default())
-            setup = spack.solver.asp.SpackSolverSetup(context=spack.context.default())
+            solver = spack.solver.asp.Solver(context=ctx)
+            setup = spack.solver.asp.SpackSolverSetup(context=ctx)
             with pytest.raises(spack.solver.asp.UnsatisfiableSpecError, match="Cannot satisfy"):
                 solver.driver.solve(setup, [root_spec], reuse=reusable_specs)
 
     @pytest.mark.regression("31148")
-    def test_version_weight_and_provenance(self, mutable_config: Configuration):
+    def test_version_weight_and_provenance(self, mutable_config: Configuration, ctx: SpackContext):
         """Test package preferences during concretization."""
         reusable_specs = [
             spack.concretize.concretize_one(spec_str) for spec_str in ("pkg-b@0.9", "pkg-b@1.0")
         ]
         root_spec = Spec("pkg-a foobar=bar")
 
-        external_specs = reusable_external_specs(spack.context.default())
+        external_specs = reusable_external_specs(ctx)
         with mutable_config.override("concretizer:reuse", True):
-            solver = spack.solver.asp.Solver(context=spack.context.default())
-            setup = spack.solver.asp.SpackSolverSetup(context=spack.context.default())
+            solver = spack.solver.asp.Solver(context=ctx)
+            setup = spack.solver.asp.SpackSolverSetup(context=ctx)
             result, _, _ = solver.driver.solve(
                 setup, [root_spec], reuse=reusable_specs + external_specs
             )
@@ -2140,9 +2142,9 @@ spack:
             assert result_spec["pkg-b"].dag_hash() == reusable_specs[1].dag_hash()
 
     @pytest.mark.regression("51112")
-    def test_variant_penalty(self, mutable_config):
+    def test_variant_penalty(self, mutable_config, ctx: SpackContext):
         """Test package preferences during concretization."""
-        external_specs = reusable_external_specs(spack.context.default())
+        external_specs = reusable_external_specs(ctx)
 
         # The variant definition is similar to
         #
@@ -2157,8 +2159,8 @@ spack:
         # pkg_fact("trilinos",variant_possible_value(195,"17")).
         # pkg_fact("trilinos",variant_possible_value(195,"20")).
 
-        solver = spack.solver.asp.Solver(context=spack.context.default())
-        setup = spack.solver.asp.SpackSolverSetup(context=spack.context.default())
+        solver = spack.solver.asp.Solver(context=ctx)
+        setup = spack.solver.asp.SpackSolverSetup(context=ctx)
 
         # Ensure that since the default value of 14 cannot be taken, we select "17"
         result, _, _ = solver.driver.solve(setup, [Spec("trilinos")], reuse=external_specs)
@@ -2302,19 +2304,23 @@ spack:
             ),
         ],
     )
-    def test_requirements_and_weights(self, packages_config, expected, mutable_config):
+    def test_requirements_and_weights(
+        self, packages_config, expected, mutable_config, ctx: SpackContext
+    ):
         """Checks that requirements and strong preferences on virtual packages influence the
         weights for providers, even if "package preferences" are not set consistently.
         """
         packages_yaml = syaml.load_config(packages_config)
         mutable_config.set("packages", packages_yaml["packages"])
 
-        setup = spack.solver.asp.SpackSolverSetup(context=spack.context.default())
+        setup = spack.solver.asp.SpackSolverSetup(context=ctx)
         asp_problem = setup.setup([Spec("mpileaks")], reuse=[]).asp_problem
 
         assert all(x in asp_problem for x in expected)
 
-    def test_reuse_succeeds_with_config_compatible_os(self, mutable_config: Configuration):
+    def test_reuse_succeeds_with_config_compatible_os(
+        self, mutable_config: Configuration, ctx: SpackContext
+    ):
         root_spec = Spec("pkg-b")
         s = spack.concretize.concretize_one(root_spec)
         other_os = s.copy()
@@ -2326,8 +2332,8 @@ spack:
         overrides = {"concretizer": {"reuse": True, "os_compatible": {s.os: [mock_os]}}}
         custom_scope = spack.config.InternalConfigScope("concretize_override", overrides)
         with mutable_config.override(custom_scope):
-            solver = spack.solver.asp.Solver(context=spack.context.default())
-            setup = spack.solver.asp.SpackSolverSetup(context=spack.context.default())
+            solver = spack.solver.asp.Solver(context=ctx)
+            setup = spack.solver.asp.SpackSolverSetup(context=ctx)
             result, _, _ = solver.driver.solve(setup, [root_spec], reuse=reusable_specs)
         concrete_spec = result.specs[0]
         assert concrete_spec.satisfies("os={}".format(other_os.architecture.os))
@@ -2496,25 +2502,25 @@ packages:
             ["v1-consumer ^conditional-provider@1:1 +disable-v1"],
         ],
     )
-    def test_result_specs_is_not_empty(self, mutable_config, specs):
+    def test_result_specs_is_not_empty(self, mutable_config, specs, ctx: SpackContext):
         """Check that the implementation of "result.specs" is correct in cases where we
         know a concretization exists.
         """
         specs = [Spec(s) for s in specs]
-        external_specs = reusable_external_specs(spack.context.default())
-        solver = spack.solver.asp.Solver(context=spack.context.default())
-        setup = spack.solver.asp.SpackSolverSetup(context=spack.context.default())
+        external_specs = reusable_external_specs(ctx)
+        solver = spack.solver.asp.Solver(context=ctx)
+        setup = spack.solver.asp.SpackSolverSetup(context=ctx)
         result, _, _ = solver.driver.solve(setup, specs, reuse=external_specs)
         assert result.specs
 
     @pytest.mark.regression("38664")
-    def test_unsolved_specs_raises_error(self, monkeypatch, mock_packages):
+    def test_unsolved_specs_raises_error(self, monkeypatch, mock_packages, ctx: SpackContext):
         """Check that the solver raises an exception when input specs are not
         satisfied.
         """
         specs = [Spec("zlib")]
-        solver = spack.solver.asp.Solver(context=spack.context.default())
-        setup = spack.solver.asp.SpackSolverSetup(context=spack.context.default())
+        solver = spack.solver.asp.Solver(context=ctx)
+        setup = spack.solver.asp.SpackSolverSetup(context=ctx)
 
         simulate_unsolved_property = [(x, None) for x in specs]
 
@@ -2850,7 +2856,9 @@ packages:
         assert result["deprecated-versions"].satisfies("@1.0.0")
 
     @pytest.mark.regression("44085")
-    def test_can_reuse_concrete_externals_for_dependents(self, mutable_config: Configuration):
+    def test_can_reuse_concrete_externals_for_dependents(
+        self, mutable_config: Configuration, ctx: SpackContext
+    ):
         """Test that external specs that are in the DB can be reused. This means they are
         preferred to concretizing another external from packages.yaml
         """
@@ -2864,15 +2872,15 @@ packages:
 
         root_specs = [Spec("sombrero")]
         with mutable_config.override("concretizer:reuse", True):
-            solver = spack.solver.asp.Solver(context=spack.context.default())
-            setup = spack.solver.asp.SpackSolverSetup(context=spack.context.default())
+            solver = spack.solver.asp.Solver(context=ctx)
+            setup = spack.solver.asp.SpackSolverSetup(context=ctx)
             result, _, _ = solver.driver.solve(setup, root_specs, reuse=[external_spec])
 
         assert len(result.specs) == 1
         sombrero = result.specs[0]
         assert sombrero["externaltool"].dag_hash() == external_spec.dag_hash()
 
-    def test_cannot_reuse_host_incompatible_libc(self):
+    def test_cannot_reuse_host_incompatible_libc(self, ctx: SpackContext):
         """Test whether reuse concretization correctly fails to reuse a spec with a host
         incompatible libc."""
         if not spack.platforms.using_libc_compatibility():
@@ -2888,8 +2896,8 @@ packages:
 
         # The spec b@1 ^glibc@2.30 is "more optimal" than b@0 ^glibc@2.28, but due to glibc
         # incompatibility, it should not be reused.
-        solver = spack.solver.asp.Solver(context=spack.context.default())
-        setup = spack.solver.asp.SpackSolverSetup(context=spack.context.default())
+        solver = spack.solver.asp.Solver(context=ctx)
+        setup = spack.solver.asp.SpackSolverSetup(context=ctx)
         result, _, _ = solver.driver.solve(setup, [Spec("pkg-b")], reuse=[fst, snd])
         assert len(result.specs) == 1
         assert result.specs[0] == snd
@@ -3107,7 +3115,7 @@ class TestConcretizeSeparately:
             spack.concretize.concretize_one("unify-build-deps-a@2.0")
 
     @pytest.mark.regression("43647")
-    def test_specifying_different_versions_build_deps(self):
+    def test_specifying_different_versions_build_deps(self, ctx: SpackContext):
         """Tests that we can concretize a spec with nodes using the same build
         dependency pinned at different versions, when the constraint is specified
         in the root spec.
@@ -3123,19 +3131,19 @@ class TestConcretizeSeparately:
         hdf5_str = "hdf5@1.0 ^gmake@4.1"
         pinned_str = "pinned-gmake@1.0 ^gmake@3.0"
         input_specs = [Spec(hdf5_str), Spec(pinned_str)]
-        solver = spack.solver.asp.Solver(context=spack.context.default())
+        solver = spack.solver.asp.Solver(context=ctx)
         result = solver.solve(input_specs)
 
         assert any(x.satisfies(hdf5_str) for x in result.specs)
         assert any(x.satisfies(pinned_str) for x in result.specs)
 
     @pytest.mark.regression("44289")
-    def test_all_extensions_depend_on_same_extendee(self):
+    def test_all_extensions_depend_on_same_extendee(self, ctx: SpackContext):
         """Tests that we don't reuse dependencies that bring in a different extendee"""
         setuptools = spack.concretize.concretize_one("py-setuptools ^python@3.10")
 
-        solver = spack.solver.asp.Solver(context=spack.context.default())
-        setup = spack.solver.asp.SpackSolverSetup(context=spack.context.default())
+        solver = spack.solver.asp.Solver(context=ctx)
+        setup = spack.solver.asp.SpackSolverSetup(context=ctx)
         result, _, _ = solver.driver.solve(
             setup, [Spec("py-floating ^python@3.11")], reuse=list(setuptools.traverse())
         )
@@ -3392,12 +3400,12 @@ def test_concretization_version_order():
 @pytest.mark.usefixtures("mutable_database", "mock_store")
 @pytest.mark.not_on_windows("Expected length is different on Windows")
 def test_filtering_reused_specs(
-    roots, reuse_yaml, expected, not_expected, expected_length, mutable_config
+    roots, reuse_yaml, expected, not_expected, expected_length, mutable_config, ctx: SpackContext
 ):
     """Tests that we can select which specs are to be reused, using constraints as filters"""
     # Assume all specs have a runtime dependency
     mutable_config.set("concretizer:reuse", reuse_yaml)
-    context = spack.context.default()
+    context = ctx
     selector = spack.solver.asp.ReusableSpecsSelector(
         context=context,
         packages_with_externals=spack.externals_config.external_config_with_implicit_externals(
@@ -3432,18 +3440,18 @@ def test_filtering_reused_specs(
     ],
 )
 @pytest.mark.not_on_windows("Expected length is different on Windows")
-def test_selecting_reused_sources(reuse_yaml, expected_length, mutable_config):
+def test_selecting_reused_sources(reuse_yaml, expected_length, mutable_config, ctx: SpackContext):
     """Tests that we can turn on/off sources of reusable specs"""
     # Assume all specs have a runtime dependency
     mutable_config.set("concretizer:reuse", reuse_yaml)
-    context = spack.context.default()
+    context = ctx
     selector = spack.solver.asp.ReusableSpecsSelector(
         context=context,
         packages_with_externals=spack.externals_config.external_config_with_implicit_externals(
             context
         ),
     )
-    specs = selector.reusable_specs(["mpileaks"])
+    specs = selector.reusable_specs([Spec("mpileaks")])
     assert len(specs) == expected_length
 
     # Compiler wrapper is not reused, as it might have changed from previous installations
@@ -4471,7 +4479,9 @@ def test_commit_variant_enters_the_hash(mutable_config, mock_packages, monkeypat
 
 
 @pytest.mark.regression("51180")
-def test_reuse_with_mixed_compilers(mutable_config: Configuration, mock_packages):
+def test_reuse_with_mixed_compilers(
+    mutable_config: Configuration, mock_packages, ctx: SpackContext
+):
     """Tests that potentially reusing a spec with a mixed compiler set, will not interfere
     with a request on one of the languages for the same package.
     """
@@ -4506,8 +4516,8 @@ packages:
     root_specs = [Spec("openblas %fortran=gcc")]
 
     with mutable_config.override("concretizer:reuse", True):
-        solver = spack.solver.asp.Solver(context=spack.context.default())
-        setup = spack.solver.asp.SpackSolverSetup(context=spack.context.default())
+        solver = spack.solver.asp.Solver(context=ctx)
+        setup = spack.solver.asp.SpackSolverSetup(context=ctx)
         result, _, _ = solver.driver.solve(setup, root_specs, reuse=reusable_specs)
 
     assert len(result.specs) == 1
@@ -4517,10 +4527,10 @@ packages:
 
 
 @pytest.mark.regression("51224")
-def test_when_possible_above_all(mutable_config, mock_packages):
+def test_when_possible_above_all(mutable_config, mock_packages, ctx: SpackContext):
     """Tests that the criterion to solve as many specs as possible is above all other criteria."""
     specs = [Spec("pkg-a"), Spec("pkg-b")]
-    solver = spack.solver.asp.Solver(context=spack.context.default())
+    solver = spack.solver.asp.Solver(context=ctx)
 
     for result in solver.solve_in_rounds(specs):
         criteria = sorted(result.criteria, reverse=True)
@@ -4536,9 +4546,9 @@ def test_when_possible_above_all(mutable_config, mock_packages):
         [Spec("pkg-a"), Spec("pkg-b"), Spec("pkg-c")],
     ],
 )
-def test_result_roundtrip(mock_packages, config, specs):
+def test_result_roundtrip(mock_packages, config, specs, ctx: SpackContext):
     """Test that a solve result can be serialized and brought back."""
-    solver = spack.solver.asp.Solver(context=spack.context.default())
+    solver = spack.solver.asp.Solver(context=ctx)
     result = solver.solve(specs)
     roundtrip = spack.solver.result.Result.from_dict(result.to_dict(), specs, repo=result.repo)
 
@@ -4546,8 +4556,8 @@ def test_result_roundtrip(mock_packages, config, specs):
     # to come back as exactly the same graph they were before.
     assert len(result.answers) == len(roundtrip.answers)
     for (_, _, lspecs), (_, _, rspecs) in zip(result.answers, roundtrip.answers):
-        lids = {id(lspec) for lspec in spack.traverse.traverse_nodes(lspecs.values())}
-        rids = {id(rspec) for rspec in spack.traverse.traverse_nodes(rspecs.values())}
+        lids = {id(lspec) for lspec in spack.traverse.traverse_nodes(list(lspecs.values()))}
+        rids = {id(rspec) for rspec in spack.traverse.traverse_nodes(list(rspecs.values()))}
         assert len(lids) == len(rids)
 
     assert roundtrip == result
@@ -4700,10 +4710,10 @@ def test_concretization_cache_roundtrip(
         assert h == hdf5
 
 
-def test_concretization_cache_roundtrip_result(use_concretization_cache):
+def test_concretization_cache_roundtrip_result(use_concretization_cache, ctx: SpackContext):
     """Ensure the concretization cache doesn't change Solver Result objects."""
     specs = [Spec("hdf5")]
-    solver = spack.solver.asp.Solver(context=spack.context.default())
+    solver = spack.solver.asp.Solver(context=ctx)
 
     result1 = solver.solve(specs)
     result2 = solver.solve(specs)
@@ -5202,7 +5212,7 @@ def test_conflict_with_direct_dependency_on_virtual_provider(config, mock_packag
         spack.concretize.concretize_one("conflict-virtual +conflict_transitive")
 
 
-def test_imposed_spec_dependency_duplication(mock_packages: spack.repo.Repo):
+def test_imposed_spec_dependency_duplication(mock_packages: spack.repo.Repo, ctx: SpackContext):
     """Tests that imposed dependencies triggered by identical conditions are grouped together,
     and that imposed dependencies that differ on a deptype are not grouped together."""
     # The trigger-and-effect-deps pkg has 4 conditions, 2 triggers, and 4 effects in total:
@@ -5211,7 +5221,7 @@ def test_imposed_spec_dependency_duplication(mock_packages: spack.repo.Repo):
     # +y -> depends on pkg-a with deptype run
     # +y -> depends on pkg-b with deptype run
     pkg = mock_packages.get_pkg_class("trigger-and-effect-deps")
-    setup = spack.solver.asp.SpackSolverSetup(context=spack.context.default())
+    setup = spack.solver.asp.SpackSolverSetup(context=ctx)
     setup.gen = spack.solver.asp.ProblemInstanceBuilder()
     setup.clauses = spack.solver.clauses.SpecClauseGenerator(repo=spack.repo.PATH)
     setup.package_dependencies_rules(pkg)
@@ -5555,9 +5565,9 @@ def test_concretization_cache_skips_automatic_splice(
 
 
 @pytest.mark.regression("52832")
-def test_solve_in_rounds_with_no_specs(mock_packages, config):
+def test_solve_in_rounds_with_no_specs(mock_packages, config, ctx: SpackContext):
     """Tests that solving no specs at all yields no result, instead of being unsatisfiable."""
-    solver = spack.solver.asp.Solver(context=spack.context.default())
+    solver = spack.solver.asp.Solver(context=ctx)
     assert list(solver.solve_in_rounds([])) == []
 
 
@@ -5907,7 +5917,7 @@ def injected_context(mutable_config, mock_packages, mock_packages_repo):
     which would otherwise raise ``UnknownNamespaceError`` for ``builtin_mock``.
     """
     mutable_config.set("repos", {"builtin_mock": str(mock_packages_repo.root)})
-    return spack.context.from_config(mutable_config)
+    return SpackContext(mutable_config)
 
 
 @pytest.mark.parametrize(
@@ -6010,7 +6020,7 @@ def test_concretization_cache_reads_no_global(
             "concretizer:concretization_cache",
             {"enable": True, "url": "$env/concretization", "entry_limit": 10},
         )
-        context = spack.context.from_config(spack.config.CONFIG)
+        context = SpackContext(spack.config.CONFIG)
 
         with break_globals():
             solver = spack.solver.asp.Solver(context=context)
@@ -6065,7 +6075,7 @@ def test_develop_specs_read_no_global(
         mutable_config.set(
             "develop", {"develop-test": {"spec": "develop-test@develop", "path": str(develop_dir)}}
         )
-        context = spack.context.from_config(spack.config.CONFIG)
+        context = SpackContext(spack.config.CONFIG)
 
         with break_globals():
             result = spack.solver.asp.Solver(context=context).solve([Spec("develop-test@develop")])
@@ -6089,7 +6099,9 @@ def test_package_hash_is_assigned_through_the_injected_repository(break_globals,
 
 
 @pytest.mark.regression("51964")
-def test_concrete_input_specs_skip_the_dependency_precheck(mock_packages, config, monkeypatch):
+def test_concrete_input_specs_skip_the_dependency_precheck(
+    mock_packages, config, monkeypatch, ctx: SpackContext
+):
     """Concrete input specs represent the rest of an environment under unify:true, and may have
     been concretized against an older recipe, so they are not checked against the possible
     dependencies of the roots.
@@ -6110,12 +6122,10 @@ def test_concrete_input_specs_skip_the_dependency_precheck(mock_packages, config
 
     # an abstract spec is still checked against the possible dependencies
     with pytest.raises(spack.solver.asp.InvalidDependencyError):
-        spack.solver.asp.SpackSolverSetup(context=spack.context.default()).setup(
-            [spack.spec.Spec("pkg-a ^pkg-b")]
-        )
+        spack.solver.asp.SpackSolverSetup(context=ctx).setup([spack.spec.Spec("pkg-a ^pkg-b")])
 
     # the concrete one is not
-    spack.solver.asp.SpackSolverSetup(context=spack.context.default()).setup([spec])
+    spack.solver.asp.SpackSolverSetup(context=ctx).setup([spec])
 
 
 #: conftest.py disables compiler detection for every test, the tests below need the real one

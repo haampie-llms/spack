@@ -1,67 +1,155 @@
 # Copyright Spack Project Developers. See COPYRIGHT file for details.
 #
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
-"""A coherent bundle of the external resources an operation reads.
+"""The resources an operation reads, built from one configuration.
 
-This module imports the configuration, the store, the repositories and the buildcache index at
-runtime. Modules that need :py:class:`SpackContext` only in annotations import this one under
-``if TYPE_CHECKING:``; a runtime import from any module those four import is an import cycle.
+A :class:`SpackContext` holds a configuration and builds everything derived from it on first
+access, so an operation only pays for what it reads.
+
+This module imports nothing at runtime, so it can be imported from anywhere.
 """
 
-from typing import NamedTuple
+from typing import TYPE_CHECKING, Any, Callable, Generic, Optional, TypeVar, overload
 
-import spack.binary_distribution
-import spack.caches
-import spack.config
-import spack.repo
-import spack.store
-import spack.util.file_cache
+if TYPE_CHECKING:
+    import spack.binary_distribution
+    import spack.config
+    import spack.environment
+    import spack.repo
+    import spack.store
+    import spack.util.file_cache
 
-
-class SpackContext(NamedTuple):
-    """External resources a single operation reads from."""
-
-    #: Layered configuration driving the operation.
-    config: spack.config.Configuration
-    #: Installed-spec store, derived from ``config``.
-    store: spack.store.Store
-    #: Package repositories, derived from ``config``.
-    repo: spack.repo.RepoPath
-    #: Buildcache index handle.
-    binary_index: spack.binary_distribution.BinaryIndexCache
-    #: Cache for small data (package indexes, ...), derived from ``config``.
-    misc_cache: spack.util.file_cache.FileCache
+T = TypeVar("T")
 
 
-def from_config(config: spack.config.Configuration) -> SpackContext:
-    """Return a context whose store, repo and buildcache index all derive from ``config``.
+class _member(Generic[T]):
+    """``functools.cached_property`` for Python 3.6 and 3.7: the value is built on first access
+    and stored on the instance."""
 
-    This takes over the import machinery for the process: ``create_and_enable`` rebinds the
-    repository the ``ReposFinder`` on ``sys.meta_path`` searches, and prepends the repository's
-    python paths to ``sys.path``. Package class loading is process-wide, so two contexts can
-    coexist only if their repositories declare disjoint or identical namespaces.
+    def __init__(self, build: Callable[[Any], T]) -> None:
+        self.build = build
+        self.name = build.__name__
+        self.__doc__ = build.__doc__
+
+    @overload
+    def __get__(self, instance: None, owner: Any = None) -> "_member[T]": ...
+
+    @overload
+    def __get__(self, instance: object, owner: Any = None) -> T: ...
+
+    def __get__(self, instance, owner=None):
+        if instance is None:
+            return self
+        value = instance.__dict__[self.name] = self.build(instance)
+        return value
+
+
+class SpackContext:
+    """External resources an operation reads, all derived from ``config``."""
+
+    def __init__(
+        self,
+        config: "spack.config.Configuration",
+        *,
+        environment: Optional["spack.environment.Environment"] = None,
+    ) -> None:
+        self._config = config
+        self._environment = environment
+
+    @property
+    def config(self) -> "spack.config.Configuration":
+        """Layered configuration driving the operation."""
+        return self._config
+
+    @property
+    def environment(self) -> Optional["spack.environment.Environment"]:
+        """The environment of the operation, whose scope is part of ``config``."""
+        return self._environment
+
+    @_member
+    def misc_cache(self) -> "spack.util.file_cache.FileCache":
+        """Cache for small data (package indexes, ...)."""
+        import spack.caches
+
+        return spack.caches.misc_cache(config=self.config)
+
+    @_member
+    def store(self) -> "spack.store.Store":
+        """Installed-spec store."""
+        import spack.store
+
+        return spack.store.create(self.config)
+
+    @_member
+    def repo(self) -> "spack.repo.RepoPath":
+        """Package repositories, enabled for importing package modules."""
+        import spack.repo
+
+        return spack.repo.create_and_enable(self.config, cache=self.misc_cache)
+
+    @_member
+    def binary_index(self) -> "spack.binary_distribution.BinaryIndexCache":
+        """Buildcache index."""
+        import spack.binary_distribution
+
+        return spack.binary_distribution.BinaryIndexCache(config=self.config)
+
+    def __reduce__(self):
+        return SpackContext, (self._config,), {"_environment": self._environment}
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+
+
+class _ProcessContext(SpackContext):
+    """A context whose members are the process globals, read at each access.
+
+    This is a transitional view: it goes away together with the globals.
     """
-    misc_cache = spack.caches.misc_cache(config=config)
-    return SpackContext(
-        config=config,
-        store=spack.store.create(config),
-        repo=spack.repo.create_and_enable(config, cache=misc_cache),
-        binary_index=spack.binary_distribution.BinaryIndexCache(config=config),
-        misc_cache=misc_cache,
-    )
+
+    def __init__(self) -> None:
+        pass
+
+    @property
+    def config(self) -> "spack.config.Configuration":
+        import spack.config
+
+        return spack.config.CONFIG
+
+    @property
+    def environment(self) -> Optional["spack.environment.Environment"]:
+        from spack.active_environment import active_environment
+
+        return active_environment()
+
+    @property  # type: ignore[override]
+    def misc_cache(self) -> "spack.util.file_cache.FileCache":
+        import spack.caches
+
+        return spack.caches.MISC_CACHE
+
+    @property  # type: ignore[override]
+    def store(self) -> "spack.store.Store":
+        import spack.store
+
+        return spack.store.STORE
+
+    @property  # type: ignore[override]
+    def repo(self) -> "spack.repo.RepoPath":
+        import spack.repo
+
+        return spack.repo.PATH
+
+    @property  # type: ignore[override]
+    def binary_index(self) -> "spack.binary_distribution.BinaryIndexCache":
+        import spack.binary_distribution
+
+        return spack.binary_distribution.BINARY_INDEX
+
+    def __reduce__(self):
+        return _ProcessContext, ()
 
 
 def default() -> SpackContext:
-    """Returns a context wrapping the current process globals (the migration shim).
-
-    The globals are stored as they are, so a field that is still an unconstructed singleton is
-    only built when it is read. Callers that never touch the store or the buildcache index do
-    not pay for them.
-    """
-    return SpackContext(
-        config=spack.config.CONFIG,
-        store=spack.store.STORE,
-        repo=spack.repo.PATH,
-        binary_index=spack.binary_distribution.BINARY_INDEX,
-        misc_cache=spack.caches.MISC_CACHE,
-    )
+    """Return a view of the process globals as a context (transitional)."""
+    return _ProcessContext()
