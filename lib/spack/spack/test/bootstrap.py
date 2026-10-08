@@ -237,6 +237,12 @@ def test_config_yaml_is_preserved_during_bootstrap(mutable_config):
     assert spack.config.CONFIG.get("config:test_stage") == expected_dir
 
 
+def test_bootstrap_config_does_not_modify_the_user_config(mutable_config):
+    spack.config.CONFIG.set("config:install_tree:root", "/tmp/store", scope="command_line")
+    spack.bootstrap.config._read_and_sanitize_configuration()
+    assert spack.config.CONFIG.get("config:install_tree:root") == "/tmp/store"
+
+
 @pytest.mark.regression("26548")
 def test_bootstrap_custom_store_in_environment(mutable_config, tmp_path: pathlib.Path):
     # Test that the custom store in an environment is taken into account
