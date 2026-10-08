@@ -12,7 +12,7 @@ import spack.config
 import spack.deptypes as dt
 import spack.repo
 import spack.spec
-from spack.old_installer import PackageInstaller
+from spack.installer import PackageInstaller
 from spack.solver.asp import UnsatisfiableSpecError
 from spack.solver.error import SolverError
 

@@ -916,13 +916,13 @@ def test_view_projection_path_is_final_after_regenerate(
         with open(os.path.join(projection, f"{self.name}.projection"), "w", encoding="utf-8") as f:
             f.write(projection)
 
-    monkeypatch.setattr(spack.package_base.PackageBase, "add_files_to_view", add_files_to_view)
-
     view_dir = tmp_path / "view"
     env = ev.create_in_dir(tmp_path, with_view="view")
     env.add("mpileaks")
     env.concretize()
     env.install_all(fake=True)
+    # Patched after installing: build processes cannot unpickle the local function
+    monkeypatch.setattr(spack.package_base.PackageBase, "add_files_to_view", add_files_to_view)
     env.regenerate_views()
 
     recorded = list(view_dir.glob("*.projection"))

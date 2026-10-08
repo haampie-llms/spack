@@ -77,8 +77,8 @@ import spack.version
 from spack.config import Configuration
 from spack.enums import ConfigScopePriority
 from spack.fetch_strategy import URLFetchStrategy
+from spack.installer import PackageInstaller
 from spack.main import SpackCommand
-from spack.old_installer import PackageInstaller
 from spack.repo import RepoPath
 from spack.store import Store
 from spack.util import tty
@@ -2711,13 +2711,6 @@ def reset_extension_paths():
     spack.extensions.extension_paths_from_entry_points.cache_clear()
     yield
     spack.extensions.extension_paths_from_entry_points.cache_clear()
-
-
-@pytest.fixture(params=["old", "new"])
-def installer_variant(request):
-    """Parametrize a test over the old and new installer."""
-    with spack.config.CONFIG.override("config:installer", request.param):
-        yield request.param
 
 
 class FsTree:

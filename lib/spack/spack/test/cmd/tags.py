@@ -5,7 +5,7 @@
 import spack.concretize
 import spack.main
 import spack.repo
-from spack.old_installer import PackageInstaller
+from spack.installer import PackageInstaller
 
 tags = spack.main.SpackCommand("tags")
 

@@ -1071,6 +1071,46 @@ def env_subdir_path(manifest_dir: Union[str, pathlib.Path]) -> str:
     return os.path.join(str(manifest_dir), env_subdir_name)
 
 
+def views_from_config(
+    manifest_dir: Union[str, pathlib.Path], config: spack.config.Configuration
+) -> Dict[str, "ViewDescriptor"]:
+    """Views of the environment in ``manifest_dir``, from the ``view`` section of ``config``.
+
+    A boolean view option takes precedence over any that may be included. So ``view: true``
+    results in the default view only, and ``view: false`` means the environment has no views.
+    Without a view option, the environment has the default view.
+
+    Args:
+        manifest_dir: directory containing the environment manifest file
+        config: configuration including the scope of the environment
+    """
+    base = os.path.abspath(str(manifest_dir))
+    default_path = os.path.join(env_subdir_path(base), "view")
+    env_view = config.get("view", True)
+    views: Dict[str, ViewDescriptor] = {}
+
+    if env_view is False:
+        return views
+    if isinstance(env_view, str):
+        items = [(default_view_name, env_view)]
+    elif isinstance(env_view, dict):
+        items = list(env_view.items())
+    else:  # true, or no view option
+        items = []
+
+    for name, values in items:
+        if isinstance(values, str):
+            views[name] = ViewDescriptor(base, values)
+        elif isinstance(values, dict):
+            views[name] = ViewDescriptor.from_dict(base, values)
+        else:
+            tty.error(f"Cannot add view named {name} for {type(values)} values {values}")
+
+    if not views:
+        views[default_view_name] = ViewDescriptor(base, default_path)
+    return views
+
+
 class ConcretizedRootInfo:
     """Data on root specs that have been concretized"""
 
@@ -1230,51 +1270,6 @@ class Environment:
         """Get a write lock context manager for use in a ``with`` block."""
         return lk.WriteTransaction(self.txlock, acquire=self._re_read)
 
-    def _process_view(self, env_view: Optional[Union[bool, str, Dict]]):
-        """Process view option(s), which can be boolean, string, or None.
-
-        A boolean environment view option takes precedence over any that may
-        be included. So ``view: True`` results in the default view only. And
-        ``view: False`` means the environment will have no view.
-
-        Args:
-            env_view: view option provided in the manifest or configuration
-        """
-
-        def add_view(name, values):
-            """Add the view with the name and the string or dict values."""
-            if isinstance(values, str):
-                self.views[name] = ViewDescriptor(self.path, values)
-            elif isinstance(values, dict):
-                self.views[name] = ViewDescriptor.from_dict(self.path, values)
-            else:
-                tty.error(f"Cannot add view named {name} for {type(values)} values {values}")
-
-        # If the configuration specifies 'view: False' then we are done
-        # processing views. If this is called with the environment's view
-        # view (versus an included view), then there are to be NO views.
-        if env_view is False:
-            return
-
-        # If the configuration specifies 'view: True' then only the default
-        # view will be created for the environment and we are done processing
-        # views.
-        if env_view is True:
-            add_view(default_view_name, self.view_path_default)
-            return
-
-        # Otherwise, the configuration has a subdirectory or dictionary.
-        if isinstance(env_view, str):
-            add_view(default_view_name, env_view)
-        elif env_view:
-            for name, values in env_view.items():
-                add_view(name, values)
-
-        # If we reach this point without an explicit view option then we
-        # provide the default view.
-        if self.views == dict():
-            self.views[default_view_name] = ViewDescriptor(self.path, self.view_path_default)
-
     def _load_concrete_include_data(self):
         """Load concrete include specs data from included concrete directories."""
         if self.included_concrete_env_root_dirs:
@@ -1332,9 +1327,8 @@ class Environment:
 
     def _construct_state_from_manifest(self):
         """Set up user specs and views from the manifest file."""
-        self.views = {}
         self._sync_speclists()
-        self._process_view(spack.config.CONFIG.get("view", True))
+        self.views = views_from_config(self.path, spack.config.CONFIG)
         self._process_included_lockfiles()
 
     def _sync_speclists(self):

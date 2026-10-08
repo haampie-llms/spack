@@ -9,7 +9,7 @@ import spack.concretize
 import spack.config
 import spack.context
 import spack.error
-import spack.old_installer
+import spack.installer
 import spack.package_base
 import spack.paths
 import spack.platforms
@@ -20,7 +20,7 @@ import spack.store
 import spack.util.spack_yaml as syaml
 import spack.version
 from spack.config import Configuration
-from spack.old_installer import PackageInstaller
+from spack.installer import PackageInstaller
 from spack.solver.asp import InternalConcretizerError, UnsatisfiableSpecError
 from spack.solver.requirements import RequirementParser
 from spack.solver.reuse import reusable_external_specs
@@ -326,7 +326,7 @@ def test_require_hash(mock_fetch, install_mockery, concretize_scope, test_repo):
     s1 = spack.concretize.concretize_one("x@1.1")
     s2 = spack.concretize.concretize_one("x@1.0")
 
-    builder = spack.old_installer.PackageInstaller([s1.package, s2.package], fake=True)
+    builder = spack.installer.PackageInstaller([s1.package, s2.package], fake=True)
     builder.install()
 
     conf_str = f"""\

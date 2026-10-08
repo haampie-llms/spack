@@ -1039,20 +1039,26 @@ class ModuleContext(tengine.Context):
 
         if use_view:
             spack_env = active_environment()
-            if not spack_env:
+            config = spack.config.CONFIG
+            # Build processes have the configuration of the environment, but not the environment
+            if spack_env is not None:
+                env_path, views = spack_env.path, spack_env.views
+            elif config.env_path is not None:
+                env_path = config.env_path
+                views = spack.environment.views_from_config(env_path, config)
+            else:
                 raise spack.environment.SpackEnvironmentViewError(
                     "Module generation with views requires active environment"
                 )
 
             view_name = spack.environment.default_view_name if use_view is True else use_view
 
-            if not spack_env.has_view(view_name):
+            if view_name not in views:
                 raise spack.environment.SpackEnvironmentViewError(
-                    f"View {view_name} not found in environment {spack_env.name}"
-                    " when generating modules"
+                    f"View {view_name} not found in environment {env_path} when generating modules"
                 )
 
-            view = spack_env.views[view_name]
+            view = views[view_name]
         else:
             view = None
 

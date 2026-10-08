@@ -1123,7 +1123,7 @@ spack:
             with open(tmp_path / "spec.json", "w", encoding="utf-8") as f:
                 f.write(concrete_spec.to_json())
 
-            install_cmd("--fake", str(tmp_path / "spec.json"))
+            install_cmd("--fake", "--include-build-deps", str(tmp_path / "spec.json"))
             buildcache_cmd("push", "-u", "-f", mirror_url, "callpath")
             ci_cmd("rebuild-index")
 

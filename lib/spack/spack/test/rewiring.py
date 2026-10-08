@@ -11,7 +11,7 @@ import pytest
 import spack.concretize
 import spack.deptypes as dt
 import spack.rewiring
-from spack.old_installer import PackageInstaller
+from spack.installer import PackageInstaller
 from spack.store import Store
 from spack.test.relocate import text_in_bin
 

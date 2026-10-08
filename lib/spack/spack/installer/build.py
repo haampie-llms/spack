@@ -462,11 +462,12 @@ def worker_function(
     """
     spec, log_path = request.spec, request.log_path
 
-    # TODO: don't start a build for external packages
-    if spec.external:
-        return
-
     global_state.restore()
+
+    # Externals are not built; post-install hooks generate their module files.
+    if spec.external:
+        spack.hooks.post_install(spec, request.explicit)
+        return
 
     if sys.platform != "win32":
         # Isolate the process group to shield against Ctrl+C and enable safe killpg() cleanup. In
@@ -561,7 +562,6 @@ def worker_function(
 def _archive_build_metadata(pkg: "spack.package_base.PackageBase") -> None:
     """Copy build metadata from stage to install prefix .spack directory.
 
-    Mirrors what the old installer's log() function does in the parent process.
     Only called after a successful source build (not for binary cache installs).
     Errors are suppressed to avoid failing the build over metadata archiving."""
 
