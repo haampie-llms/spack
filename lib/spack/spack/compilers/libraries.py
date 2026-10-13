@@ -409,10 +409,10 @@ class FileCompilerCache(CompilerCache):
         self.cache = cache
         self._data: Dict[str, Dict[str, Optional[str]]] = {}
 
-    def _get_entry(self, key: str, *, allow_empty: bool) -> Optional[CompilerCacheEntry]:
+    def _get_entry(self, key: str) -> Optional[CompilerCacheEntry]:
         try:
             entry = CompilerCacheEntry.from_dict(self._data[key])
-            return entry if allow_empty or not entry.empty else None
+            return None if entry.empty else entry
         except ValueError:
             del self._data[key]
         except KeyError:
@@ -433,7 +433,7 @@ class FileCompilerCache(CompilerCache):
                 self._data = {}
 
         key = self._key(compiler)
-        value = self._get_entry(key, allow_empty=False)
+        value = self._get_entry(key)
         if value is not None:
             return value
 
@@ -450,12 +450,15 @@ class FileCompilerCache(CompilerCache):
                 self._data = {}
 
             # Use cache entry that may have been created by another process in the meantime.
-            entry = self._get_entry(key, allow_empty=True)
+            entry = self._get_entry(key)
 
             # Finally compute the cache entry
             if entry is None:
                 self._data[key] = self.value(compiler, repo=repo)
                 entry = CompilerCacheEntry.from_dict(self._data[key])
+                # A compiler that fails to run is probed again next time
+                if entry.empty:
+                    del self._data[key]
 
             new.write(json.dumps(self._data, separators=(",", ":")))
 
