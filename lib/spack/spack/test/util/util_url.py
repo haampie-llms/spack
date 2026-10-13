@@ -122,6 +122,12 @@ def test_default_download_name_dot_dot():
     assert url_util.default_download_filename("https://example.com/.abcdef") == "_abcdef"
 
 
+def test_default_download_name_without_basename():
+    """A URL whose path ends in a slash, or has no path, still gives a file name."""
+    assert url_util.default_download_filename("https://example.com/dir/") == "_"
+    assert url_util.default_download_filename("https://example.com") == "_"
+
+
 def test_parse_link_rel_next():
     parse = url_util.parse_link_rel_next
     assert parse(r'</abc>; rel="next"') == "/abc"

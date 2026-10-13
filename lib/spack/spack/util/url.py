@@ -123,8 +123,8 @@ def default_download_filename(url: str) -> str:
     )
     valid_name = sanitize_filename(name)
 
-    # Don't download to hidden files please
-    if valid_name[0] == ".":
+    # Don't download to hidden or nameless files please
+    if not valid_name or valid_name[0] == ".":
         valid_name = "_" + valid_name[1:]
 
     return valid_name
