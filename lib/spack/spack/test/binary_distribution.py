@@ -628,6 +628,35 @@ def test_text_relocate_if_needed(
     assert join_path("bin", "secretexe") not in manifest["relocate_textfiles"]
 
 
+@pytest.mark.not_on_windows("requires symlinks")
+def test_relocation_lists_are_confined_to_the_prefix(tmp_path: pathlib.Path):
+    """Entries of the relocation lists of a tarball cannot name files outside of the prefix."""
+    prefix, outside = tmp_path / "prefix", tmp_path / "outside"
+    (prefix / "bin").mkdir(parents=True)
+    outside.mkdir()
+    (prefix / "bin" / "exe").touch()
+    (outside / "file").touch()
+    (prefix / "bin" / "to-exe").symlink_to("exe")
+    (prefix / "to-bin").symlink_to("bin")
+    (prefix / "to-file").symlink_to(outside / "file")
+    (prefix / "to-outside").symlink_to(outside)
+    relocation_paths = spack.binary_distribution._relocation_paths
+
+    inside = [join_path("bin", "exe"), join_path("bin", "to-exe"), join_path("to-bin", "exe")]
+    assert relocation_paths(str(prefix), inside, follow=True) == [
+        str(prefix / entry) for entry in inside
+    ]
+    # a link that points out of the prefix is replaced, but not written through
+    assert relocation_paths(str(prefix), ["to-file"], follow=False) == [str(prefix / "to-file")]
+    with pytest.raises(ValueError, match="outside of the package prefix"):
+        relocation_paths(str(prefix), ["to-file"], follow=True)
+
+    for entry in (str(outside / "file"), join_path("..", "outside", "file"), "to-outside/file"):
+        for follow in (True, False):
+            with pytest.raises(ValueError, match="outside of the package prefix"):
+                relocation_paths(str(prefix), [entry], follow=follow)
+
+
 def test_compression_writer(tmp_path: pathlib.Path):
     text = "This is some text. We might or might not like to compress it as we write."
     checksum_algo = "sha256"

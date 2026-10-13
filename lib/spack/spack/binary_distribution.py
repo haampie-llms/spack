@@ -1981,6 +1981,29 @@ class _SplicedRpaths:
         return list(spack.util.lang.dedupe(spack_built + external))
 
 
+def _relocation_paths(prefix: str, entries: Iterable[str], *, follow: bool) -> List[str]:
+    """Join the entries of a relocation list to the prefix, refusing those that lead out of it.
+    With ``follow`` an entry that is a symlink is written through, otherwise it is replaced."""
+    root = os.path.realpath(prefix)
+    checked: Dict[str, bool] = {}
+
+    def inside(path: str) -> bool:
+        if path not in checked:
+            real = os.path.realpath(path)
+            checked[path] = real == root or real.startswith(root + os.sep)
+        return checked[path]
+
+    paths = []
+    for entry in entries:
+        path = os.path.join(prefix, entry)
+        if not inside(os.path.dirname(path)) or (
+            follow and os.path.islink(path) and not inside(path)
+        ):
+            raise ValueError(f"Cannot relocate {entry}: it is outside of the package prefix")
+        paths.append(path)
+    return paths
+
+
 def relocate_package(spec: spack.spec.Spec) -> None:
     """Relocate binaries and text files in the given spec prefix, based on its buildinfo file."""
     spec_prefix = str(spec.prefix)
@@ -2082,9 +2105,9 @@ def relocate_package(spec: spack.spec.Spec) -> None:
     dedupe_hardlinks_if_necessary(spec_prefix, buildinfo)
 
     # Text files containing the prefix text
-    textfiles = [os.path.join(spec_prefix, f) for f in buildinfo["relocate_textfiles"]]
-    binaries = [os.path.join(spec_prefix, f) for f in buildinfo.get("relocate_binaries")]
-    links = [os.path.join(spec_prefix, f) for f in buildinfo.get("relocate_links", [])]
+    textfiles = _relocation_paths(spec_prefix, buildinfo["relocate_textfiles"], follow=True)
+    binaries = _relocation_paths(spec_prefix, buildinfo.get("relocate_binaries"), follow=True)
+    links = _relocation_paths(spec_prefix, buildinfo.get("relocate_links", []), follow=False)
 
     platform = spack.platforms.by_name(spec.platform)
     if "macho" in platform.binary_formats:
