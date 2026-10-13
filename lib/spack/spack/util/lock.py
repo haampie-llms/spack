@@ -732,10 +732,11 @@ class Lock:
 
             # we need to call release_fn before releasing the lock
             release_fn = release_fn or true_fn
-            result = release_fn()
-
-            self.backend.release()  # can raise LockError.
-            self._reads = 0
+            try:
+                result = release_fn()
+            finally:
+                self.backend.release()  # can raise LockError.
+                self._reads = 0
             self._log_released(locktype)
             return bool(result)
         else:
@@ -764,14 +765,14 @@ class Lock:
             self._log_releasing(locktype)
 
             # we need to call release_fn before releasing the lock
-            result = release_fn()
-
-            if self._reads > 0:
-                self._lock(LockType.READ)
-            else:
-                self.backend.release()  # can raise LockError.
-
-            self._writes = 0
+            try:
+                result = release_fn()
+            finally:
+                if self._reads > 0:
+                    self._lock(LockType.READ)
+                else:
+                    self.backend.release()  # can raise LockError.
+                self._writes = 0
             self._log_released(locktype)
             return bool(result)
         else:
