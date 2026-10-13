@@ -427,7 +427,7 @@ class RemoveFirstPath(NamePathModifier):
     def execute(self, env: MutableMapping[str, str]):
         tty.debug(f"RemoveFirstPath: {self.name}-{self.value}", level=3)
         environment_value = env.get(self.name, "")
-        directories = environment_value.split(self.separator)
+        directories = environment_value.split(self.separator) if environment_value else []
         directories = [path_to_os_path(os.path.normpath(x)).pop() for x in directories]
         val = path_to_os_path(os.path.normpath(self.value)).pop()
         if val in directories:
@@ -439,7 +439,8 @@ class RemoveLastPath(NamePathModifier):
     def execute(self, env: MutableMapping[str, str]):
         tty.debug(f"RemoveLastPath: {self.name}-{self.value}", level=3)
         environment_value = env.get(self.name, "")
-        directories = environment_value.split(self.separator)[::-1]
+        directories = environment_value.split(self.separator) if environment_value else []
+        directories.reverse()
         directories = [path_to_os_path(os.path.normpath(x)).pop() for x in directories]
         val = path_to_os_path(os.path.normpath(self.value)).pop()
         if val in directories:
@@ -451,7 +452,7 @@ class RemovePath(NamePathModifier):
     def execute(self, env: MutableMapping[str, str]):
         tty.debug(f"RemovePath: {self.name}-{self.value}", level=3)
         environment_value = env.get(self.name, "")
-        directories = environment_value.split(self.separator)
+        directories = environment_value.split(self.separator) if environment_value else []
         directories = [
             path_to_os_path(os.path.normpath(x)).pop()
             for x in directories
