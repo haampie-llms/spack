@@ -152,10 +152,10 @@ def _specs_from_store(store):
 def _specs_from_mirror(binary_index, config: spack.config.Configuration):
     try:
         specs = spack.binary_distribution.update_cache_and_get_specs(binary_index, config=config)
-    except (spack.binary_distribution.FetchCacheError, IndexError):
-        # this is raised when no mirrors had indices.
-        # TODO: update mirror configuration so it can indicate that the
-        # TODO: source cache (or any mirror really) doesn't have binaries.
+    except IndexError:
+        return []
+    except spack.binary_distribution.FetchCacheError as e:
+        warnings.warn(f"binary mirrors cannot be used in concretization:\n{e}")
         return []
     for url in sorted(binary_index.mirrors_without_index):
         warnings.warn(f"the mirror at {url} cannot be used in concretization (no index found)")
