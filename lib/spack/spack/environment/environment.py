@@ -1372,6 +1372,8 @@ class Environment:
         for x in self.concretized_roots:
             if self.manifest.is_explicit(group=x.group):
                 yield x
+        for roots in self.included_concretized_roots.values():
+            yield from roots
 
     @property
     def dev_specs(self):

@@ -69,6 +69,18 @@ def test_gc_with_environment(mutable_database, mutable_mock_env_path):
 
 
 @pytest.mark.db
+def test_gc_with_included_environment(mutable_database, mutable_mock_env_path):
+    with ev.create("included"):
+        add("cmake")
+        install("--fake")
+
+    with ev.create("test_gc", include_concrete=["included"]):
+        output = gc("-by")
+    assert "There are no unused specs" in output
+    assert mutable_database.query_local("cmake")
+
+
+@pytest.mark.db
 def test_gc_with_build_dependency_in_environment(mutable_database, mutable_mock_env_path):
     s = spack.concretize.concretize_one("simple-inheritance")
     PackageInstaller([s.package], explicit=True, fake=True).install()
