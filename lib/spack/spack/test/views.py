@@ -9,7 +9,7 @@ import pytest
 
 import spack.concretize
 from spack.directory_layout import DirectoryLayout
-from spack.filesystem_view import SimpleFilesystemView, YamlFilesystemView
+from spack.filesystem_view import SimpleFilesystemView, YamlFilesystemView, view_hardlink
 from spack.old_installer import PackageInstaller
 from spack.spec import Spec
 from spack.test.conftest import FsTree
@@ -150,3 +150,11 @@ def test_view_no_dir_symlinks(mock_packages, tmp_path: pathlib.Path):
     # File should be a symlink.
     ah_path = os.path.join(include_dir, "a.h")
     assert os.path.islink(ah_path)
+
+
+@pytest.mark.not_on_windows("Requires symlinks")
+def test_view_hardlink_does_not_follow_symlinks(tmp_path: pathlib.Path):
+    (tmp_path / "dir").mkdir()
+    (tmp_path / "link").symlink_to("dir")
+    view_hardlink(str(tmp_path / "link"), str(tmp_path / "dst"))
+    assert (tmp_path / "dst").is_symlink()
