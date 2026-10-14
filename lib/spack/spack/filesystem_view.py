@@ -54,7 +54,7 @@ def view_symlink(src: str, dst: str, *args, **kwargs) -> None:
 
 
 def view_hardlink(src: str, dst: str, *args, **kwargs) -> None:
-    os.link(src, dst)
+    os.link(src, dst, follow_symlinks=False)
 
 
 def view_copy(
