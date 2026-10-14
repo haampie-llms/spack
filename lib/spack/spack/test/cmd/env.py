@@ -620,7 +620,7 @@ def test_env_modifications_error_on_activate(
 
     e = ev.read("test")
     with e:
-        install("--fake", "--add", "cmake-client")
+        install("--fake", "--add", "cmake-client", "modifies-run-env")
 
     def setup_error(pkg, env):
         raise RuntimeError("cmake-client had issues!")
@@ -628,11 +628,14 @@ def test_env_modifications_error_on_activate(
     pkg = mock_packages.get_pkg_class("cmake-client")
     monkeypatch.setattr(pkg, "setup_run_environment", setup_error)
 
-    ev.shell.activate(e)
+    env_variables = {}
+    ev.shell.activate(e).apply_modifications(env_variables)
 
     _, err = capfd.readouterr()
     assert "cmake-client had issues!" in err
     assert "Warning: could not load runtime environment" in err
+    # the other root still contributes its runtime environment
+    assert env_variables["DEPENDENCY_ENV_VAR"] == "1"
 
 
 def test_activate_adds_transitive_run_deps_to_path(install_mockery, mock_fetch, monkeypatch):

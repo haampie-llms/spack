@@ -1988,19 +1988,24 @@ class Environment:
     def _env_modifications_for_view(
         self, view: ViewDescriptor, reverse: bool = False
     ) -> spack.util.environment.EnvironmentModifications:
+        with spack.store.STORE.db.read_transaction():
+            installed_roots = [
+                s for s in self.concrete_roots() if spack.store.STORE.db.installed(s)
+            ]
         try:
-            with spack.store.STORE.db.read_transaction():
-                installed_roots = [
-                    s for s in self.concrete_roots() if spack.store.STORE.db.installed(s)
-                ]
             mods = uenv.environment_modifications_for_specs(*installed_roots, view=view)
-        except Exception as e:
-            # Failing to setup spec-specific changes shouldn't be a hard error.
-            tty.warn(
-                f"could not {'unload' if reverse else 'load'} runtime environment due "
-                f"to {e.__class__.__name__}: {e}"
-            )
-            return spack.util.environment.EnvironmentModifications()
+        except Exception:
+            # Failing to setup spec-specific changes shouldn't be a hard error: retry root by
+            # root, and skip the roots that fail.
+            mods = spack.util.environment.EnvironmentModifications()
+            for root in installed_roots:
+                try:
+                    mods.extend(uenv.environment_modifications_for_specs(root, view=view))
+                except Exception as e:
+                    tty.warn(
+                        f"could not {'unload' if reverse else 'load'} runtime environment of "
+                        f"{root.name} due to {e.__class__.__name__}: {e}"
+                    )
         return mods.reversed() if reverse else mods
 
     def add_view_to_env(
