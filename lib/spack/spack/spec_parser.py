@@ -92,8 +92,8 @@ if TYPE_CHECKING:
 #: characters that can be part of a word in any language
 IDENTIFIER = r"(?:[a-zA-Z_0-9][a-zA-Z_0-9\-]*)"
 DOTTED_IDENTIFIER = rf"(?:{IDENTIFIER}(?:\.{IDENTIFIER})+)"
-#: Git commits are 40-character lowercase hex strings
-GIT_HASH = r"(?:[a-f0-9]{40})"
+#: Git commits are 40-character lowercase hex strings, not the start of a longer version
+GIT_HASH = r"(?:[a-f0-9]{40}(?![a-zA-Z_0-9\-\.]))"
 #: Git refs include branch names, and can contain ``.`` and ``/``
 GIT_REF = r"(?:[a-zA-Z_0-9][a-zA-Z_0-9./\-]*)"
 GIT_VERSION_PATTERN = rf"(?:(?:git\.(?:{GIT_REF}))|(?:{GIT_HASH}))"

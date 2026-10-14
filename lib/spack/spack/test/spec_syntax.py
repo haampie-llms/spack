@@ -2058,6 +2058,15 @@ def test_uppercase_hash_is_not_a_git_version():
     assert isinstance(spack.spec.Spec(f"x@{mixed.lower()}").versions[0], spack.version.GitVersion)
 
 
+@pytest.mark.parametrize("suffix", ["8", ".1", "-rc1", "_1"])
+def test_git_hash_followed_by_version_characters_is_one_version(suffix):
+    """Forty hex digits are a git commit only if the version ends there."""
+    text = f"x@{'a' * 40}{suffix}"
+    (spec,) = SpecParser(text, Spec).all_specs()
+    assert not isinstance(spec.versions[0], spack.version.GitVersion)
+    assert str(spec) == text
+
+
 @pytest.mark.regression("32471")
 @pytest.mark.parametrize("spec_str", ["target=x86_64", "os=redhat6", "target=x86_64:"])
 def test_platform_is_none_if_not_present(spec_str):
