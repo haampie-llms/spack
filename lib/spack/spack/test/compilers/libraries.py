@@ -188,6 +188,24 @@ def test_detector_uses_the_cache_it_is_given(mock_packages, mock_gcc, monkeypatc
     assert not (process_wide / entries).exists()
 
 
+def test_failed_compiler_probe_is_not_cached(mock_packages, mock_gcc, monkeypatch, tmp_path):
+    """A compiler that failed to run is probed again by the next process; its output is cached
+    once it runs.
+    """
+    outputs = iter([None, "verbose output"])
+    monkeypatch.setattr(
+        spack.compilers.libraries.CompilerPropertyDetector,
+        "_compile_dummy_c_source",
+        lambda self: next(outputs),
+    )
+
+    for expected in (None, "verbose output", "verbose output"):
+        cache = spack.compilers.libraries.FileCompilerCache(
+            spack.util.file_cache.FileCache(str(tmp_path))
+        )
+        assert cache.get(mock_gcc, repo=spack.repo.PATH).c_compiler_output == expected
+
+
 def test_detector_reads_the_recipe_from_the_repo_it_is_given(
     mock_packages, mock_gcc, repo_builder
 ):
