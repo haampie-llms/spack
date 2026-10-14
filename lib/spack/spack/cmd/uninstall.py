@@ -313,9 +313,7 @@ def uninstall_specs(args, specs):
 
     if not uninstall_list:
         tty.warn("There are no package to uninstall.")
-        return
-
-    if not args.yes_to_all:
+    elif not args.yes_to_all:
         confirmation.confirm_action(uninstall_list, "uninstalled", "uninstall")
 
     # Uninstall everything on the list

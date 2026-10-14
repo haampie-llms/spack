@@ -439,3 +439,17 @@ class TestUninstallFromEnv:
                 if concrete.name == "diamond-link-bottom"
             )
             assert not spack.store.STORE.db.installed(dtdiamondbottom)
+
+    def test_uninstall_remove_spec_only_used_by_other_env(self, mock_packages, install_mockery):
+        """If you "spack uninstall --remove libelf" from e1, and libelf is also in e2, then
+        libelf is removed from e1 but not uninstalled."""
+        for name in ("e1", "e2"):
+            self.env("create", name)
+            with spack.environment.read(name):
+                self.add("libelf")
+                install("--fake")
+
+        with spack.environment.read("e1") as e1:
+            uninstall("-y", "--remove", "libelf")
+            assert not list(e1.roots())
+        assert spack.store.STORE.db.query("libelf")
