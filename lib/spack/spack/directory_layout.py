@@ -277,11 +277,13 @@ class DirectoryLayout:
         assert not path.startswith(self.root)
         return os.path.join(self.root, path)
 
-    def remove_install_directory(self, spec: "spack.spec.Spec", deprecated: bool = False) -> None:
-        """Removes a prefix and any empty parent directories from the root.
-        Raised RemoveFailedError if something goes wrong.
+    def remove_install_directory(
+        self, spec: "spack.spec.Spec", deprecated: bool = False, path: Optional[str] = None
+    ) -> None:
+        """Removes ``path``, by default the prefix the layout computes for the spec, and any empty
+        parent directories from the root. Raised RemoveFailedError if something goes wrong.
         """
-        path = self.path_for_spec(spec)
+        path = path or self.path_for_spec(spec)
         assert path.startswith(self.root), (
             "Attempted to remove dir outside Spack's install tree. PATH: {path}, ROOT: {self.root}"
         )

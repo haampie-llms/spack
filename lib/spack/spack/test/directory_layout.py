@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 import spack.concretize
+import spack.package_base
 import spack.paths
 import spack.repo
 import spack.util.file_cache
@@ -220,3 +221,21 @@ def test_yaml_directory_layout_build_path(tmp_path: pathlib.Path, config, mock_p
     layout = DirectoryLayout(str(tmp_path))
     rel_path = os.path.join(layout.metadata_dir, layout.packages_dir)
     assert layout.build_packages_path(spec) == os.path.join(spec.prefix, rel_path)
+
+
+def test_uninstall_removes_recorded_prefix(temporary_store, config, mock_packages, monkeypatch):
+    """Tests that uninstall removes the prefix recorded in the database, not the spec's prefix or
+    the one the layout computes after a change of projections."""
+    spec = spack.concretize.concretize_one("libelf")
+    temporary_store.layout.create_install_directory(spec)
+    temporary_store.db.add(spec)
+    recorded = spec.prefix
+
+    layout = DirectoryLayout(temporary_store.root, projections={"all": "{name}-{hash}"})
+    monkeypatch.setattr(temporary_store, "layout", layout)
+    spec.set_prefix(layout.path_for_spec(spec))
+    os.makedirs(spec.prefix)
+
+    spack.package_base.PackageBase.uninstall_by_spec(spec)
+    assert not os.path.exists(recorded)
+    assert os.path.isdir(spec.prefix)

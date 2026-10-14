@@ -2196,7 +2196,8 @@ class PackageBase(WindowsRPath, PackageViewMixin, metaclass=PackageMeta):
                 # test if spec is already deprecated, not whether we want to
                 # deprecate it now
                 deprecated = bool(spack.store.STORE.db.deprecator(spec))
-                spack.store.STORE.layout.remove_install_directory(spec, deprecated)
+                path = spack.store.STORE.db.get_record(spec).path
+                spack.store.STORE.layout.remove_install_directory(spec, deprecated, path)
             # Delete DB entry
             if deprecator:
                 msg = "deprecating DB entry [{0}] in favor of [{1}]"
