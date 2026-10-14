@@ -673,7 +673,10 @@ class RepoIndex:
         # Filename of the provider index cache (we assume they're all json)
         from spack.spec import SPECFILE_FORMAT_VERSION
 
-        cache_filename = f"{name}/{self.namespace}-specfile_v{SPECFILE_FORMAT_VERSION}-index.json"
+        path_hash = spack.util.hash.b32_hash(self.packages_path)[-7:]
+        cache_filename = (
+            f"{name}/{self.namespace}-{path_hash}-specfile_v{SPECFILE_FORMAT_VERSION}-index.json"
+        )
 
         with self.cache.read_transaction(cache_filename) as f:
             # Get the mtime of the cache if it exists, of -inf.
