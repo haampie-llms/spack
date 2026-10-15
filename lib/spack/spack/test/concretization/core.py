@@ -5373,6 +5373,19 @@ def test_specs_from_mirror_warns_when_index_missing(monkeypatch):
         spack.solver.reuse._specs_from_mirror(binary_index, spack.config.CONFIG)
 
 
+def test_specs_from_mirror_warns_when_no_index_can_be_fetched(monkeypatch):
+    """Tests that we get a warning when the index of every binary mirror fails to be fetched."""
+    binary_index = spack.binary_distribution.BinaryIndexCache(config=spack.config.CONFIG)
+
+    def fake_update(*, config):
+        raise spack.binary_distribution.FetchCacheError([RuntimeError("connection refused")])
+
+    monkeypatch.setattr(binary_index, "update", fake_update)
+
+    with pytest.warns(UserWarning, match="connection refused"):
+        assert spack.solver.reuse._specs_from_mirror(binary_index, spack.config.CONFIG) == []
+
+
 @pytest.mark.parametrize(
     "data",
     [
