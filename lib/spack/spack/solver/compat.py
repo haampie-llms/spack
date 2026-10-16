@@ -212,7 +212,9 @@ class _ClingoV6Control:
         self._control = control_mod.Control(clingo_library(), list(options))
 
     def add(self, name: str, parameters: Tuple[str, ...], program: str) -> None:
-        # Spack only ever adds the implicit "base" part without parameters.
+        # Spack only adds parts without parameters.
+        if name != "base":
+            program = f"#program {name}.\n{program}"
         self._control.parse_string(program)
 
     def load(self, path: str) -> None:

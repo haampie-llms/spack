@@ -749,6 +749,21 @@ class PyclingoDriver:
         parent_dir = os.path.dirname(__file__)
         return [os.path.join(parent_dir, rel_path) for rel_path in control_files]
 
+    def _diagnostic_model(self) -> Any:
+        """Solve again, in a second step on the same grounded program, showing the facts needed
+        for error causation, and return the symbols of the best model."""
+        diagnostics = self._control_file_paths(["display_diagnostics.lp"])[0]
+        with open(diagnostics, "r", encoding="utf-8") as f:
+            self.control.add("diagnostics", [], f.read())
+        self.control.ground([("diagnostics", [])])
+        models = []
+        self.control.solve(
+            on_model=lambda model: models.append(
+                (model.cost, model.symbols(shown=True, terms=True))
+            )
+        )
+        return min(models)[1]
+
     def _run_clingo(
         self,
         specs: List[spack.spec.Spec],
@@ -825,6 +840,11 @@ class PyclingoDriver:
             specs, repo=setup.context.repo, hash_lookup=setup.reusable_and_possible
         )
         min_cost, best_model = best
+
+        # The main solve shows only what is needed to build specs. If the best model has errors,
+        # solve again showing the facts that error causation needs.
+        if extract_args(best_model, "error"):
+            best_model = self._diagnostic_model()
 
         # first check for errors
         error_handler = ErrorHandler(best_model, specs, setup.deprecation_details)
