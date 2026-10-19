@@ -7,10 +7,10 @@ import sys
 from typing import List, Optional, Sequence, Tuple, Union
 
 import spack.util.executable
-from spack.active_environment import active_environment
 
 from ._common import _executables_in_store, _python_import, _try_import_from_store
 from .config import (
+    bootstrap_environment,
     ensure_bootstrap_configuration,
     mypy_root_spec,
     pytest_root_spec,
@@ -121,9 +121,7 @@ def _optional_requirements() -> List[RequiredResponseType]:
 
 def _development_requirements() -> List[RequiredResponseType]:
     # Make the development dependencies that are installed available
-    env = active_environment()
-    if env is not None:
-        load(env)
+    load(bootstrap_environment())
 
     return [
         _required_python_module(

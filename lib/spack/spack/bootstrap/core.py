@@ -216,8 +216,7 @@ def _install_from_source(
 
         env = bootstrap_environment()
         with env.write_transaction():
-            roots = {x.root for x in env.concretized_roots if x.group == CORE_GROUP}
-            if request.abstract_spec in roots:
+            if request.abstract_spec in dict(env.concretized_specs_by(group=CORE_GROUP)):
                 env.deconcretize_by_user_spec(request.abstract_spec, group=CORE_GROUP)
             env.add(request.abstract_spec, group=CORE_GROUP)
             env.add_concrete_spec(request.abstract_spec, concrete_spec, group=CORE_GROUP)

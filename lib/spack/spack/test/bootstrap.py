@@ -543,8 +543,10 @@ class _RecordingEnvironment:
     """Stand-in for the core environment, recording what it is asked to install."""
 
     def __init__(self) -> None:
-        self.concretized_roots: List[Any] = []
         self.installs: List[Any] = []
+
+    def concretized_specs_by(self, *, group):
+        return []
 
     def write_transaction(self):
         return contextlib.suppress()

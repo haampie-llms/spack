@@ -51,16 +51,6 @@ def ruff_root_spec() -> str:
     return "py-ruff@0.15.0"
 
 
-def dev_bootstrap_mirror_names() -> List[str]:
-    """Return the mirror names used for bootstrapping dev
-    requirements"""
-    return [
-        "developer-tools-darwin",
-        "developer-tools-x86_64_v3-linux-gnu",
-        "developer-tools-aarch64-linux-gnu",
-    ]
-
-
 def is_bootstrapping() -> bool:
     """Return True if we are in a bootstrapping context, False otherwise.
 
@@ -119,7 +109,6 @@ def _write_environment_manifest(path: str) -> None:
         "core_group": CORE_GROUP,
         "dev_group": DEV_GROUP,
         "dev_specs": development_requirements(),
-        "dev_mirrors": dev_bootstrap_mirror_names(),
         "view": pathlib.Path(path, "view").as_posix(),
         "store_path": pathlib.Path(store_path()).as_posix(),
     }

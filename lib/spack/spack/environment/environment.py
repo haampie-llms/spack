@@ -1535,14 +1535,12 @@ class Environment:
 
         """
         spec = Spec(user_spec)
-        is_user_spec = list_name == USER_SPECS_KEY
-        if is_user_spec:
-            list_name = self._user_specs_key(group=group)
+        key = self._user_specs_key(group=group) if list_name == USER_SPECS_KEY else list_name
 
-        if list_name not in self.spec_lists:
-            raise SpackEnvironmentError(f"No list {list_name} exists in environment {self.name}")
+        if key not in self.spec_lists:
+            raise SpackEnvironmentError(f"No list {key} exists in environment {self.name}")
 
-        if is_user_spec:
+        if list_name == USER_SPECS_KEY:
             if spec.anonymous:
                 raise SpackEnvironmentError("cannot add anonymous specs to an environment")
             elif not spack.repo.PATH.exists(spec.name) and not spec.abstract_hash:
@@ -1550,11 +1548,11 @@ class Environment:
                 if spec.name not in virtuals:
                     raise SpackEnvironmentError(f"no such package: {spec.name}")
 
-        list_to_change = self.spec_lists[list_name]
+        list_to_change = self.spec_lists[key]
         existing = str(spec) in list_to_change.yaml_list
         if not existing:
             list_to_change.add(spec)
-            if is_user_spec:
+            if list_name == USER_SPECS_KEY:
                 self.manifest.add_user_spec(str(user_spec), group=group)
             else:
                 self.manifest.add_definition(str(user_spec), list_name=list_name)

@@ -96,7 +96,7 @@ You can check what is installed in the bootstrapping store at any time using:
    [+] clingo-bootstrap@spack+python
 
    -- root specs / dev ---------------------------------------------
-    -  py-mypy@0.900:   -  py-pytest@6.2.4:   -  py-ruff@0.15.0
+    -  py-mypy@0.900: ^py-mypy-extensions@:1.0   -  py-pytest@6.2.4:   -  py-ruff@0.15.0
 
 If needed, you can remove all the software in the current bootstrapping store with:
 

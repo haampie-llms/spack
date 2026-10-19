@@ -6,7 +6,8 @@
 #
 spack:
   specs:
-  # Concrete specs are added to this group without the concretizer, since clingo is among them
+  # Bootstrapping adds specs to this group together with their concrete specs, since clingo
+  # cannot concretize itself
   - group: {{ core_group }}
     specs: []
   - group: {{ dev_group }}
@@ -20,18 +21,20 @@ spack:
         py-platformdirs:
           require: "+wheel"
       concretizer:
-        reuse: true
-        unify: true
         targets:
           granularity: generic
           host_compatible: false
       # Signed binaries of the development dependencies
       mirrors::
-{% for mirror in dev_mirrors %}
-        {{mirror}}:
-          url: https://binaries.spack.io/releases/v2026.03/{{mirror}}
+        developer-tools-darwin:
+          url: https://binaries.spack.io/releases/v2026.03/developer-tools-darwin
           signed: true
-{% endfor %}
+        developer-tools-x86_64_v3-linux-gnu:
+          url: https://binaries.spack.io/releases/v2026.03/developer-tools-x86_64_v3-linux-gnu
+          signed: true
+        developer-tools-aarch64-linux-gnu:
+          url: https://binaries.spack.io/releases/v2026.03/developer-tools-aarch64-linux-gnu
+          signed: true
 
   view:
     default:
