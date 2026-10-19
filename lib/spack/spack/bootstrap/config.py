@@ -8,7 +8,7 @@ import hashlib
 import os
 import pathlib
 import sys
-from typing import Generator, MutableSequence, Optional, Sequence
+from typing import Generator, List, MutableSequence, Sequence
 
 import spack.vendor.archspec.cpu
 
@@ -23,6 +23,42 @@ from spack.util import tty
 
 #: Name of the configuration scope that is present only in the bootstrapping configuration
 _SCOPE_NAME = "bootstrap"
+
+#: Group of the bootstrapping environment with the core dependencies of Spack
+CORE_GROUP = "core"
+
+#: Group of the bootstrapping environment with the development dependencies of Spack
+DEV_GROUP = "dev"
+
+
+def development_requirements() -> List[str]:
+    """Return the root specs of the development dependencies of Spack"""
+    return [pytest_root_spec(), ruff_root_spec(), mypy_root_spec()]
+
+
+def mypy_root_spec() -> str:
+    """Return the root spec used to bootstrap mypy"""
+    return "py-mypy@0.900: ^py-mypy-extensions@:1.0"
+
+
+def pytest_root_spec() -> str:
+    """Return the root spec used to bootstrap pytest"""
+    return "py-pytest@6.2.4:"
+
+
+def ruff_root_spec() -> str:
+    """Return the root spec used to bootstrap ruff"""
+    return "py-ruff@0.15.0"
+
+
+def dev_bootstrap_mirror_names() -> List[str]:
+    """Return the mirror names used for bootstrapping dev
+    requirements"""
+    return [
+        "developer-tools-darwin",
+        "developer-tools-x86_64_v3-linux-gnu",
+        "developer-tools-aarch64-linux-gnu",
+    ]
 
 
 def is_bootstrapping() -> bool:
@@ -46,16 +82,12 @@ def spec_for_current_python() -> str:
     return f"python@{version_str}"
 
 
-def environment_path(prefix: str = "") -> str:
-    """Return the path of a bootstrapping environment for the interpreter running Spack.
-
-    Args:
-        prefix: prefix of the directory name, which otherwise identifies the interpreter
-    """
+def environment_path() -> str:
+    """Return the path of the bootstrapping environment for the interpreter running Spack."""
     python_part = spec_for_current_python().replace("@", "")
     arch_part = spack.vendor.archspec.cpu.host().family
     interpreter_part = hashlib.md5(sys.exec_prefix.encode()).hexdigest()[:5]
-    dirname = f"{prefix}{python_part}-{arch_part}-{interpreter_part}"
+    dirname = f"spack-{python_part}-{arch_part}-{interpreter_part}"
     return os.path.join(root_path(), "environments", dirname)
 
 
@@ -76,32 +108,20 @@ def store_path() -> str:
     return _store_path()
 
 
-def write_environment_manifest(
-    path: str,
-    *,
-    specs: Sequence[str] = (),
-    view: Optional[str] = None,
-    mirrors: Sequence[str] = (),
-) -> None:
-    """Write the manifest of a bootstrapping environment, which installs into the bootstrap store
-    and uses the interpreter running Spack as the only Python.
-
-    Args:
-        path: root directory of the environment
-        specs: root specs of the environment
-        view: path of the view, if any
-        mirrors: names of the developer tools mirrors to use, which also select the concretizer
-            settings for them
-    """
+def _write_environment_manifest(path: str) -> None:
+    """Write the manifest of the bootstrapping environment, which installs into the bootstrap
+    store and uses the interpreter running Spack as the only Python."""
     template = spack.tengine.make_environment().get_template("bootstrap/spack.yaml")
     context = {
         "python_spec": f"{spec_for_current_python()}+ctypes",
         "python_prefix": pathlib.Path(sys.exec_prefix).as_posix(),
         "architecture": spack.vendor.archspec.cpu.host().family,
-        "view": pathlib.Path(view).as_posix() if view else "false",
-        "environment_specs": specs,
+        "core_group": CORE_GROUP,
+        "dev_group": DEV_GROUP,
+        "dev_specs": development_requirements(),
+        "dev_mirrors": dev_bootstrap_mirror_names(),
+        "view": pathlib.Path(path, "view").as_posix(),
         "store_path": pathlib.Path(store_path()).as_posix(),
-        "bootstrap_mirrors": mirrors,
     }
     os.makedirs(path, exist_ok=True)
     pathlib.Path(path, spack.environment.manifest_name).write_text(
@@ -109,11 +129,11 @@ def write_environment_manifest(
     )
 
 
-def core_environment() -> spack.environment.Environment:
-    """Return the environment of the core dependencies of Spack, for the interpreter running it"""
-    path = environment_path(prefix="core-")
+def bootstrap_environment() -> spack.environment.Environment:
+    """Return the environment of the dependencies of Spack, for the interpreter running it"""
+    path = environment_path()
     if not spack.environment.is_env_dir(path):
-        write_environment_manifest(path)
+        _write_environment_manifest(path)
     return spack.environment.Environment(path)
 
 
@@ -184,5 +204,7 @@ def _ensure_bootstrap_configuration() -> Generator:
     # The environment sets the store, the Python interpreter and the policies
     with spack.environment.no_active_environment(), spack.platforms.use_platform(
         spack.platforms.real_host()
-    ), spack.config.use_configuration(*_bootstrap_config_scopes(), user_scope), core_environment():
+    ), spack.config.use_configuration(
+        *_bootstrap_config_scopes(), user_scope
+    ), bootstrap_environment():
         yield

@@ -51,7 +51,7 @@ from ._common import (
     _try_import_from_store,
 )
 from .clingo import ClingoBootstrapConcretizer
-from .config import core_environment, spec_for_current_python
+from .config import CORE_GROUP, bootstrap_environment, spec_for_current_python
 
 #: Name of the file containing metadata about the bootstrapping source
 METADATA_YAML_FILENAME = "metadata.yaml"
@@ -214,13 +214,16 @@ def _install_from_source(
             concrete_spec = request.concretize(request.abstract_spec)
             installer_args = request.installer_args
 
-        env = core_environment()
+        env = bootstrap_environment()
         with env.write_transaction():
-            if any(x.root == request.abstract_spec for x in env.concretized_roots):
-                env.deconcretize_by_user_spec(request.abstract_spec)
-            env.add_concrete_spec(request.abstract_spec, concrete_spec)
+            roots = {x.root for x in env.concretized_roots if x.group == CORE_GROUP}
+            if request.abstract_spec in roots:
+                env.deconcretize_by_user_spec(request.abstract_spec, group=CORE_GROUP)
+            env.add(request.abstract_spec, group=CORE_GROUP)
+            env.add_concrete_spec(request.abstract_spec, concrete_spec, group=CORE_GROUP)
             env.write(regenerate=False)
-            env.install_specs([concrete_spec], fail_fast=True, **installer_args)
+        # Not under the lock, since a nested bootstrap during the install may need it
+        env.install_specs([concrete_spec], fail_fast=True, **installer_args)
 
     return request.probe(concrete_spec)
 

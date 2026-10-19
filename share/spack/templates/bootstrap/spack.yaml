@@ -5,8 +5,38 @@
 # Architecture: {{ architecture }}
 #
 spack:
-  specs: [{% for spec in environment_specs %}"{{ spec }}"{% if not loop.last %}, {% endif %}{% endfor %}]
-  view: {{ view }}
+  specs:
+  # Concrete specs are added to this group without the concretizer, since clingo is among them
+  - group: {{ core_group }}
+    specs: []
+  - group: {{ dev_group }}
+    specs: [{% for spec in dev_specs %}"{{ spec }}"{% if not loop.last %}, {% endif %}{% endfor %}]
+    override:
+      packages:
+        python-venv:
+          buildable: false
+        py-typed-ast:
+          require: "+wheel"
+        py-platformdirs:
+          require: "+wheel"
+      concretizer:
+        reuse: true
+        unify: true
+        targets:
+          granularity: generic
+          host_compatible: false
+      # Signed binaries of the development dependencies
+      mirrors::
+{% for mirror in dev_mirrors %}
+        {{mirror}}:
+          url: https://binaries.spack.io/releases/v2026.03/{{mirror}}
+          signed: true
+{% endfor %}
+
+  view:
+    default:
+      root: {{ view }}
+      group: {{ dev_group }}
 
   config:
     install_tree:
@@ -33,28 +63,3 @@ spack:
       externals:
         - spec: "{{ python_spec }}"
           prefix: "{{ python_prefix }}"
-{% if bootstrap_mirrors %}
-
-    python-venv:
-      buildable: false
-
-    py-typed-ast:
-      require: "+wheel"
-
-    py-platformdirs:
-      require: "+wheel"
-
-  concretizer:
-    reuse: true
-    unify: true
-    targets:
-      granularity: generic
-      host_compatible: false
-
-  mirrors::
-{% for mirror in bootstrap_mirrors %}
-    {{mirror}}:
-      url: https://binaries.spack.io/releases/v2026.03/{{mirror}}
-      signed: true
-{% endfor %}
-{% endif %}
