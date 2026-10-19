@@ -159,7 +159,7 @@ def test_raising_exception_executables_in_path(mutable_config):
 def test_bootstrap_deactivates_environments(active_mock_environment):
     assert active_environment() == active_mock_environment
     with spack.bootstrap.ensure_bootstrap_configuration():
-        assert active_environment() is None
+        assert active_environment().path == spack.bootstrap.config.environment_path("core-")
     assert active_environment() == active_mock_environment
 
 
@@ -572,7 +572,7 @@ def recording_environment(monkeypatch):
     env = _RecordingEnvironment()
     monkeypatch.setattr(spack.bootstrap.core, "_add_externals_if_missing", lambda: None)
     monkeypatch.setattr(spack.concretize, "concretize_one", _FakeConcreteSpec)
-    monkeypatch.setattr(spack.bootstrap.core, "_core_environment", lambda: env)
+    monkeypatch.setattr(spack.bootstrap.core, "core_environment", lambda: env)
     return env
 
 

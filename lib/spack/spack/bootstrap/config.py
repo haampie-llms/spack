@@ -6,18 +6,19 @@
 import contextlib
 import hashlib
 import os
+import pathlib
 import sys
-from typing import Any, Dict, Generator, MutableSequence, Sequence
+from typing import Any, Dict, Generator, MutableSequence, Optional, Sequence
 
 import spack.vendor.archspec.cpu
 
 import spack.config
 import spack.environment
-import spack.modules
 import spack.paths
 import spack.platforms
 import spack.repo
 import spack.store
+import spack.tengine
 from spack.error import ExplicitDatabaseUpgradeError
 from spack.util import tty
 
@@ -76,22 +77,45 @@ def store_path() -> str:
     return _store_path()
 
 
-@contextlib.contextmanager
-def _spack_python_interpreter() -> Generator:
-    """Override the current configuration to set the interpreter under
-    which Spack is currently running as the only Python external spec
-    available.
+def write_environment_manifest(
+    path: str,
+    *,
+    specs: Sequence[str] = (),
+    view: Optional[str] = None,
+    mirrors: Sequence[str] = (),
+) -> None:
+    """Write the manifest of a bootstrapping environment, which installs into the bootstrap store
+    and uses the interpreter running Spack as the only Python.
+
+    Args:
+        path: root directory of the environment
+        specs: root specs of the environment
+        view: path of the view, if any
+        mirrors: names of the developer tools mirrors to use, which also select the concretizer
+            settings for them
     """
-    python_prefix = sys.exec_prefix
-    external_python = spec_for_current_python()
-
-    entry = {
-        "buildable": False,
-        "externals": [{"prefix": python_prefix, "spec": str(external_python)}],
+    template = spack.tengine.make_environment().get_template("bootstrap/spack.yaml")
+    context = {
+        "python_spec": f"{spec_for_current_python()}+ctypes",
+        "python_prefix": pathlib.Path(sys.exec_prefix).as_posix(),
+        "architecture": spack.vendor.archspec.cpu.host().family,
+        "view": pathlib.Path(view).as_posix() if view else "false",
+        "environment_specs": specs,
+        "store_path": pathlib.Path(store_path()).as_posix(),
+        "bootstrap_mirrors": mirrors,
     }
+    os.makedirs(path, exist_ok=True)
+    pathlib.Path(path, spack.environment.manifest_name).write_text(
+        template.render(context), encoding="utf-8"
+    )
 
-    with spack.config.CONFIG.override("packages:python::", entry):
-        yield
+
+def core_environment() -> spack.environment.Environment:
+    """Return the environment of the core dependencies of Spack, for the interpreter running it"""
+    path = environment_path(prefix="core-")
+    if not spack.environment.is_env_dir(path):
+        write_environment_manifest(path)
+    return spack.environment.Environment(path)
 
 
 def _store_path() -> str:
@@ -158,18 +182,17 @@ def _bootstrap_config_scopes() -> Sequence["spack.config.ConfigScope"]:
 def _ensure_bootstrap_configuration() -> Generator:
     spack.repo.PATH.repos  # ensure this is instantiated from current config.
     spack.store.ensure_singleton_created()
-    bootstrap_store_path = store_path()
+    store_path()  # raises if bootstrapping is disabled
     user_configuration = _read_and_sanitize_configuration()
     with spack.environment.no_active_environment(), spack.platforms.use_platform(
         spack.platforms.real_host()
     ), spack.config.use_configuration(
         # Default configuration scopes excluding command line and builtin
         *_bootstrap_config_scopes()
-    ), spack.store.use_store(bootstrap_store_path, extra_data={"padded_length": 0}):
+    ):
         spack.config.CONFIG.set("bootstrap", user_configuration["bootstrap"])
         spack.config.CONFIG.set("config", user_configuration["config"])
-        # Binaries verified by sha256 sum are supported only by the new installer
-        spack.config.CONFIG.set("config:installer", "new")
         spack.config.CONFIG.set("repos", user_configuration["repos"])
-        with spack.modules.disable_modules(), _spack_python_interpreter():
+        # The environment sets the store, the Python interpreter and the policies
+        with core_environment():
             yield

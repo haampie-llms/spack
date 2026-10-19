@@ -9,19 +9,16 @@ import shutil
 import sys
 from typing import Iterable, List
 
-import spack.vendor.archspec.cpu
-
 import spack.config
 import spack.environment
 import spack.error
 import spack.paths
 import spack.spec
 import spack.stage
-import spack.tengine
 import spack.util.gpg
 from spack.util import tty
 
-from .config import environment_path, root_path, spec_for_current_python, store_path
+from .config import environment_path, root_path, write_environment_manifest
 from .core import _add_externals_if_missing
 
 
@@ -116,19 +113,12 @@ class BootstrapEnvironment(spack.environment.Environment):
         tty.msg(
             "[BOOTSTRAPPING] Spack has missing dependencies, creating a bootstrapping environment"
         )
-        env = spack.tengine.make_environment()
-        template = env.get_template("bootstrap/spack.yaml")
-        context = {
-            "python_spec": f"{spec_for_current_python()}+ctypes",
-            "python_prefix": pathlib.Path(sys.exec_prefix).as_posix(),
-            "architecture": spack.vendor.archspec.cpu.host().family,
-            "environment_path": self.environment_root().as_posix(),
-            "environment_specs": self.spack_dev_requirements(),
-            "store_path": pathlib.Path(store_path()).as_posix(),
-            "bootstrap_mirrors": dev_bootstrap_mirror_names(),
-        }
-        self.environment_root().mkdir(parents=True, exist_ok=True)
-        self.spack_yaml().write_text(template.render(context), encoding="utf-8")
+        write_environment_manifest(
+            str(self.environment_root()),
+            specs=self.spack_dev_requirements(),
+            view=str(self.view_root()),
+            mirrors=dev_bootstrap_mirror_names(),
+        )
 
 
 def mypy_root_spec() -> str:
