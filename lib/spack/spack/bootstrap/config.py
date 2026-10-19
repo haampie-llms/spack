@@ -8,7 +8,7 @@ import hashlib
 import os
 import pathlib
 import sys
-from typing import Any, Dict, Generator, MutableSequence, Optional, Sequence
+from typing import Generator, MutableSequence, Optional, Sequence
 
 import spack.vendor.archspec.cpu
 
@@ -17,7 +17,6 @@ import spack.environment
 import spack.paths
 import spack.platforms
 import spack.repo
-import spack.store
 import spack.tengine
 from spack.error import ExplicitDatabaseUpgradeError
 from spack.util import tty
@@ -148,20 +147,19 @@ def ensure_bootstrap_configuration() -> Generator:
         raise
 
 
-def _read_and_sanitize_configuration() -> Dict[str, Any]:
-    """Read the user configuration that needs to be reused for bootstrapping
-    and remove the entries that should not be copied over.
-    """
-    # Read the "config" section but pop the install tree (the entry will not be
-    # considered due to the use_store context manager, so it will be confusing
-    # to have it in the configuration).
+def _user_configuration_scope() -> "spack.config.InternalConfigScope":
+    """Return a scope with the user configuration that is reused for bootstrapping."""
+    # The environment sets the install tree, so its other keys must not merge into it
     config_yaml = spack.config.CONFIG.get("config")
     config_yaml.pop("install_tree", None)
-    return {
-        "bootstrap": spack.config.CONFIG.get("bootstrap"),
-        "config": config_yaml,
-        "repos": spack.config.CONFIG.get("repos"),
-    }
+    return spack.config.InternalConfigScope(
+        "bootstrap-user",
+        {
+            "bootstrap:": spack.config.CONFIG.get("bootstrap"),
+            "config:": config_yaml,
+            "repos:": spack.config.CONFIG.get("repos"),
+        },
+    )
 
 
 def _bootstrap_config_scopes() -> Sequence["spack.config.ConfigScope"]:
@@ -181,18 +179,10 @@ def _bootstrap_config_scopes() -> Sequence["spack.config.ConfigScope"]:
 @contextlib.contextmanager
 def _ensure_bootstrap_configuration() -> Generator:
     spack.repo.PATH.repos  # ensure this is instantiated from current config.
-    spack.store.ensure_singleton_created()
     store_path()  # raises if bootstrapping is disabled
-    user_configuration = _read_and_sanitize_configuration()
+    user_scope = _user_configuration_scope()
+    # The environment sets the store, the Python interpreter and the policies
     with spack.environment.no_active_environment(), spack.platforms.use_platform(
         spack.platforms.real_host()
-    ), spack.config.use_configuration(
-        # Default configuration scopes excluding command line and builtin
-        *_bootstrap_config_scopes()
-    ):
-        spack.config.CONFIG.set("bootstrap", user_configuration["bootstrap"])
-        spack.config.CONFIG.set("config", user_configuration["config"])
-        spack.config.CONFIG.set("repos", user_configuration["repos"])
-        # The environment sets the store, the Python interpreter and the policies
-        with core_environment():
-            yield
+    ), spack.config.use_configuration(*_bootstrap_config_scopes(), user_scope), core_environment():
+        yield
