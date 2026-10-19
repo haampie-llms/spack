@@ -1,49 +1,42 @@
-# This environment contains Spack non-core dependencies for the
-# following configuration
+# This environment contains software that Spack needs, for the following configuration
 #
 # Python spec: {{ python_spec }}
 # Python interpreter: {{ python_prefix }}
 # Architecture: {{ architecture }}
 #
 spack:
-  specs:
-{% for spec in environment_specs %}
-    - "{{ spec }}"
-{% endfor %}
-  view: {{ environment_path }}/view
+  specs: [{% for spec in environment_specs %}"{{ spec }}"{% if not loop.last %}, {% endif %}{% endfor %}]
+  view: {{ view }}
 
   config:
     install_tree:
       root: {{ store_path }}
       padded_length: 0
-
     install_status: false
+    # Binaries verified by sha256 sum are supported only by the new installer
+    installer: new
+
+  modules::
+    default:
+      enable: []
 
   packages:
-
-    expat:
+    all:
       deprecation:
         allow:
+          # Pinned binaries can be of versions that were deprecated after they were built,
+          # and Python deprecation cycles are very fast
           - labels: [version_deprecated]
 
     python:
       buildable: false
-      # Python deprecation cycles are very fast, each new patch version deprecates
-      # the previous ones
-      deprecation:
-        allow:
-          - labels: [version_deprecated]
       externals:
         - spec: "{{ python_spec }}"
           prefix: "{{ python_prefix }}"
+{% if bootstrap_mirrors %}
 
     python-venv:
       buildable: false
-
-    py-pytest:
-      deprecation:
-        allow:
-          - labels: [version_deprecated]
 
     py-typed-ast:
       require: "+wheel"
@@ -64,3 +57,4 @@ spack:
       url: https://binaries.spack.io/releases/v2026.03/{{mirror}}
       signed: true
 {% endfor %}
+{% endif %}

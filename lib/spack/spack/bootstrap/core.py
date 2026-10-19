@@ -27,8 +27,6 @@ import spack.concretize
 import spack.config
 import spack.deptypes as dt
 import spack.detection
-import spack.enums
-import spack.environment
 import spack.error
 import spack.externals
 import spack.mirrors.mirror
@@ -53,7 +51,7 @@ from ._common import (
     _try_import_from_store,
 )
 from .clingo import ClingoBootstrapConcretizer
-from .config import environment_path, spec_for_current_python
+from .config import core_environment, spec_for_current_python
 
 #: Name of the file containing metadata about the bootstrapping source
 METADATA_YAML_FILENAME = "metadata.yaml"
@@ -130,28 +128,23 @@ class BootstrapRequest(Generic[ResultT]):
 
 
 def _mirror_scope(source: ConfigDictionary) -> spack.config.InternalConfigScope:
-    """Return a configuration scope to install from a bootstrapping source, whose mirror is the
-    only one"""
+    """Return a configuration scope where the mirror of a bootstrapping source is the only one"""
     url = source["info"]["url"]
     # A relative path is relative to the metadata directory
     if spack.util.url.is_path_instead_of_url(url) and not os.path.isabs(url):
         url = os.path.join(spack.config.canonicalize_path(source["metadata"]), url)
-    data: Dict[str, Any] = {
-        "mirrors:": {source["name"]: spack.mirrors.mirror.Mirror(url).fetch_url}
-    }
-    if source["type"] == "buildcache":
-        # Pinned binaries can be of versions that were deprecated after they were built
-        allow = [{"labels": [spack.enums.LEGACY_DEPRECATION_LABEL]}]
-        data["packages"] = {"all": {"deprecation": {"allow": allow}}}
-    return spack.config.InternalConfigScope(f"bootstrap-{source['name']}-{uuid.uuid4()}", data)
+    return spack.config.InternalConfigScope(
+        f"bootstrap-{source['name']}-{uuid.uuid4()}",
+        {"mirrors:": {source["name"]: spack.mirrors.mirror.Mirror(url).fetch_url}},
+    )
 
 
 def host_externals() -> List[spack.spec.Spec]:
     """Return the externals for the interpreter running Spack and for its libc, which replace
     those of the host where a binary was built."""
-    externals: List[spack.externals.ExternalDict] = [
-        {"spec": spec_for_current_python(), "prefix": sys.exec_prefix}
-    ]
+    externals: List[spack.externals.ExternalDict] = list(
+        spack.config.CONFIG.get("packages:python:externals")
+    )
     libc = spack.util.libc.libc_from_current_python_process()
     if libc:
         externals.append({"spec": str(libc), "prefix": libc.external_path})
@@ -200,14 +193,6 @@ def _pinned_binary(abstract_spec: spack.spec.Spec, sha256: Dict[str, str]) -> sp
     raise RuntimeError(f'no pinned binary provides "{abstract_spec}"')
 
 
-def _core_environment() -> spack.environment.Environment:
-    """Return the environment recording the core dependencies installed for this interpreter"""
-    path = environment_path(prefix="core-")
-    if spack.environment.is_env_dir(path):
-        return spack.environment.Environment(path)
-    return spack.environment.create_in_dir(path, with_view=False)
-
-
 def _install_from_source(
     request: BootstrapRequest[ResultT], source: ConfigDictionary
 ) -> Optional[ResultT]:
@@ -229,7 +214,7 @@ def _install_from_source(
             concrete_spec = request.concretize(request.abstract_spec)
             installer_args = request.installer_args
 
-        env = _core_environment()
+        env = core_environment()
         with env.write_transaction():
             if any(x.root == request.abstract_spec for x in env.concretized_roots):
                 env.deconcretize_by_user_spec(request.abstract_spec)

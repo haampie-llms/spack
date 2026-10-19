@@ -91,11 +91,12 @@ You can check what is installed in the bootstrapping store at any time using:
 .. code-block:: console
 
    % spack -b find
-   ==> Showing internal bootstrap store at "/Users/spack/.spack/bootstrap/store"
-   ==> 11 installed packages
-   -- darwin-catalina-x86_64 / apple-clang@12.0.0 ------------------
-   clingo-bootstrap@spack  libassuan@2.5.5  libgpg-error@1.42  libksba@1.5.1  pinentry@1.1.1  zlib@1.2.11
-   gnupg@2.3.1             libgcrypt@1.9.3  libiconv@1.16      npth@1.6       python@3.8
+   ==> In environment /Users/spack/.spack/bootstrap/environments/core-python3.9-aarch64-2e555 (no root specs)
+   -- darwin-bigsur-aarch64 / no compilers -------------------------
+   clingo-bootstrap@spack
+
+   -- darwin-sequoia-aarch64 / no compilers ------------------------
+   python@3.9  python-venv@1.0
 
 If needed, you can remove all the software in the current bootstrapping store with:
 
@@ -105,12 +106,14 @@ If needed, you can remove all the software in the current bootstrapping store wi
    ==> Removing bootstrapped software and configuration in "/Users/spack/.spack/bootstrap"
 
    % spack -b find
-   ==> Showing internal bootstrap store at "/Users/spack/.spack/bootstrap/store"
+   ==> In environment /Users/spack/.spack/bootstrap/environments/core-python3.9-aarch64-2e555 (no root specs)
    ==> 0 installed packages
 
 Pre-built binaries are verified by the sha256 sums listed, by DAG hash, in the ``metadata.yaml`` file of their bootstrapping source.
 They were built on another host, so Spack splices the python interpreter and the libc of the current host into them, and it creates a venv for the current interpreter instead of using a pre-built one.
-The specs installed for each interpreter are recorded in an environment, in the ``environments`` directory of the bootstrapping root.
+Bootstrapping happens in an environment for the interpreter running Spack, in the ``environments`` directory of the bootstrapping root.
+Its ``spack.yaml`` sets the bootstrapping store and the Python interpreter, and its lockfile records the installed specs.
+Commands run with ``spack -b`` run in this environment.
 
 .. _cmd-spack-bootstrap-list:
 .. _cmd-spack-bootstrap-disable:
