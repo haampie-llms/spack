@@ -1123,14 +1123,7 @@ def test_tarball_common_prefix(dummy_prefix, tmp_path: pathlib.Path):
             common_prefix = spack.binary_distribution._ensure_common_prefix(tar)
             assert common_prefix == expected_prefix
 
-            # For consistent behavior across all supported Python versions
-            tar.extraction_filter = lambda member, path: member
-
-            # Extract into prefix2
-            tar.extractall(
-                path="prefix2",
-                members=spack.binary_distribution._tar_strip_component(tar, common_prefix),
-            )
+        spack.binary_distribution.extract_buildcache_tarball("example.tar", "prefix2")
 
         # Verify files are all there at the correct level.
         assert set(os.listdir("prefix2")) == {"bin", "share", ".spack"}
@@ -1148,6 +1141,95 @@ def test_tarball_common_prefix(dummy_prefix, tmp_path: pathlib.Path):
         assert readlink(os.path.join("prefix2", "bin", "absolute_app_link")) == os.path.join(
             dummy_prefix, "bin", "app"
         )
+
+
+def _deep_dir(base: pathlib.Path, length: int) -> pathlib.Path:
+    """Return a path below base that is at least length characters long."""
+    while len(str(base)) < length:
+        base = base / ("x" * 100)
+    return base
+
+
+@pytest.mark.parametrize("contents", ["dirs", "files", "bundle"])
+def test_extract_buildcache_tarball(tmp_path: pathlib.Path, contents: str):
+    """Extraction strips the prefix the tarball was created from, whether the prefix contains
+    files, only dirs, or only the .spack dir, without doubling path lengths when both the old and
+    new prefix are long."""
+    length = int(0.6 * os.pathconf(tmp_path, "PC_PATH_MAX"))
+    prefix = _deep_dir(tmp_path / "old", length) / "pkg-1.0-abcdef"
+    (prefix / ".spack").mkdir(parents=True)
+    (prefix / ".spack" / "spec.json").write_text("{}")
+    expected = {".spack"}
+    if contents != "bundle":
+        (prefix / "lib").mkdir()
+        (prefix / "lib" / "libfoo.so").write_text("foo")
+        (prefix / "lib" / "libfoo.so.1").symlink_to("libfoo.so")
+        os.link(prefix / "lib" / "libfoo.so", prefix / "lib" / "libfoo.a")
+        expected.add("lib")
+    if contents == "files":
+        (prefix / "README").write_text("hello")
+        expected.add("README")
+
+    tarball = str(tmp_path / "pkg.tar.gz")
+    spack.binary_distribution._do_create_tarball(
+        tarball, str(prefix), buildinfo={}, prefixes_to_relocate=[]
+    )
+    destination = _deep_dir(tmp_path / "new", length) / "pkg-1.0-abcdef"
+    spack.binary_distribution.extract_buildcache_tarball(tarball, str(destination))
+
+    assert set(os.listdir(destination)) == expected
+    assert set(os.listdir(destination / ".spack")) == {"spec.json", "binary_distribution"}
+    if contents != "bundle":
+        lib = destination / "lib"
+        assert (lib / "libfoo.so").read_text() == "foo"
+        assert os.readlink(lib / "libfoo.so.1") == "libfoo.so"
+        assert os.path.samefile(lib / "libfoo.so", lib / "libfoo.a")
+
+
+def test_extract_buildcache_tarball_decompresses_once(
+    tmp_path: pathlib.Path, dummy_prefix, monkeypatch
+):
+    """The tarball is read front to back once: gzip does not rewind to decompress it again."""
+    data = os.path.join(dummy_prefix, "share", "data")
+    with open(data, "wb") as f:
+        f.write(os.urandom(1024 * 1024))  # exceeds read buffers, so seeking back rewinds gzip
+    tarball = str(tmp_path / "pkg.tar.gz")
+    spack.binary_distribution._do_create_tarball(
+        tarball, dummy_prefix, buildinfo={}, prefixes_to_relocate=[]
+    )
+
+    def rewind(self):
+        raise AssertionError("tarball is decompressed twice")
+
+    monkeypatch.setattr(gzip._GzipReader, "_rewind", rewind)
+    spack.binary_distribution.extract_buildcache_tarball(tarball, str(tmp_path / "dest"))
+    assert filecmp.cmp(data, tmp_path / "dest" / "share" / "data", shallow=False)
+
+
+@pytest.mark.parametrize(
+    "name,error",
+    [
+        ("/file", "outside of prefix"),
+        ("{prefix}/../../file", "unsafe path"),
+        ("file", "outside of prefix"),
+    ],
+)
+def test_extract_buildcache_tarball_invalid(
+    tmp_path: pathlib.Path, dummy_prefix, name: str, error: str
+):
+    """Tarballs with members outside of the prefix are rejected, and nothing is extracted."""
+    tarball = str(tmp_path / "pkg.tar")
+    with tarfile.open(tarball, "w") as tar:
+        tar.add(dummy_prefix)
+        info = tarfile.TarInfo(name.format(prefix=dummy_prefix.lstrip("/")))
+        info.size = 5
+        tar.addfile(info, io.BytesIO(b"hello"))
+
+    destination = tmp_path / "a" / "b"
+    with pytest.raises(ValueError, match=error):
+        spack.binary_distribution.extract_buildcache_tarball(tarball, str(destination))
+    assert os.listdir(destination) == []
+    assert not os.path.exists(tmp_path / "file")
 
 
 def test_tarfile_missing_binary_distribution_file(tmp_path: pathlib.Path):

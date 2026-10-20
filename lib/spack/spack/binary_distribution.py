@@ -2300,38 +2300,185 @@ def relocate_package(spec: spack.spec.Spec) -> None:
             os.unlink(install_manifest)
 
 
-def _tar_strip_component(tar: tarfile.TarFile, prefix: str):
-    """Yield all members of tarfile that start with given prefix, and strip that prefix (including
-    symlinks)"""
-    # Including trailing /, otherwise we end up with absolute paths.
-    regex = re.compile(re.escape(prefix) + "/*")
+def _member_parts(name: str) -> List[str]:
+    """Split a member name into path components, rejecting names that escape the destination."""
+    parts = [p for p in name.split("/") if p and p != "."]
+    if (
+        name.startswith("/")
+        or ".." in parts
+        or sys.platform == "win32"
+        and any("\\" in p or ":" in p for p in parts)
+    ):
+        raise ValueError(f"Tarball contains unsafe path {name}")
+    return parts
 
-    # Only yield members in the package prefix.
-    # Note: when a tarfile is created, relative in-prefix symlinks are
-    # expanded to matching member names of tarfile entries. So, we have
-    # to ensure that those are updated too.
-    # Absolute symlinks are copied verbatim -- relocation should take care of
-    # them.
-    for m in tar.getmembers():
-        result = regex.match(m.name)
-        if not result:
-            continue
-        m.name = m.name[result.end() :]
-        if m.linkname:
-            result = regex.match(m.linkname)
-            if result:
-                m.linkname = m.linkname[result.end() :]
-        yield m
+
+def _mkdir_unique(parent: str) -> str:
+    """Create a new directory in parent with default permissions, unlike tempfile.mkdtemp."""
+    while True:
+        path = os.path.join(parent, f".spack-extract-{os.urandom(4).hex()}")
+        try:
+            os.mkdir(path)
+            return path
+        except FileExistsError:
+            pass
+
+
+class _BuildcacheExtractor:
+    """Extracts a build cache tarball in a single pass.
+
+    Member names start with the package prefix at build time, which is only known after the last
+    member. Members are extracted into ``tmp``, which stands for the archive dir ``root``: the
+    deepest dir containing everything extracted so far. Dirs leading up to the prefix come first
+    in the tarball, so ``root`` descends to the prefix (or just below it) before anything is
+    extracted, and moving it up later is a rename."""
+
+    def __init__(self, tar: tarfile.TarFile, destination: str) -> None:
+        self.tar = tar
+        self.destination = destination
+        self.tmp = _mkdir_unique(destination)
+        self.root: List[str] = []
+        self.descending = True
+        #: members extracted into tmp, with names relative to root
+        self.extracted: List[tarfile.TarInfo] = []
+        #: extracted dirs, whose attributes are set at the end like in TarFile.extractall
+        self.dirs: List[tarfile.TarInfo] = []
+        #: dirs at or above root, which are not extracted
+        self.skipped: Dict[Tuple[str, ...], tarfile.TarInfo] = {}
+
+    def add(self, member: tarfile.TarInfo) -> None:
+        parts = _member_parts(member.name)
+        n = len(self.root)
+
+        if parts == self.root[: len(parts)]:
+            if not member.isdir():
+                raise ValueError(f"Tarball contains non-directory {member.name}")
+            self.skipped[tuple(parts)] = member
+            return
+
+        if parts[:n] != self.root:
+            common = 0
+            while parts[common] == self.root[common]:
+                common += 1
+            self._move_up(self.root[:common])
+        elif self.descending:
+            # Nothing extracted yet: descend to the deepest dir containing this member.
+            if member.isdir():
+                self.skipped[tuple(parts)] = member
+                self.root = parts
+                return
+            self.root = parts[:-1]
+
+        n = len(self.root)
+        if member.islnk():
+            target = _member_parts(member.linkname)
+            if target[:n] != self.root or len(target) == n:
+                raise ValueError(f"Tarball hardlinks {member.linkname}, which is not extracted")
+            member.linkname = "/".join(target[n:])
+        member.name = "/".join(parts[n:])
+
+        self.descending = False
+        self.extracted.append(member)
+        if member.isdir():
+            self.dirs.append(member)
+        self.tar.extract(member, self.tmp, set_attrs=not member.isdir())
+
+    def _move_up(self, root: List[str]) -> None:
+        """Make tmp stand for root, an ancestor of the current root."""
+        rel = self.root[len(root) :]
+        tmp = _mkdir_unique(self.destination)
+        try:
+            if len(rel) > 1:
+                os.makedirs(os.path.join(tmp, *rel[:-1]))
+            os.rename(self.tmp, os.path.join(tmp, *rel))
+        except BaseException:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
+
+        # Keep member names relative to root: tarfile looks up link targets by name.
+        prefix = "/".join(rel)
+        for member in self.extracted:
+            member.name = f"{prefix}/{member.name}"
+            if member.islnk():
+                member.linkname = f"{prefix}/{member.linkname}"
+
+        # Skipped dirs below the new root are extracted now.
+        for i in range(1, len(rel) + 1):
+            skipped = self.skipped.pop(tuple(root + rel[:i]), None)
+            if skipped is not None:
+                skipped.name = "/".join(rel[:i])
+                self.extracted.append(skipped)
+                self.dirs.append(skipped)
+
+        self.tmp, self.root, self.descending = tmp, root, False
+
+    def validate(self) -> List[str]:
+        """Restore the member names, validate them, and return the package prefix."""
+        root = "/".join(self.root)
+        for member in self.extracted:
+            member.name = f"{root}/{member.name}" if root else member.name
+            if member.islnk():
+                member.linkname = f"{root}/{member.linkname}" if root else member.linkname
+        self.extracted.clear()
+        return _member_parts(_ensure_common_prefix(self.tar))
+
+    def finish(self) -> None:
+        """Validate the tarball and move the package prefix contents into the destination."""
+        prefix = self.validate()
+        n = len(prefix)
+
+        if self.root[:n] == prefix and len(self.root) > n:
+            # root is below the prefix: move tmp into place as a whole
+            rel = self.root[n:]
+            os.makedirs(os.path.join(self.destination, *rel[:-1]), exist_ok=True)
+            os.rename(self.tmp, os.path.join(self.destination, *rel))
+        elif prefix[: len(self.root)] == self.root:
+            src = os.path.join(self.tmp, *prefix[len(self.root) :])
+            for entry in os.listdir(src):
+                os.rename(os.path.join(src, entry), os.path.join(self.destination, entry))
+            shutil.rmtree(self.tmp)
+        else:
+            raise ValueError(f"Tarball contents are not in prefix {'/'.join(prefix)}")
+
+        self._set_dir_attrs(prefix)
+
+    def _set_dir_attrs(self, prefix: List[str]) -> None:
+        """Set attributes of the prefix and the dirs in it, deepest first, like extractall."""
+        n = len(prefix)
+        dirs = []
+        for member in itertools.chain(self.dirs, self.skipped.values()):
+            parts = _member_parts(member.name)
+            if parts[:n] == prefix:
+                dirs.append((parts[n:], member))
+        dirs.sort(key=lambda d: d[0], reverse=True)
+        for parts, member in dirs:
+            path = os.path.join(self.destination, *parts)
+            try:
+                self.tar.chown(member, path, numeric_owner=False)
+                self.tar.utime(member, path)
+                self.tar.chmod(member, path)
+            except tarfile.ExtractError:
+                pass
 
 
 def extract_buildcache_tarball(tarfile_path: str, destination: str) -> None:
+    """Extract the package prefix in a build cache tarball into destination."""
+    os.makedirs(destination, exist_ok=True)
     with closing(tarfile.open(tarfile_path, "r")) as tar:
         # For consistent behavior across all supported Python versions
         tar.extraction_filter = lambda member, path: member
-        # Remove common prefix from tarball entries and directly extract them to the install dir.
-        tar.extractall(
-            path=destination, members=_tar_strip_component(tar, prefix=_ensure_common_prefix(tar))
-        )
+        extractor = _BuildcacheExtractor(tar, destination)
+        try:
+            try:
+                for member in tar:
+                    extractor.add(member)
+            except Exception:
+                # Report an invalid tarball as such, not the error it caused while extracting.
+                extractor.validate()
+                raise
+            extractor.finish()
+        finally:
+            shutil.rmtree(extractor.tmp, ignore_errors=True)
 
 
 def extract_tarball(spec, tarball_stage: spack.stage.Stage, force=False, timer=timer.NULL_TIMER):
