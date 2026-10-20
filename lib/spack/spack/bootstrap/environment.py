@@ -1,13 +1,11 @@
 # Copyright Spack Project Developers. See COPYRIGHT file for details.
 #
 # SPDX-License-Identifier: (Apache-2.0 OR MIT)
-"""Bootstrap non-core Spack dependencies from an environment."""
+"""Bootstrap the development dependencies of Spack in the bootstrapping environment."""
 
 import os
 import pathlib
-import shutil
 import sys
-from typing import Iterable, List
 
 import spack.config
 import spack.environment
@@ -15,135 +13,79 @@ import spack.error
 import spack.paths
 import spack.spec
 import spack.stage
+import spack.store
 import spack.util.gpg
 from spack.util import tty
 
-from .config import environment_path, root_path, write_environment_manifest
-from .core import _add_externals_if_missing
+from .config import (
+    DEV_GROUP,
+    bootstrap_environment,
+    development_requirements,
+    ensure_bootstrap_configuration,
+    root_path,
+)
+from .core import _add_externals_if_missing, ensure_clingo_importable_or_raise
 
 
-class BootstrapEnvironment(spack.environment.Environment):
-    """Environment to install dependencies of Spack for a given interpreter and architecture"""
-
-    def __init__(self) -> None:
-        if not self.spack_yaml().exists():
-            self._write_spack_yaml_file()
-        super().__init__(self.environment_root())
-
-        # Remove python package roots created before python-venv was introduced
-        for s in self.concrete_roots():
-            if "python" in s.package.extendees and not s.dependencies("python-venv"):
-                self.deconcretize_by_hash(s.dag_hash())
-
-    @classmethod
-    def spack_dev_requirements(cls) -> List[str]:
-        """Spack development requirements"""
-        return [pytest_root_spec(), ruff_root_spec(), mypy_root_spec()]
-
-    @classmethod
-    def environment_root(cls) -> pathlib.Path:
-        """Environment root directory"""
-        return pathlib.Path(environment_path())
-
-    @classmethod
-    def bootstrap_gpg_home(cls) -> pathlib.Path:
-        """Location of the GPG home directory used for bootstrapping"""
-        return pathlib.Path(root_path()).joinpath(".bootstrap_gpg_home")
-
-    @classmethod
-    def view_root(cls) -> pathlib.Path:
-        """Location of the view"""
-        return cls.environment_root().joinpath("view")
-
-    @classmethod
-    def bin_dir(cls) -> pathlib.Path:
-        """Paths to be added to PATH"""
-        return cls.view_root().joinpath("bin")
-
-    def python_dirs(self) -> Iterable[pathlib.Path]:
-        python = next(s for s in self.all_specs_generator() if s.name == "python-venv").package
-        return {self.view_root().joinpath(p) for p in (python.platlib, python.purelib)}
-
-    @classmethod
-    def spack_yaml(cls) -> pathlib.Path:
-        """Environment spack.yaml file"""
-        return cls.environment_root().joinpath("spack.yaml")
-
-    def update_installations(self) -> None:
-        """Update the installations of this environment."""
-        log_enabled = tty.is_debug() or tty.is_verbose()
-        with tty.SuppressOutput(msg_enabled=log_enabled, warn_enabled=log_enabled):
-            specs = self.concretize()
-        if specs:
-            colorized_specs = [
-                spack.spec.Spec(x).cformat("{name}{@version}")
-                for x in self.spack_dev_requirements()
-            ]
-            tty.msg(f"[BOOTSTRAPPING] Installing dependencies ({', '.join(colorized_specs)})")
-            self.write(regenerate=False)
-            with tty.SuppressOutput(msg_enabled=log_enabled, warn_enabled=log_enabled):
-                with spack.util.gpg.gnupghome_override(str(self.bootstrap_gpg_home())):
-                    download_and_trust_key()
-                    fetch_policy = (
-                        "cache_only"
-                        if not spack.config.CONFIG.get("bootstrap:dev:enable_source", False)
-                        else "auto"
-                    )
-                    try:
-                        self.install_all(
-                            fail_fast=True,
-                            root_policy=fetch_policy,
-                            dependencies_policy=fetch_policy,
-                        )
-                    except BaseException:
-                        # catch any exception as we always want to clean up
-                        shutil.rmtree(self.environment_root())
-                        raise
-                    self.write(regenerate=True)
-
-    def load(self) -> None:
-        """Update PATH and sys.path."""
-        # Make executables available (shouldn't need PYTHONPATH)
-        os.environ["PATH"] = f"{self.bin_dir()}{os.pathsep}{os.environ.get('PATH', '')}"
-
-        # Spack itself imports pytest
-        sys.path.extend(str(p) for p in self.python_dirs())
-
-    def _write_spack_yaml_file(self) -> None:
-        tty.msg(
-            "[BOOTSTRAPPING] Spack has missing dependencies, creating a bootstrapping environment"
-        )
-        write_environment_manifest(
-            str(self.environment_root()),
-            specs=self.spack_dev_requirements(),
-            view=str(self.view_root()),
-            mirrors=dev_bootstrap_mirror_names(),
+def _installed(env: spack.environment.Environment) -> bool:
+    """Return whether the development dependencies of Spack are concretized and installed"""
+    concrete = dict(env.concretized_specs_by(group=DEV_GROUP))
+    with spack.store.STORE.db.read_transaction():
+        return all(
+            s in concrete and concrete[s].installed for s in env.user_specs_by(group=DEV_GROUP)
         )
 
 
-def mypy_root_spec() -> str:
-    """Return the root spec used to bootstrap mypy"""
-    return "py-mypy@0.900: ^py-mypy-extensions@:1.0"
+def _install(env: spack.environment.Environment) -> None:
+    """Concretize and install the development dependencies of Spack, from signed binaries."""
+    log_enabled = tty.is_debug() or tty.is_verbose()
+    with tty.SuppressOutput(msg_enabled=log_enabled, warn_enabled=log_enabled):
+        with env.write_transaction():
+            env.concretize()
+            env.write(regenerate=False)
+    if _installed(env):
+        return
 
-
-def pytest_root_spec() -> str:
-    """Return the root spec used to bootstrap pytest"""
-    return "py-pytest@6.2.4:"
-
-
-def ruff_root_spec() -> str:
-    """Return the root spec used to bootstrap ruff"""
-    return "py-ruff@0.15.0"
-
-
-def dev_bootstrap_mirror_names() -> List[str]:
-    """Return the mirror names used for bootstrapping dev
-    requirements"""
-    return [
-        "developer-tools-darwin",
-        "developer-tools-x86_64_v3-linux-gnu",
-        "developer-tools-aarch64-linux-gnu",
+    colorized_specs = [
+        spack.spec.Spec(x).cformat("{name}{@version}") for x in development_requirements()
     ]
+    tty.msg(f"[BOOTSTRAPPING] Installing dependencies ({', '.join(colorized_specs)})")
+    gpg_home = os.path.join(root_path(), ".bootstrap_gpg_home")
+    enable_source = spack.config.CONFIG.get("bootstrap:dev:enable_source", False)
+    policy = "auto" if enable_source else "cache_only"
+    # The mirrors of the development dependencies are in the configuration of their group
+    with tty.SuppressOutput(
+        msg_enabled=log_enabled, warn_enabled=log_enabled
+    ), spack.util.gpg.gnupghome_override(gpg_home), env.config_override_for_group(group=DEV_GROUP):
+        download_and_trust_key()
+        roots = [root for _, root in env.concretized_specs_by(group=DEV_GROUP)]
+        try:
+            env.install_specs(
+                roots, fail_fast=True, root_policy=policy, dependencies_policy=policy
+            )
+        except BaseException:
+            # Concretize again next time, e.g. when binaries were missing
+            with env.write_transaction():
+                for user_spec, _ in list(env.concretized_specs_by(group=DEV_GROUP)):
+                    env.deconcretize_by_user_spec(user_spec, group=DEV_GROUP)
+                env.write(regenerate=False)
+            raise
+    with env.write_transaction():
+        env.write(regenerate=True)
+
+
+def load(env: spack.environment.Environment) -> None:
+    """Make the development dependencies of Spack in the view of the environment available, by
+    updating PATH and sys.path."""
+    roots = [root for _, root in env.concretized_specs_by(group=DEV_GROUP)]
+    if not roots:
+        return
+    venv = roots[0]["python-venv"].package
+    view = pathlib.Path(env.default_view.root)
+    # Make executables available (shouldn't need PYTHONPATH)
+    os.environ["PATH"] = f"{view / 'bin'}{os.pathsep}{os.environ.get('PATH', '')}"
+    # Spack itself imports pytest
+    sys.path.extend({str(view / p) for p in (venv.platlib, venv.purelib)})
 
 
 def download_and_trust_key():
@@ -164,7 +106,11 @@ def download_and_trust_key():
 
 def ensure_environment_dependencies() -> None:
     """Ensure Spack dependencies from the bootstrap environment are installed and ready to use"""
-    _add_externals_if_missing()
-    with BootstrapEnvironment() as env:
-        env.update_installations()
-        env.load()
+    with ensure_bootstrap_configuration():
+        env = bootstrap_environment()
+        if not _installed(env):
+            _add_externals_if_missing()
+            # clingo is installed in the same environment, so it must be there before concretizing
+            ensure_clingo_importable_or_raise()
+            _install(env)
+        load(env)

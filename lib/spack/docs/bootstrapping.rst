@@ -91,12 +91,12 @@ You can check what is installed in the bootstrapping store at any time using:
 .. code-block:: console
 
    % spack -b find
-   ==> In environment /Users/spack/.spack/bootstrap/environments/core-python3.9-aarch64-2e555 (no root specs)
-   -- darwin-bigsur-aarch64 / no compilers -------------------------
-   clingo-bootstrap@spack
+   ==> In environment /Users/spack/.spack/bootstrap/environments/spack-python3.9-aarch64-2e555 (4 root specs)
+   -- root specs / core --------------------------------------------
+   [+] clingo-bootstrap@spack+python
 
-   -- darwin-sequoia-aarch64 / no compilers ------------------------
-   python@3.9  python-venv@1.0
+   -- root specs / dev ---------------------------------------------
+    -  py-mypy@0.900: ^py-mypy-extensions@:1.0   -  py-pytest@6.2.4:   -  py-ruff@0.15.0
 
 If needed, you can remove all the software in the current bootstrapping store with:
 
@@ -106,13 +106,14 @@ If needed, you can remove all the software in the current bootstrapping store wi
    ==> Removing bootstrapped software and configuration in "/Users/spack/.spack/bootstrap"
 
    % spack -b find
-   ==> In environment /Users/spack/.spack/bootstrap/environments/core-python3.9-aarch64-2e555 (no root specs)
+   ==> In environment /Users/spack/.spack/bootstrap/environments/spack-python3.9-aarch64-2e555 (3 root specs)
    ==> 0 installed packages
 
 Pre-built binaries are verified by the sha256 sums listed, by DAG hash, in the ``metadata.yaml`` file of their bootstrapping source.
 They were built on another host, so Spack splices the python interpreter and the libc of the current host into them, and it creates a venv for the current interpreter instead of using a pre-built one.
 Bootstrapping happens in an environment for the interpreter running Spack, in the ``environments`` directory of the bootstrapping root.
 Its ``spack.yaml`` sets the bootstrapping store and the Python interpreter, and its lockfile records the installed specs.
+The core dependencies are in its ``core`` group, and the development dependencies needed by ``spack style`` and ``spack unit-test`` in its ``dev`` group, whose specs are in the view of the environment.
 Commands run with ``spack -b`` run in this environment.
 
 .. _cmd-spack-bootstrap-list:

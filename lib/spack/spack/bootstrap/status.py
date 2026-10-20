@@ -9,9 +9,15 @@ from typing import List, Optional, Sequence, Tuple, Union
 import spack.util.executable
 
 from ._common import _executables_in_store, _python_import, _try_import_from_store
-from .config import ensure_bootstrap_configuration
+from .config import (
+    bootstrap_environment,
+    ensure_bootstrap_configuration,
+    mypy_root_spec,
+    pytest_root_spec,
+    ruff_root_spec,
+)
 from .core import clingo_root_spec, gnupg_root_spec, patchelf_root_spec
-from .environment import BootstrapEnvironment, mypy_root_spec, pytest_root_spec, ruff_root_spec
+from .environment import load
 
 ExecutablesType = Union[str, Sequence[str]]
 RequiredResponseType = Tuple[bool, Optional[str]]
@@ -114,10 +120,8 @@ def _optional_requirements() -> List[RequiredResponseType]:
 
 
 def _development_requirements() -> List[RequiredResponseType]:
-    # Ensure we trigger environment modifications if we have an environment
-    if BootstrapEnvironment.spack_yaml().exists():
-        with BootstrapEnvironment() as env:
-            env.load()
+    # Make the development dependencies that are installed available
+    load(bootstrap_environment())
 
     return [
         _required_python_module(

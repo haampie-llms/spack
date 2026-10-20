@@ -1521,8 +1521,13 @@ class Environment:
         """Remove this environment from Spack entirely."""
         shutil.rmtree(self.path)
 
-    def add(self, user_spec, list_name=USER_SPECS_KEY) -> bool:
+    def add(self, user_spec, list_name=USER_SPECS_KEY, *, group: Optional[str] = None) -> bool:
         """Add a single user_spec (non-concretized) to the Environment
+
+        Args:
+            user_spec: spec to be added
+            list_name: name of the list to add the spec to
+            group: group of user specs to add the spec to, if ``list_name`` is the user specs
 
         Returns:
             True if the spec was added, False if it was already present and did not need to be
@@ -1530,9 +1535,10 @@ class Environment:
 
         """
         spec = Spec(user_spec)
+        key = self._user_specs_key(group=group) if list_name == USER_SPECS_KEY else list_name
 
-        if list_name not in self.spec_lists:
-            raise SpackEnvironmentError(f"No list {list_name} exists in environment {self.name}")
+        if key not in self.spec_lists:
+            raise SpackEnvironmentError(f"No list {key} exists in environment {self.name}")
 
         if list_name == USER_SPECS_KEY:
             if spec.anonymous:
@@ -1542,12 +1548,12 @@ class Environment:
                 if spec.name not in virtuals:
                     raise SpackEnvironmentError(f"no such package: {spec.name}")
 
-        list_to_change = self.spec_lists[list_name]
+        list_to_change = self.spec_lists[key]
         existing = str(spec) in list_to_change.yaml_list
         if not existing:
             list_to_change.add(spec)
             if list_name == USER_SPECS_KEY:
-                self.manifest.add_user_spec(str(user_spec))
+                self.manifest.add_user_spec(str(user_spec), group=group)
             else:
                 self.manifest.add_definition(str(user_spec), list_name=list_name)
             self._sync_speclists()

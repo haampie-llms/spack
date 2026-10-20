@@ -12,12 +12,11 @@ from .core import (
     ensure_patchelf_in_path_or_raise,
     ensure_winsdk_external_or_raise,
 )
-from .environment import BootstrapEnvironment, ensure_environment_dependencies
+from .environment import ensure_environment_dependencies
 from .status import status_message
 
 __all__ = [
     "all_core_root_specs",
-    "BootstrapEnvironment",
     "ensure_bootstrap_configuration",
     "ensure_clingo_importable_or_raise",
     "ensure_core_dependencies",

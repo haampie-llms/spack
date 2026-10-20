@@ -1844,6 +1844,26 @@ class TestEnvironmentGroups:
         assert apps_specs.name == "specs:apps"
         assert apps_specs.specs == [spack.spec.Spec("mpileaks %gcc@14"), spack.spec.Spec("mpich")]
 
+    def test_add_to_group(self, create_temporary_manifest, mock_packages):
+        """Tests that a spec can be added to the user specs of a group"""
+        manifest = create_temporary_manifest(
+            """
+    spack:
+      specs:
+      - group: apps
+        specs: []
+    """
+        )
+        e = ev.Environment(manifest.manifest_dir)
+        assert e.add("mpileaks", group="apps")
+        assert not e.add("mpileaks", group="apps")
+        assert e.user_specs_by(group="apps").specs == [spack.spec.Spec("mpileaks")]
+        assert e.user_specs.specs == []
+
+        e.write()
+        manifest = EnvironmentManifestFile(manifest.manifest_dir)
+        assert manifest.user_specs(group="apps") == ["mpileaks"]
+
     def test_cannot_define_group_twice(self, create_temporary_manifest):
         """Tests that defining the same group twice raises an error"""
         with pytest.raises(SpackEnvironmentConfigError, match="defined more than once"):
