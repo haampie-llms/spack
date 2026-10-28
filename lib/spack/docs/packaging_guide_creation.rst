@@ -844,6 +844,20 @@ A directive can list several advisories, and users allow each of them separately
 The advisories listed together share the reason and severity of the directive, so advisories with different severities go in separate directives.
 See :ref:`package-deprecations-config` for how users allow them.
 
+.. _deprecate-patch-fixes:
+
+If a patch fixes a vulnerability, name the advisories it fixes in the ``fixes`` argument of ``patch()``:
+
+.. code-block:: python
+
+   deprecated("@1.1.1t", reason="vuln", severity="high", labels=["CVE-2023-0286", "CVE-2023-0215"])
+   patch("cve-2023-0286.patch", when="@1.1.1t", fixes=["CVE-2023-0286"])
+
+When the patch is applied to a spec, Spack stops refusing that spec for the labels in ``fixes``.
+In this example ``openssl@1.1.1t`` is no longer refused for ``CVE-2023-0286``.
+It is still refused for ``CVE-2023-0215``, unless the user allows that label.
+``fixes`` can also be used on a patch passed to ``depends_on(..., patches=...)``.
+
 Whether a deprecated version can be selected depends on the user's configuration.
 Users list the deprecations they allow, by severity, reason and labels, and Spack refuses the ones no entry in that list matches.
 This is a hard error both at concretization time and before the spec is installed.
@@ -891,6 +905,8 @@ Pre-release suffixes also contain string parts, but they are handled in a specia
 For example ``1.2.3alpha1`` is parsed as a pre-release of the version ``1.2.3``.
 This allows Spack to order it before the actual release: ``1.2.3alpha1 < 1.2.3``.
 Spack supports alpha, beta and release candidate suffixes: ``1.2alpha1 < 1.2beta1 < 1.2rc1 < 1.2``.
+The number is optional: ``1.2rc < 1.2rc1``.
+The suffix ``final`` denotes the release itself: ``1.2final == 1.2``.
 Any suffix not recognized as a pre-release is treated as an ordinary string component, so ``1.2 < 1.2-mysuffix``.
 
 Finally, there are a few special string components that are considered "infinity versions".
@@ -901,7 +917,7 @@ Infinity versions are not automatically used when determining the latest version
 
 More formally, the order on versions is defined as follows.
 A version string is split into a list of components based on delimiters such as ``.``, ``-``, ``_``, and string boundaries.
-The components are split into the **release** and a possible **pre-release** (if the last component is numeric and the second to last is a string ``alpha``, ``beta`` or ``rc``).
+The components are split into the **release** and a possible **pre-release** (if the version ends in ``alpha``, ``beta``, ``rc`` or ``final``, optionally followed by a number).
 The release components are ordered lexicographically, with comparison between different types of components as follows:
 
 #. The following special strings are considered larger than any other numeric or non-numeric version component, and satisfy the following order between themselves: ``develop > main > master > head > trunk > stable``.
@@ -2488,6 +2504,12 @@ Let's take the example patch from above and assume for some reason, it can only 
     #include "ad_lustre.h"
 
 Hence, the patch needs to be applied in the ``src/mpi`` subdirectory, and the ``working_dir="src/mpi"`` option would exactly do that.
+
+``fixes``
+"""""""""
+
+This lists the labels of the ``deprecated()`` directives of the patched package that the patch fixes.
+A spec with the patch applied is not refused for those labels, see :ref:`patches that fix a deprecation <deprecate-patch-fixes>`.
 
 Patch functions
 ^^^^^^^^^^^^^^^^^^^^^
