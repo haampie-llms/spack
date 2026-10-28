@@ -905,6 +905,8 @@ Pre-release suffixes also contain string parts, but they are handled in a specia
 For example ``1.2.3alpha1`` is parsed as a pre-release of the version ``1.2.3``.
 This allows Spack to order it before the actual release: ``1.2.3alpha1 < 1.2.3``.
 Spack supports alpha, beta and release candidate suffixes: ``1.2alpha1 < 1.2beta1 < 1.2rc1 < 1.2``.
+The number is optional: ``1.2rc < 1.2rc1``.
+The suffix ``final`` denotes the release itself: ``1.2final == 1.2``.
 Any suffix not recognized as a pre-release is treated as an ordinary string component, so ``1.2 < 1.2-mysuffix``.
 
 Finally, there are a few special string components that are considered "infinity versions".
@@ -915,7 +917,7 @@ Infinity versions are not automatically used when determining the latest version
 
 More formally, the order on versions is defined as follows.
 A version string is split into a list of components based on delimiters such as ``.``, ``-``, ``_``, and string boundaries.
-The components are split into the **release** and a possible **pre-release** (if the last component is numeric and the second to last is a string ``alpha``, ``beta`` or ``rc``).
+The components are split into the **release** and a possible **pre-release** (if the version ends in ``alpha``, ``beta``, ``rc`` or ``final``, optionally followed by a number).
 The release components are ordered lexicographically, with comparison between different types of components as follows:
 
 #. The following special strings are considered larger than any other numeric or non-numeric version component, and satisfy the following order between themselves: ``develop > main > master > head > trunk > stable``.
