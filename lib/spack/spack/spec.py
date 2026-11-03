@@ -5207,19 +5207,23 @@ class ParseContext:
 
     Without a context, parsing is pure and does not depend on the machine, as required for specs
     in package repositories. With a context, the text is user input: toolchains are expanded,
-    and ``default_os`` and ``default_target`` are resolved to the host's defaults.
+    ``default_os`` and ``default_target`` are resolved to the host's defaults, and spec files are
+    read from the filesystem if ``specfiles`` is True.
     """
 
-    __slots__ = ("toolchains", "_toolchain_cache")
+    __slots__ = ("toolchains", "specfiles", "_toolchain_cache")
 
-    def __init__(self, *, toolchains: Optional[Dict] = None) -> None:
+    def __init__(self, *, toolchains: Optional[Dict] = None, specfiles: bool = False) -> None:
         self.toolchains = toolchains or {}
+        self.specfiles = specfiles
         #: toolchain name -> parsed toolchain spec, filled lazily by expand_toolchains
         self._toolchain_cache: Dict[str, Spec] = {}
 
     @staticmethod
-    def from_config(config: "spack.config.Configuration") -> "ParseContext":
-        return ParseContext(toolchains=config.get("toolchains"))
+    def from_config(
+        config: "spack.config.Configuration", *, specfiles: bool = False
+    ) -> "ParseContext":
+        return ParseContext(toolchains=config.get("toolchains"), specfiles=specfiles)
 
 
 def evaluate(spec: Spec, context: ParseContext) -> None:
@@ -5263,7 +5267,8 @@ def parse(text: str, *, context: Optional[ParseContext] = None) -> List[Spec]:
     Return:
         List of specs
     """
-    specs = spack.spec_parser.SpecParser(text, Spec).all_specs()
+    specfiles = bool(context and context.specfiles)
+    specs = spack.spec_parser.SpecParser(text, Spec, specfiles=specfiles).all_specs()
     if context is not None:
         for spec in specs:
             evaluate(spec, context)
@@ -5277,7 +5282,8 @@ def parse_one_or_raise(text: str, *, context: Optional[ParseContext] = None) -> 
         text: text to be parsed
         context: if given, the text is user input, and the spec is evaluated in it
     """
-    result = spack.spec_parser.parse_one_or_raise(text, Spec)
+    specfiles = bool(context and context.specfiles)
+    result = spack.spec_parser.parse_one_or_raise(text, Spec, specfiles=specfiles)
     if context is not None:
         evaluate(result, context)
     return result

@@ -26,7 +26,14 @@ from spack.externals import (
     complete_variants_and_architecture,
     extract_dicts_from_configuration,
 )
-from spack.spec import EMPTY_SPEC, ParseContext, Spec, expand_toolchains, resolve_host_aliases
+from spack.spec import (
+    EMPTY_SPEC,
+    ParseContext,
+    Spec,
+    expand_toolchains,
+    parse,
+    resolve_host_aliases,
+)
 from spack.spec_parser import (
     UNIX_FILENAME,
     WINDOWS_FILENAME,
@@ -1852,7 +1859,7 @@ def test_error_conditions(text, match_string):
 )
 def test_specfile_error_conditions_windows(text, exc_cls):
     with pytest.raises(exc_cls):
-        SpecParser(text, Spec).all_specs()
+        SpecParser(text, Spec, specfiles=True).all_specs()
 
 
 @pytest.mark.parametrize(
@@ -1876,11 +1883,11 @@ def test_parse_specfile_simple(specfile_for, tmp_path: pathlib.Path):
     specfile = tmp_path / "libdwarf.json"
     s = specfile_for("libdwarf", specfile)
 
-    spec = SpecParser(str(specfile), Spec).next_spec()
+    spec = SpecParser(str(specfile), Spec, specfiles=True).next_spec()
     assert spec == s
 
     # Check we can mix literal and spec-file in text
-    specs = SpecParser(f"mvapich_foo {str(specfile)}", Spec).all_specs()
+    specs = SpecParser(f"mvapich_foo {str(specfile)}", Spec, specfiles=True).all_specs()
     assert len(specs) == 2
 
 
@@ -1927,17 +1934,21 @@ def test_parse_specfile_dependency(config, mock_packages, tmp_path: pathlib.Path
 
     # Make sure we can use yaml path as dependency, e.g.:
     #     "spack spec libdwarf ^ /path/to/libelf.json"
-    spec = SpecParser(f"libdwarf ^ {str(specfile)}", Spec).next_spec()
+    spec = SpecParser(f"libdwarf ^ {str(specfile)}", Spec, specfiles=True).next_spec()
     assert spec and spec["libelf"] == s["libelf"]
 
     with fs.working_dir(str(tmp_path)):
         # Make sure this also works: "spack spec ./libelf.yaml"
-        spec = SpecParser(f"libdwarf^.{os.path.sep}{specfile.name}", Spec).next_spec()
+        spec = SpecParser(
+            f"libdwarf^.{os.path.sep}{specfile.name}", Spec, specfiles=True
+        ).next_spec()
         assert spec and spec["libelf"] == s["libelf"]
 
         # Should also be accepted: "spack spec ../<cur-dir>/libelf.yaml"
         spec = SpecParser(
-            f"libdwarf^..{os.path.sep}{specfile.parent.name}{os.path.sep}{specfile.name}", Spec
+            f"libdwarf^..{os.path.sep}{specfile.parent.name}{os.path.sep}{specfile.name}",
+            Spec,
+            specfiles=True,
         ).next_spec()
         assert spec and spec["libelf"] == s["libelf"]
 
@@ -1951,19 +1962,21 @@ def test_parse_specfile_relative_paths(specfile_for, tmp_path: pathlib.Path):
 
     with fs.working_dir(str(parent_dir)):
         # Make sure this also works: "spack spec ./libelf.yaml"
-        spec = SpecParser(f".{os.path.sep}{basename}", Spec).next_spec()
+        spec = SpecParser(f".{os.path.sep}{basename}", Spec, specfiles=True).next_spec()
         assert spec == s
 
         # Should also be accepted: "spack spec ../<cur-dir>/libelf.yaml"
         spec = SpecParser(
-            f"..{os.path.sep}{parent_dir.name}{os.path.sep}{basename}", Spec
+            f"..{os.path.sep}{parent_dir.name}{os.path.sep}{basename}", Spec, specfiles=True
         ).next_spec()
         assert spec == s
 
         # Should also handle mixed clispecs and relative paths, e.g.:
         #     "spack spec mvapich_foo ../<cur-dir>/libelf.yaml"
         specs = SpecParser(
-            f"mvapich_foo ..{os.path.sep}{parent_dir.name}{os.path.sep}{basename}", Spec
+            f"mvapich_foo ..{os.path.sep}{parent_dir.name}{os.path.sep}{basename}",
+            Spec,
+            specfiles=True,
         ).all_specs()
         assert len(specs) == 2
         assert specs[1] == s
@@ -1976,8 +1989,21 @@ def test_parse_specfile_relative_subdir_path(specfile_for, tmp_path: pathlib.Pat
     s = specfile_for("libdwarf", specfile)
 
     with fs.working_dir(str(tmp_path)):
-        spec = SpecParser(f"subdir{os.path.sep}{specfile.name}", Spec).next_spec()
+        spec = SpecParser(f"subdir{os.path.sep}{specfile.name}", Spec, specfiles=True).next_spec()
         assert spec == s
+
+
+def test_specfiles_are_rejected_by_default(specfile_for, tmp_path: pathlib.Path):
+    """Spec files are read only when enabled, so that Spec(str) does not touch the filesystem."""
+    specfile = tmp_path / "libdwarf.json"
+    s = specfile_for("libdwarf", specfile)
+
+    with pytest.raises(SpecParsingError, match="only accepted on the command line"):
+        spack.spec.Spec(str(specfile))
+    with pytest.raises(SpecParsingError, match="only accepted on the command line"):
+        spack.spec.Spec("libdwarf").satisfies(f"libdwarf ^{specfile}")
+
+    assert parse(str(specfile), context=ParseContext(specfiles=True)) == [s]
 
 
 def test_resolve_host_aliases(monkeypatch):
