@@ -15,7 +15,7 @@ import spack.concretize
 import spack.deptypes
 import spack.error
 import spack.hash_lookup
-import spack.platforms.test
+import spack.platforms
 import spack.repo
 import spack.solver.asp
 import spack.spec
@@ -26,7 +26,7 @@ from spack.externals import (
     complete_variants_and_architecture,
     extract_dicts_from_configuration,
 )
-from spack.spec import EMPTY_SPEC, Spec, expand_toolchains
+from spack.spec import EMPTY_SPEC, ParseContext, Spec, expand_toolchains, resolve_host_aliases
 from spack.spec_parser import (
     UNIX_FILENAME,
     WINDOWS_FILENAME,
@@ -373,15 +373,12 @@ def specfile_for(config, mock_packages):
         ),
         # version range and list
         ("@1.6,1.2:1.4", [Token("VERSION", value="@1.6,1.2:1.4")], r"@1.2:1.4,1.6"),
-        (
-            r"os=default_os",  # Various translations associated with the architecture
-            [Token("KEY_VALUE_PAIR", value="os=default_os")],
-            "platform=test os=debian6",
-        ),
+        # host aliases are kept as is, see test_resolve_host_aliases
+        (r"os=default_os", [Token("KEY_VALUE_PAIR", value="os=default_os")], "os=default_os"),
         (
             r"target=default_target",
             [Token("KEY_VALUE_PAIR", value="target=default_target")],
-            f"platform=test target={spack.platforms.test.Test.default}",
+            "target=default_target",
         ),
         (r"platform=linux", [Token("KEY_VALUE_PAIR", value="platform=linux")], r"platform=linux"),
         # Version hash pair
@@ -1728,7 +1725,7 @@ def test_disambiguate_hash_by_spec(spec1, spec2, constraint, mock_packages, monk
         ("x platform=test platform=test", "'platform'"),
         # TODO: these two seem wrong: need to change how arch is initialized (should fail on os)
         ("x os=debian6 platform=test target=default_target os=redhat6", "two architectures"),
-        ("x target=default_target platform=test os=redhat6 os=debian6", "'platform'"),
+        ("x target=default_target platform=test os=redhat6 os=debian6", "two architectures"),
         # Dependencies
         ("^[@foo] zlib", "expected an edge attribute or `]`"),
         # TODO: Remove this as soon as use variants are added and we can parse custom attributes
@@ -1981,6 +1978,31 @@ def test_parse_specfile_relative_subdir_path(specfile_for, tmp_path: pathlib.Pat
     with fs.working_dir(str(tmp_path)):
         spec = SpecParser(f"subdir{os.path.sep}{specfile.name}", Spec).next_spec()
         assert spec == s
+
+
+def test_resolve_host_aliases(monkeypatch):
+    """Parsing keeps default_os and default_target, evaluating user input resolves them."""
+
+    def fail():
+        raise AssertionError("parsing must not query the host")
+
+    with monkeypatch.context() as m:
+        m.setattr(spack.platforms, "host", fail)
+        spec = spack.spec.Spec("x os=default_os target=default_target")
+        assert str(spec) == "x os=default_os target=default_target"
+
+    host = spack.platforms.host()
+    resolve_host_aliases(spec)
+    assert spec.architecture.platform == str(host)
+    assert spec.architecture.os == str(host.default_operating_system())
+    assert spec.architecture.target == host.default_target()
+
+    # parsing user input resolves them in dependencies too
+    spec = spack.spec.parse_one_or_raise("x ^y target=default_target", context=ParseContext())
+    assert spec["y"].architecture.target == host.default_target()
+
+    with pytest.raises(spack.error.SpecError, match="not the current platform"):
+        resolve_host_aliases(spack.spec.Spec("x platform=other os=default_os"))
 
 
 @pytest.mark.regression("20310")
