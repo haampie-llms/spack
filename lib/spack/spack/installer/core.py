@@ -355,8 +355,8 @@ class PackageInstaller:
         failures: List[spack.spec.Spec] = []
         finished_builds: List[str] = []
 
-        # Unwind on SIGTERM and SIGHUP like on Ctrl-C, so that the cleanup below runs. Signals
-        # that are already ignored or handled (e.g. nohup) are left alone.
+        # Raise KeyboardInterrupt on SIGTERM and SIGHUP so that the finally of the next try block
+        # executes. Signals that are already ignored or handled are left alone.
         old_signal_handlers = {}
         for sig in _TERMINATION_SIGNALS:
             if signal.getsignal(sig) is signal.SIG_DFL:
