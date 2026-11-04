@@ -54,10 +54,14 @@ def create_installer(
         )
 
     # With enable: auto the old installer silently runs builds without the sandbox.
-    if use_old_installer and spack.config.CONFIG.get("config:sandbox:enable", False) is True:
+    enable_sandbox = spack.config.CONFIG.get("config:sandbox:enable", False)
+    if enable_sandbox is True and use_old_installer:
         raise spack.sandbox.SandboxError(
             "config:sandbox:enable is only supported with config:installer:new"
         )
+    if enable_sandbox is True:
+        # Probe sandbox support now so builds don't fail later inside a subprocess.
+        spack.sandbox.get_sandbox()
 
     # The old installer dumps the full log from the command layer instead.
     if use_old_installer:

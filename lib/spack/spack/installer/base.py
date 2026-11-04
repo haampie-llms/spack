@@ -44,9 +44,6 @@ class ExitCode:
     STOPPED_AT_PHASE = 3
     #: Exit code used by the child process to signal a binary cache miss (no source fallback)
     BUILD_CACHE_MISS = 4
-    #: Exit code of a successful install from a build cache in a sandboxed child of the build
-    #: process, which reports it as SUCCESS
-    SUCCESS_FROM_BINARY_CACHE = 5
 
 
 #: How often the event loop should wake up to poll for a background-to-foreground transition
@@ -342,8 +339,7 @@ class Tee(abc.ABC):
         self.saved_fds = redirect_stdio(w)
         self._setup_handles()
         os.close(w)
-        # The thread is started separately, so that the process can fork while single-threaded,
-        # after stdout and stderr are redirected to the pipe.
+        # Started separately, so that the process can fork while single-threaded.
         self.tee_thread = threading.Thread(target=self.run, args=(r, log_file), daemon=True)
 
     def start(self) -> None:

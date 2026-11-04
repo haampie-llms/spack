@@ -225,16 +225,20 @@ class DirectoryLayout:
     def create_install_directory(self, spec: "spack.spec.Spec") -> None:
         _check_concrete(spec)
 
+        perms = self.create_prefix(spec)
+        fs.mkdirp(self.metadata_path(spec), mode=perms.dir_mode, group=perms.group)  # in prefix
+
+        self.write_spec(spec, self.spec_file_path(spec))
+
+    def create_prefix(self, spec: "spack.spec.Spec") -> "spack.package_prefs.Permissions":
+        """Create the install prefix with the package's permissions, and return them."""
         # Each package folder can have its own specific permissions, while
         # intermediate folders (arch/compiler) are set with access permissions
         # equivalent to the root permissions of the layout.
         perms = spack.package_prefs.package_permissions(spack.config.CONFIG, spec.name)
         spack.package_prefs.warn_if_sgid_on_afs(spec.prefix, perms.dir_mode)
-
         fs.mkdirp(spec.prefix, mode=perms.dir_mode, group=perms.group, default_perms="parents")
-        fs.mkdirp(self.metadata_path(spec), mode=perms.dir_mode, group=perms.group)  # in prefix
-
-        self.write_spec(spec, self.spec_file_path(spec))
+        return perms
 
     def ensure_installed(self, spec: "spack.spec.Spec") -> None:
         """

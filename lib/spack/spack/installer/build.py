@@ -32,7 +32,6 @@ import spack.config
 import spack.error
 import spack.hooks
 import spack.mirrors.mirror
-import spack.package_prefs
 import spack.repo
 import spack.sandbox
 import spack.spec
@@ -72,9 +71,11 @@ else:
 if TYPE_CHECKING:
     import spack.package_base
 
-# Import the hook modules once, so that build processes (and the forkserver, which preloads this
-# module) inherit them instead of importing them in every build process.
+# Build processes inherit the hook modules instead of importing them per build.
 spack.hooks.load()
+
+#: Exit code of a sandboxed child that installed from a build cache; reported as SUCCESS
+_SUCCESS_FROM_BINARY_CACHE = 5
 
 #: Suffix for temporary backup during overwrite install
 OVERWRITE_BACKUP_SUFFIX = ".old"
@@ -342,13 +343,10 @@ def install_from_buildcache(
 
     send_state("relocating", state_stream)
     with timer.measure("install"):
-        # Extract and relocate in the sandbox, so that the tarball cannot write outside the prefix.
-        # The stage is removed before, since the sandbox does not allow removing its directory.
+        # Extract in the sandbox; remove the stage first, since the sandbox cannot remove it.
         with open(tarball_stage.save_filename, "rb") as tarball:
             tarball_stage.destroy()
-            perms = spack.package_prefs.package_permissions(spack.config.CONFIG, spec.name)
-            spack.package_prefs.warn_if_sgid_on_afs(spec.prefix, perms.dir_mode)
-            fs.mkdirp(spec.prefix, mode=perms.dir_mode, group=perms.group, default_perms="parents")
+            spack.store.STORE.layout.create_prefix(spec)
             _enable_sandbox(sandbox, spec, [])
             with timer.measure("extract"):
                 spack.binary_distribution.extract_buildcache_tarball(
@@ -386,7 +384,7 @@ class PrefixPivoter:
         #: Temporary location for the original prefix
         self.tmp_prefix: Optional[str] = None
         self.parent = os.path.dirname(prefix)
-        #: Exit code of the build. Without an exception, anything other than success is a failure
+        #: Exit code of the build: anything but SUCCESS is a failure, also without an exception
         self.exit_code = ExitCode.SUCCESS
 
     def __enter__(self) -> "PrefixPivoter":
@@ -465,8 +463,6 @@ class BuildRequest(NamedTuple):
     log_path: str
     stop_before: Optional[str]
     stop_at: Optional[str]
-    #: The config:sandbox section if the build is sandboxed, None otherwise
-    sandbox: Optional[Dict[str, Any]]
 
 
 def worker_function(
@@ -538,8 +534,7 @@ def worker_function(
     sys.stdin = open(os.devnull, "r", encoding=sys.stdin.encoding)
     os.dup2(sys.stdin.fileno(), 0)
 
-    # Redirect stdout and stderr to the log file and parent process. The tee thread is started
-    # later, so that a sandboxed build can fork while this process is single-threaded.
+    # Redirect stdout and stderr; the tee thread starts after a sandboxed build has forked.
     tee = Tee(tee_control_r, tee_control_w, parent, log_path)
 
     # Use closefd=False because of the connection objects. Use line buffering.
@@ -554,15 +549,21 @@ def worker_function(
         sys.stderr.fileno(), "w", buffering=1, encoding=_stderr_enc, closefd=False
     )
 
-    # A sandboxed build runs in a child process, since the sandbox cannot be lifted. This process
-    # remains unconfined for what needs write access outside of the sandbox: moving the install
-    # prefix, removing the stage directory, and the hooks that publish the installed package.
+    # Sandboxed builds run in a forked child; this process does the writes outside the sandbox.
     try:
         with PrefixPivoter(spec.prefix, request.keep_prefix) as pivoter:
-            pid = _fork_build(request, state) if request.sandbox is not None else None
-            tee.start()
-            exit_code = _build(request, state) if pid is None else _wait_for_exit_code(pid)
-            if exit_code == ExitCode.SUCCESS_FROM_BINARY_CACHE:
+            sandbox = spack.sandbox.resolve_config(spack.config.CONFIG.get("config:sandbox", {}))
+            if sandbox is None:
+                tee.start()
+                exit_code = _build(request, state, None)
+            else:
+                pid = _fork_build(request, state, sandbox)
+                tee.start()
+                _, status = os.waitpid(pid, 0)
+                exit_code = (
+                    os.WEXITSTATUS(status) if os.WIFEXITED(status) else ExitCode.BUILD_ERROR
+                )
+            if exit_code == _SUCCESS_FROM_BINARY_CACHE:
                 spec.package.installed_from_binary_cache = True
                 exit_code = ExitCode.SUCCESS
             if exit_code == ExitCode.SUCCESS:
@@ -588,8 +589,7 @@ def worker_function(
             except Exception:
                 pass  # don't fail the build just because log compression failed
 
-        # The sandbox allows removing the contents of the stage directory, but not the directory
-        # itself, unless the stage root is in the temp dir.
+        # The sandbox can empty the stage, but not remove its directory.
         if not request.keep_stage and not spec.package.installed_from_binary_cache:
             try:
                 spec.package.stage.destroy()
@@ -599,10 +599,9 @@ def worker_function(
     sys.exit(exit_code)
 
 
-def _fork_build(request: BuildRequest, state: IpcChannel) -> int:
+def _fork_build(request: BuildRequest, state: IpcChannel, sandbox: Dict[str, Any]) -> int:
     """Run ``_build`` in a child process and return its pid."""
-    # The child inherits the SIGTERM handler. Block SIGTERM until the child is in its try block,
-    # so that a KeyboardInterrupt cannot run the cleanup of worker_function in the child.
+    # Block SIGTERM until the child's try, so its KeyboardInterrupt can't run our cleanup.
     signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
     try:
         pid = os.fork()
@@ -610,7 +609,7 @@ def _fork_build(request: BuildRequest, state: IpcChannel) -> int:
             exit_code = ExitCode.BUILD_ERROR
             try:
                 signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM})
-                exit_code = _build(request, state)
+                exit_code = _build(request, state, sandbox)
                 sys.stdout.flush()
                 sys.stderr.flush()
             finally:
@@ -620,14 +619,13 @@ def _fork_build(request: BuildRequest, state: IpcChannel) -> int:
         signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM})
 
 
-def _build(request: BuildRequest, state: IpcChannel) -> int:
-    """Install the requested spec and return an exit code. Runs in the child process of
-    ``worker_function`` if the build is sandboxed."""
+def _build(request: BuildRequest, state: IpcChannel, sandbox: Optional[Dict[str, Any]]) -> int:
+    """Install the requested spec and return an exit code."""
     state_stream = make_state_stream(state)
     try:
-        _install(request, state_stream, spack.store.STORE)
+        _install(request, state_stream, spack.store.STORE, sandbox)
         if request.spec.package.installed_from_binary_cache:
-            return ExitCode.SUCCESS_FROM_BINARY_CACHE
+            return _SUCCESS_FROM_BINARY_CACHE
         return ExitCode.SUCCESS
     except spack.error.StopPhase:
         return ExitCode.STOPPED_AT_PHASE
@@ -641,12 +639,6 @@ def _build(request: BuildRequest, state: IpcChannel) -> int:
         return ExitCode.BUILD_ERROR
     finally:
         state_stream.close()
-
-
-def _wait_for_exit_code(pid: int) -> int:
-    """Wait for the sandboxed child process and return its exit code."""
-    _, status = os.waitpid(pid, 0)
-    return os.WEXITSTATUS(status) if os.WIFEXITED(status) else ExitCode.BUILD_ERROR
 
 
 def _archive_build_metadata(pkg: "spack.package_base.PackageBase") -> None:
@@ -719,8 +711,7 @@ def _archive_build_metadata(pkg: "spack.package_base.PackageBase") -> None:
 def _enable_sandbox(
     config: Optional[Dict[str, Any]], spec: spack.spec.Spec, write_paths: List[str]
 ) -> None:
-    """Apply the sandbox described by the ``config:sandbox`` section to the current process,
-    allowing writes to the install prefix and ``write_paths``. Does nothing if config is None."""
+    """Confine this process per ``config:sandbox``, if not None; the prefix is writable."""
     if config is None:
         return
     try:
@@ -730,7 +721,6 @@ def _enable_sandbox(
 
     allow_read = config.get("allow_read", "all")
     sandbox.restrict_reads = allow_read != "all"
-    read_paths = allow_read if sandbox.restrict_reads else []
 
     for dep in spec.traverse(root=False):
         if not dep.external:
@@ -769,7 +759,7 @@ def _enable_sandbox(
         sandbox.allow_read(os.path.join(upstream_db.root, "bin", "sbang"))
 
     # User-configured paths
-    for p in read_paths:
+    for p in allow_read if sandbox.restrict_reads else []:
         sandbox.allow_read(p)
     for p in config.get("allow_write", []):
         sandbox.allow_write(p)
@@ -798,8 +788,8 @@ def _rewire_no_db(
             spack.binary_distribution.create_tarball(spec.build_spec, tarball)
         with timer.measure("pre-install"):
             spack.hooks.pre_install(spec)
-        fs.mkdirp(spec.prefix)
-        _enable_sandbox(sandbox, spec, [tmpdir])
+        spack.store.STORE.layout.create_prefix(spec)
+        _enable_sandbox(sandbox, spec, [])
         with timer.measure("extract"):
             spack.binary_distribution.extract_buildcache_tarball(tarball, destination=spec.prefix)
         with timer.measure("relocate"):
@@ -809,7 +799,10 @@ def _rewire_no_db(
 
 
 def _install(
-    request: BuildRequest, state_stream: io.TextIOWrapper, store: spack.store.Store
+    request: BuildRequest,
+    state_stream: io.TextIOWrapper,
+    store: spack.store.Store,
+    sandbox: Optional[Dict[str, Any]],
 ) -> None:
     """Install a spec from build cache or source."""
     spec, explicit, install_policy = request.spec, request.explicit, request.install_policy
@@ -823,7 +816,7 @@ def _install(
 
     if request.fake:
         store.layout.create_install_directory(spec)
-        _enable_sandbox(request.sandbox, spec, [])
+        _enable_sandbox(sandbox, spec, [])
         _do_fake_install(pkg)
         _post_install(pkg, spec, explicit, timer, cache=False)
         return
@@ -831,7 +824,7 @@ def _install(
     # Try to install from buildcache, unless user asked for source only
     if install_policy != "source_only":
         if install_from_buildcache(
-            request.mirrors, spec, request.unsigned, state_stream, timer, request.sandbox
+            request.mirrors, spec, request.unsigned, state_stream, timer, sandbox
         ):
             _post_install(pkg, spec, explicit, timer, cache=True)
             return
@@ -843,7 +836,7 @@ def _install(
     if spec.build_spec is not spec:
         if install_policy == "source_only":
             send_state("rewiring", state_stream)
-            _rewire_no_db(spec, timer, request.sandbox)
+            _rewire_no_db(spec, timer, sandbox)
             _post_install(pkg, spec, explicit, timer, cache=False)
             return
         # Binary cache was the only option; signal miss for force_source expansion.
@@ -911,7 +904,7 @@ def _install(
             raise spack.error.InstallError(f"'{stop_at}' is not a valid phase for {pkg.name}")
 
         # Develop specs build in a source directory outside of the stage.
-        _enable_sandbox(request.sandbox, spec, [stage.path, stage.source_path])
+        _enable_sandbox(sandbox, spec, [stage.path, stage.source_path])
 
         for phase in builder:
             if stop_before is not None and phase.name == stop_before:

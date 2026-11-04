@@ -46,8 +46,7 @@ LANDLOCK_ACCESS_NET_BIND_TCP = 1 << 0
 LANDLOCK_ACCESS_NET_CONNECT_TCP = 1 << 1
 LANDLOCK_RESTRICT_SELF_TSYNC = 1 << 3
 
-#: Minimum Landlock ABI for ``enable: auto``. ABI v1 cannot handle REFER, which means that
-#: renaming or linking files across directories is always denied.
+#: Minimum Landlock ABI for ``enable: auto``: ABI v1 denies renames and links across directories
 MIN_AUTO_ABI = 2
 
 
@@ -293,11 +292,7 @@ def get_sandbox() -> Sandbox:
 
 
 def resolve_config(config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Decide whether builds should be sandboxed, given the ``config:sandbox`` section.
-
-    Returns the section if builds should be sandboxed, and None otherwise. With ``enable: auto``
-    the sandbox is used only if the kernel supports it; with ``enable: true`` a missing kernel
-    feature is an error."""
+    """Return ``config:sandbox`` if builds are sandboxed, None otherwise; raise for ``true``."""
     enable = config.get("enable", False)
     if enable is False:
         return None
