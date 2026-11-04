@@ -11,7 +11,8 @@ Hooks are not executed in any particular order.
 Currently the following hooks are supported:
 
 * ``pre_install(spec)``
-* ``post_install(spec, explicit)``
+* ``post_install(spec, explicit)``: operates on the install prefix only
+* ``post_install_publish(spec, explicit)``: writes outside the prefix, outside the sandbox
 * ``pre_uninstall(spec)``
 * ``post_uninstall(spec)``
 """
@@ -46,9 +47,9 @@ class _HookRunner:
 
     @property
     def hooks(self) -> List[types.ModuleType]:
-        if not self._hooks:
-            self._hooks = [importlib.import_module(module_name) for module_name in self.HOOK_ORDER]
-        return self._hooks
+        if _HookRunner._hooks is None:
+            _HookRunner._hooks = [importlib.import_module(m) for m in self.HOOK_ORDER]
+        return _HookRunner._hooks
 
     def __call__(self, *args, **kwargs):
         for module in self.hooks:
@@ -58,9 +59,22 @@ class _HookRunner:
                     hook(*args, **kwargs)
 
 
+def load() -> None:
+    """Import all hook modules, e.g. before forking processes that run hooks."""
+    _HookRunner("load").hooks
+
+
 # pre/post install and run by the install subprocess
 pre_install = _HookRunner("pre_install")
-post_install = _HookRunner("post_install")
+post_install_prefix = _HookRunner("post_install")
+post_install_publish = _HookRunner("post_install_publish")
+
+
+def post_install(spec, explicit) -> None:
+    """Run the post install hooks on the prefix, then those that publish it."""
+    post_install_prefix(spec, explicit)
+    post_install_publish(spec, explicit)
+
 
 pre_uninstall = _HookRunner("pre_uninstall")
 post_uninstall = _HookRunner("post_uninstall")

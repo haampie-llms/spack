@@ -248,9 +248,12 @@ properties: Dict[str, Any] = {
                         "description": "Allow TCP network access during the build phase.",
                     },
                     "allow_read": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Additional paths with read and execute permissions.",
+                        "oneOf": [
+                            {"type": "string", "enum": ["all"]},
+                            {"type": "array", "items": {"type": "string"}},
+                        ],
+                        "description": "Paths with read and execute permissions, in addition "
+                        "to dependency prefixes. The default all does not restrict reads.",
                     },
                     "allow_write": {
                         "type": "array",

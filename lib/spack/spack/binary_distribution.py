@@ -57,7 +57,6 @@ import spack.mirrors.mirror
 import spack.oci.image
 import spack.oci.oci
 import spack.oci.opener
-import spack.package_prefs
 import spack.paths
 import spack.platforms
 import spack.spec
@@ -2324,8 +2323,13 @@ def _tar_strip_component(tar: tarfile.TarFile, prefix: str):
         yield m
 
 
-def extract_buildcache_tarball(tarfile_path: str, destination: str) -> None:
-    with closing(tarfile.open(tarfile_path, "r")) as tar:
+def extract_buildcache_tarball(tarfile_path: Union[str, IO[bytes]], destination: str) -> None:
+    """Extract a build cache tarball, given by path or as a file object, into destination."""
+    if isinstance(tarfile_path, str):
+        tar = tarfile.open(tarfile_path, "r")
+    else:
+        tar = tarfile.open(fileobj=tarfile_path, mode="r")
+    with closing(tar):
         # For consistent behavior across all supported Python versions
         tar.extraction_filter = lambda member, path: member
         # Remove common prefix from tarball entries and directly extract them to the install dir.
@@ -2347,9 +2351,7 @@ def extract_tarball(spec, tarball_stage: spack.stage.Stage, force=False, timer=t
             raise NoOverwriteException(str(spec.prefix))
 
     # Create the install prefix
-    perms = spack.package_prefs.package_permissions(spack.config.CONFIG, spec.name)
-    spack.package_prefs.warn_if_sgid_on_afs(spec.prefix, perms.dir_mode)
-    fsys.mkdirp(spec.prefix, mode=perms.dir_mode, group=perms.group, default_perms="parents")
+    spack.store.STORE.layout.create_prefix(spec)
 
     tarfile_path = tarball_stage.save_filename
 
