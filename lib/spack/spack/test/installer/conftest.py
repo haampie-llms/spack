@@ -85,6 +85,11 @@ class DrivingUI(RecordingUI):
             self.on_tick()
 
 
+def send_message(conn, message: dict) -> None:
+    """Write a message to a state channel the way a build does."""
+    write_connection(conn, json.dumps(message).encode() + b"\n")
+
+
 class Script(NamedTuple):
     """The scripted result of a single launched build."""
 
@@ -116,8 +121,7 @@ class FakeBuild:
             self.finished = True
             # Report the exit code and EOF the channels, like a child that exited.
             if self.exitcode is not None:
-                message = json.dumps({"exit": self.exitcode}).encode() + b"\n"
-                write_connection(self.channels.state_w, message)
+                send_message(self.channels.state_w, {"exit": self.exitcode})
             self.channels.state_w.close()
             self.channels.output_w.close()
 
@@ -151,7 +155,7 @@ class ScriptedLauncher:
         script = self.scripts[request.spec.name].pop(0)
         channels = create_build_channels()
         for state in script.states:
-            write_connection(channels.state_w, json.dumps({"state": state}).encode() + b"\n")
+            send_message(channels.state_w, {"state": state})
         if script.raw_state:
             write_connection(channels.state_w, script.raw_state)
         if script.output:
