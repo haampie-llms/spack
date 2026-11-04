@@ -4,6 +4,7 @@
 """Tests for the installer.core module: the PackageInstaller event loop."""
 
 import os
+import signal
 import sys
 
 import pytest
@@ -12,7 +13,12 @@ import spack.error
 import spack.spec
 from spack.config import Configuration
 from spack.installer.base import ExitCode
-from spack.installer.core import PackageInstaller, read_connection, write_connection
+from spack.installer.core import (
+    _TERMINATION_SIGNALS,
+    PackageInstaller,
+    read_connection,
+    write_connection,
+)
 from spack.installer.ui import ChangeJobs, SetEcho
 from spack.store import Store
 from spack.test.installer.conftest import (
@@ -348,6 +354,32 @@ def test_keyboard_interrupt_terminates_builds_and_flushes_db(temporary_store, mo
     assert launcher.hanging[0].terminated
     assert _record(temporary_store, dep) is not None
     assert _record(temporary_store, root) is None
+
+
+@pytest.mark.disable_clean_stage_check  # interrupted installs keep their log files
+@pytest.mark.parametrize("signum", _TERMINATION_SIGNALS, ids=lambda s: s.name)
+def test_termination_signal_raises_once(signum, temporary_store, mock_packages):
+    """The first termination signal raises KeyboardInterrupt, later ones are ignored until the
+    cleanup is done, and the default handlers are restored afterwards."""
+    if any(signal.getsignal(sig) is not signal.SIG_DFL for sig in _TERMINATION_SIGNALS):
+        pytest.skip("termination signals are handled by the test runner")
+    spec = _make_concrete("trivial-install-test-package")
+    launcher = ScriptedLauncher({spec.name: Script(hang=True)})
+    handlers_after_signal = []
+
+    def tick():
+        if launcher.hanging:
+            try:
+                signal.getsignal(signum)(signum, None)
+            finally:
+                handlers_after_signal.extend(signal.getsignal(s) for s in _TERMINATION_SIGNALS)
+
+    with pytest.raises(KeyboardInterrupt):
+        _install(launcher, spec, ui=DrivingUI(tick))
+
+    assert launcher.hanging[0].terminated
+    assert handlers_after_signal == [signal.SIG_IGN] * len(_TERMINATION_SIGNALS)
+    assert all(signal.getsignal(s) is signal.SIG_DFL for s in _TERMINATION_SIGNALS)
 
 
 @pytest.mark.disable_clean_stage_check  # failed builds keep their log file in the stage root
