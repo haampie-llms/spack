@@ -50,7 +50,9 @@ def setup(tmp):
     write(os.path.join(repo, "repo.yaml"), "repo:\n  namespace: e2e\n  api: v2.2\n")
     for name, body in PACKAGES.items():
         cls = name.capitalize()
-        write(os.path.join(repo, "packages", name, "package.py"), PACKAGE.format(cls=cls, body=body))
+        write(
+            os.path.join(repo, "packages", name, "package.py"), PACKAGE.format(cls=cls, body=body)
+        )
     q = lambda p: p.replace("\\", "/")  # noqa: E731
     cfg = os.path.join(tmp, "cfg")
     write(
