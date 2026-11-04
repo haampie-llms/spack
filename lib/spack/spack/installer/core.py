@@ -407,9 +407,9 @@ class PackageInstaller:
                         if data.name == "output":
                             self._handle_child_logs(child_info, selector)
                         elif data.name == "state":
-                            self._handle_child_state(child_info, selector)
-                        elif data.name == "sentinel":
-                            finished_builds.append(data.build_id)
+                            # EOF on the state channel means the build process has exited.
+                            if not self._handle_child_state(child_info, selector):
+                                finished_builds.append(data.build_id)
                     elif data == STDIN_EVENT:
                         stdin_ready = True
                     elif data == SIGWINCH_EVENT:
@@ -486,16 +486,18 @@ class PackageInstaller:
                 except Exception:
                     pass
 
-            # Release our jobserver token for each terminated build and then join.
-            for child in self.running_builds.values():
+            # Release our jobserver token for each terminated build and wait for it to exit.
+            for _ in self.running_builds:
                 try:
                     jobserver.release()
-                    child.proc.join(timeout=30)
-                    if child.proc.is_alive():
-                        child.proc.kill()
-                        child.proc.join()
                 except Exception:
                     pass
+            try:
+                for build_id in self._wait_for_exit(timeout=30):
+                    self.running_builds[build_id].proc.kill()
+                self._wait_for_exit(timeout=None)
+            except Exception:
+                pass
 
             # Release all held locks best-effort, so that one failure does not prevent the others
             # from being released.
@@ -842,6 +844,27 @@ class PackageInstaller:
         except OSError:
             pass
 
+    def _wait_for_exit(self, timeout: Optional[float]) -> List[str]:
+        """Process output and state of the running builds until their state channels reach EOF.
+        Returns the ids of builds that are still running after the timeout."""
+        deadline = None if timeout is None else time.monotonic() + timeout
+        running = set(self.running_builds)
+        with selectors.DefaultSelector() as selector:
+            for build_id in running:
+                self.running_builds[build_id].register_with_selector(selector, build_id)
+            while running:
+                remaining = None if deadline is None else deadline - time.monotonic()
+                if remaining is not None and remaining <= 0:
+                    break
+                for key, _ in selector.select(remaining):
+                    data = key.data
+                    child = self.running_builds[data.build_id]
+                    if data.name == "output":
+                        self._handle_child_logs(child, selector)
+                    elif not self._handle_child_state(child, selector):
+                        running.discard(data.build_id)
+        return list(running)
+
     def _handle_child_logs(self, child_info: ChildInfo, selector: selectors.BaseSelector) -> bool:
         """Handle reading output logs from a child process pipe. Returns False once the channel
         has reached EOF and was unregistered, True while it remains open."""
@@ -919,5 +942,7 @@ class PackageInstaller:
                 self.ui.on_progress(dag_hash, message["progress"], message["total"])
             elif "installed_from_binary_cache" in message:
                 child_info.spec.package.installed_from_binary_cache = True
+            elif "exit" in message:
+                child_info.exit_code = message["exit"]
 
         return True
