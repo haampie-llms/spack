@@ -162,10 +162,14 @@ if sys.platform == "win32":
 else:
     _TERMINATION_SIGNALS = [signal.SIGTERM, signal.SIGHUP]
 
+#: Bytes written to the self-pipe by parallelism signals
+MINUS = 0x00
+PLUS = 0x01
+
 #: Signals that add or remove a job, like pressing + or - (``kill -USR1 <pid>``)
 _PARALLELISM_SIGNALS: Dict[signal.Signals, int] = {}
 if sys.platform != "win32":
-    _PARALLELISM_SIGNALS = {signal.SIGUSR1: 1, signal.SIGUSR2: -1}
+    _PARALLELISM_SIGNALS = {signal.SIGUSR1: PLUS, signal.SIGUSR2: MINUS}
 
 #: Selector data key of the self-pipe for parallelism signals
 SIGNAL_EVENT = "signal"
@@ -379,9 +383,9 @@ class PackageInstaller:
             if signal.getsignal(sig) is signal.SIG_DFL:
                 old_signal_handlers[sig] = signal.signal(sig, raise_once)
 
-        def write_signum(signum, frame):
+        def write_byte(signum, frame):
             try:
-                os.write(signal_w, bytes([signum]))
+                os.write(signal_w, bytes([_PARALLELISM_SIGNALS[signum]]))
             except OSError:
                 pass
 
@@ -392,7 +396,7 @@ class PackageInstaller:
             selector.register(signal_r, selectors.EVENT_READ, SIGNAL_EVENT)
             for sig in _PARALLELISM_SIGNALS:
                 if signal.getsignal(sig) is signal.SIG_DFL:
-                    old_signal_handlers[sig] = signal.signal(sig, write_signum)
+                    old_signal_handlers[sig] = signal.signal(sig, write_byte)
 
         try:
             # Try to schedule builds immediately. The first job does not require a token.
@@ -463,9 +467,9 @@ class PackageInstaller:
                         terminal.drain_sigwinch()
                         self.ui.on_resize()
                     elif data == SIGNAL_EVENT:
-                        for signum in os.read(signal_r, 64):
-                            delta = _PARALLELISM_SIGNALS[signal.Signals(signum)]
-                            self._change_jobs(jobserver, delta)
+                        # Apply in order, since decreasing stops at one job
+                        for byte in os.read(signal_r, 64):
+                            self._change_jobs(jobserver, 1 if byte == PLUS else -1)
                     elif data == JOBSERVER_EVENT and not jobserver.has_target_parallelism():
                         jobserver.maybe_discard_tokens()
                         self.ui.on_jobs_changed(jobserver.num_jobs, jobserver.target_jobs)
