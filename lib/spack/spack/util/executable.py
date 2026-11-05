@@ -25,20 +25,24 @@ WINDOWS_DEFAULT_PATHEXT = ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC
 
 OutType = Union[Optional[BinaryIO], str, Type[str], Callable]
 
-#: Matches the jobserver flags in ``MAKEFLAGS``, capturing the fds of a pipe based jobserver
-#: (``R,W``). Other values, like ``fifo:PATH``, match with empty groups.
-_JOBSERVER = re.compile(r"(?:^|\s)--jobserver-(?:auth|fds)=(?:(\d+),(\d+)(?!\S))?")
+def jobserver_auth(makeflags: str) -> Optional[str]:
+    """Return the value of the last jobserver flag in ``MAKEFLAGS``, which gmake uses."""
+    auth = None
+    for flag in makeflags.split():
+        name, _, value = flag.partition("=")
+        if name in ("--jobserver-auth", "--jobserver-fds"):
+            auth = value
+    return auth
 
 
 def _jobserver_fds(env: Dict[str, str]) -> Tuple[int, ...]:
-    """Return the open fds of a pipe based jobserver advertised in ``MAKEFLAGS``, which a child
-    process should inherit. As in gmake, the last jobserver flag wins."""
+    """Return the open fds of a pipe based jobserver advertised in ``MAKEFLAGS``."""
     if sys.platform == "win32":  # pass_fds is not supported
         return ()
-    matches = _JOBSERVER.findall(env.get("MAKEFLAGS", ""))
-    if not matches or not matches[-1][0]:
+    match = re.fullmatch(r"(\d+),(\d+)", jobserver_auth(env.get("MAKEFLAGS", "")) or "")
+    if not match:
         return ()
-    fds = tuple(map(int, matches[-1]))
+    fds = (int(match.group(1)), int(match.group(2)))
     try:
         for fd in fds:
             os.fstat(fd)
