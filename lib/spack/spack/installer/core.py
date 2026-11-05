@@ -354,7 +354,7 @@ class PackageInstaller:
         failures: List[spack.spec.Spec] = []
         finished_builds: List[str] = []
 
-        # Raise KeyboardInterrupt on SIGTERM and SIGHUP so that the finally of the next try block
+        # Raise TerminatedBySignal on SIGTERM and SIGHUP so that the finally of the next try block
         # executes. Signals that are already ignored or handled are left alone.
         old_signal_handlers: Dict[signal.Signals, Union[Callable, int, None]] = {}
 
@@ -362,7 +362,7 @@ class PackageInstaller:
             # Further signals must not interrupt the cleanup in finally
             for sig in old_signal_handlers:
                 signal.signal(sig, signal.SIG_IGN)
-            raise KeyboardInterrupt
+            raise spack.error.TerminatedBySignal(signum)
 
         for sig in _TERMINATION_SIGNALS:
             if signal.getsignal(sig) is signal.SIG_DFL:
