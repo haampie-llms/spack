@@ -5,6 +5,7 @@
 
 import os
 import signal
+import subprocess
 import sys
 
 import pytest
@@ -354,6 +355,32 @@ def test_keyboard_interrupt_terminates_builds_and_flushes_db(temporary_store, mo
     assert launcher.hanging[0].terminated
     assert _record(temporary_store, dep) is not None
     assert _record(temporary_store, root) is None
+
+
+@pytest.mark.not_on_windows("Windows has no process groups")
+@pytest.mark.disable_clean_stage_check  # interrupted installs keep their log files
+def test_stuck_build_is_killed_with_its_process_group(temporary_store, mock_packages, monkeypatch):
+    """A build that does not exit after SIGTERM is killed with its entire process group."""
+    # A real process group standing in for a build's make, cc, etc.
+    group = subprocess.Popen(["sleep", "60"], start_new_session=True)
+    spec = _make_concrete("trivial-install-test-package")
+    launcher = ScriptedLauncher({spec.name: Script(hang=True)})
+    monkeypatch.setattr(
+        PackageInstaller, "_wait_for_exit", lambda self, timeout: list(self.running_builds)
+    )
+
+    def tick():
+        if launcher.hanging:
+            launcher.hanging[0].pid = group.pid
+            raise KeyboardInterrupt
+
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            _install(launcher, spec, ui=DrivingUI(tick))
+        assert group.wait(timeout=10) == -signal.SIGKILL
+    finally:
+        group.kill()
+        group.wait()
 
 
 @pytest.mark.disable_clean_stage_check  # interrupted installs keep their log files

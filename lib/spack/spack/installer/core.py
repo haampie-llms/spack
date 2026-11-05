@@ -518,8 +518,14 @@ class PackageInstaller:
 
             # Wait for the builds to exit, kill those that do not, and reap them all.
             try:
-                for build_id in self._wait_for_exit(timeout=30):
-                    self.running_builds[build_id].proc.kill()
+                stuck = self._wait_for_exit(timeout=30)
+                if sys.platform == "win32":
+                    for build_id in stuck:
+                        self.running_builds[build_id].proc.kill()
+                else:
+                    # Unlike kill(), this also kills the build's children, which could otherwise
+                    # keep writing to the prefix after its lock is released.
+                    _signal_children({b: self.running_builds[b] for b in stuck}, signal.SIGKILL)
                 for child in self.running_builds.values():
                     child.proc.join()
             except Exception:
