@@ -162,14 +162,9 @@ if sys.platform == "win32":
 else:
     _TERMINATION_SIGNALS = [signal.SIGTERM, signal.SIGHUP]
 
-#: Bytes written to the self-pipe by parallelism signals
+#: Bytes written to the self-pipe by SIGUSR1 (add a job) and SIGUSR2 (remove a job)
 MINUS = 0x00
 PLUS = 0x01
-
-#: Signals that add or remove a job, like pressing + or - (``kill -USR1 <pid>``)
-_PARALLELISM_SIGNALS: Dict[signal.Signals, int] = {}
-if sys.platform != "win32":
-    _PARALLELISM_SIGNALS = {signal.SIGUSR1: PLUS, signal.SIGUSR2: MINUS}
 
 #: Selector data key of the self-pipe for parallelism signals
 SIGNAL_EVENT = "signal"
@@ -383,18 +378,19 @@ class PackageInstaller:
             if signal.getsignal(sig) is signal.SIG_DFL:
                 old_signal_handlers[sig] = signal.signal(sig, raise_once)
 
-        def write_byte(signum, frame):
-            try:
-                os.write(signal_w, bytes([_PARALLELISM_SIGNALS[signum]]))
-            except OSError:
-                pass
+        if sys.platform != "win32":
 
-        if _PARALLELISM_SIGNALS:
+            def write_byte(signum, frame):
+                try:
+                    os.write(signal_w, bytes([PLUS if signum == signal.SIGUSR1 else MINUS]))
+                except OSError:
+                    pass
+
             signal_r, signal_w = os.pipe()
             os.set_blocking(signal_r, False)
             os.set_blocking(signal_w, False)
             selector.register(signal_r, selectors.EVENT_READ, SIGNAL_EVENT)
-            for sig in _PARALLELISM_SIGNALS:
+            for sig in (signal.SIGUSR1, signal.SIGUSR2):
                 if signal.getsignal(sig) is signal.SIG_DFL:
                     old_signal_handlers[sig] = signal.signal(sig, write_byte)
 

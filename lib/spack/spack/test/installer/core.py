@@ -14,7 +14,6 @@ import spack.spec
 from spack.config import Configuration
 from spack.installer.base import ExitCode
 from spack.installer.core import (
-    _PARALLELISM_SIGNALS,
     _TERMINATION_SIGNALS,
     PackageInstaller,
     read_connection,
@@ -453,8 +452,6 @@ def test_change_jobs_commands_adjust_parallelism(temporary_store, mock_packages)
 def test_parallelism_signals_adjust_parallelism(temporary_store, mock_packages):
     """SIGUSR1 adds a job and SIGUSR2 removes one while a build runs, and the default handlers
     are restored afterwards."""
-    if any(signal.getsignal(sig) is not signal.SIG_DFL for sig in _PARALLELISM_SIGNALS):
-        pytest.skip("parallelism signals are handled by the test runner")
     spec = _make_concrete("trivial-install-test-package")
     launcher = ScriptedLauncher({spec.name: Script(hang=True)})
     sent = False
@@ -480,7 +477,8 @@ def test_parallelism_signals_adjust_parallelism(temporary_store, mock_packages):
 
     initial = targets()[0]
     assert targets() == [initial, initial + 1, initial + 2, initial + 1]
-    assert all(signal.getsignal(s) is signal.SIG_DFL for s in _PARALLELISM_SIGNALS)
+    assert signal.getsignal(signal.SIGUSR1) is signal.SIG_DFL
+    assert signal.getsignal(signal.SIGUSR2) is signal.SIG_DFL
 
 
 @pytest.mark.disable_clean_stage_check  # interrupted and failed installs keep their log files
