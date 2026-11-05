@@ -14,6 +14,7 @@ import spack.spec
 from spack.config import Configuration
 from spack.installer.base import ExitCode
 from spack.installer.core import (
+    _PARALLELISM_SIGNALS,
     _TERMINATION_SIGNALS,
     PackageInstaller,
     read_connection,
@@ -446,6 +447,40 @@ def test_change_jobs_commands_adjust_parallelism(temporary_store, mock_packages)
     initial = jobs_events[0][2]
     assert ("jobs_changed", initial + 1, initial + 1) in jobs_events
     assert jobs_events[-1][2] == initial  # target restored after the decrease
+
+
+@pytest.mark.not_on_windows("Windows has no SIGUSR1 and SIGUSR2")
+def test_parallelism_signals_adjust_parallelism(temporary_store, mock_packages):
+    """SIGUSR1 adds a job and SIGUSR2 removes one while a build runs, and the default handlers
+    are restored afterwards."""
+    if any(signal.getsignal(sig) is not signal.SIG_DFL for sig in _PARALLELISM_SIGNALS):
+        pytest.skip("parallelism signals are handled by the test runner")
+    spec = _make_concrete("trivial-install-test-package")
+    launcher = ScriptedLauncher({spec.name: Script(hang=True)})
+    sent = False
+
+    def targets():
+        # Consecutive duplicates come from the actual count catching up with the target
+        all_targets = [e[2] for e in ui.events if e[0] == "jobs_changed"]
+        return [t for i, t in enumerate(all_targets) if i == 0 or t != all_targets[i - 1]]
+
+    def tick():
+        nonlocal sent
+        if not launcher.hanging:
+            return
+        if not sent:
+            sent = True
+            for sig in (signal.SIGUSR1, signal.SIGUSR1, signal.SIGUSR2):
+                os.kill(os.getpid(), sig)
+        elif len(targets()) == 4:
+            launcher.hanging[0].finish()
+
+    ui = DrivingUI(tick)
+    _install(launcher, spec, ui=ui)
+
+    initial = targets()[0]
+    assert targets() == [initial, initial + 1, initial + 2, initial + 1]
+    assert all(signal.getsignal(s) is signal.SIG_DFL for s in _PARALLELISM_SIGNALS)
 
 
 @pytest.mark.disable_clean_stage_check  # interrupted and failed installs keep their log files

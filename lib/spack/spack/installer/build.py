@@ -469,6 +469,12 @@ def worker_function(
         # Reset SIGTSTP to default in case the parent had a custom handler.
         signal.signal(signal.SIGTSTP, signal.SIG_DFL)
 
+        # Drop the parent's parallelism handlers and wakeup fd, which fork inherits.
+        signal.set_wakeup_fd(-1)
+        for sig in (signal.SIGUSR1, signal.SIGUSR2):
+            if signal.getsignal(sig) is not signal.SIG_IGN:
+                signal.signal(sig, signal.SIG_DFL)
+
         # Under forkserver/spawn Python drops CLOEXEC. We don't want to expose these fds to the
         # build. Notably the state fd should be closed, since its EOF signals to the parent process
         # that the build has finished, and that should not be delayed by daemons that keep the fd

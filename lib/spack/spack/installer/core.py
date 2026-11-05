@@ -162,6 +162,19 @@ if sys.platform == "win32":
 else:
     _TERMINATION_SIGNALS = [signal.SIGTERM, signal.SIGHUP]
 
+#: Signals that add or remove a job, like pressing + or - (``kill -USR1 <pid>``)
+if sys.platform == "win32":
+    _PARALLELISM_SIGNALS: Dict[signal.Signals, int] = {}
+else:
+    _PARALLELISM_SIGNALS = {signal.SIGUSR1: 1, signal.SIGUSR2: -1}
+
+#: Selector data key of the self-pipe for parallelism signals
+SIGNAL_EVENT = "signal"
+
+
+def _ignore_signal(signum, frame) -> None:
+    """Handler for signals that are processed through the wakeup fd."""
+
 
 def _signal_children(running_builds: Dict[str, ChildInfo], sig: signal.Signals) -> None:
     """Send a signal to the process group of each running build."""
@@ -356,8 +369,10 @@ class PackageInstaller:
         finished_builds: List[str] = []
 
         # Raise KeyboardInterrupt on SIGTERM and SIGHUP so that the finally of the next try block
-        # executes. Signals that are already ignored or handled are left alone.
+        # executes, and change parallelism on SIGUSR1 and SIGUSR2 through a self-pipe. Signals that
+        # are already ignored or handled are left alone.
         old_signal_handlers: Dict[signal.Signals, Union[Callable, int, None]] = {}
+        signal_r, signal_w = -1, -1
 
         def raise_once(signum, frame):
             # Further signals must not interrupt the cleanup in finally
@@ -368,6 +383,21 @@ class PackageInstaller:
         for sig in _TERMINATION_SIGNALS:
             if signal.getsignal(sig) is signal.SIG_DFL:
                 old_signal_handlers[sig] = signal.signal(sig, raise_once)
+
+        # The wakeup fd receives one byte per signal, also when Python would coalesce handler calls
+        old_wakeup_fd = -1
+        # Job count change per signal number, for the signals handled here
+        jobs_deltas: Dict[int, int] = {}
+        if _PARALLELISM_SIGNALS:
+            signal_r, signal_w = os.pipe()
+            os.set_blocking(signal_r, False)
+            os.set_blocking(signal_w, False)
+            selector.register(signal_r, selectors.EVENT_READ, SIGNAL_EVENT)
+            old_wakeup_fd = signal.set_wakeup_fd(signal_w, warn_on_full_buffer=False)
+            for sig, delta in _PARALLELISM_SIGNALS.items():
+                if signal.getsignal(sig) is signal.SIG_DFL:
+                    old_signal_handlers[sig] = signal.signal(sig, _ignore_signal)
+                    jobs_deltas[sig] = delta
 
         try:
             # Try to schedule builds immediately. The first job does not require a token.
@@ -437,6 +467,11 @@ class PackageInstaller:
                         assert terminal is not None
                         terminal.drain_sigwinch()
                         self.ui.on_resize()
+                    elif data == SIGNAL_EVENT:
+                        # Other handled signals write to the wakeup fd too
+                        for signum in os.read(signal_r, 64):
+                            if signum in jobs_deltas:
+                                self._change_jobs(jobserver, jobs_deltas[signum])
                     elif data == JOBSERVER_EVENT and not jobserver.has_target_parallelism():
                         jobserver.maybe_discard_tokens()
                         self.ui.on_jobs_changed(jobserver.num_jobs, jobserver.target_jobs)
@@ -552,6 +587,12 @@ class PackageInstaller:
                 pass
             for sig, handler in old_signal_handlers.items():
                 signal.signal(sig, handler)
+            # Close the self-pipe only after its handlers are gone
+            if signal_w >= 0:
+                signal.set_wakeup_fd(old_wakeup_fd)
+            for fd in (signal_r, signal_w):
+                if fd >= 0:
+                    os.close(fd)
 
             # Restore output settings. On Linux this is a no-op. On Windows this disables
             # VT100 processing and must happen after the final render.
@@ -855,11 +896,14 @@ class PackageInstaller:
             if isinstance(cmd, SetEcho):
                 self._set_echo(cmd.build_id, cmd.echo)
             else:  # ChangeJobs
-                if cmd.delta > 0:
-                    jobserver.increase_parallelism()
-                else:
-                    jobserver.decrease_parallelism()
-                self.ui.on_jobs_changed(jobserver.num_jobs, jobserver.target_jobs)
+                self._change_jobs(jobserver, cmd.delta)
+
+    def _change_jobs(self, jobserver: JobServerBase, delta: int) -> None:
+        if delta > 0:
+            jobserver.increase_parallelism()
+        else:
+            jobserver.decrease_parallelism()
+        self.ui.on_jobs_changed(jobserver.num_jobs, jobserver.target_jobs)
 
     def _set_echo(self, build_id: str, echo: bool) -> None:
         """Enable or disable log forwarding from a running build to this process."""

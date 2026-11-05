@@ -1513,6 +1513,15 @@ class TestTargetJobs:
         tui.on_jobs_changed(5, 5)
         assert tui.dirty is False
 
+    def test_non_tty_prints_target_changes(self):
+        """Without a TTY, changes of the target are printed, but not the initial value."""
+        tui, _, fake_stdout = create_tui(is_tty=False)
+        tui.on_jobs_changed(4, 4)
+        tui.on_jobs_changed(4, 5)
+        tui.on_jobs_changed(5, 5)
+        tui.on_jobs_changed(5, 3)
+        assert fake_stdout.getvalue() == "==> Jobs: 4 => 5\n==> Jobs: 5 => 3\n"
+
     def test_header_shows_target_jobs(self):
         """The rendered header should contain the target_jobs count and the word 'jobs'."""
         tui, _, fake_stdout = create_tui(total=1)
