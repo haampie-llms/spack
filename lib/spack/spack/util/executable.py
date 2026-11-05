@@ -36,11 +36,11 @@ def jobserver_auth(makeflags: str) -> Optional[str]:
     return auth
 
 
-def _jobserver_fds(env: Dict[str, str]) -> Tuple[int, ...]:
+def jobserver_fds(makeflags: str) -> Tuple[int, ...]:
     """Return the open fds of a pipe based jobserver advertised in ``MAKEFLAGS``."""
     if sys.platform == "win32":  # pass_fds is not supported
         return ()
-    match = re.fullmatch(r"(\d+),(\d+)", jobserver_auth(env.get("MAKEFLAGS", "")) or "")
+    match = re.fullmatch(r"(\d+),(\d+)", jobserver_auth(makeflags) or "")
     if not match:
         return ()
     fds = (int(match.group(1)), int(match.group(2)))
@@ -329,7 +329,7 @@ class Executable:
                 stdout=ostream,
                 env=current_environment,
                 # close_fds=True by default: only stdio and jobserver fds are inherited
-                pass_fds=_jobserver_fds(current_environment),
+                pass_fds=jobserver_fds(current_environment.get("MAKEFLAGS", "")),
             )
         except OSError as e:
             message = "Command: " + cmd_line_string

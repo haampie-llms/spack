@@ -269,3 +269,17 @@ def test_exe_passes_only_jobserver_fds():
     finally:
         os.close(r)
         os.close(w)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="pass_fds is POSIX specific")
+def test_jobserver_fds():
+    r, w = os.pipe()
+    try:
+        makeflags = f" -j4 --jobserver-auth={r},{w}"
+        assert ex.jobserver_fds(makeflags) == (r, w)
+        # gmake 4.4 disables the jobserver for recipes that are not recursive
+        makeflags += " --jobserver-auth=-2,-2"
+        assert ex.jobserver_fds(makeflags) == ()
+    finally:
+        os.close(r)
+        os.close(w)
