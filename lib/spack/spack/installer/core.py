@@ -163,17 +163,12 @@ else:
     _TERMINATION_SIGNALS = [signal.SIGTERM, signal.SIGHUP]
 
 #: Signals that add or remove a job, like pressing + or - (``kill -USR1 <pid>``)
-if sys.platform == "win32":
-    _PARALLELISM_SIGNALS: Dict[signal.Signals, int] = {}
-else:
+_PARALLELISM_SIGNALS: Dict[signal.Signals, int] = {}
+if sys.platform != "win32":
     _PARALLELISM_SIGNALS = {signal.SIGUSR1: 1, signal.SIGUSR2: -1}
 
 #: Selector data key of the self-pipe for parallelism signals
 SIGNAL_EVENT = "signal"
-
-
-def _ignore_signal(signum, frame) -> None:
-    """Handler for signals that are processed through the wakeup fd."""
 
 
 def _signal_children(running_builds: Dict[str, ChildInfo], sig: signal.Signals) -> None:
@@ -384,20 +379,20 @@ class PackageInstaller:
             if signal.getsignal(sig) is signal.SIG_DFL:
                 old_signal_handlers[sig] = signal.signal(sig, raise_once)
 
-        # The wakeup fd receives one byte per signal, also when Python would coalesce handler calls
-        old_wakeup_fd = -1
-        # Job count change per signal number, for the signals handled here
-        jobs_deltas: Dict[int, int] = {}
+        def write_signum(signum, frame):
+            try:
+                os.write(signal_w, bytes([signum]))
+            except OSError:
+                pass
+
         if _PARALLELISM_SIGNALS:
             signal_r, signal_w = os.pipe()
             os.set_blocking(signal_r, False)
             os.set_blocking(signal_w, False)
             selector.register(signal_r, selectors.EVENT_READ, SIGNAL_EVENT)
-            old_wakeup_fd = signal.set_wakeup_fd(signal_w, warn_on_full_buffer=False)
-            for sig, delta in _PARALLELISM_SIGNALS.items():
+            for sig in _PARALLELISM_SIGNALS:
                 if signal.getsignal(sig) is signal.SIG_DFL:
-                    old_signal_handlers[sig] = signal.signal(sig, _ignore_signal)
-                    jobs_deltas[sig] = delta
+                    old_signal_handlers[sig] = signal.signal(sig, write_signum)
 
         try:
             # Try to schedule builds immediately. The first job does not require a token.
@@ -468,10 +463,9 @@ class PackageInstaller:
                         terminal.drain_sigwinch()
                         self.ui.on_resize()
                     elif data == SIGNAL_EVENT:
-                        # Other handled signals write to the wakeup fd too
                         for signum in os.read(signal_r, 64):
-                            if signum in jobs_deltas:
-                                self._change_jobs(jobserver, jobs_deltas[signum])
+                            delta = _PARALLELISM_SIGNALS[signal.Signals(signum)]
+                            self._change_jobs(jobserver, delta)
                     elif data == JOBSERVER_EVENT and not jobserver.has_target_parallelism():
                         jobserver.maybe_discard_tokens()
                         self.ui.on_jobs_changed(jobserver.num_jobs, jobserver.target_jobs)
@@ -588,8 +582,6 @@ class PackageInstaller:
             for sig, handler in old_signal_handlers.items():
                 signal.signal(sig, handler)
             # Close the self-pipe only after its handlers are gone
-            if signal_w >= 0:
-                signal.set_wakeup_fd(old_wakeup_fd)
             for fd in (signal_r, signal_w):
                 if fd >= 0:
                     os.close(fd)
