@@ -1,0 +1,106 @@
+# TEMPORARY: integration tests for closing fds in Executable. Not meant to be merged.
+name: fdtest
+
+on:
+  push:
+    branches: [tmp/executable-close-fds]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: windows (${{ matrix.variant }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [fix, baseline]
+    defaults:
+      run:
+        shell:
+          powershell Invoke-Expression -Command "./share/spack/qa/windows_test_setup.ps1"; {0}
+    steps:
+    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      with:
+        fetch-depth: 3
+    - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+      with:
+        python-version: '3.14'
+    - name: Install Python packages
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install --upgrade -r .github/workflows/requirements/unit_tests/requirements.txt
+        python -m pip install --upgrade clingo==5.8.0
+    - name: Use Executable without the fix
+      if: matrix.variant == 'baseline'
+      run: |
+        git checkout HEAD~2 -- lib/spack/spack/util/executable.py
+        git diff --stat HEAD
+    - name: Unit tests
+      if: matrix.variant == 'fix'
+      run: |
+        python -m pytest -x -v lib/spack/spack/test/util/executable.py lib/spack/spack/test/make_executable.py lib/spack/spack/test/installer lib/spack/spack/test/build_environment.py
+        ./share/spack/qa/validate_last_exit.ps1
+    - name: Install fd-probe
+      run: |
+        spack -C .github/fdtest/scope install fd-probe
+        ./share/spack/qa/validate_last_exit.ps1
+    - name: Check stdio of children in the build log
+      run: |
+        spack -C .github/fdtest/scope python .github/fdtest/check.py
+        ./share/spack/qa/validate_last_exit.ps1
+
+  linux:
+    name: linux py${{ matrix.python }} (${{ matrix.variant }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.9', '3.14']  # fork and forkserver are the default start methods
+        variant: [fix, baseline]
+    steps:
+    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      with:
+        fetch-depth: 3
+    - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+      with:
+        python-version: ${{ matrix.python }}
+    - run: python3 -m pip install pytest
+    - name: Use Executable without the fix
+      if: matrix.variant == 'baseline'
+      run: git checkout HEAD~2 -- lib/spack/spack/util/executable.py && git diff --stat HEAD
+    - name: Unit tests
+      if: matrix.variant == 'fix'
+      run: python3 -m pytest -x -v lib/spack/spack/test/util/executable.py lib/spack/spack/test/make_executable.py lib/spack/spack/test/installer lib/spack/spack/test/build_environment.py
+    - name: Integration
+      run: .github/fdtest/posix.sh ${{ matrix.variant == 'fix' && 'pass' || 'fail' }}
+
+  rhel8-python36:
+    name: rhel8 platform-python 3.6 (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    container: registry.access.redhat.com/ubi8/ubi
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [fix, baseline]
+    steps:
+    - run: dnf install -y bzip2 curl gcc gcc-c++ git gzip make patch tar unzip which xz
+    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      with:
+        fetch-depth: 3
+    - name: Setup a virtual environment with platform-python
+      run: |
+        git config --global --add safe.directory '*'
+        /usr/libexec/platform-python -m venv ~/platform-spack
+        echo "$HOME/platform-spack/bin" >> $GITHUB_PATH
+        ~/platform-spack/bin/pip install --upgrade pip pytest
+    - name: Use Executable without the fix
+      if: matrix.variant == 'baseline'
+      run: git checkout HEAD~2 -- lib/spack/spack/util/executable.py && git diff --stat HEAD
+    - name: Unit tests
+      if: matrix.variant == 'fix'
+      run: python3 -m pytest -x -v lib/spack/spack/test/util/executable.py lib/spack/spack/test/make_executable.py lib/spack/spack/test/installer lib/spack/spack/test/build_environment.py
+    - name: Integration
+      run: .github/fdtest/posix.sh ${{ matrix.variant == 'fix' && 'pass' || 'fail' }}

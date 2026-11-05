@@ -1,0 +1,11 @@
+packages:
+  gmake:
+    externals:
+    - spec: gmake@4.2
+      prefix: /usr
+    buildable: false
+  # Not needed for fd-probe; their presence skips Windows SDK detection during concretization
+  win-sdk:
+    buildable: false
+  wgl:
+    buildable: false

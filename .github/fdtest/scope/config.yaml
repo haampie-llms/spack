@@ -1,0 +1,5 @@
+config:
+  install_tree:
+    root: $tempdir/fdtest/opt
+  build_stage: [$tempdir/fdtest/stage]
+  installer: new

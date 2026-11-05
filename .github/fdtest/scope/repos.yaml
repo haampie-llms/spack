@@ -1,0 +1,3 @@
+repos::
+  fdtest: $spack/.github/fdtest/repo/spack_repo/fdtest
+  builtin_mock: $spack/var/spack/test_repos/spack_repo/builtin_mock
