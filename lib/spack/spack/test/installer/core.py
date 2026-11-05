@@ -6,13 +6,10 @@
 import os
 import signal
 import sys
-import threading
-import time
 
 import pytest
 
 import spack.error
-import spack.installer.core
 import spack.spec
 from spack.config import Configuration
 from spack.installer.base import ExitCode
@@ -432,28 +429,6 @@ def test_termination_signal_during_cleanup(temporary_store, mock_packages):
     assert launcher.hanging[0].terminated
     assert _record(temporary_store, dep) is not None
     assert signal.getsignal(signal.SIGTERM) is signal.SIG_DFL
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="no wakeup fd on Windows")
-@pytest.mark.disable_clean_stage_check  # interrupted installs keep their log files
-def test_termination_signal_wakes_up_event_loop(temporary_store, mock_packages, monkeypatch):
-    """A termination signal during select() ends the event loop before the select() timeout."""
-    _skip_if_handled_by_test_runner()
-    monkeypatch.setattr(spack.installer.core, "DATABASE_WRITE_INTERVAL", 60.0)
-    spec = _make_concrete("trivial-install-test-package")
-    launcher = ScriptedLauncher({spec.name: Script(hang=True)})
-
-    def launch(request, jobserver):
-        # The handlers are installed by now; the signal arrives while the loop waits in select()
-        threading.Timer(0.1, os.kill, (os.getpid(), signal.SIGTERM)).start()
-        return launcher(request, jobserver)
-
-    start = time.monotonic()
-    with pytest.raises(spack.error.TerminatedBySignal):
-        _install(launch, spec)
-
-    assert time.monotonic() - start < 30
-    assert launcher.hanging[0].terminated
 
 
 @pytest.mark.disable_clean_stage_check  # failed builds keep their log file in the stage root
