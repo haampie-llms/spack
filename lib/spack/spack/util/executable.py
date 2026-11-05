@@ -25,6 +25,7 @@ WINDOWS_DEFAULT_PATHEXT = ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC
 
 OutType = Union[Optional[BinaryIO], str, Type[str], Callable]
 
+
 def jobserver_auth(makeflags: str) -> Optional[str]:
     """Return the value of the last jobserver flag in ``MAKEFLAGS``, which gmake uses."""
     auth = None
