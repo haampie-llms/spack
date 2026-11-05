@@ -359,15 +359,17 @@ class PackageInstaller:
 
         # Queue SIGTERM and SIGHUP to end the loop, unless already ignored or handled. On POSIX the
         # wakeup fd interrupts select().
-        handled = [sig for sig in _TERMINATION_SIGNALS if signal.getsignal(sig) is signal.SIG_DFL]
-        received: List[int] = []
+        handled_signals = [
+            sig for sig in _TERMINATION_SIGNALS if signal.getsignal(sig) is signal.SIG_DFL
+        ]
+        received_signals: List[int] = []
         signal_r, signal_w = -1, -1
         old_wakeup_fd = -1
 
         try:
-            for sig in handled:
-                signal.signal(sig, lambda signum, frame: received.append(signum))
-            if handled and sys.platform != "win32":
+            for sig in handled_signals:
+                signal.signal(sig, lambda signum, frame: received_signals.append(signum))
+            if handled_signals and sys.platform != "win32":
                 signal_r, signal_w = os.pipe()
                 os.set_blocking(signal_r, False)
                 os.set_blocking(signal_w, False)
@@ -383,7 +385,7 @@ class PackageInstaller:
                 self._run_ui_commands(jobserver)
                 self._flush_db_if_due(time.monotonic(), database_actions, retained_read_locks)
 
-            while not received and (
+            while not received_signals and (
                 self.pending_builds
                 or self.running_builds
                 or database_actions
@@ -565,7 +567,7 @@ class PackageInstaller:
             except Exception:
                 pass
             # Safe to reset to SIG_DFL, since we only handle signals that had it before
-            for sig in handled:
+            for sig in handled_signals:
                 signal.signal(sig, signal.SIG_DFL)
             # Close the pipe only after it is no longer the wakeup fd
             if signal_w >= 0:
@@ -580,8 +582,8 @@ class PackageInstaller:
                 terminal.teardown_output()
 
             # A termination signal takes precedence over other exceptions
-            if received:
-                raise spack.error.TerminatedBySignal(received[0])
+            if received_signals:
+                raise spack.error.TerminatedBySignal(received_signals[0])
 
             # Re-raise the DB exception if any.
             if db_exc is not None:
