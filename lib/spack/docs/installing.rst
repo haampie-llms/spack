@@ -111,6 +111,16 @@ You can adjust parallelism while a build is running:
 When reducing parallelism, Spack waits for currently running jobs to finish before the new limit takes effect; it does not kill active processes.
 The progress header shows the adjustment in progress, e.g. ``+/-: 4=>2 jobs``, until the actual count reaches the target.
 
+Without a terminal, for example when Spack runs in the background or is driven by a script, send signals to the ``spack install`` process instead:
+
+.. code-block:: console
+
+   $ kill -USR1 <pid>  # add a job
+   $ kill -USR2 <pid>  # remove a job
+
+In non-interactive mode, Spack prints each change, e.g. ``==> Jobs: 4 => 5``.
+Send one signal at a time and wait for this line: signals of the same kind that arrive in quick succession may be merged into one.
+
 
 Multi-process and multi-node installs
 --------------------------------------

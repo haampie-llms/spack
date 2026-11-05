@@ -469,6 +469,11 @@ def worker_function(
         # Reset SIGTSTP to default in case the parent had a custom handler.
         signal.signal(signal.SIGTSTP, signal.SIG_DFL)
 
+        # Drop the parent's parallelism signal handlers, which fork inherits.
+        for sig in (signal.SIGUSR1, signal.SIGUSR2):
+            if signal.getsignal(sig) is not signal.SIG_IGN:
+                signal.signal(sig, signal.SIG_DFL)
+
         # With fork, signals would otherwise wake up the parent's event loop.
         signal.set_wakeup_fd(-1)
 

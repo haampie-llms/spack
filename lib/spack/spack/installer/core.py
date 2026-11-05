@@ -33,6 +33,7 @@ import spack.util.tty
 from spack.installer.base import (
     JOBSERVER_EVENT,
     OUTPUT_BUFFER_SIZE,
+    SIGNAL_EVENT,
     SIGWINCH_EVENT,
     STDIN_EVENT,
     BaseTerminalState,
@@ -53,12 +54,12 @@ from spack.installer.ui import BuildInfo, InstallerUI, SetEcho, TerminalUI
 
 if sys.platform == "win32":
     from spack.installer.base import NoopJobServer as JobServer
+    from spack.installer.windows import SignalPipe, read_connection, write_connection
     from spack.installer.windows import WindowsTerminalState as TerminalState
-    from spack.installer.windows import read_connection, write_connection
 else:
     from spack.installer.posix import PosixJobServer as JobServer
     from spack.installer.posix import PosixTerminalState as TerminalState
-    from spack.installer.posix import read_connection, write_connection
+    from spack.installer.posix import SignalPipe, read_connection, write_connection
 
 if TYPE_CHECKING:
     import spack.package_base
@@ -161,8 +162,9 @@ if sys.platform == "win32":
 else:
     _TERMINATION_SIGNALS = (signal.SIGTERM, signal.SIGHUP)
 
-#: Selector data key of the pipe that wakes up the event loop on signals
-SIGNAL_EVENT = "signal"
+
+def _to_wakeup_fd(signum, frame) -> None:
+    """Python handler, so that CPython writes the signal number to the wakeup fd."""
 
 
 def _signal_children(running_builds: Dict[str, ChildInfo], sig: signal.Signals) -> None:
@@ -357,24 +359,21 @@ class PackageInstaller:
         failures: List[spack.spec.Spec] = []
         finished_builds: List[str] = []
 
-        # Queue SIGTERM and SIGHUP to end the loop, unless already ignored or handled. On POSIX the
-        # wakeup fd interrupts select().
-        handled_signals = [
-            sig for sig in _TERMINATION_SIGNALS if signal.getsignal(sig) is signal.SIG_DFL
-        ]
-        received_signals: List[int] = []
-        signal_r, signal_w = -1, -1
-        old_wakeup_fd = -1
+        # Signals are events of the loop, read as numbers from the wakeup fd. Signals that are
+        # already ignored or handled are left alone.
+        signals = list(_TERMINATION_SIGNALS)
+        if sys.platform != "win32":
+            signals += [signal.SIGUSR1, signal.SIGUSR2]
+            if terminal is not None and sys.stdout.isatty():
+                signals.append(signal.SIGWINCH)
+        handled_signals = [s for s in signals if signal.getsignal(s) is signal.SIG_DFL]
+        terminating_signal: Optional[int] = None
+        signal_pipe: Optional[SignalPipe] = None
 
         try:
+            signal_pipe = SignalPipe(selector)
             for sig in handled_signals:
-                signal.signal(sig, lambda signum, frame: received_signals.append(signum))
-            if handled_signals and sys.platform != "win32":
-                signal_r, signal_w = os.pipe()
-                os.set_blocking(signal_r, False)
-                os.set_blocking(signal_w, False)
-                selector.register(signal_r, selectors.EVENT_READ, SIGNAL_EVENT)
-                old_wakeup_fd = signal.set_wakeup_fd(signal_w)
+                signal.signal(sig, _to_wakeup_fd)
 
             # Try to schedule builds immediately. The first job does not require a token.
             blocked = False
@@ -385,7 +384,7 @@ class PackageInstaller:
                 self._run_ui_commands(jobserver)
                 self._flush_db_if_due(time.monotonic(), database_actions, retained_read_locks)
 
-            while not received_signals and (
+            while terminating_signal is None and (
                 self.pending_builds
                 or self.running_builds
                 or database_actions
@@ -444,8 +443,17 @@ class PackageInstaller:
                         terminal.drain_sigwinch()
                         self.ui.on_resize()
                     elif data == SIGNAL_EVENT:
-                        # The handlers queue the signals; the pipe only wakes up select()
-                        os.read(signal_r, 64)
+                        assert signal_pipe is not None
+                        # Apply in order, since decreasing stops at one job
+                        for signum in signal_pipe.read():
+                            if signum not in handled_signals:
+                                continue
+                            elif signum in _TERMINATION_SIGNALS:
+                                terminating_signal = terminating_signal or signum
+                            elif signum == signal.SIGWINCH:
+                                self.ui.on_resize()
+                            else:
+                                self._change_jobs(jobserver, 1 if signum == signal.SIGUSR1 else -1)
                     elif data == JOBSERVER_EVENT and not jobserver.has_target_parallelism():
                         jobserver.maybe_discard_tokens()
                         self.ui.on_jobs_changed(jobserver.num_jobs, jobserver.target_jobs)
@@ -569,12 +577,12 @@ class PackageInstaller:
             # Safe to reset to SIG_DFL, since we only handle signals that had it before
             for sig in handled_signals:
                 signal.signal(sig, signal.SIG_DFL)
-            # Close the pipe only after it is no longer the wakeup fd
-            if signal_w >= 0:
-                signal.set_wakeup_fd(old_wakeup_fd)
-            for fd in (signal_r, signal_w):
-                if fd >= 0:
-                    os.close(fd)
+            if signal_pipe is not None:
+                # A termination signal may also arrive during cleanup
+                for signum in b"".join(iter(signal_pipe.read, b"")):
+                    if signum in handled_signals and signum in _TERMINATION_SIGNALS:
+                        terminating_signal = terminating_signal or signum
+                signal_pipe.close()
 
             # Restore output settings. On Linux this is a no-op. On Windows this disables
             # VT100 processing and must happen after the final render.
@@ -582,8 +590,8 @@ class PackageInstaller:
                 terminal.teardown_output()
 
             # A termination signal takes precedence over other exceptions
-            if received_signals:
-                raise spack.error.TerminatedBySignal(received_signals[0])
+            if terminating_signal is not None:
+                raise spack.error.TerminatedBySignal(terminating_signal)
 
             # Re-raise the DB exception if any.
             if db_exc is not None:
@@ -882,11 +890,14 @@ class PackageInstaller:
             if isinstance(cmd, SetEcho):
                 self._set_echo(cmd.build_id, cmd.echo)
             else:  # ChangeJobs
-                if cmd.delta > 0:
-                    jobserver.increase_parallelism()
-                else:
-                    jobserver.decrease_parallelism()
-                self.ui.on_jobs_changed(jobserver.num_jobs, jobserver.target_jobs)
+                self._change_jobs(jobserver, cmd.delta)
+
+    def _change_jobs(self, jobserver: JobServerBase, delta: int) -> None:
+        if delta > 0:
+            jobserver.increase_parallelism()
+        else:
+            jobserver.decrease_parallelism()
+        self.ui.on_jobs_changed(jobserver.num_jobs, jobserver.target_jobs)
 
     def _set_echo(self, build_id: str, echo: bool) -> None:
         """Enable or disable log forwarding from a running build to this process."""

@@ -17,6 +17,7 @@ import msvcrt
 import os
 import selectors
 import shutil
+import signal
 import socket
 import threading
 import time
@@ -25,6 +26,7 @@ from typing import Callable, Optional
 
 from spack.installer.base import (
     OUTPUT_BUFFER_SIZE,
+    SIGNAL_EVENT,
     SIGWINCH_EVENT,
     STDIN_EVENT,
     BaseTerminalState,
@@ -170,6 +172,30 @@ class WindowsTerminalState(BaseTerminalState):
                     self.sigwinch_w.sendall(b"\x00")
                 except OSError:
                     pass
+
+
+class SignalPipe:
+    """Socket pair that receives the numbers of signals with a Python handler as the wakeup fd,
+    which must be a socket on Windows."""
+
+    def __init__(self, selector: selectors.BaseSelector) -> None:
+        self.r, self.w = socket.socketpair()
+        self.r.setblocking(False)
+        self.w.setblocking(False)
+        selector.register(self.r, selectors.EVENT_READ, SIGNAL_EVENT)
+        self.old_wakeup_fd = signal.set_wakeup_fd(self.w.fileno())
+
+    def read(self) -> bytes:
+        try:
+            return self.r.recv(64)
+        except BlockingIOError:
+            return b""
+
+    def close(self) -> None:
+        # Close the sockets only after they are no longer the wakeup fd
+        signal.set_wakeup_fd(self.old_wakeup_fd)
+        self.r.close()
+        self.w.close()
 
 
 def create_build_channels() -> BuildChannels:

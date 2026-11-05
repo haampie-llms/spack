@@ -413,6 +413,10 @@ class TerminalUI(InstallerUI):
         """Set the actual and target number of jobs to run concurrently."""
         if actual == self.actual_jobs and target == self.target_jobs:
             return
+        # For non-TTY output, print changes of the target, but not the initial value
+        if not self.is_tty and not self.headless and self.target_jobs not in (0, target):
+            self.stdout.write(f"==> Jobs: {self.target_jobs} => {target}\n")
+            self.stdout.flush()
         self.actual_jobs = actual
         self.target_jobs = target
         self.dirty = True
