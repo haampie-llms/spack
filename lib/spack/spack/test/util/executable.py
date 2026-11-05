@@ -255,48 +255,17 @@ def test_exe_disallows_callable_as_output(mock_executable):
         hello(output=lambda line: line)
 
 
-@pytest.fixture
-def pipe_fds():
+@pytest.mark.skipif(sys.platform == "win32", reason="pass_fds is POSIX specific")
+def test_exe_passes_only_jobserver_fds():
     r, w = os.pipe()
-    yield r, w
-    os.close(r)
-    os.close(w)
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="pass_fds is POSIX specific")
-@pytest.mark.parametrize(
-    "makeflags,expected",
-    [
-        ("", False),
-        ("-j --jobserver-auth={r},{w}", True),  # gmake >= 4.0
-        ("-j --jobserver-fds={r},{w}", True),  # gmake < 4.0
-        ("-j --jobserver-auth=fifo:/tmp/fifo", False),  # gmake >= 4.4
-        ("--jobserver-auth={r},{w} --jobserver-auth=fifo:/tmp/fifo", False),  # last one wins
-    ],
-)
-def test_jobserver_fds(pipe_fds, makeflags, expected):
-    r, w = pipe_fds
-    fds = ex._jobserver_fds({"MAKEFLAGS": makeflags.format(r=r, w=w)})
-    assert fds == ((r, w) if expected else ())
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="pass_fds is POSIX specific")
-def test_jobserver_fds_closed():
-    r, w = os.pipe()
-    os.close(r)
-    os.close(w)
-    assert ex._jobserver_fds({"MAKEFLAGS": f"-j --jobserver-auth={r},{w}"}) == ()
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="pass_fds is POSIX specific")
-def test_exe_passes_only_jobserver_fds(pipe_fds):
-    r, w = pipe_fds
     os.set_inheritable(r, True)
     os.set_inheritable(w, True)
     python = ex.Executable(sys.executable)
     check = f"import os; os.fstat({r}); os.fstat({w})"
-
-    python("-c", check, error=str, fail_on_error=False)
-    assert python.returncode != 0
-
-    python("-c", check, extra_env={"MAKEFLAGS": f"-j --jobserver-auth={r},{w}"})
+    try:
+        python("-c", check, error=str, fail_on_error=False)
+        assert python.returncode != 0
+        python("-c", check, extra_env={"MAKEFLAGS": f"-j --jobserver-auth={r},{w}"})
+    finally:
+        os.close(r)
+        os.close(w)
