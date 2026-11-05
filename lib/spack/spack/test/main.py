@@ -6,6 +6,9 @@
 import os
 import os.path
 import pathlib
+import signal
+import subprocess
+import sys
 
 import pytest
 
@@ -358,3 +361,24 @@ def test_env_substitution_via_main_entrypoint(
 
     assert mutable_config.env_path == env.path
     assert spack.config.substitute_path_variables("$env/foo") == f"{env.path}/foo"
+
+
+@pytest.mark.not_on_windows("Windows has no death by signal")
+@pytest.mark.parametrize(
+    "exception,signum",
+    [
+        ("KeyboardInterrupt()", signal.SIGINT),
+        ("spack.error.TerminatedBySignal(signal.SIGTERM)", signal.SIGTERM),
+        ("spack.error.TerminatedBySignal(signal.SIGHUP)", signal.SIGHUP),
+    ],
+)
+def test_exit_by_signal(exception, signum, tmp_path: pathlib.Path):
+    """Spack exits by the signal that interrupted it, so the parent process can tell."""
+    script = tmp_path / "interrupt.py"
+    script.write_text(f"import signal\nimport spack.error\nraise {exception}\n")
+    result = subprocess.run(
+        [sys.executable, spack.paths.spack_script, "python", str(script)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    assert result.returncode == -signum
