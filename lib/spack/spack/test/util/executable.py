@@ -265,7 +265,7 @@ def test_exe_passes_only_jobserver_fds():
     try:
         python("-c", check, error=str, fail_on_error=False)
         assert python.returncode != 0
-        python("-c", check, extra_env={"MAKEFLAGS": f"-j --jobserver-auth={r},{w}"})
+        python("-c", check, extra_env={"MAKEFLAGS": f" -j4 --jobserver-auth={r},{w}"})
     finally:
         os.close(r)
         os.close(w)
