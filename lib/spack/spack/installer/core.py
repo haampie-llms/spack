@@ -156,11 +156,10 @@ class NullReportData(ReportData):
         pass
 
 
-#: Signals that end an install like Ctrl-C does
 if sys.platform == "win32":
-    _TERMINATION_SIGNALS = [signal.SIGTERM]
+    _TERMINATION_SIGNALS = (signal.SIGTERM,)
 else:
-    _TERMINATION_SIGNALS = [signal.SIGTERM, signal.SIGHUP]
+    _TERMINATION_SIGNALS = (signal.SIGTERM, signal.SIGHUP)
 
 
 def _signal_children(running_builds: Dict[str, ChildInfo], sig: signal.Signals) -> None:
