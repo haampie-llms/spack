@@ -7,7 +7,6 @@ Runs the selector-based event loop that starts builds, forwards their output, ap
 commands, and flushes finished builds to the database. See :mod:`spack.installer` for the
 overall design."""
 
-import collections
 import json
 import os
 import selectors
@@ -15,7 +14,7 @@ import signal
 import sys
 import tempfile
 import time
-from typing import TYPE_CHECKING, Callable, Deque, Dict, List, Optional, Set, Union
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Set, Union
 
 import spack.binary_distribution
 import spack.config
@@ -358,11 +357,10 @@ class PackageInstaller:
         failures: List[spack.spec.Spec] = []
         finished_builds: List[str] = []
 
-        # SIGTERM and SIGHUP are queued by their handler and end the event loop, so that they never
-        # interrupt its bookkeeping. On POSIX the wakeup fd interrupts select(). Signals that are
-        # already ignored or handled are left alone.
+        # Queue SIGTERM and SIGHUP to end the loop, unless already ignored or handled. On POSIX the
+        # wakeup fd interrupts select().
         handled = [sig for sig in _TERMINATION_SIGNALS if signal.getsignal(sig) is signal.SIG_DFL]
-        received: Deque[int] = collections.deque()
+        received: List[int] = []
         signal_r, signal_w = -1, -1
         old_wakeup_fd = -1
 

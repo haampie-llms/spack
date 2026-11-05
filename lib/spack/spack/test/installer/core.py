@@ -384,8 +384,7 @@ def test_termination_signal_terminates_builds(signum, temporary_store, mock_pack
 
 @pytest.mark.disable_clean_stage_check  # interrupted installs keep their log files
 def test_termination_signal_while_starting_build(temporary_store, mock_packages):
-    """A termination signal while a build is started does not prevent its registration, so that
-    it is terminated."""
+    """A termination signal while a build is started terminates that build."""
     _skip_if_handled_by_test_runner()
     spec = _make_concrete("trivial-install-test-package")
     launcher = ScriptedLauncher({spec.name: Script(hang=True)})
