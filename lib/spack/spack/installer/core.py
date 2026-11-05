@@ -356,17 +356,16 @@ class PackageInstaller:
 
         # Raise TerminatedBySignal on SIGTERM and SIGHUP so that the finally of the next try block
         # executes. Signals that are already ignored or handled are left alone.
-        old_signal_handlers: Dict[signal.Signals, Union[Callable, int, None]] = {}
+        handled = [sig for sig in _TERMINATION_SIGNALS if signal.getsignal(sig) is signal.SIG_DFL]
 
         def raise_once(signum, frame):
             # Further signals must not interrupt the cleanup in finally
-            for sig in old_signal_handlers:
+            for sig in handled:
                 signal.signal(sig, signal.SIG_IGN)
             raise spack.error.TerminatedBySignal(signum)
 
-        for sig in _TERMINATION_SIGNALS:
-            if signal.getsignal(sig) is signal.SIG_DFL:
-                old_signal_handlers[sig] = signal.signal(sig, raise_once)
+        for sig in handled:
+            signal.signal(sig, raise_once)
 
         try:
             # Try to schedule builds immediately. The first job does not require a token.
@@ -556,8 +555,9 @@ class PackageInstaller:
                 jobserver.close()
             except Exception:
                 pass
-            for sig, handler in old_signal_handlers.items():
-                signal.signal(sig, handler)
+            # Safe to reset to SIG_DFL, since we only handle signals that had it before
+            for sig in handled:
+                signal.signal(sig, signal.SIG_DFL)
 
             # Restore output settings. On Linux this is a no-op. On Windows this disables
             # VT100 processing and must happen after the final render.

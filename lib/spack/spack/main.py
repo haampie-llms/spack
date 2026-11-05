@@ -1158,12 +1158,12 @@ def main(argv=None):
     except spack.error.TerminatedBySignal as e:
         if spack.config.CONFIG.get("config:debug") or spack.error.SHOW_BACKTRACE:
             traceback.print_exc()
-        # Exit by the same signal, so that the parent process sees why spack stopped
         for stream in (sys.stdout, sys.stderr):
             try:
                 stream.flush()
             except Exception:
                 pass
+        # Exit by the same signal, so that the parent process sees why spack stopped
         signal.signal(e.signum, signal.SIG_DFL)
         os.kill(os.getpid(), e.signum)
         return 128 + e.signum
