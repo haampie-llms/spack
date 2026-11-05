@@ -474,6 +474,9 @@ def worker_function(
             if signal.getsignal(sig) is not signal.SIG_IGN:
                 signal.signal(sig, signal.SIG_DFL)
 
+        # With fork, signals would otherwise wake up the parent's event loop.
+        signal.set_wakeup_fd(-1)
+
         # Under forkserver/spawn Python drops CLOEXEC. We don't want to expose these fds to the
         # build. Notably the state fd should be closed, since its EOF signals to the parent process
         # that the build has finished, and that should not be delayed by daemons that keep the fd

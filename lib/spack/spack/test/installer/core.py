@@ -356,30 +356,85 @@ def test_keyboard_interrupt_terminates_builds_and_flushes_db(temporary_store, mo
     assert _record(temporary_store, root) is None
 
 
-@pytest.mark.disable_clean_stage_check  # interrupted installs keep their log files
-@pytest.mark.parametrize("signum", _TERMINATION_SIGNALS, ids=lambda s: s.name)
-def test_termination_signal_raises_once(signum, temporary_store, mock_packages):
-    """The first termination signal raises KeyboardInterrupt, later ones are ignored until the
-    cleanup is done, and the default handlers are restored afterwards."""
+def _skip_if_handled_by_test_runner():
     if any(signal.getsignal(sig) is not signal.SIG_DFL for sig in _TERMINATION_SIGNALS):
         pytest.skip("termination signals are handled by the test runner")
+
+
+def _raise_signal(signum: int) -> None:
+    if sys.platform == "win32":
+        signal.raise_signal(signum)
+    else:
+        os.kill(os.getpid(), signum)
+
+
+@pytest.mark.disable_clean_stage_check  # interrupted installs keep their log files
+@pytest.mark.parametrize("signum", _TERMINATION_SIGNALS, ids=lambda s: s.name)
+def test_termination_signal_terminates_builds(signum, temporary_store, mock_packages):
+    """A termination signal ends the event loop, which terminates the running builds, restores the
+    default handlers, and raises TerminatedBySignal."""
+    _skip_if_handled_by_test_runner()
     spec = _make_concrete("trivial-install-test-package")
     launcher = ScriptedLauncher({spec.name: Script(hang=True)})
-    handlers_after_signal = []
 
     def tick():
         if launcher.hanging:
-            try:
-                signal.getsignal(signum)(signum, None)
-            finally:
-                handlers_after_signal.extend(signal.getsignal(s) for s in _TERMINATION_SIGNALS)
+            _raise_signal(signum)
 
-    with pytest.raises(KeyboardInterrupt):
+    with pytest.raises(spack.error.TerminatedBySignal) as e:
         _install(launcher, spec, ui=DrivingUI(tick))
 
+    assert e.value.signum == signum
     assert launcher.hanging[0].terminated
-    assert handlers_after_signal == [signal.SIG_IGN] * len(_TERMINATION_SIGNALS)
     assert all(signal.getsignal(s) is signal.SIG_DFL for s in _TERMINATION_SIGNALS)
+
+
+@pytest.mark.disable_clean_stage_check  # interrupted installs keep their log files
+def test_termination_signal_while_starting_build(temporary_store, mock_packages):
+    """A termination signal while a build is started terminates that build."""
+    _skip_if_handled_by_test_runner()
+    spec = _make_concrete("trivial-install-test-package")
+    launcher = ScriptedLauncher({spec.name: Script(hang=True)})
+
+    def launch(request, jobserver):
+        child = launcher(request, jobserver)
+        _raise_signal(signal.SIGTERM)
+        return child
+
+    with pytest.raises(spack.error.TerminatedBySignal):
+        _install(launch, spec)
+
+    assert launcher.hanging[0].terminated
+
+
+@pytest.mark.disable_clean_stage_check  # interrupted installs keep their log files
+def test_termination_signal_during_cleanup(temporary_store, mock_packages):
+    """A termination signal during the cleanup after another exception does not interrupt the
+    cleanup, and is raised after it."""
+    _skip_if_handled_by_test_runner()
+    dep = _make_concrete("dependency-install")
+    root = _make_concrete("dependent-install", deps=[dep])
+    launcher = ScriptedLauncher({dep.name: Script(), root.name: Script(hang=True)})
+
+    def tick():
+        if launcher.hanging:
+            build = launcher.hanging[0]
+            terminate = build.terminate
+
+            def signal_and_terminate():
+                _raise_signal(signal.SIGTERM)
+                terminate()
+
+            build.terminate = signal_and_terminate
+            raise KeyboardInterrupt
+
+    with pytest.raises(spack.error.TerminatedBySignal) as e:
+        _install(launcher, root, ui=DrivingUI(tick))
+
+    assert isinstance(e.value.__context__, KeyboardInterrupt)
+    assert launcher.hanging[0].terminated
+    assert _record(temporary_store, dep) is not None
+    assert signal.getsignal(signal.SIGTERM) is signal.SIG_DFL
 
 
 @pytest.mark.disable_clean_stage_check  # failed builds keep their log file in the stage root

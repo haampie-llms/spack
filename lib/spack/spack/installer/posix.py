@@ -30,7 +30,7 @@ import spack.util.tty
 from spack.installer.base import (
     JOBSERVER_EVENT,
     OUTPUT_BUFFER_SIZE,
-    SIGWINCH_EVENT,
+    SIGNAL_EVENT,
     STDIN_EVENT,
     TEE_STOP,
     BaseTerminalState,
@@ -62,23 +62,10 @@ class PosixTerminalState(BaseTerminalState):
     ) -> None:
         super().__init__(selector, on_headless, on_suspend, on_resume)
         self.old_stdin_settings = termios.tcgetattr(sys.stdin)
-        self.sigwinch_r = -1
-        self.sigwinch_w = -1
         self.stdin_reader = StdinReader(functools.partial(os.read, sys.stdin.fileno(), 1024))
 
     def setup(self) -> None:
-        """Set cbreak mode, register stdin and signal pipes in the selector."""
-
-        # SIGWINCH self-pipe (stdout must be a tty too)
-        if sys.stdout.isatty():
-            self.sigwinch_r, self.sigwinch_w = os.pipe()
-            os.set_blocking(self.sigwinch_r, False)
-            os.set_blocking(self.sigwinch_w, False)
-            self.selector.register(self.sigwinch_r, selectors.EVENT_READ, SIGWINCH_EVENT)
-            self.old_sigwinch = signal.signal(signal.SIGWINCH, self._handle_sigwinch)
-        else:
-            self.old_sigwinch = None
-
+        """Set cbreak mode, register stdin in the selector."""
         self.old_sigtstp = signal.signal(signal.SIGTSTP, self._handle_sigtstp)
 
         # Start correctly depending on whether we're foregrounded or backgrounded
@@ -87,32 +74,20 @@ class PosixTerminalState(BaseTerminalState):
             self.enter_foreground()
 
     def teardown_input(self) -> None:
-        """Restore terminal settings and signal handlers, close pipes."""
+        """Restore terminal settings and the SIGTSTP handler."""
         with ignore_signal(signal.SIGTTOU):
             try:
                 termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_stdin_settings)
             except termios.error as e:
                 spack.util.tty.debug(f"Failed to restore terminal settings: {e}")
 
-        for sig, old in ((signal.SIGTSTP, self.old_sigtstp), (signal.SIGWINCH, self.old_sigwinch)):
-            if old is not None:
-                try:
-                    signal.signal(sig, old)
-                except Exception as e:
-                    spack.util.tty.debug(f"Failed to restore signal handler for {sig}: {e}")
+        try:
+            signal.signal(signal.SIGTSTP, self.old_sigtstp)
+        except Exception as e:
+            spack.util.tty.debug(f"Failed to restore signal handler for SIGTSTP: {e}")
 
         if sys.stdin.fileno() in self.selector.get_map():
             self.selector.unregister(sys.stdin.fileno())
-
-        for fd in (self.sigwinch_r, self.sigwinch_w):
-            if fd < 0:
-                continue
-            if fd in self.selector.get_map():
-                self.selector.unregister(fd)
-            try:
-                os.close(fd)
-            except Exception as e:
-                spack.util.tty.debug(f"Failed to close sigwinch pipe {fd}: {e}")
 
     def _handle_sigtstp(self, signum: int, frame: object) -> None:
         """Restore terminal before suspending, then re-install handler after resume."""
@@ -139,12 +114,6 @@ class PosixTerminalState(BaseTerminalState):
         if self.on_resume is not None:
             self.on_resume()
         self.handle_continue()
-
-    def _handle_sigwinch(self, signum: int, frame: object) -> None:
-        try:
-            os.write(self.sigwinch_w, b"\x00")
-        except OSError:
-            pass
 
     def enter_foreground(self) -> None:
         """Restore interactive terminal mode."""
@@ -177,11 +146,31 @@ class PosixTerminalState(BaseTerminalState):
         else:
             self.enter_background()
 
-    def drain_sigwinch(self) -> None:
-        os.read(self.sigwinch_r, 64)
-
     def _should_enter_foreground(self) -> bool:
         return not _is_background_tty(sys.stdin)
+
+
+class SignalPipe:
+    """Self-pipe that receives the numbers of signals with a Python handler as the wakeup fd."""
+
+    def __init__(self, selector: selectors.BaseSelector) -> None:
+        self.r, self.w = os.pipe()
+        os.set_blocking(self.r, False)
+        os.set_blocking(self.w, False)
+        selector.register(self.r, selectors.EVENT_READ, SIGNAL_EVENT)
+        self.old_wakeup_fd = signal.set_wakeup_fd(self.w)
+
+    def read(self) -> bytes:
+        try:
+            return os.read(self.r, 64)
+        except BlockingIOError:
+            return b""
+
+    def close(self) -> None:
+        # Close the pipe only after it is no longer the wakeup fd
+        signal.set_wakeup_fd(self.old_wakeup_fd)
+        os.close(self.r)
+        os.close(self.w)
 
 
 def create_build_channels() -> BuildChannels:

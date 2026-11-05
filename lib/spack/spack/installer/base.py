@@ -54,6 +54,7 @@ HEADLESS_WAKE_INTERVAL = 1.0
 STDIN_EVENT = "stdin"
 SIGWINCH_EVENT = "sigwinch"
 JOBSERVER_EVENT = "jobserver"
+SIGNAL_EVENT = "signal"
 
 
 class BuildChannels(NamedTuple):
@@ -164,10 +165,8 @@ class BaseTerminalState(abc.ABC):
     def enter_foreground(self) -> None:
         pass
 
-    @abc.abstractmethod
     def drain_sigwinch(self) -> None:
-        """Drain the platform-specific sigwinch notification channel."""
-        pass
+        """Drain the notification channel of terminal resizes on platforms without SIGWINCH."""
 
     def wake_interval(self) -> Optional[float]:
         """Extra wake-up cadence the terminal needs from the event loop, or None. While headless
