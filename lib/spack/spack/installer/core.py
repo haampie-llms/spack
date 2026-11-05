@@ -465,7 +465,7 @@ class PackageInstaller:
                     elif data == SIGNAL_EVENT:
                         # Apply in order, since decreasing stops at one job
                         for byte in os.read(signal_r, 64):
-                            self._change_jobs(jobserver, 1 if byte == PLUS[0] else -1)
+                            self._change_jobs(jobserver, 1 if byte else -1)
                     elif data == JOBSERVER_EVENT and not jobserver.has_target_parallelism():
                         jobserver.maybe_discard_tokens()
                         self.ui.on_jobs_changed(jobserver.num_jobs, jobserver.target_jobs)
