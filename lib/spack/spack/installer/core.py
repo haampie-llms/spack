@@ -163,8 +163,8 @@ else:
     _TERMINATION_SIGNALS = [signal.SIGTERM, signal.SIGHUP]
 
 #: Bytes written to the self-pipe by SIGUSR1 (add a job) and SIGUSR2 (remove a job)
-MINUS = 0x00
-PLUS = 0x01
+MINUS = b"\x00"
+PLUS = b"\x01"
 
 #: Selector data key of the self-pipe for parallelism signals
 SIGNAL_EVENT = "signal"
@@ -382,7 +382,7 @@ class PackageInstaller:
 
             def write_byte(signum, frame):
                 try:
-                    os.write(signal_w, bytes([PLUS if signum == signal.SIGUSR1 else MINUS]))
+                    os.write(signal_w, PLUS if signum == signal.SIGUSR1 else MINUS)
                 except OSError:
                     pass
 
@@ -465,7 +465,7 @@ class PackageInstaller:
                     elif data == SIGNAL_EVENT:
                         # Apply in order, since decreasing stops at one job
                         for byte in os.read(signal_r, 64):
-                            self._change_jobs(jobserver, 1 if byte == PLUS else -1)
+                            self._change_jobs(jobserver, 1 if byte == PLUS[0] else -1)
                     elif data == JOBSERVER_EVENT and not jobserver.has_target_parallelism():
                         jobserver.maybe_discard_tokens()
                         self.ui.on_jobs_changed(jobserver.num_jobs, jobserver.target_jobs)
