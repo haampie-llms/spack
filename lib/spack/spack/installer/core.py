@@ -511,7 +511,8 @@ class PackageInstaller:
                 except Exception:
                     pass
 
-            # Builds stay stopped if a signal skipped on_resume after Ctrl-Z
+            # An exception between SIGCONT and on_resume after Ctrl-Z leaves the builds stopped, and
+            # stopped builds do not handle the SIGTERM above until they are continued.
             if sys.platform != "win32":
                 _signal_children(self.running_builds, signal.SIGCONT)
 
