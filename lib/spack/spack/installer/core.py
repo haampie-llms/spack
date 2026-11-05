@@ -7,6 +7,7 @@ Runs the selector-based event loop that starts builds, forwards their output, ap
 commands, and flushes finished builds to the database. See :mod:`spack.installer` for the
 overall design."""
 
+import collections
 import json
 import os
 import selectors
@@ -14,7 +15,7 @@ import signal
 import sys
 import tempfile
 import time
-from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Set, Union
+from typing import TYPE_CHECKING, Callable, Deque, Dict, List, Optional, Set, Union
 
 import spack.binary_distribution
 import spack.config
@@ -160,6 +161,9 @@ if sys.platform == "win32":
     _TERMINATION_SIGNALS = (signal.SIGTERM,)
 else:
     _TERMINATION_SIGNALS = (signal.SIGTERM, signal.SIGHUP)
+
+#: Selector data key of the pipe that wakes up the event loop on signals
+SIGNAL_EVENT = "signal"
 
 
 def _signal_children(running_builds: Dict[str, ChildInfo], sig: signal.Signals) -> None:
@@ -354,20 +358,24 @@ class PackageInstaller:
         failures: List[spack.spec.Spec] = []
         finished_builds: List[str] = []
 
-        # Raise TerminatedBySignal on SIGTERM and SIGHUP so that the finally of the next try block
-        # executes. Signals that are already ignored or handled are left alone.
+        # SIGTERM and SIGHUP are queued by their handler and end the event loop, so that they never
+        # interrupt its bookkeeping. On POSIX the wakeup fd interrupts select(). Signals that are
+        # already ignored or handled are left alone.
         handled = [sig for sig in _TERMINATION_SIGNALS if signal.getsignal(sig) is signal.SIG_DFL]
-
-        def raise_once(signum, frame):
-            # Further signals must not interrupt the cleanup in finally
-            for sig in handled:
-                signal.signal(sig, signal.SIG_IGN)
-            raise spack.error.TerminatedBySignal(signum)
-
-        for sig in handled:
-            signal.signal(sig, raise_once)
+        received: Deque[int] = collections.deque()
+        signal_r, signal_w = -1, -1
+        old_wakeup_fd = -1
 
         try:
+            for sig in handled:
+                signal.signal(sig, lambda signum, frame: received.append(signum))
+            if handled and sys.platform != "win32":
+                signal_r, signal_w = os.pipe()
+                os.set_blocking(signal_r, False)
+                os.set_blocking(signal_w, False)
+                selector.register(signal_r, selectors.EVENT_READ, SIGNAL_EVENT)
+                old_wakeup_fd = signal.set_wakeup_fd(signal_w)
+
             # Try to schedule builds immediately. The first job does not require a token.
             blocked = False
             if self.pending_builds:
@@ -377,7 +385,7 @@ class PackageInstaller:
                 self._run_ui_commands(jobserver)
                 self._flush_db_if_due(time.monotonic(), database_actions, retained_read_locks)
 
-            while (
+            while not received and (
                 self.pending_builds
                 or self.running_builds
                 or database_actions
@@ -435,6 +443,9 @@ class PackageInstaller:
                         assert terminal is not None
                         terminal.drain_sigwinch()
                         self.ui.on_resize()
+                    elif data == SIGNAL_EVENT:
+                        # The handlers queue the signals; the pipe only wakes up select()
+                        os.read(signal_r, 64)
                     elif data == JOBSERVER_EVENT and not jobserver.has_target_parallelism():
                         jobserver.maybe_discard_tokens()
                         self.ui.on_jobs_changed(jobserver.num_jobs, jobserver.target_jobs)
@@ -558,11 +569,21 @@ class PackageInstaller:
             # Safe to reset to SIG_DFL, since we only handle signals that had it before
             for sig in handled:
                 signal.signal(sig, signal.SIG_DFL)
+            # Close the pipe only after it is no longer the wakeup fd
+            if signal_w >= 0:
+                signal.set_wakeup_fd(old_wakeup_fd)
+            for fd in (signal_r, signal_w):
+                if fd >= 0:
+                    os.close(fd)
 
             # Restore output settings. On Linux this is a no-op. On Windows this disables
             # VT100 processing and must happen after the final render.
             if terminal is not None:
                 terminal.teardown_output()
+
+            # A termination signal takes precedence over other exceptions
+            if received:
+                raise spack.error.TerminatedBySignal(received[0])
 
             # Re-raise the DB exception if any.
             if db_exc is not None:

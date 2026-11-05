@@ -6,10 +6,13 @@
 import os
 import signal
 import sys
+import threading
+import time
 
 import pytest
 
 import spack.error
+import spack.installer.core
 import spack.spec
 from spack.config import Configuration
 from spack.installer.base import ExitCode
@@ -356,31 +359,101 @@ def test_keyboard_interrupt_terminates_builds_and_flushes_db(temporary_store, mo
     assert _record(temporary_store, root) is None
 
 
-@pytest.mark.disable_clean_stage_check  # interrupted installs keep their log files
-@pytest.mark.parametrize("signum", _TERMINATION_SIGNALS, ids=lambda s: s.name)
-def test_termination_signal_raises_once(signum, temporary_store, mock_packages):
-    """The first termination signal raises TerminatedBySignal, later ones are ignored until the
-    cleanup is done, and the default handlers are restored afterwards."""
+def _skip_if_handled_by_test_runner():
     if any(signal.getsignal(sig) is not signal.SIG_DFL for sig in _TERMINATION_SIGNALS):
         pytest.skip("termination signals are handled by the test runner")
+
+
+@pytest.mark.disable_clean_stage_check  # interrupted installs keep their log files
+@pytest.mark.parametrize("signum", _TERMINATION_SIGNALS, ids=lambda s: s.name)
+def test_termination_signal_terminates_builds(signum, temporary_store, mock_packages):
+    """A termination signal ends the event loop, which terminates the running builds, restores the
+    default handlers, and raises TerminatedBySignal."""
+    _skip_if_handled_by_test_runner()
     spec = _make_concrete("trivial-install-test-package")
     launcher = ScriptedLauncher({spec.name: Script(hang=True)})
-    handlers_after_signal = []
 
     def tick():
         if launcher.hanging:
-            try:
-                signal.getsignal(signum)(signum, None)
-            finally:
-                handlers_after_signal.extend(signal.getsignal(s) for s in _TERMINATION_SIGNALS)
+            signal.getsignal(signum)(signum, None)
 
     with pytest.raises(spack.error.TerminatedBySignal) as e:
         _install(launcher, spec, ui=DrivingUI(tick))
 
     assert e.value.signum == signum
     assert launcher.hanging[0].terminated
-    assert handlers_after_signal == [signal.SIG_IGN] * len(_TERMINATION_SIGNALS)
     assert all(signal.getsignal(s) is signal.SIG_DFL for s in _TERMINATION_SIGNALS)
+
+
+@pytest.mark.disable_clean_stage_check  # interrupted installs keep their log files
+def test_termination_signal_while_starting_build(temporary_store, mock_packages):
+    """A termination signal while a build is started does not prevent its registration, so that
+    it is terminated."""
+    _skip_if_handled_by_test_runner()
+    spec = _make_concrete("trivial-install-test-package")
+    launcher = ScriptedLauncher({spec.name: Script(hang=True)})
+
+    def launch(request, jobserver):
+        child = launcher(request, jobserver)
+        signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+        return child
+
+    with pytest.raises(spack.error.TerminatedBySignal):
+        _install(launch, spec)
+
+    assert launcher.hanging[0].terminated
+
+
+@pytest.mark.disable_clean_stage_check  # interrupted installs keep their log files
+def test_termination_signal_during_cleanup(temporary_store, mock_packages):
+    """A termination signal during the cleanup after another exception does not interrupt the
+    cleanup, and is raised after it."""
+    _skip_if_handled_by_test_runner()
+    dep = _make_concrete("dependency-install")
+    root = _make_concrete("dependent-install", deps=[dep])
+    launcher = ScriptedLauncher({dep.name: Script(), root.name: Script(hang=True)})
+
+    def tick():
+        if launcher.hanging:
+            build = launcher.hanging[0]
+            terminate = build.terminate
+
+            def signal_and_terminate():
+                signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+                terminate()
+
+            build.terminate = signal_and_terminate
+            raise KeyboardInterrupt
+
+    with pytest.raises(spack.error.TerminatedBySignal) as e:
+        _install(launcher, root, ui=DrivingUI(tick))
+
+    assert isinstance(e.value.__context__, KeyboardInterrupt)
+    assert launcher.hanging[0].terminated
+    assert _record(temporary_store, dep) is not None
+    assert signal.getsignal(signal.SIGTERM) is signal.SIG_DFL
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="no wakeup fd on Windows")
+@pytest.mark.disable_clean_stage_check  # interrupted installs keep their log files
+def test_termination_signal_wakes_up_event_loop(temporary_store, mock_packages, monkeypatch):
+    """A termination signal during select() ends the event loop before the select() timeout."""
+    _skip_if_handled_by_test_runner()
+    monkeypatch.setattr(spack.installer.core, "DATABASE_WRITE_INTERVAL", 60.0)
+    spec = _make_concrete("trivial-install-test-package")
+    launcher = ScriptedLauncher({spec.name: Script(hang=True)})
+
+    def launch(request, jobserver):
+        # The handlers are installed by now; the signal arrives while the loop waits in select()
+        threading.Timer(0.1, os.kill, (os.getpid(), signal.SIGTERM)).start()
+        return launcher(request, jobserver)
+
+    start = time.monotonic()
+    with pytest.raises(spack.error.TerminatedBySignal):
+        _install(launch, spec)
+
+    assert time.monotonic() - start < 30
+    assert launcher.hanging[0].terminated
 
 
 @pytest.mark.disable_clean_stage_check  # failed builds keep their log file in the stage root
