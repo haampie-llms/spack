@@ -25,6 +25,27 @@ WINDOWS_DEFAULT_PATHEXT = ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC
 
 OutType = Union[Optional[BinaryIO], str, Type[str], Callable]
 
+#: Matches ``--jobserver-auth=R,W`` (gmake >= 4.0) and ``--jobserver-fds=R,W`` (gmake < 4.0) in
+#: ``MAKEFLAGS``. Other values, like ``fifo:PATH`` (gmake >= 4.4), match with empty groups.
+_JOBSERVER = re.compile(r"(?:^|\s)--jobserver-(?:auth|fds)=(?:(\d+),(\d+)(?!\S))?")
+
+
+def _jobserver_fds(env: Dict[str, str]) -> Tuple[int, ...]:
+    """Return the open fds of a pipe based jobserver advertised in ``MAKEFLAGS``, which a child
+    process should inherit. As in gmake, the last jobserver flag wins."""
+    if sys.platform == "win32":  # pass_fds is not supported
+        return ()
+    matches = _JOBSERVER.findall(env.get("MAKEFLAGS", ""))
+    if not matches or not matches[-1][0]:
+        return ()
+    fds = tuple(map(int, matches[-1]))
+    try:
+        for fd in fds:
+            os.fstat(fd)
+    except OSError:  # stale MAKEFLAGS: Popen fails on closed fds
+        return ()
+    return fds
+
 
 def _process_cmd_output(
     out: bytes,
@@ -236,7 +257,8 @@ class Executable:
         For ``output`` and ``error`` it's also accepted to pass a string with a filename, which
         will be automatically opened for writing.
 
-        By default, the subprocess inherits the parent's file descriptors.
+        The subprocess inherits only stdin, stdout and stderr, and on POSIX the fds of a pipe
+        based jobserver advertised in ``MAKEFLAGS``.
         """
         # Setup default environment
         current_environment = os.environ.copy() if env is None else {}
@@ -301,7 +323,8 @@ class Executable:
                 stderr=estream,
                 stdout=ostream,
                 env=current_environment,
-                close_fds=False,
+                # close_fds=True by default: inheritable fds must not leak into daemons
+                pass_fds=_jobserver_fds(current_environment),
             )
         except OSError as e:
             message = "Command: " + cmd_line_string

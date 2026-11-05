@@ -253,3 +253,47 @@ def test_exe_disallows_callable_as_output(mock_executable):
     hello = ex.Executable(path)
     with pytest.raises(ValueError):
         hello(output=lambda line: line)
+
+
+#: Prints the fds (passed as fd:inode) that are open in the child and refer to the same file
+_PRINT_INHERITED_FDS = """
+import os, sys
+for arg in sys.argv[1:]:
+    fd, ino = map(int, arg.split(":"))
+    try:
+        if os.fstat(fd).st_ino == ino:
+            print(fd)
+    except OSError:
+        pass
+"""
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="fd inheritance is POSIX specific")
+@pytest.mark.parametrize(
+    "makeflags,expect_jobserver",
+    [
+        ("", False),
+        (" -j --jobserver-auth={r},{w}", True),  # gmake >= 4.0
+        ("--jobserver-fds={r},{w} -j", True),  # gmake < 4.0
+        (" -j4 --jobserver-auth=fifo:/tmp/fifo", False),  # gmake >= 4.4 needs no fds
+        (" --jobserver-auth={r},{w} --jobserver-auth=fifo:/tmp/fifo", False),  # last one wins
+        (" -j --jobserver-auth=1020,1021", False),  # stale fds are ignored, not an error
+    ],
+)
+def test_exe_only_passes_jobserver_fds(makeflags, expect_jobserver):
+    """Inheritable fds do not leak into the child process, except for those of a pipe based
+    jobserver advertised in MAKEFLAGS."""
+    leak_r, leak_w = os.pipe()
+    js_r, js_w = os.pipe()
+    fds = (leak_r, leak_w, js_r, js_w)
+    try:
+        for fd in fds:
+            os.set_inheritable(fd, True)
+        extra_env = {"MAKEFLAGS": makeflags.format(r=js_r, w=js_w)}
+        python = ex.Executable(sys.executable)
+        args = [f"{fd}:{os.fstat(fd).st_ino}" for fd in fds]
+        out = python("-c", _PRINT_INHERITED_FDS, *args, output=str, extra_env=extra_env)
+        assert out.split() == ([str(js_r), str(js_w)] if expect_jobserver else [])
+    finally:
+        for fd in fds:
+            os.close(fd)
