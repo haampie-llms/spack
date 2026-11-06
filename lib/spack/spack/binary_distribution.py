@@ -2074,8 +2074,7 @@ def dedupe_hardlinks_if_necessary(root, buildinfo):
 
 
 class _SpliceAnalogs:
-    """Finds the node of the build spec that a node of a spliced spec replaced: the one with the
-    same name, or else the provider of the virtuals it is used as.
+    """Maps each node of a spliced spec to its counterpart in the build spec, by name or virtual.
 
     Assumes that names and virtuals are unique among the link/run/test dependencies of the build
     spec."""
