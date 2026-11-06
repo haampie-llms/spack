@@ -66,6 +66,21 @@ class BaseVisitor:
         return sort_edges(item.edge.spec.edges_to_dependencies(depflag=self.depflag))
 
 
+class BuildSpecVisitor:
+    """A visitor that also follows the build specs of spliced specs."""
+
+    def __init__(self, visitor):
+        self.visitor = visitor
+
+    def accept(self, item):
+        return self.visitor.accept(item)
+
+    def neighbors(self, item):
+        edges = self.visitor.neighbors(item)
+        edge = item.edge.spec.edge_to_build_spec()
+        return edges if edge is None else [*edges, edge]
+
+
 class ReverseVisitor:
     """A visitor that reverses the arrows in the DAG, following dependents."""
 
@@ -189,7 +204,13 @@ class MixedDepthVisitor:
 
 
 def get_visitor_from_args(
-    cover, direction, depflag: Union[dt.DepFlag, dt.DepTypes], key=id, visited=None, visitor=None
+    cover,
+    direction,
+    depflag: Union[dt.DepFlag, dt.DepTypes],
+    key=id,
+    visited=None,
+    visitor=None,
+    build_specs: bool = False,
 ):
     """
     Create a visitor object from common keyword arguments.
@@ -210,6 +231,7 @@ def get_visitor_from_args(
         key: function that takes a spec and outputs a key for uniqueness test.
         visited (set or None): a set of nodes not to follow (when using cover=nodes/edges)
         visitor: An initial visitor that is used for composition.
+        build_specs: also follow the build specs of spliced specs
 
     Returns:
         A visitor
@@ -217,6 +239,8 @@ def get_visitor_from_args(
     if not isinstance(depflag, dt.DepFlag):
         depflag = dt.canonicalize(depflag)
     visitor = visitor or BaseVisitor(depflag)
+    if build_specs:
+        visitor = BuildSpecVisitor(visitor)
     if cover == "nodes":
         visitor = CoverNodesVisitor(visitor, key, visited)
     elif cover == "edges":
@@ -455,6 +479,7 @@ def traverse_edges(
     depth: Literal[False] = False,
     key: Callable[["spack.spec.Spec"], Any] = ...,
     visited: Optional[Set[Any]] = ...,
+    build_specs: bool = ...,
 ) -> Iterable["spack.spec.DependencySpec"]: ...
 
 
@@ -470,6 +495,7 @@ def traverse_edges(
     depth: Literal[True],
     key: Callable[["spack.spec.Spec"], Any] = ...,
     visited: Optional[Set[Any]] = ...,
+    build_specs: bool = ...,
 ) -> Iterable[Tuple[int, "spack.spec.DependencySpec"]]: ...
 
 
@@ -485,6 +511,7 @@ def traverse_edges(
     depth: bool,
     key: Callable[["spack.spec.Spec"], Any] = ...,
     visited: Optional[Set[Any]] = ...,
+    build_specs: bool = ...,
 ) -> Iterable[Union["spack.spec.DependencySpec", Tuple[int, "spack.spec.DependencySpec"]]]: ...
 
 
@@ -498,6 +525,7 @@ def traverse_edges(
     depth: bool = False,
     key: Callable[["spack.spec.Spec"], Any] = id,
     visited: Optional[Set[Any]] = None,
+    build_specs: bool = False,
 ) -> Iterable[Union["spack.spec.DependencySpec", Tuple[int, "spack.spec.DependencySpec"]]]:
     """
     Iterable of edges from the DAG, starting from a list of root specs.
@@ -523,6 +551,7 @@ def traverse_edges(
             depth corresponds to the depth at which edge.spec was discovered.
         key: function that takes a spec and outputs a key for uniqueness test.
         visited: a set of nodes not to follow
+        build_specs: also follow the build specs of spliced specs (only for ``children``)
 
     Returns:
         An iterable of ``DependencySpec`` if depth is ``False`` or a tuple of
@@ -536,11 +565,15 @@ def traverse_edges(
             raise ValueError("visited set not implemented for order=topo")
     elif order not in ("post", "pre", "breadth"):
         raise ValueError(f"Unknown order {order}")
+    if build_specs and direction == "parents":
+        raise ValueError("build_specs not supported for direction=parents")
 
     # In topo traversal we need to construct a sub-DAG including all unique edges even if we are
     # yielding a subset of them, hence "edges".
     _cover = "edges" if order == "topo" else cover
-    visitor = get_visitor_from_args(_cover, direction, deptype, key, visited)
+    visitor = get_visitor_from_args(
+        _cover, direction, deptype, key, visited, build_specs=build_specs
+    )
     root_edges = with_artificial_edges(specs)
 
     # Depth-first
@@ -568,6 +601,7 @@ def traverse_nodes(
     depth: Literal[False] = False,
     key: Callable[["spack.spec.Spec"], Any] = ...,
     visited: Optional[Set[Any]] = ...,
+    build_specs: bool = ...,
 ) -> Iterable["spack.spec.Spec"]: ...
 
 
@@ -583,6 +617,7 @@ def traverse_nodes(
     depth: Literal[True],
     key: Callable[["spack.spec.Spec"], Any] = ...,
     visited: Optional[Set[Any]] = ...,
+    build_specs: bool = ...,
 ) -> Iterable[Tuple[int, "spack.spec.Spec"]]: ...
 
 
@@ -598,6 +633,7 @@ def traverse_nodes(
     depth: bool,
     key: Callable[["spack.spec.Spec"], Any] = ...,
     visited: Optional[Set[Any]] = ...,
+    build_specs: bool = ...,
 ) -> Iterable[Union["spack.spec.Spec", Tuple[int, "spack.spec.Spec"]]]: ...
 
 
@@ -612,6 +648,7 @@ def traverse_nodes(
     depth: bool = False,
     key: Callable[["spack.spec.Spec"], Any] = id,
     visited: Optional[Set[Any]] = None,
+    build_specs: bool = False,
 ) -> Iterable[Union["spack.spec.Spec", Tuple[int, "spack.spec.Spec"]]]:
     """
     Iterable of specs from the DAG, starting from a list of root specs.
@@ -635,6 +672,7 @@ def traverse_nodes(
             where depth corresponds to the depth at which ``edge.spec`` was discovered.
         key: function that takes a spec and outputs a key for uniqueness test.
         visited: a set of nodes not to follow
+        build_specs: also follow the build specs of spliced specs (only for ``children``)
 
     Yields:
         By default :class:`~spack.spec.Spec`, or a tuple ``(depth, Spec)`` if depth is
@@ -650,6 +688,7 @@ def traverse_nodes(
         depth=depth,
         key=key,
         visited=visited,
+        build_specs=build_specs,
     ):
         yield (item[0], item[1].spec) if depth else item.spec  # type: ignore
 

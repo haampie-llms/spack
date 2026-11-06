@@ -510,3 +510,66 @@ def test_mixed_depth_visitor(roots, order, include_root):
         ("D", "F"),
         ("H", "B"),
     }
+
+
+def _dag_with_build_specs(build_spec_edges: bool):
+    """y and x are spliced, y's build spec y0 is spliced too, and has x as a dependency. If
+    ``build_spec_edges``, the build spec links are test edges instead."""
+    build_spec_links = [("y", "y0"), ("y0", "y00"), ("x", "x0")]
+    specs = create_dag(
+        nodes=["r", "a", "b", "c", "x", "x0", "y", "y0", "y00"],
+        edges=[
+            ("r", "a", "link"),
+            ("r", "y", "link"),
+            ("y", "a", "link"),
+            ("y0", "a", "link"),
+            ("y0", "b", "build"),
+            ("y0", "x", "link"),
+            ("y00", "a", "link"),
+            ("x", "c", "link"),
+            ("x0", "c", "link"),
+            *((p, c, "test") for p, c in build_spec_links if build_spec_edges),
+        ],
+    )
+    if not build_spec_edges:
+        for spliced, build_spec in build_spec_links:
+            specs[spliced].build_spec = specs[build_spec]
+    return specs
+
+
+@pytest.mark.parametrize("roots", [["r"], ["y0", "r"]])
+@pytest.mark.parametrize("deptype", [dt.ALL, dt.LINK, dt.LINK | dt.BUILD])
+@pytest.mark.parametrize("root", [True, False])
+@pytest.mark.parametrize(
+    "order,cover,depth",
+    [
+        (order, cover, depth)
+        for order in ("pre", "post", "breadth", "topo")
+        for cover in ("nodes", "edges", "paths")
+        for depth in (True, False)
+        if order != "topo" or (cover != "paths" and not depth)
+    ],
+)
+@pytest.mark.parametrize("nodes", [True, False])
+def test_traverse_build_specs(nodes, order, cover, depth, root, deptype, roots):
+    """Following build specs is the same as following them as dependency edges"""
+    traversal = traverse.traverse_nodes if nodes else traverse.traverse_edges
+
+    def simplify(item):
+        d, x = item if depth else (None, item)
+        if nodes:
+            return d, x.name
+        return d, x.parent.name if x.parent else None, x.spec.name
+
+    def run(specs, **kwargs):
+        args = dict(order=order, cover=cover, root=root, depth=depth, **kwargs)
+        return [simplify(x) for x in traversal([specs[r] for r in roots], **args)]
+
+    expected = run(_dag_with_build_specs(True), deptype=deptype | dt.TEST)
+    assert run(_dag_with_build_specs(False), deptype=deptype, build_specs=True) == expected
+
+
+def test_traverse_build_specs_parents():
+    specs = _dag_with_build_specs(False)
+    with pytest.raises(ValueError):
+        list(traverse.traverse_nodes([specs["a"]], direction="parents", build_specs=True))
