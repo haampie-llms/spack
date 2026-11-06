@@ -2077,7 +2077,8 @@ class _SpliceAnalogs:
     """Finds the node of the build spec that a node of a spliced spec replaced: the one with the
     same name, or else the provider of the virtuals it is used as.
 
-    The build spec comes from a solve, so its nodes are unique by name and by virtual."""
+    Assumes that names and virtuals are unique among the link/run/test dependencies of the build
+    spec."""
 
     def __init__(self, spec: spack.spec.Spec) -> None:
         non_build = dt.ALL & ~dt.BUILD
