@@ -37,7 +37,6 @@ def recomputed_hash(spec: Spec) -> str:
     return copy.dag_hash()
 
 
-@pytest.mark.xfail(strict=True, reason="stale hashes, #53303")
 def test_splice_hashes_are_those_of_the_spliced_dag():
     zlib = node("zlib@1")
     hdf5 = node("hdf5@1", (zlib, "link"))
@@ -49,7 +48,6 @@ def test_splice_hashes_are_those_of_the_spliced_dag():
     assert out.dag_hash() == recomputed_hash(out)
 
 
-@pytest.mark.xfail(strict=True, reason="split edges, #53303")
 def test_splice_keeps_build_link_edges_of_unspliced_nodes():
     zlib = node("zlib@1")
     hdf5 = node("hdf5@1", (zlib, ("build", "link")))
@@ -63,7 +61,6 @@ def test_splice_keeps_build_link_edges_of_unspliced_nodes():
     assert [e.depflag for e in edges] == [dt.BUILD | dt.LINK]
 
 
-@pytest.mark.xfail(strict=True, reason="re-added build edges point into the input spec")
 def test_splice_does_not_modify_its_input():
     zlib = node("zlib@1")
     hdf5 = node("hdf5@1", (zlib, ("build", "link")))
@@ -76,7 +73,6 @@ def test_splice_does_not_modify_its_input():
     assert [e.parent for e in zlib.edges_from_dependents()] == [hdf5]
 
 
-@pytest.mark.xfail(strict=True, reason="unrelated providers replaced, #53304")
 def test_splice_keeps_other_providers_of_virtuals_the_replacement_can_provide():
     glibc = node("glibc@1")
     libiconv = node("libiconv@1")
@@ -88,9 +84,6 @@ def test_splice_keeps_other_providers_of_virtuals_the_replacement_can_provide():
     assert sorted(d.name for d in out.dependencies()) == ["glibc", "libiconv"]
 
 
-@pytest.mark.xfail(
-    strict=True, reason="the root counts as provider of what its package can provide"
-)
 def test_intransitive_splice_does_not_make_the_root_a_provider():
     hwloc = node("hwloc@1")
     spec = node("openmpi@1", (hwloc, "link"))
@@ -102,9 +95,6 @@ def test_intransitive_splice_does_not_make_the_root_a_provider():
     assert [d.name for d in out["hwloc"].dependencies()] == ["mpich"]
 
 
-@pytest.mark.xfail(
-    strict=True, reason="intransitive splice recurses forever", raises=RecursionError
-)
 def test_intransitive_splice_of_provider_that_depends_on_the_target_package():
     libiconv = node("libiconv@1")
     linux_headers = node("linux-headers@1")
@@ -118,7 +108,19 @@ def test_intransitive_splice_of_provider_that_depends_on_the_target_package():
         spec.splice(replacement, transitive=False)
 
 
-@pytest.mark.xfail(strict=True, reason="impossible splices are accepted")
+def test_splice_target_disambiguates():
+    libiconv = node("libiconv@1")
+    linux_headers = node("linux-headers@1")
+    glibc_2 = node("glibc@2", (libiconv, "link"), (linux_headers, "link"))
+    spec = node("gettext@1", (glibc_2, "link", "iconv"))
+    glibc_1 = node("glibc@1")
+    replacement = node("libiconv@2", (glibc_1, "link"))
+
+    out = spec.splice(replacement, transitive=False, target=Spec("glibc"))
+
+    assert out.edges_to_dependencies(virtuals="iconv")[0].spec.name == "libiconv"
+
+
 @pytest.mark.parametrize("transitive", [True, False])
 def test_splice_rejects_replacement_depending_on_an_ancestor(transitive):
     freetype = node("freetype@1")
@@ -130,7 +132,6 @@ def test_splice_rejects_replacement_depending_on_an_ancestor(transitive):
         spec.splice(replacement, transitive=transitive)
 
 
-@pytest.mark.xfail(strict=True, reason="impossible splices are accepted")
 @pytest.mark.parametrize("transitive", [True, False])
 def test_splice_rejects_replacement_whose_dag_provides_what_the_target_is_used_as(transitive):
     mpich_1 = node("mpich@1")
@@ -142,7 +143,6 @@ def test_splice_rejects_replacement_whose_dag_provides_what_the_target_is_used_a
         spec.splice(replacement, transitive=transitive)
 
 
-@pytest.mark.xfail(strict=True, reason="intransitive splices record half-spliced build specs")
 def test_intransitive_splice_records_installed_build_specs():
     zlib = node("zlib@1")
     hdf5 = node("hdf5@1", (zlib, "link"))
@@ -154,7 +154,6 @@ def test_intransitive_splice_records_installed_build_specs():
     assert recomputed_hash(out.build_spec) == spec.dag_hash()
 
 
-@pytest.mark.xfail(strict=True, reason="build-only deps are copied and matched as link/run deps")
 def test_splice_ignores_build_only_dependencies():
     python_2 = node("python@2")
     glib = node("glib@2", (python_2, "build"))
@@ -169,7 +168,6 @@ def test_splice_ignores_build_only_dependencies():
     assert not out["glib"].spliced
 
 
-@pytest.mark.xfail(strict=True, reason="name match takes the role of the target")
 def test_splice_provider_that_depends_on_another_version_of_the_target_package():
     glibc_1 = node("glibc@1")
     spec = node("gettext@1", (glibc_1, "link", "iconv"))
@@ -181,7 +179,6 @@ def test_splice_provider_that_depends_on_another_version_of_the_target_package()
     assert out.edges_to_dependencies(virtuals="iconv")[0].spec.name == "libiconv"
 
 
-@pytest.mark.xfail(strict=True, reason="a replacement depending on the target is not spliced")
 def test_splice_provider_that_depends_on_the_target():
     glibc = node("glibc@1")  # shared by spec and replacement
     spec = node("gettext@1", (glibc, "link", "iconv"))
@@ -192,7 +189,6 @@ def test_splice_provider_that_depends_on_the_target():
     assert out.edges_to_dependencies(virtuals="iconv")[0].spec.name == "libiconv"
 
 
-@pytest.mark.xfail(strict=True, reason="a provider shared by name hides a clash on its virtual")
 def test_transitive_splice_resolves_virtual_clash_with_a_shared_node():
     glibc = node("glibc@2")  # shared by spec and replacement
     libxml2 = node("libxml2@2")
