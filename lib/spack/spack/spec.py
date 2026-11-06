@@ -2414,11 +2414,11 @@ class Spec:
         """Returns whether this Spec is being deployed as built i.e. whether it has been spliced"""
         return self.build_spec is not self
 
-    def edge_to_build_spec(self) -> Optional[DependencySpec]:
-        """An edge without dependency types to the build spec, if this spec is spliced"""
-        return (
-            DependencySpec(self, self.build_spec, depflag=0, virtuals=()) if self.spliced else None
-        )
+    def edges_to_build_spec(self) -> Tuple[DependencySpec, ...]:
+        """The edge without dependency types to the build spec, if this spec is spliced"""
+        if not self.spliced:
+            return ()
+        return (DependencySpec(self, self.build_spec, depflag=0, virtuals=()),)
 
     @property
     def installed(self):

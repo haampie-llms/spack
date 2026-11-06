@@ -76,9 +76,7 @@ class BuildSpecVisitor:
         return self.visitor.accept(item)
 
     def neighbors(self, item):
-        edges = self.visitor.neighbors(item)
-        edge = item.edge.spec.edge_to_build_spec()
-        return edges if edge is None else [*edges, edge]
+        return [*self.visitor.neighbors(item), *item.edge.spec.edges_to_build_spec()]
 
 
 class ReverseVisitor:
