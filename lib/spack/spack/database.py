@@ -17,6 +17,7 @@ provides a cache and a sanity checking mechanism for what is in the
 filesystem.
 """
 
+import collections
 import contextlib
 import datetime
 import os
@@ -784,9 +785,11 @@ class Database:
         if "build_spec" in spec_node_dict:
             assert spec_reader.SPEC_VERSION >= 2, "SpecfileV1 spec cannot have build_spec"
             _, bhash, _ = spec_reader.extract_build_spec_info_from_node_dict(spec_node_dict)
-            _, build_spec = self.query_by_spec_hash(bhash, data=data)
+            upstream, build_spec = self.query_by_spec_hash(bhash, data=data)
             assert build_spec is not None, f"build_spec with hash {bhash} not found in database"
             spec._build_spec = build_spec.spec
+            if not upstream:
+                build_spec.ref_count += 1
 
     def _assign_dependencies(
         self,
@@ -811,10 +814,9 @@ class Database:
                 # hash is installed locally and upstream, there isn't enough information to
                 # determine which one a local package depends on, so the convention ensures that
                 # this isn't an issue.
-                _, record = self.query_by_spec_hash(dep.hash, data=data)
-                child = record.spec if record else None
+                upstream, record = self.query_by_spec_hash(dep.hash, data=data)
 
-                if not child:
+                if not record:
                     tty.warn(
                         f"Missing dependency not in database: "
                         f"{spec.cformat('{name}{/hash:7}')} needs {dep.name}-{dep.hash[:7]}"
@@ -822,11 +824,13 @@ class Database:
                     continue
 
                 spec._add_dependency(
-                    child,
+                    record.spec,
                     depflag=dt.canonicalize(dep.deptypes),
                     virtuals=dep.virtuals,
                     direct=dep.direct,
                 )
+                if not upstream:
+                    record.ref_count += 1
 
     def _read_from_file(self, filename: pathlib.Path, *, reindex: bool = False) -> None:
         """Fill database from file, do not maintain old data.
@@ -901,6 +905,8 @@ class Database:
                 # TODO: would a more immmutable spec implementation simplify
                 #       this?
                 data[hash_key] = InstallRecord.from_dict(spec, rec)
+                # Reference counts are computed in pass 2
+                data[hash_key].ref_count = 0
 
                 if not spec.external and "installed" in rec and rec["installed"]:
                     installed_prefixes.add(rec["path"])
@@ -912,6 +918,9 @@ class Database:
             try:
                 self._assign_build_spec(spec_reader, hash_key, installs, data)
                 self._assign_dependencies(spec_reader, hash_key, installs, data)
+                deprecated_for = data[hash_key].deprecated_for
+                if deprecated_for in data:
+                    data[deprecated_for].ref_count += 1
             except MissingDependenciesError:
                 raise
             except Exception as e:
@@ -1074,6 +1083,9 @@ class Database:
                 assert upstream and child_record, "Internal error: upstream spec not found"
             else:
                 child_record = self._data[edge.spec.dag_hash()]
+            if edge.spec is edge.parent.build_spec:
+                parent_record.spec._build_spec = child_record.spec
+                return
             parent_record.spec._add_dependency(
                 child_record.spec, depflag=edge.depflag, virtuals=edge.virtuals
             )
@@ -1087,15 +1099,22 @@ class Database:
         )
 
         # Finally update the ref counts
-        for record in self._data.values():
-            for dep in record.spec.dependencies():
-                dep_record = self._data.get(dep.dag_hash())
-                if dep_record:  # dep might be upstream
-                    dep_record.ref_count += 1
-            if record.deprecated_for:
-                self._data[record.deprecated_for].ref_count += 1
+        counts = self._ref_counts()
+        for key, record in self._data.items():
+            record.ref_count = counts[key]
 
-        self._check_ref_counts()
+    def _ref_counts(self) -> Dict[str, int]:
+        """Number of records that refer to each record: as a dependency, as the spec that
+        deprecates it, or as its build spec."""
+        counts: Dict[str, int] = collections.Counter()
+        for rec in self._data.values():
+            for dep in rec.spec.dependencies():
+                counts[dep.dag_hash()] += 1
+            if rec.deprecated_for:
+                counts[rec.deprecated_for] += 1
+            if rec.spec.spliced:
+                counts[rec.spec.build_spec.dag_hash()] += 1
+        return counts
 
     def _check_ref_counts(self):
         """Ensure consistency of reference counts in the DB.
@@ -1104,18 +1123,7 @@ class Database:
 
         Does no locking.
         """
-        counts: Dict[str, int] = {}
-        for key, rec in self._data.items():
-            counts.setdefault(key, 0)
-            for dep in rec.spec.dependencies():
-                dep_key = dep.dag_hash()
-                counts.setdefault(dep_key, 0)
-                counts[dep_key] += 1
-
-            if rec.deprecated_for:
-                counts.setdefault(rec.deprecated_for, 0)
-                counts[rec.deprecated_for] += 1
-
+        counts = self._ref_counts()
         for rec in self._data.values():
             key = rec.spec.dag_hash()
             expected = counts[key]
@@ -1296,6 +1304,13 @@ class Database:
                 if not upstream:
                     record.ref_count += 1
 
+            if spec.spliced:
+                upstream, record = self.query_by_spec_hash(spec.build_spec.dag_hash())
+                assert record, f"Missing build spec {spec.build_spec.short_spec} in DB"
+                new_spec._build_spec = record.spec
+                if not upstream:
+                    record.ref_count += 1
+
             # Mark concrete once everything is built, and preserve the original hashes of concrete
             # specs.
             new_spec._mark_concrete()
@@ -1388,6 +1403,8 @@ class Database:
 
             for dep in spec.dependencies():
                 self._decrement_ref_count(dep)
+            if spec.spliced:
+                self._decrement_ref_count(spec.build_spec)
 
     def _increment_ref_count(self, spec: "spack.spec.Spec") -> None:
         key = spec.dag_hash()
@@ -1423,6 +1440,9 @@ class Database:
         if rec.deprecated_for:
             new_spec = self._data[rec.deprecated_for].spec
             self._decrement_ref_count(new_spec)
+
+        if rec.spec.spliced:
+            self._decrement_ref_count(rec.spec.build_spec)
 
         # Returns the concrete spec so we know it in the case where a
         # query spec was passed in.
@@ -1927,8 +1947,11 @@ class NoUpstreamVisitor:
         return item.edge.spec.dag_hash() in self.upstream_hashes
 
     def neighbors(self, item: tr.EdgeAndDepth):
-        # Prune edges from upstream nodes, only follow database tracked dependencies
-        return [] if self.is_upstream(item) else item.edge.spec.edges_to_dependencies()
+        # Prune edges from upstream nodes, only follow database tracked dependencies and build specs
+        if self.is_upstream(item):
+            return []
+        spec = item.edge.spec
+        return [*spec.edges_to_dependencies(), *spec.edges_to_build_spec()]
 
 
 class UpstreamDatabaseLockingError(SpackError):
