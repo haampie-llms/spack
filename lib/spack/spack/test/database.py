@@ -1461,3 +1461,58 @@ def test_database_installed(
     abstract = spack.spec.Spec("not-a-real-package")
     assert not downstream_db.installed(abstract)
     assert not downstream_db.installed_upstream(abstract)
+
+
+def _install_spliced_spec(config):
+    """Install splice-h, and splice-h with a different splice-z spliced in"""
+    config.set("concretizer:reuse", True)
+    build_spec = spack.concretize.concretize_one("splice-h ^splice-z@1.0.0")
+    PackageInstaller([build_spec.package], fake=True, explicit=True).install()
+    config.set("concretizer:splice", {"automatic": True})
+    spliced = spack.concretize.concretize_one("splice-h ^splice-z@1.0.1")
+    PackageInstaller([spliced.package], fake=True, explicit=True).install()
+    assert spliced.build_spec.dag_hash() == build_spec.dag_hash()
+    return build_spec, spliced
+
+
+def test_uninstall_build_spec(temporary_store: Store, install_mockery, mutable_config):
+    """The build spec of a spliced spec can be uninstalled, and its record is kept until the
+    spliced spec is uninstalled"""
+    build_spec, spliced = _install_spliced_spec(mutable_config)
+
+    spack.package_base.PackageBase.uninstall_by_spec(build_spec)
+    record = Database(temporary_store.root).query_local_by_spec_hash(build_spec.dag_hash())
+    assert record and not record.installed
+
+    spack.package_base.PackageBase.uninstall_by_spec(spliced)
+    assert Database(temporary_store.root).query_local_by_spec_hash(build_spec.dag_hash()) is None
+
+
+def test_ref_counts_are_computed_on_load(temporary_store: Store, install_mockery, mutable_config):
+    """Stored reference counts are ignored, e.g. those written by older versions of Spack, which
+    did not count build specs"""
+    build_spec, _ = _install_spliced_spec(mutable_config)
+    index = temporary_store.db._index_path
+    data = json.loads(index.read_text())
+    data["database"]["installs"][build_spec.dag_hash()]["ref_count"] = 0
+    index.write_text(json.dumps(data))
+
+    db = Database(temporary_store.root)
+    record = db.query_local_by_spec_hash(build_spec.dag_hash())
+    assert record and record.ref_count == 1
+
+
+def test_reindex_restores_build_spec(temporary_store: Store, install_mockery, mutable_config):
+    """Reindex restores the record of an uninstalled build spec from the spec file of the spliced
+    spec, which older versions of Spack dropped from the database"""
+    build_spec, _ = _install_spliced_spec(mutable_config)
+    spack.package_base.PackageBase.uninstall_by_spec(build_spec)
+    index = temporary_store.db._index_path
+    data = json.loads(index.read_text())
+    del data["database"]["installs"][build_spec.dag_hash()]
+    index.write_text(json.dumps(data))
+
+    temporary_store.reindex()
+    record = temporary_store.db.query_local_by_spec_hash(build_spec.dag_hash())
+    assert record and not record.installed
+    temporary_store.db._check_ref_counts()
