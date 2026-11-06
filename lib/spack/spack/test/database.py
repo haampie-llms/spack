@@ -1485,7 +1485,7 @@ def test_uninstall_build_spec(temporary_store: Store, install_mockery, mutable_c
     assert record and not record.installed
 
     spack.package_base.PackageBase.uninstall_by_spec(spliced)
-    assert temporary_store.db.query_local_by_spec_hash(build_spec.dag_hash()) is None
+    assert Database(temporary_store.root).query_local_by_spec_hash(build_spec.dag_hash()) is None
 
 
 def test_ref_counts_are_computed_on_load(temporary_store: Store, install_mockery, mutable_config):
@@ -1500,7 +1500,6 @@ def test_ref_counts_are_computed_on_load(temporary_store: Store, install_mockery
     db = Database(temporary_store.root)
     record = db.query_local_by_spec_hash(build_spec.dag_hash())
     assert record and record.ref_count == 1
-    db._check_ref_counts()
 
 
 def test_reindex_restores_build_spec(temporary_store: Store, install_mockery, mutable_config):

@@ -192,7 +192,8 @@ class InstallRecord:
         spec: spec tracked by the install record
         path: path where the spec has been installed
         installed: whether or not the spec is currently installed
-        ref_count (int): number of specs that depend on this one
+        ref_count (int): number of records that refer to this one, as a dependency, as their
+            build spec, or as the spec they are deprecated for
         explicit (bool or None): whether or not this spec was explicitly
             installed, or pulled-in as a dependency of something else
         installation_time (datetime.datetime or None): time of the installation
@@ -735,6 +736,15 @@ class Database:
             if hash_key in db._data:
                 return db
 
+    def _reference(
+        self, hash_key: str, data: Optional[Dict[str, InstallRecord]] = None
+    ) -> Optional[InstallRecord]:
+        """Get the record for a hash, and count the reference if it is a local record."""
+        upstream, record = self.query_by_spec_hash(hash_key, data=data)
+        if record and not upstream:
+            record.ref_count += 1
+        return record
+
     def query_by_spec_hash(
         self, hash_key: str, data: Optional[Dict[str, InstallRecord]] = None
     ) -> Tuple[bool, Optional[InstallRecord]]:
@@ -785,11 +795,9 @@ class Database:
         if "build_spec" in spec_node_dict:
             assert spec_reader.SPEC_VERSION >= 2, "SpecfileV1 spec cannot have build_spec"
             _, bhash, _ = spec_reader.extract_build_spec_info_from_node_dict(spec_node_dict)
-            upstream, build_spec = self.query_by_spec_hash(bhash, data=data)
+            build_spec = self._reference(bhash, data=data)
             assert build_spec is not None, f"build_spec with hash {bhash} not found in database"
             spec._build_spec = build_spec.spec
-            if not upstream:
-                build_spec.ref_count += 1
 
     def _assign_dependencies(
         self,
@@ -814,7 +822,7 @@ class Database:
                 # hash is installed locally and upstream, there isn't enough information to
                 # determine which one a local package depends on, so the convention ensures that
                 # this isn't an issue.
-                upstream, record = self.query_by_spec_hash(dep.hash, data=data)
+                record = self._reference(dep.hash, data=data)
 
                 if not record:
                     tty.warn(
@@ -829,8 +837,6 @@ class Database:
                     virtuals=dep.virtuals,
                     direct=dep.direct,
                 )
-                if not upstream:
-                    record.ref_count += 1
 
     def _read_from_file(self, filename: pathlib.Path, *, reindex: bool = False) -> None:
         """Fill database from file, do not maintain old data.
@@ -1297,19 +1303,14 @@ class Database:
 
             # Connect dependencies from the DB to the new copy.
             for dep in spec.edges_to_dependencies():
-                dkey = dep.spec.dag_hash()
-                upstream, record = self.query_by_spec_hash(dkey)
+                record = self._reference(dep.spec.dag_hash())
                 assert record, f"Missing dependency {dep.spec.short_spec} in DB"
                 new_spec._add_dependency(record.spec, depflag=dep.depflag, virtuals=dep.virtuals)
-                if not upstream:
-                    record.ref_count += 1
 
             if spec.spliced:
-                upstream, record = self.query_by_spec_hash(spec.build_spec.dag_hash())
+                record = self._reference(spec.build_spec.dag_hash())
                 assert record, f"Missing build spec {spec.build_spec.short_spec} in DB"
                 new_spec._build_spec = record.spec
-                if not upstream:
-                    record.ref_count += 1
 
             # Mark concrete once everything is built, and preserve the original hashes of concrete
             # specs.
@@ -1400,11 +1401,15 @@ class Database:
 
         if rec.ref_count == 0 and not rec.installed:
             del self._data[key]
+            self._release_references(spec)
 
-            for dep in spec.dependencies():
-                self._decrement_ref_count(dep)
-            if spec.spliced:
-                self._decrement_ref_count(spec.build_spec)
+    def _release_references(self, spec: "spack.spec.Spec") -> None:
+        """Decrement the reference counts of the dependencies and the build spec of a removed
+        record."""
+        for dep in spec.dependencies():
+            self._decrement_ref_count(dep)
+        if spec.spliced:
+            self._decrement_ref_count(spec.build_spec)
 
     def _increment_ref_count(self, spec: "spack.spec.Spec") -> None:
         key = spec.dag_hash()
@@ -1434,15 +1439,11 @@ class Database:
         # Remove any reference to this node from dependencies and
         # decrement the reference count
         rec.spec.detach()
-        for dep in rec.spec.dependencies():
-            self._decrement_ref_count(dep)
+        self._release_references(rec.spec)
 
         if rec.deprecated_for:
             new_spec = self._data[rec.deprecated_for].spec
             self._decrement_ref_count(new_spec)
-
-        if rec.spec.spliced:
-            self._decrement_ref_count(rec.spec.build_spec)
 
         # Returns the concrete spec so we know it in the case where a
         # query spec was passed in.
@@ -1947,7 +1948,7 @@ class NoUpstreamVisitor:
         return item.edge.spec.dag_hash() in self.upstream_hashes
 
     def neighbors(self, item: tr.EdgeAndDepth):
-        # Prune edges from upstream nodes, only follow database tracked dependencies and build specs
+        # Prune edges from upstream nodes, follow database tracked dependencies and build specs
         if self.is_upstream(item):
             return []
         spec = item.edge.spec
