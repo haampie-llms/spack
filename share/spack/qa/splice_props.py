@@ -5,13 +5,15 @@ target, splices, and checks the invariants below. Inputs include specs and repla
 themselves spliced, rebuilds of the same version, compilers as build dependencies with virtuals,
 build dependencies with DAGs of their own, test edges, variants and externals. Besides the
 structure of the result, the checks cover the root, a JSON round trip, splicing twice, splicing
-the target back, edge order, agreement of the two modes without clashes, and commutation of
-independent splices.
+the target back, edge order, agreement of the two modes without clashes, commutation of
+independent splices, and that relocation can map the dependencies of each spliced node's build
+spec onto its own.
 
 The target is passed to Spec.splice when it accepts one; with --guess, or when it does not,
 Spec.splice guesses it from the replacement, and the test expects the documented guess. Which
 splices are impossible follows the semantics of the rewritten Spec.splice: clashes go to the
-replacement when transitive and to the spec otherwise, resolved by name and by virtual.
+replacement when transitive and to the spec otherwise, resolved by name and by virtual. Splices
+it rejects because relocation cannot map their result must fail invariant 21 without that check.
 
     spack python share/spack/qa/splice_props.py [--cases N] [--seed S] [--transitive yes|no|both]
         [--guess] [--jobs J] [--show K] [--only INVARIANT]
@@ -574,6 +576,32 @@ def inv15_json_round_trip(c):
         yield "root hash differs after round trip"
 
 
+def inv21_dependencies_map_onto(c):
+    """21. The link/run edges of a spliced node's build spec map onto its own: each to exactly
+    one edge, by virtual or else by name, and every edge is the image of one. Relocation needs
+    this map: prefixes in the binary are those of the build spec's dependencies."""
+    for n in all_nodes(c.out):
+        if not n.spliced:
+            continue
+        mine = n.edges_to_dependencies(depflag=NON_BUILD)
+        hit: Set[int] = set()
+        for e in n.build_spec.edges_to_dependencies(depflag=NON_BUILD):
+            images = [
+                f
+                for f in mine
+                if (
+                    set(f.virtuals) & set(e.virtuals) if e.virtuals else f.spec.name == e.spec.name
+                )
+            ]
+            hit.update(id(f) for f in images)
+            if len(images) != 1:
+                to = ", ".join(f.spec.name for f in images) or "nothing"
+                yield f"{n.name} -> {e.spec.name} of the build spec maps to {to}"
+        for f in mine:
+            if id(f) not in hit:
+                yield f"{n.name} -> {f.spec.name} is the image of no edge of the build spec"
+
+
 INVARIANTS = [
     inv1_one_edge_per_pair,
     inv2_unique_names_and_providers,
@@ -588,6 +616,7 @@ INVARIANTS = [
     inv12_target_replaced,
     inv14_root_stands_for_spec,
     inv15_json_round_trip,
+    inv21_dependencies_map_onto,
 ]
 
 
@@ -657,6 +686,22 @@ def node_in(out: Spec, c: Case, x: Spec) -> Optional[Spec]:
     return None
 
 
+def not_relocatable(spec, targets, replacement, transitive) -> bool:
+    """Whether the splice, without the relocation check of Spec.splice, fails invariant 21"""
+    splice = getattr(spack.spec, "_Splice", None)
+    if splice is None or not hasattr(splice, "_validate_relocation"):
+        return False
+    validate = splice._validate_relocation
+    splice._validate_relocation = lambda *args: None
+    try:
+        out = do_splice(spec, targets, replacement, transitive)
+    except spack.spec.SpliceError:
+        return False
+    finally:
+        splice._validate_relocation = validate
+    return any(inv21_dependencies_map_onto(Case(spec, targets, replacement, transitive, out)))
+
+
 def check(spec, targets, replacement, transitive) -> Dict[str, List[str]]:
     """Splice and check every invariant, plus 9 (inputs unchanged), 13 (determinism),
     16 (idempotence), 17 (undo) and 19 (edge order)"""
@@ -665,7 +710,9 @@ def check(spec, targets, replacement, transitive) -> Dict[str, List[str]]:
     try:
         out = do_splice(spec, targets, replacement, transitive)
     except spack.spec.SpliceError as e:
-        return {} if reason else {"splice raised SpliceError": [str(e)]}
+        if reason or not_relocatable(spec, targets, replacement, transitive):
+            return {}
+        return {"splice raised SpliceError": [str(e)]}
     except Exception as e:
         return {"splice crashed": [f"{type(e).__name__}: {e}"[:200]]}
     if reason and not reason.startswith(MAYBE):
