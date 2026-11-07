@@ -226,7 +226,6 @@ def test_intransitive_splice_ignores_virtuals_only_the_target_uses():
     assert out["libxml2"].edges_to_dependencies(virtuals="iconv")[0].spec.name == "libiconv"
 
 
-@pytest.mark.xfail(strict=True, reason="edges are split by virtual")
 def test_splice_rejects_moving_part_of_an_edge():
     glibc = node("glibc@2")
     libxml2 = node("libxml2@1", (glibc, "link", "libc"))
@@ -239,7 +238,6 @@ def test_splice_rejects_moving_part_of_an_edge():
         spec.splice(replacement, transitive=True)
 
 
-@pytest.mark.xfail(strict=True, reason="dependencies by name are replaced by other packages")
 @pytest.mark.parametrize("transitive", [True, False])
 def test_splice_rejects_replacing_a_dependency_by_name_with_another_package(transitive):
     openblas = node("openblas@1")
