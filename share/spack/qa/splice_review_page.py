@@ -55,11 +55,34 @@ def describe(graph):
     return "; ".join(arrow(e) for e in graph["edges"])
 
 
-def svg(graph):
-    """Draw a recorded graph, with positions from dot. Children are ordered by name, so that a
-    node is at the same side in every graph of a test."""
+def canonical(graph):
+    """The graph with its nodes in breadth-first order and children ordered by name. Specs store
+    edges in the order they were added, which differs between results: without this the same DAG
+    is drawn in different ways."""
     nodes = graph["nodes"]
-    by_child = sorted(graph["edges"], key=lambda e: (e["parent"], node_label(nodes[e["child"]])))
+    children = collections.defaultdict(list)
+    for e in graph["edges"]:
+        children[e["parent"]].append(e)
+    order, queue = [], [0]
+    while queue:
+        i = queue.pop(0)
+        if i not in order:
+            order.append(i)
+            children[i].sort(key=lambda e: (node_label(nodes[e["child"]]), edge_label(e)))
+            queue.extend(e["child"] for e in children[i])
+    index = {old: new for new, old in enumerate(order)}
+    edges = [
+        {**e, "parent": index[e["parent"]], "child": index[e["child"]]}
+        for i in order
+        for e in children[i]
+    ]
+    return {"nodes": [nodes[i] for i in order], "edges": edges}
+
+
+def svg(graph):
+    """Draw a recorded graph, with positions from dot"""
+    graph = canonical(graph)
+    nodes = graph["nodes"]
     dot = [
         "digraph {",
         "rankdir=TB; nodesep=0.3; ranksep=0.5; ordering=out;",
@@ -70,7 +93,7 @@ def svg(graph):
         width = (len(node_label(n)) * 7.4 + 22) / 72
         dot.append(f'n{i} [width={width:.3f}, label="{node_label(n)}"];')
     pending = collections.defaultdict(list)
-    for e in by_child:
+    for e in graph["edges"]:
         dot.append(f'n{e["parent"]} -> n{e["child"]} [label="{edge_label(e)} "];')
         pending[(e["parent"], e["child"])].append(e)
     dot.append("}")
