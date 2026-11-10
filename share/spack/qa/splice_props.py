@@ -576,27 +576,35 @@ def inv15_json_round_trip(c):
         yield "root hash differs after round trip"
 
 
+def images_of(e, edges) -> list:
+    """The edges that relocation maps edge e of a build spec to: by virtual, or else by name"""
+    return [
+        f
+        for f in edges
+        if (set(f.virtuals) & set(e.virtuals) if e.virtuals else f.spec.name == e.spec.name)
+    ]
+
+
 def inv21_dependencies_map_onto(c):
     """21. The link/run edges of a spliced node's build spec map onto its own: each to exactly
-    one edge, by virtual or else by name, and every edge is the image of one. Relocation needs
-    this map: prefixes in the binary are those of the build spec's dependencies."""
+    one edge, by virtual or else by name, and every edge is the image of one. A dependency that
+    maps to another package is no longer a dependency. Relocation needs this map: prefixes in
+    the binary are those of the build spec's dependencies."""
     for n in all_nodes(c.out):
         if not n.spliced:
             continue
         mine = n.edges_to_dependencies(depflag=NON_BUILD)
+        names = {d.name for d in n.traverse(root=False, deptype=NON_BUILD)}
         hit: Set[int] = set()
         for e in n.build_spec.edges_to_dependencies(depflag=NON_BUILD):
-            images = [
-                f
-                for f in mine
-                if (
-                    set(f.virtuals) & set(e.virtuals) if e.virtuals else f.spec.name == e.spec.name
-                )
-            ]
+            images = images_of(e, mine)
             hit.update(id(f) for f in images)
             if len(images) != 1:
                 to = ", ".join(f.spec.name for f in images) or "nothing"
                 yield f"{n.name} -> {e.spec.name} of the build spec maps to {to}"
+            elif images[0].spec.name != e.spec.name and e.spec.name in names:
+                to = images[0].spec.name
+                yield f"{n.name} -> {e.spec.name} maps to {to}, but remains a dependency"
         for f in mine:
             if id(f) not in hit:
                 yield f"{n.name} -> {f.spec.name} is the image of no edge of the build spec"
