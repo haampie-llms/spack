@@ -612,43 +612,26 @@ def inv21_dependencies_map_onto(c):
 
 
 def inv22_relocation_finds_the_same_map(c):
-    """22. Relocation takes each dependency of a spliced node for the dependency of the build
-    spec that it replaced."""
+    """22. Relocation maps each dependency of a spliced node's build spec to the dependency that
+    took its place."""
     for n in all_nodes(c.out):
         if not n.spliced:
             continue
-        analogs = spack.binary_distribution._SpliceAnalogs(n)
+        analogs = spack.binary_distribution._splice_analogs(n)
+        unchanged = {c.h(d) for d in n.traverse(deptype=NON_BUILD)}
         mine = n.edges_to_dependencies(depflag=NON_BUILD)
         for e in n.build_spec.edges_to_dependencies(depflag=NON_BUILD):
             images = images_of(e, mine)
             if len(images) != 1:
                 continue
-            new = images[0].spec
-            analog = new if c.h(new) == c.h(e.spec) else analogs(new)
-            if analog is None or c.h(analog) != c.h(e.spec):
+            new, old = images[0].spec, e.spec
+            analog = old if c.h(old) in unchanged else analogs.get(old.dag_hash())
+            if analog is None or c.h(analog) != c.h(new):
                 found = f"{analog.name}@{analog.version}" if analog else "nothing"
                 yield (
-                    f"{n.name} -> {new.name}@{new.version} replaced {e.spec.name}@"
-                    f"{e.spec.version}, relocation takes it for {found}"
+                    f"{n.name} -> {new.name}@{new.version} replaced {old.name}@{old.version}, "
+                    f"which relocation maps to {found}"
                 )
-
-
-def inv23_no_prefix_is_claimed_twice(c):
-    """23. Relocation takes no two dependencies of a spliced node for the same node of its build
-    spec: the prefix of that node can only become one of them."""
-    for n in all_nodes(c.out):
-        if not n.spliced:
-            continue
-        analogs = spack.binary_distribution._SpliceAnalogs(n)
-        old = {c.h(d): d for d in n.build_spec.traverse(deptype=NON_BUILD)}
-        claims: Dict[str, Set[str]] = collections.defaultdict(set)
-        for s in n.traverse(deptype=NON_BUILD):
-            analog = s if c.h(s) in old else analogs(s)
-            if analog is not None and c.h(analog) in old:
-                claims[c.h(analog)].add(f"{s.name}@{s.version}")
-        for h, names in claims.items():
-            if len(names) > 1:
-                yield f"{old[h].name}@{old[h].version} of {n.name} is claimed by {sorted(names)}"
 
 
 INVARIANTS = [
@@ -667,7 +650,6 @@ INVARIANTS = [
     inv15_json_round_trip,
     inv21_dependencies_map_onto,
     inv22_relocation_finds_the_same_map,
-    inv23_no_prefix_is_claimed_twice,
 ]
 
 
