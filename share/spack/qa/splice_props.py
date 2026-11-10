@@ -6,8 +6,8 @@ themselves spliced, rebuilds of the same version, compilers as build dependencie
 build dependencies with DAGs of their own, test edges, variants and externals. Besides the
 structure of the result, the checks cover the root, a JSON round trip, splicing twice, splicing
 the target back, edge order, agreement of the two modes without clashes, commutation of
-independent splices, and that relocation can map the dependencies of each spliced node's build
-spec onto its own.
+independent splices, that relocation can map the dependencies of each spliced node's build
+spec onto its own, and that spack.binary_distribution finds that map.
 
 The target is passed to Spec.splice when it accepts one; with --guess, or when it does not,
 Spec.splice guesses it from the replacement, and the test expects the documented guess. Which
@@ -30,6 +30,7 @@ import sys
 import traceback
 from typing import Dict, List, Optional, Set, Tuple
 
+import spack.binary_distribution
 import spack.deptypes as dt
 import spack.repo
 import spack.spec
@@ -610,6 +611,46 @@ def inv21_dependencies_map_onto(c):
                 yield f"{n.name} -> {f.spec.name} is the image of no edge of the build spec"
 
 
+def inv22_relocation_finds_the_same_map(c):
+    """22. Relocation takes each dependency of a spliced node for the dependency of the build
+    spec that it replaced."""
+    for n in all_nodes(c.out):
+        if not n.spliced:
+            continue
+        analogs = spack.binary_distribution._SpliceAnalogs(n)
+        mine = n.edges_to_dependencies(depflag=NON_BUILD)
+        for e in n.build_spec.edges_to_dependencies(depflag=NON_BUILD):
+            images = images_of(e, mine)
+            if len(images) != 1:
+                continue
+            new = images[0].spec
+            analog = new if c.h(new) == c.h(e.spec) else analogs(new)
+            if analog is None or c.h(analog) != c.h(e.spec):
+                found = f"{analog.name}@{analog.version}" if analog else "nothing"
+                yield (
+                    f"{n.name} -> {new.name}@{new.version} replaced {e.spec.name}@"
+                    f"{e.spec.version}, relocation takes it for {found}"
+                )
+
+
+def inv23_no_prefix_is_claimed_twice(c):
+    """23. Relocation takes no two dependencies of a spliced node for the same node of its build
+    spec: the prefix of that node can only become one of them."""
+    for n in all_nodes(c.out):
+        if not n.spliced:
+            continue
+        analogs = spack.binary_distribution._SpliceAnalogs(n)
+        old = {c.h(d): d for d in n.build_spec.traverse(deptype=NON_BUILD)}
+        claims: Dict[str, Set[str]] = collections.defaultdict(set)
+        for s in n.traverse(deptype=NON_BUILD):
+            analog = s if c.h(s) in old else analogs(s)
+            if analog is not None and c.h(analog) in old:
+                claims[c.h(analog)].add(f"{s.name}@{s.version}")
+        for h, names in claims.items():
+            if len(names) > 1:
+                yield f"{old[h].name}@{old[h].version} of {n.name} is claimed by {sorted(names)}"
+
+
 INVARIANTS = [
     inv1_one_edge_per_pair,
     inv2_unique_names_and_providers,
@@ -625,6 +666,8 @@ INVARIANTS = [
     inv14_root_stands_for_spec,
     inv15_json_round_trip,
     inv21_dependencies_map_onto,
+    inv22_relocation_finds_the_same_map,
+    inv23_no_prefix_is_claimed_twice,
 ]
 
 
