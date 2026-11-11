@@ -1,0 +1,57 @@
+# TEMPORARY: quick run of the Ctrl-C checks. Not meant to be merged.
+name: sigtest
+
+on:
+  push:
+    branches: [tmp/installer-sigint-gha]
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell:
+          powershell Invoke-Expression -Command "./share/spack/qa/windows_test_setup.ps1"; {0}
+    steps:
+    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+    - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+      with:
+        python-version: '3.14'
+    - name: Install Python packages
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install --upgrade -r .github/workflows/requirements/unit_tests/requirements.txt
+        python -m pip install --upgrade clingo==5.8.0
+    - name: Unit tests
+      run: |
+        python -m pytest -x -v lib/spack/spack/test/installer lib/spack/spack/test/main.py
+        ./share/spack/qa/validate_last_exit.ps1
+    - name: Interrupt an install
+      run: |
+        python share/spack/qa/interrupt-install.py
+        ./share/spack/qa/validate_last_exit.ps1
+
+  posix:
+    name: ${{ matrix.os }} py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - {os: ubuntu-22.04, python: '3.7'}
+        - {os: ubuntu-24.04, python: '3.9'}
+        - {os: ubuntu-24.04, python: '3.14'}
+        - {os: macos-latest, python: '3.14'}
+    steps:
+    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+    - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+      with:
+        python-version: ${{ matrix.python }}
+    - run: python3 -m pip install pytest clingo
+    - name: Unit tests
+      run: python3 -m pytest -x -v lib/spack/spack/test/installer lib/spack/spack/test/main.py
+    - name: Interrupt an install
+      run: python3 share/spack/qa/interrupt-install.py
