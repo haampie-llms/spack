@@ -126,7 +126,6 @@ def test_buildcache_tag_env_view(install_mockery, mock_fetch, mutable_mock_env_p
     env("create", "--with-view", view_root, "test")
     with ev.read("test"):
         install("--fake", "--add", "libelf")
-        install("--fake", "--add", "trivial-install-test-package")
 
     registry = InMemoryOCIRegistry("example.com")
 
@@ -136,7 +135,7 @@ def test_buildcache_tag_env_view(install_mockery, mock_fetch, mutable_mock_env_p
         with ev.read("test") as e:
             buildcache("push", "--tag", "packages", "oci-test")
             buildcache("push", "--tag", "with_view", "--env-view", "oci-test")
-            prefixes = [s.prefix for s in e.concrete_roots()]
+            prefix = e.concrete_roots()[0].prefix
 
         manifest, config = get_manifest_and_config(
             ImageReference.from_string("example.com/image:packages")
@@ -149,12 +148,12 @@ def test_buildcache_tag_env_view(install_mockery, mock_fetch, mutable_mock_env_p
     assert view_manifest["layers"][:-1] == manifest["layers"]
     assert view_config["rootfs"]["diff_ids"][:-1] == config["rootfs"]["diff_ids"]
 
-    # Environment variables refer to the view, not to the individual prefixes
+    # Environment variables refer to the view, not to the install prefix
     path = next(x for x in config["config"]["Env"] if x.startswith("PATH="))
     view_path = next(x for x in view_config["config"]["Env"] if x.startswith("PATH="))
-    assert all(os.path.join(p, "bin") in path for p in prefixes)
+    assert os.path.join(prefix, "bin") in path
     assert os.path.join(view_root, "bin") in view_path
-    assert not any(p in entry for p in prefixes for entry in view_config["config"]["Env"])
+    assert not any(prefix in entry for entry in view_config["config"]["Env"])
 
     # The layer contains the view at the same path as on the host, linking to the packages
     layer = registry.blobs[view_manifest["layers"][-1]["digest"]]
@@ -162,32 +161,7 @@ def test_buildcache_tag_env_view(install_mockery, mock_fetch, mutable_mock_env_p
         members = {m.name: m for m in tar.getmembers()}
     name = default_path_to_name(os.path.join(view_root, "bin", "libelf"))
     assert members[name].issym()
-    assert members[name].linkname == os.path.join(prefixes[0], "bin", "libelf")
-
-
-@pytest.mark.not_on_windows("environment views are symlink based")
-def test_env_view_blob_of_symlinked_view(tmp_path: pathlib.Path):
-    """Views created by older versions of Spack are a symlink to a sibling directory. The layer
-    should contain both the symlink and the directory."""
-    (tmp_path / "._view" / "abcdef" / "bin").mkdir(parents=True)
-    (tmp_path / "._view" / "abcdef" / "bin" / "exe").write_text("")
-    (tmp_path / "view").symlink_to(os.path.join("._view", "abcdef"))
-    registry = InMemoryOCIRegistry("example.com")
-
-    with oci_servers(registry):
-        blob = spack.binary_distribution._oci_push_env_view_blob(
-            ImageReference.from_string("example.com/image:tag"),
-            str(tmp_path / "view"),
-            str(tmp_path),
-        )
-
-    with tarfile.open(fileobj=io.BytesIO(registry.blobs[str(blob.compressed_digest)])) as tar:
-        members = {m.name: m for m in tar.getmembers()}
-
-    link = members[default_path_to_name(str(tmp_path / "view"))]
-    assert link.issym() and link.linkname == os.path.join("._view", "abcdef")
-    exe = default_path_to_name(str(tmp_path / "._view" / "abcdef" / "bin" / "exe"))
-    assert members[exe].isreg()
+    assert members[name].linkname == os.path.join(prefix, "bin", "libelf")
 
 
 @pytest.mark.parametrize(

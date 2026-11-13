@@ -95,7 +95,7 @@ from spack.relocate_text import utf8_paths_to_single_binary_regex
 from spack.stage import stage_from_config
 from spack.util import file_cache, timer, tty
 from spack.util.executable import which
-from spack.util.filesystem import mkdirp, readlink
+from spack.util.filesystem import mkdirp
 
 from .enums import InstallRecordStatus
 from .url_buildcache import (
@@ -1285,9 +1285,11 @@ class OCIUploader(Uploader):
                 base_image_cache=self._base_images,
             )
 
-        extra_layers = []
-        if env_view_root:
-            extra_layers.append(_oci_push_env_view_blob(tagged_image, env_view_root, self.tmpdir))
+        extra_layers = (
+            [_oci_push_env_view_blob(tagged_image, env_view_root, self.tmpdir)]
+            if env_view_root
+            else []
+        )
 
         _oci_put_manifest(
             self._base_images,
@@ -1539,20 +1541,9 @@ def _oci_push_env_view_blob(
     filename = os.path.join(tmpdir, "env-view.tar.gz")
 
     with spack.util.archive.gzip_compressed_tarfile(filename) as (tar, gz_checksum, tar_checksum):
-        if os.path.islink(view_root):
-            # Old views are a symlink to a sibling directory: add both.
-            spack.util.archive.reproducible_tarfile_from_prefix(
-                tar, os.path.realpath(view_root), include_parent_directories=True
-            )
-            link = tarfile.TarInfo(spack.util.archive.default_path_to_name(view_root))
-            link.type = tarfile.SYMTYPE
-            link.linkname = readlink(view_root)
-            link.mode = 0o755
-            tar.addfile(link)
-        else:
-            spack.util.archive.reproducible_tarfile_from_prefix(
-                tar, view_root, include_parent_directories=True
-            )
+        spack.util.archive.reproducible_tarfile_from_prefix(
+            tar, view_root, include_parent_directories=True
+        )
 
     blob = spack.oci.oci.Blob(
         Digest.from_sha256(gz_checksum.hexdigest()),
@@ -1632,14 +1623,13 @@ def _oci_put_manifest(
     # Create an oci.image.config file
     config = copy.deepcopy(base_config)
 
+    # If a layer for a dependency has gone missing (due to removed manifest in the registry, a
+    # failed push, or a local forced uninstall), we cannot create a runnable container image.
+    blobs = [checksums[s.dag_hash()] for s in expected_blobs if s.dag_hash() in checksums]
+    blobs.extend(extra_layers)
+
     # Add the diff ids of the blobs
-    for s in expected_blobs:
-        # If a layer for a dependency has gone missing (due to removed manifest in the registry, a
-        # failed push, or a local forced uninstall), we cannot create a runnable container image.
-        checksum = checksums.get(s.dag_hash())
-        if checksum:
-            config["rootfs"]["diff_ids"].append(str(checksum.uncompressed_digest))
-    config["rootfs"]["diff_ids"].extend(str(blob.uncompressed_digest) for blob in extra_layers)
+    config["rootfs"]["diff_ids"].extend(str(blob.uncompressed_digest) for blob in blobs)
 
     # Set the environment variables
     config["config"]["Env"] = [f"{k}={v}" for k, v in env.items()]
@@ -1668,8 +1658,6 @@ def _oci_put_manifest(
         if use_docker_format
         else "application/vnd.oci.image.layer.v1.tar+gzip"
     )
-    blobs = [checksums[s.dag_hash()] for s in expected_blobs if s.dag_hash() in checksums]
-    blobs.extend(extra_layers)
 
     manifest = {
         "mediaType": base_manifest_mediaType,

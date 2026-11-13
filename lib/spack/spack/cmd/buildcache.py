@@ -597,6 +597,15 @@ def push_fn(args):
     if not spack.oci.image.is_oci_url(mirror.push_url):
         check_mirror_for_layout(mirror)
 
+    # Bring the view up to date before uploading anything, so that problems with it show up early.
+    env_view_root, env_modifications = None, None
+    if args.env_view:
+        env = spack.cmd.require_active_env(args.subparser)
+        view = env.default_view
+        view.regenerate(env)
+        env_view_root = view.root
+        env_modifications = env.add_view_to_env(EnvironmentModifications(), ev.default_view_name)
+
     with spack.binary_distribution.make_uploader(
         mirror=mirror,
         force=args.force,
@@ -641,20 +650,10 @@ def push_fn(args):
             )
 
         # Finally tag all roots as a single image if requested.
-        if args.tag and args.env_view:
-            env = spack.cmd.require_active_env(args.subparser)
-            view = env.default_view
-            view.regenerate(env)
+        if args.tag:
             uploader.tag(
-                args.tag,
-                roots,
-                env_view_root=view.root,
-                env_modifications=env.add_view_to_env(
-                    EnvironmentModifications(), ev.default_view_name
-                ),
+                args.tag, roots, env_view_root=env_view_root, env_modifications=env_modifications
             )
-        elif args.tag:
-            uploader.tag(args.tag, roots)
 
 
 def install_fn(args):
