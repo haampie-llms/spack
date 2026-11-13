@@ -36,7 +36,6 @@ import inspect
 import io
 import multiprocessing
 import os
-import re
 import signal
 import sys
 import traceback
@@ -480,7 +479,7 @@ def optimization_flags(compiler, target):
     return result
 
 
-def link_dirs_of(query: spack.spec.SpecBuildInterface) -> List[str]:
+def link_dirs_of(query: spack.spec.Spec) -> List[str]:
     """Return the library directories a build uses to link against ``query``, as returned by
     ``spec[name]``: those of its libraries, followed by its ``lib`` and ``lib64`` subdirectories
     that exist."""
@@ -1397,12 +1396,10 @@ def start_build_process(
             except Exception:
                 pass
 
-        mflags = os.environ.get("MAKEFLAGS")
-        if mflags is not None:
-            m = re.search(r"--jobserver-[^=]*=(\d),(\d)", mflags)
-            if m:
-                jobserver_fd1 = Connection(int(m.group(1)))
-                jobserver_fd2 = Connection(int(m.group(2)))
+        jobserver_fds = spack.util.executable.jobserver_fds(os.environ.get("MAKEFLAGS", ""))
+        if jobserver_fds:
+            jobserver_fd1 = Connection(jobserver_fds[0])
+            jobserver_fd2 = Connection(jobserver_fds[1])
 
         p = BuildProcess(
             target=_setup_pkg_and_run,
