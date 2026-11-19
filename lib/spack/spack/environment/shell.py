@@ -8,7 +8,7 @@ from typing import List, Optional
 import spack.config
 import spack.environment as ev
 import spack.repo
-import spack.schema.environment
+import spack.schema.env_vars
 import spack.store
 from spack.active_environment import active_environment
 from spack.util import tty
@@ -176,10 +176,6 @@ def activate(
     # become PATH variables.
     #
 
-    env_vars_yaml = spack.config.CONFIG.get("env_vars", None)
-    if env_vars_yaml:
-        env_mods.extend(spack.schema.environment.parse(env_vars_yaml))
-
     try:
         if view and env.has_view(view):
             with spack.store.STORE.db.read_transaction():
@@ -193,6 +189,12 @@ def activate(
             "  To remove it and resolve the issue, force concretize with the command:\n",
             "    spack -e {0} concretize --force".format(env.name),
         )
+
+    # env_vars come last, so that they override the view
+    env_vars_yaml = spack.config.CONFIG.get("env_vars", None)
+    if env_vars_yaml:
+        env_mods.extend(spack.schema.env_vars.parse(env_vars_yaml))
+        spack.schema.env_vars.filter_modifications(env_mods, env_vars_yaml)
 
     return env_mods
 
@@ -216,7 +218,7 @@ def deactivate() -> EnvironmentModifications:
     with active.manifest.use_config():
         env_vars_yaml = spack.config.CONFIG.get("env_vars", None)
     if env_vars_yaml:
-        env_mods.extend(spack.schema.environment.parse(env_vars_yaml).reversed())
+        env_mods.extend(spack.schema.env_vars.parse(env_vars_yaml).reversed())
 
     active_view = os.getenv(ev.spack_env_view_var)
 
@@ -230,6 +232,9 @@ def deactivate() -> EnvironmentModifications:
                 "Could not fully deactivate view due to missing package "
                 "or repo, shell environment may be corrupt."
             )
+
+    if env_vars_yaml:
+        spack.schema.env_vars.filter_modifications(env_mods, env_vars_yaml)
 
     ev.deactivate()
 
