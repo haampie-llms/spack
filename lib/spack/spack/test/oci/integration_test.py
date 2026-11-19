@@ -164,6 +164,36 @@ def test_buildcache_tag_env_view(install_mockery, mock_fetch, mutable_mock_env_p
     assert members[name].linkname == os.path.join(prefix, "bin", "libelf")
 
 
+@pytest.mark.not_on_windows("environment views are symlink based")
+def test_buildcache_tag_env_view_env_vars(
+    install_mockery, mock_fetch, mutable_mock_env_path, mutable_config, tmp_path
+):
+    """Tests that env_vars config is applied after the view's environment modifications."""
+    view_root = str(tmp_path / "view")
+    env("create", "--with-view", view_root, "test")
+    with ev.read("test"):
+        install("--fake", "--add", "libelf")
+
+    registry = InMemoryOCIRegistry("example.com")
+
+    with oci_servers(registry):
+        mirror("add", "oci-test", "oci://example.com/image")
+
+        with ev.read("test"), mutable_config.override(
+            "env_vars", {"set": {"FOO": "bar"}, "unset": ["CMAKE_PREFIX_PATH"]}
+        ):
+            buildcache("push", "--tag", "with_view", "--env-view", "oci-test")
+
+        _, config = get_manifest_and_config(
+            ImageReference.from_string("example.com/image:with_view")
+        )
+
+    names = {entry.split("=", 1)[0] for entry in config["config"]["Env"]}
+    assert "FOO=bar" in config["config"]["Env"]
+    assert "PATH" in names
+    assert "CMAKE_PREFIX_PATH" not in names
+
+
 @pytest.mark.parametrize(
     "args,error",
     [
